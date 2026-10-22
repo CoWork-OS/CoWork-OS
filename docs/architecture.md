@@ -349,6 +349,15 @@ Application work runs locally; there is no SSH or remote worker route. Routes ar
 - **Task-stated restrictions:** a task that forbids scripting turns the scripting-based mutation tools into task tool restrictions. They are hidden from the catalog, and the policy pipeline denies them at execution. Task tool restrictions in general are now enforced at execution, not only by hiding the tool.
 - **Default:** native computer use is **Background only**. Legacy `background_first` settings migrate to it, and foreground modes are explicit opt-ins.
 
+## 3D models (Meshy)
+
+- **Connector and costs:** Meshy runs as its own pinned MCP server, installed from the bundled registry entry `meshy` with its own folder under the app data dir as cwd. Credit costs come from a per-server cost policy (`src/electron/mcp/tool-costs.ts`, Meshy's table in `src/electron/meshy/meshy-server.ts`) that the tool approval middleware in `src/electron/agent/tools/registry.ts` consults. It puts the estimate on the approval card and books it in the same synchronous step as the per-task limit check. A call over the limit, or a tool without a declared price, requires explicit approval.
+- **Results and the model index:** after a Meshy call, `src/electron/meshy/meshy-tool-results.ts` passes the result's structured fields to the model. It records the creating call and trusted saved paths in a small index under `<app data>/meshy/`, which lives outside the server's writable folder. Workspace saves are logged as `file_created`.
+- **Viewer and IPC:** the renderer's three.js viewer (`src/renderer/components/Model3D/`) receives model bytes over `model3d:read` (`src/electron/ipc/meshy-handlers.ts`). That read accepts only `.glb`/`.gltf` files, inside a known workspace or recorded by Meshy, with symlinks resolved. The other `meshy:*` channels are read-only Meshy calls or free downloads from `assets.meshy.ai`. Nothing the renderer can call spends credits.
+- **`::model{}` and slots:** the `::model{}` reply directive is parsed in `AssistantMessageContent.tsx` and degraded to text by `shared/rich-embeds.ts`. Live WebGL views share a four-slot `LiveFrameSlots` pool.
+
+See [3D Models with Meshy](meshy-3d.md).
+
 ## Terminal Tabs
 
 Terminal tabs are implemented with a renderer/main split:

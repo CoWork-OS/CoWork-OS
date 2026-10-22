@@ -84,6 +84,7 @@ export default defineConfig({
           { text: "Background App Control", link: "/local-background-app-control" },
           { text: "Application Execution Backend", link: "/application-execution-backend" },
           { text: "Photoshop Local Editing", link: "/photoshop-local-editing" },
+          { text: "3D Models with Meshy", link: "/meshy-3d" },
           { text: "Live Canvas", link: "/live-canvas" },
           { text: "Bots & Conversations", link: "/bots-and-conversations" },
           { text: "Agent Teams", link: "/agent-teams-contract" },

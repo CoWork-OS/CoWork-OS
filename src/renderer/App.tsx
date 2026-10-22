@@ -2408,6 +2408,8 @@ export function App() {
   const [sideChat, setSideChat] = useState<SideChatState | null>(null);
   // Bumped to open Settings > Memory > Review (a dream review notification was clicked).
   const [memoryReviewRequest, setMemoryReviewRequest] = useState(0);
+  // A connector a sidebar notice asked Settings to open (registry id).
+  const [settingsConnector, setSettingsConnector] = useState<string | undefined>(undefined);
   const [settingsTab, setSettingsTab] = useState<
     | "memory"
     | "appearance"
@@ -3678,8 +3680,17 @@ export function App() {
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
-      setSettingsTab(tab === "appearance" ? "appearance" : "llm");
+      const detail = (event as CustomEvent<{ tab?: string; connector?: string }>).detail;
+      const tab = detail?.tab;
+      setSettingsConnector(
+        tab === "connectors" && typeof detail?.connector === "string"
+          ? detail.connector
+          : undefined,
+      );
+      // "connectors" opens Integrations, whose first sub-tab is Connectors.
+      setSettingsTab(
+        tab === "appearance" ? "appearance" : tab === "connectors" ? "integrations" : "llm",
+      );
       setCurrentView("settings");
     };
     window.addEventListener("open-settings", handler as EventListener);
@@ -9251,6 +9262,7 @@ export function App() {
               autoOpenTurnOutput={autoOpenTurnOutput}
               onAutoOpenTurnOutputChange={handleAutoOpenTurnOutputChange}
               initialTab={settingsTab}
+              initialConnector={settingsConnector}
               memoryReviewRequest={memoryReviewRequest}
               focusAutomation={focusAutomationOwner}
               onShowOnboarding={handleShowOnboarding}

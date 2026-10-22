@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **3D models with Meshy**: a pinned Meshy connector in **Settings → Connectors**. Ask for a model ("a low-poly treasure chest for my Godot game", "turn this photo into something I can print"), and the agent makes it with Meshy's 28 tools. They cover text, image and multi-view to 3D, texturing, remeshing, rigging, animation, format conversion and 3D-print prep. Replies show models as interactive 3D cards:
+  - orbit and zoom, animation clips, wireframe and grid;
+  - a progress ring while Meshy works;
+  - a **Download** menu for every format Meshy made, free;
+  - a **Next** menu of follow-ups with their credit costs.
+
+  A **3D gallery** lists recent generations and the models on this machine. Any `.glb` saved into the workspace shows the same card, and the bundled `meshy-3d` skill carries Meshy's workflow rules. See [3D Models with Meshy](meshy-3d.md). (#763, #764)
+
+- **Credit costs on MCP approvals**: a connector whose tools spend credits can declare their prices. Meshy is the first. The approval card then leads with the call's estimated cost and what the task has spent. A call that would pass the per-task limit (200 credits for Meshy), or a tool with no listed price, asks again even under **Always allow**. (#763)
+
 ### Security
 
 - **Only you can change the agent's persona, rules and skills**: the admin-lane tools are offered only when text you typed asks for them, never because agent output, a plan step, an automation, a heartbeat, another agent, page code, an answer button or in-app browser page content mentions them. The admin lane covers persona, quirks, vibes, response style, names, lore, behavioral rules, expertise, heartbeat and integration setup. Your typed text means a task prompt or follow-up from the desktop app, a remote device's view, Web Access or a channel message from the verified owner. The tools no longer stay offered from an earlier turn, and a skill's tool allowlist no longer skips the check. Text from attached files never counts, even inside a typed message. Tasks created before this release don't count their original prompt; your next typed message does. See [Agent Self-Modification Gates](security/self-modification-gates.md). (#723, #724, #725, #730)

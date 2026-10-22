@@ -37,6 +37,7 @@ CoWork OS is a free, open-source desktop app for macOS and Windows that does rea
 - **Get through your inbox without losing control.** It triages, summarizes and drafts replies; nothing is sent until you approve it.
 - **Research in a browser you can watch.** The agent browses in a visible window you can take over at any time, and hands back a report with its sources.
 - **Put a bot on a schedule.** A bot with its own memory posts a morning summary to Telegram, Slack or Discord, and asks you before it acts outside its scope.
+- **Make 3D models and game assets.** "Make a low-poly treasure chest for my Godot game" — Meshy builds it, the approval card names the credit cost first, and the model appears in the chat as a 3D view you can spin, animate and download. [3D Models with Meshy](docs/meshy-3d.md)
 - **Work on code with every command shown.** Real terminal tabs, diffs and test runs in the timeline, and approvals for anything risky.
 - **Keep it all local if you want.** Run on Ollama or LM Studio on your own machine, or sign in with OpenRouter and use free models with no API key to copy.
 

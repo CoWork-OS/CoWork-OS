@@ -36,6 +36,12 @@ const COWORK_USE_CASES: UseCase[] = [
     run: "Help me plan a two-model workflow for my next task: one route creates the draft and another independently critiques it. Ask what outcome I need, then recommend roles using only configured model routes.",
   },
   {
+    emoji: "🧊",
+    prompt:
+      "Make a low-poly treasure chest for my Godot game with Meshy, tell me the credit cost first, and show me the 3D model.",
+    run: "Use the meshy-3d skill. Make a low-poly treasure chest for a Godot game (a small prop, about 1,500 triangles). Tell me the tool and its credit cost and wait for my yes before any paid call. Save the GLB in models/ and show it with a ::model card. If the Meshy connector isn't set up, tell me how to add it in Settings → Connectors → Meshy.",
+  },
+  {
     emoji: "☀️",
     prompt:
       "Build my morning brief from calendar, inbox, and tasks: top priorities, calendar risks, what's due, and next actions — formatted for my phone.",

@@ -143,7 +143,7 @@ Mailtrap
 
 ### Creative / Architecture
 
-Rhino, Blender, ComfyUI
+Rhino, Blender, ComfyUI, Meshy (3D models; see [3D Models with Meshy](meshy-3d.md))
 
 ### Local services
 
@@ -473,7 +473,7 @@ These connectors are included in the local MCP registry and appear in **Settings
 | **Dev Tools**               | Hugging Face, Ahrefs, Mermaid Chart, Cloudflare, Honeycomb, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba                           |
 | **Finance**                 | Stripe, PayPal, Square, Attio                                                                                                                                                   |
 | **Legal**                   | Clinical Trials                                                                                                                                                                 |
-| **Creative / Architecture** | Rhino, Blender, ComfyUI                                                                                                                                                         |
+| **Creative / Architecture** | Rhino, Blender, ComfyUI, Meshy                                                                                                                                                  |
 | **Local services**          | Maps (OSM or Google, with timezone lookup), Home Assistant                                                                                                                      |
 | **Finance data**            | FactSet, LSEG, S&P Global, Daloopa, Morningstar, Moody's, MT Newswires, Aiera, PitchBook, Chronograph, Egnyte                                                                   |
 

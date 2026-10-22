@@ -1138,6 +1138,24 @@ Built-in tools for efficient code navigation and editing:
 
 ---
 
+## 3D Models (Meshy)
+
+Make 3D models, rigged characters and printable parts with [Meshy](https://www.meshy.ai), and see them in the chat. **Full guide:** [3D Models with Meshy](meshy-3d.md).
+
+- **Meshy connector**: Meshy's own MCP server, pinned and installed from **Settings → Connectors → Meshy** with your API key. 28 tools cover:
+  - text, image and multi-view to 3D;
+  - refine, retexture, remesh, resize, UV unwrap and convert;
+  - rig, animate and text to motion;
+  - printability check and repair, multicolor 3MF, split into parts and slicer handoff;
+  - concept images;
+  - balance and task lists.
+- **Costs on approval cards**: every call that can spend credits asks first. The card leads with the tool's estimated cost and what the task has spent on Meshy. A call that would take a task past 200 credits asks again even under **Always allow**, and tools without a listed price always ask.
+- **3D cards in chat**: replies show models as interactive cards (`::model{path=… task=…}`). You can orbit and zoom, play animation clips, and toggle wireframe, grid and auto-rotate. A Meshy task card tracks the job's progress until the model is ready. **Download** saves any format Meshy already made, free. **Next** offers texture, rig, remesh and the other follow-ups, each with its cost. A `.glb` saved into the workspace shows the same card in the timeline.
+- **3D gallery**: your recent Meshy generations and the models on this machine, with your credit balance, prompt search and a full-size viewer.
+- **Bundled `meshy-3d` skill**: confirm the cost first, submit each job once, choose the format and detail level for the asset's use, and save into the project.
+
+---
+
 ## Live Canvas
 
 Agent-driven visual workspace for interactive content creation and data visualization.
@@ -1422,6 +1440,7 @@ Pre-built connectors for enterprise integrations, local services, and creative w
 | **Vercel**           | Deploy               | projects, deployments                                                                                 |
 | **Monday**           | Work Management      | boards, items                                                                                         |
 | **Miro**             | Whiteboard           | boards, content                                                                                       |
+| **Meshy**            | 3D models            | text/image to 3D, texture, remesh, rig, animate, convert, 3D-print prep (credit costs on approvals)   |
 | **Supabase**         | Database             | query, tables, auth                                                                                   |
 | **Excalidraw**       | Diagrams             | create, update elements                                                                               |
 | **Stripe**           | Payments             | customers, payments, products                                                                         |

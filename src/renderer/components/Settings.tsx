@@ -396,6 +396,8 @@ interface SettingsProps {
   autoOpenTurnOutput: boolean;
   onAutoOpenTurnOutputChange: (enabled: boolean) => void;
   initialTab?: SettingsTab;
+  /** A connector (registry id) to open on the Connectors tab, e.g. from a sidebar notice. */
+  initialConnector?: string;
   /** Bumped to open the Memory tab's Review view (also when Settings is already open). */
   memoryReviewRequest?: number;
   focusAutomation?: { owner: AutomationOwner; id: string } | null;
@@ -1403,6 +1405,7 @@ export function Settings({
   autoOpenTurnOutput,
   onAutoOpenTurnOutputChange,
   initialTab = "appearance",
+  initialConnector,
   memoryReviewRequest = 0,
   focusAutomation,
   onShowOnboarding,
@@ -1438,7 +1441,17 @@ export function Settings({
   useEffect(() => {
     if (memoryReviewRequest > 0) setActiveTab("memory");
   }, [memoryReviewRequest]);
-  const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(null);
+  const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(() =>
+    initialConnector
+      ? {
+          id: `connector:${initialConnector}`,
+          name: initialConnector,
+          kind: "native",
+          source: "notice",
+          targetId: initialConnector,
+        }
+      : null,
+  );
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
     initialTab === "skillhub" || !hasHostMethods("listCustomSkills", "getCustomSkillSettings")

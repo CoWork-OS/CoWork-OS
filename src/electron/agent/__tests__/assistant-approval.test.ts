@@ -3,8 +3,11 @@ import {
   ASSISTANT_APPROVAL_QUESTION_ID,
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
+  canOfferAssistantAlwaysAllow,
+  findAssistantApprovalOptionLabel,
   isAssistantApprovalInputRequest,
   isHighImpactApprovalDecision,
+  parseAssistantApprovalAction,
   parseAssistantApprovalAnswer,
   shouldUseAssistantApprovalInput,
 } from "../assistant-approval";
@@ -270,5 +273,103 @@ describe("approval content preview", () => {
     const question = buildAssistantApprovalRequest("run_command", "Run", { command: "ls" })
       .questions[0];
     expect(question.preview).toBeUndefined();
+  });
+});
+
+describe("Always allow on the inline approval card", () => {
+  const persistablePrompt = {
+    scope: { kind: "command_prefix", prefix: "npm test" },
+    scopePreview: 'commands starting with "npm test"',
+    suggestedActions: [
+      { action: "deny_once", label: "Deny once", effect: "deny" },
+      { action: "allow_once", label: "Allow once", effect: "allow" },
+      { action: "allow_session", label: "Allow for session", effect: "allow" },
+      { action: "allow_workspace", label: "Allow for workspace", effect: "allow" },
+    ],
+  };
+
+  it("offers Always allow between Deny and Allow once when the engine allows a workspace rule", () => {
+    const details = { command: "npm test", permissionPrompt: persistablePrompt };
+    const options = buildAssistantApprovalRequest("run_command", "Run the tests", details)
+      .questions[0].options;
+    expect(options.map((option) => option.label)).toEqual(["Deny", "Always allow", "Allow once"]);
+    expect(options[1].description).toBe(
+      'Continue and stop asking in this workspace for commands starting with "npm test".',
+    );
+    expect(buildAssistantApprovalMessage("run_command", "Run the tests", details)).toBe(
+      "I need your decision before I can continue. Choose **Deny**, **Always allow**, or **Allow once** below.",
+    );
+  });
+
+  it("withholds Always allow when the engine offers no workspace rule or no scope", () => {
+    const oneTimeOnly = {
+      ...persistablePrompt,
+      suggestedActions: persistablePrompt.suggestedActions.slice(0, 2),
+    };
+    expect(canOfferAssistantAlwaysAllow({ permissionPrompt: oneTimeOnly })).toBe(false);
+    expect(
+      canOfferAssistantAlwaysAllow({
+        permissionPrompt: { ...persistablePrompt, scope: undefined },
+      }),
+    ).toBe(false);
+    expect(canOfferAssistantAlwaysAllow({})).toBe(false);
+    expect(canOfferAssistantAlwaysAllow(undefined)).toBe(false);
+    expect(
+      buildAssistantApprovalRequest("run_command", "Run", {
+        permissionPrompt: oneTimeOnly,
+      }).questions[0].options.map((option) => option.label),
+    ).toEqual(["Deny", "Allow once"]);
+  });
+
+  it("never offers Always allow on task consent or an exact-write review", () => {
+    const consent = buildAssistantApprovalRequest("computer_use", 'Use "Calculator"?', {
+      taskConsentScope: "reading and clicking in Calculator",
+      permissionPrompt: persistablePrompt,
+    });
+    expect(consent.questions[0].options.map((option) => option.label)).toEqual([
+      "Deny",
+      "Allow for this task",
+    ]);
+    const review = buildAssistantApprovalRequest("workspace_write", "Review write", {
+      tool: "write_file",
+      responsibilityActionReview: { version: 1 },
+      permissionPrompt: persistablePrompt,
+    });
+    expect(review.questions[0].options.map((option) => option.label)).toEqual([
+      "Deny once",
+      "Allow once",
+    ]);
+  });
+
+  it("maps each answer to its approval action and fails closed on anything else", () => {
+    const answer = (optionLabel?: string, otherText?: string) => ({
+      [ASSISTANT_APPROVAL_QUESTION_ID]: { optionLabel, otherText },
+    });
+    expect(parseAssistantApprovalAction(answer("Always allow"))).toBe("allow_workspace");
+    expect(parseAssistantApprovalAction(answer(" always ALLOW "))).toBe("allow_workspace");
+    expect(parseAssistantApprovalAction(answer("Allow once"))).toBe("allow_once");
+    expect(parseAssistantApprovalAction(answer("Allow for this task"))).toBe("allow_once");
+    expect(parseAssistantApprovalAction(answer("Deny"))).toBe("deny_once");
+    expect(parseAssistantApprovalAction(answer(undefined, "always allow this"))).toBe("deny_once");
+    expect(parseAssistantApprovalAction(undefined)).toBe("deny_once");
+    expect(parseAssistantApprovalAnswer(answer("Always allow"))).toBe(true);
+    // A reviewed write approves one write only, whatever label arrives.
+    expect(
+      parseAssistantApprovalAction(
+        { [RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID]: { optionLabel: "Always allow" } },
+        true,
+      ),
+    ).toBe("deny_once");
+  });
+
+  it("answers a workspace-scope decision with Always allow only when the card offers it", () => {
+    const withAlways = [{ label: "Deny" }, { label: "Always allow" }, { label: "Allow once" }];
+    const withoutAlways = [{ label: "Deny" }, { label: "Allow once" }];
+    expect(findAssistantApprovalOptionLabel(withAlways, "allow_workspace")).toBe("Always allow");
+    expect(findAssistantApprovalOptionLabel(withAlways, "allow_once")).toBe("Allow once");
+    expect(findAssistantApprovalOptionLabel(withAlways, "allow_session")).toBe("Allow once");
+    expect(findAssistantApprovalOptionLabel(withAlways, "deny_workspace")).toBe("Deny");
+    expect(findAssistantApprovalOptionLabel(withoutAlways, "allow_workspace")).toBe("Allow once");
+    expect(findAssistantApprovalOptionLabel(undefined, "allow_once")).toBeUndefined();
   });
 });

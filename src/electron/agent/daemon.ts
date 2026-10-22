@@ -274,9 +274,11 @@ import { isHeadlessMode } from "../utils/runtime-mode";
 import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
+  canOfferAssistantAlwaysAllow,
   isHighImpactApprovalDecision,
   isAssistantApprovalInputRequest,
-  parseAssistantApprovalAnswer,
+  findAssistantApprovalOptionLabel,
+  parseAssistantApprovalAction,
   shouldUseAssistantApprovalInput,
 } from "./assistant-approval";
 import { TaskQueueManager } from "./queue-manager";
@@ -8765,7 +8767,7 @@ export class AgentDaemon extends EventEmitter {
     } | null,
     trackingKey = type,
     signal?: AbortSignal,
-    validateDecision?: (approved: boolean) => Promise<boolean>,
+    validateDecision?: (approved: boolean, action: ApprovalResponseAction) => Promise<boolean>,
     approvalBinding?: { approvalId: string; revisionHash: string },
   ): Promise<boolean> {
     if (signal?.aborted) {
@@ -8846,10 +8848,15 @@ export class AgentDaemon extends EventEmitter {
         typeof details === "object" &&
         typeof details.responsibilityActionReview === "object" &&
         details.responsibilityActionReview?.version === 1;
-      let approved =
-        response.status === "submitted" &&
-        parseAssistantApprovalAnswer(response.answers, isResponsibilityActionReview);
-      if (validateDecision) approved = await validateDecision(approved);
+      let action: ApprovalResponseAction =
+        response.status === "submitted"
+          ? parseAssistantApprovalAction(response.answers, isResponsibilityActionReview)
+          : "deny_once";
+      // Answers come from the renderer: an "Always allow" the card never offered is refused.
+      if (action === "allow_workspace" && !canOfferAssistantAlwaysAllow(details))
+        action = "deny_once";
+      let approved = action !== "deny_once";
+      if (validateDecision) approved = await validateDecision(approved, action);
       if (signal?.aborted) {
         throw new Error("Approval request cancelled because tool execution ended");
       }
@@ -8859,6 +8866,7 @@ export class AgentDaemon extends EventEmitter {
           requestId: response.requestId,
           assistantInput: true,
           approvalType: type,
+          action,
           reason: "assistant_input",
         });
       } else {
@@ -9861,7 +9869,13 @@ export class AgentDaemon extends EventEmitter {
         await this.approvalRepo.resolvePending(approval.id, "denied", approval);
         return false;
       }
-      const validateDecision = async (approved: boolean): Promise<boolean> => {
+      // Set by validateDecision; the cast keeps TypeScript from narrowing it to the initial value.
+      let chosenAction = "deny_once" as ApprovalResponseAction;
+      const validateDecision = async (
+        approved: boolean,
+        action: ApprovalResponseAction,
+      ): Promise<boolean> => {
+        chosenAction = action;
         if (!approved) {
           if (isResponsibilityActionReview) {
             try {
@@ -9945,6 +9959,25 @@ export class AgentDaemon extends EventEmitter {
           validateDecision,
           { approvalId: approval.id, revisionHash: approvalRequestRevisionHash(approval) },
         );
+        // "Always allow" saves a workspace rule for the prompt scope through the same path as
+        // the dialog's workspace scope. It runs only after the decision passed validation, so a
+        // stale or superseded card never leaves a rule behind. A failed save keeps the one-time
+        // allow: the person approved this operation either way.
+        if (approved && chosenAction === "allow_workspace") {
+          try {
+            const persistence = await this.persistApprovalActionRule(chosenAction, approval);
+            this.logEvent(taskId, "log", {
+              type: "tool_authorization",
+              decision: "allow",
+              reason: "assistant_always_allow",
+              approvalId: approval.id,
+              approvalType: type,
+              persistence,
+            });
+          } catch (error) {
+            log.warn("Failed to save an Always allow rule:", error);
+          }
+        }
         if (approved && type === "external_file_access") {
           this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
         }
@@ -10613,19 +10646,12 @@ export class AgentDaemon extends EventEmitter {
         candidate.id === ASSISTANT_APPROVAL_QUESTION_ID ||
         candidate.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
     );
-    const allow = action.startsWith("allow_");
-    // The card offers one allow scope; a broader requested scope is answered with it.
-    const option = question?.options?.find((candidate) =>
-      candidate.label
-        .trim()
-        .toLowerCase()
-        .startsWith(allow ? "allow" : "deny"),
-    );
-    if (!question || !option) return "not_found";
+    const optionLabel = findAssistantApprovalOptionLabel(question?.options, action);
+    if (!question || !optionLabel) return "not_found";
     const { status } = await this.respondToInputRequest({
       requestId: inputId,
       status: "submitted",
-      answers: { [question.id]: { optionLabel: option.label } },
+      answers: { [question.id]: { optionLabel } },
     });
     if (status === "handled") {
       this.logEvent(approval.taskId, "log", {
@@ -10633,7 +10659,7 @@ export class AgentDaemon extends EventEmitter {
         approvalId,
         requestId: inputId,
         action,
-        answer: option.label,
+        answer: optionLabel,
         ...(attribution ? { decidedBy: attribution } : {}),
       });
     }

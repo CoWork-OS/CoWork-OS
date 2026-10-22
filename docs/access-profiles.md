@@ -38,6 +38,14 @@ Runs with nobody to answer the card (headless mode, `cowork run`, sub-agents,
 bot and channel conversations, scheduled or no-human-input tasks) deny the
 request instead.
 
+When the permission engine can scope the request (a command prefix, domain, path,
+tool or MCP server) and allows saving a rule for it, the card also offers
+**Always allow**. Choosing it allows the operation and saves a workspace-local allow
+rule for that scope, so the same request in this workspace no longer asks. The rule
+is saved only after the decision passes the same checks as **Allow once**, and
+never for task-scoped consent or an exact-write review. Remove it from the
+workspace-local rules in the permission settings.
+
 Private Browser Workbench dialogs and native credential confirmations are separate from the
 tool-approval queue. Automatic review cannot suppress them, and agent card fills require fresh
 approval without a standing grant. See [Private browser credentials and checkout](security-guide.md#private-browser-credentials-and-checkout).

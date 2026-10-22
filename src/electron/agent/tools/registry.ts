@@ -1487,24 +1487,32 @@ export class ToolRegistry {
     return isComputerToolBlocked(worksOn, kind);
   }
 
-  private botContainedCache: { at: number; value: boolean } | null = null;
+  private botContainedCache: { value: boolean } | null = null;
 
   /**
-   * A run in a bot's own folder; fails closed if the task cannot be read. Cached briefly,
-   * since every tool the registry lists is checked against it.
+   * A run in a bot's own folder; fails closed if the task cannot be read. Every tool the
+   * registry lists is checked against it, so the answer is cached: "contained" for good (a
+   * task never leaves its bot's folder), "not contained" only until the current synchronous
+   * pass ends, since the daemon can contain a running task at any time. A task that could not
+   * be read counts as contained for that pass only.
    */
   private isBotContainedTask(): boolean {
-    const now = Date.now();
-    if (this.botContainedCache && now - this.botContainedCache.at < 1000) {
-      return this.botContainedCache.value;
-    }
+    if (this.botContainedCache) return this.botContainedCache.value;
     let value: boolean;
+    let readContained = false;
     try {
       value = this.daemon.getTask?.(this.taskId)?.agentConfig?.botContained === true;
+      readContained = value;
     } catch {
       value = true;
     }
-    this.botContainedCache = { at: now, value };
+    const cache = { value };
+    this.botContainedCache = cache;
+    if (!readContained) {
+      queueMicrotask(() => {
+        if (this.botContainedCache === cache) this.botContainedCache = null;
+      });
+    }
     return value;
   }
 

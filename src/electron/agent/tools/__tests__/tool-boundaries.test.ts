@@ -127,7 +127,13 @@ describe("tool boundary classes", () => {
     for (const name of ["read_file", "web_fetch", "memory_recall", "gmail_action", "spawn_agent"]) {
       expect(allowed(name)).toBe(true);
     }
-    for (const name of ["get_env", "qa_navigate", "android_phone_observe", "brand_new_tool"]) {
+    for (const name of [
+      "get_env",
+      "qa_navigate",
+      "android_phone_observe",
+      "brand_new_tool",
+      "set_clipboard",
+    ]) {
       expect(allowed(name)).toBe(false);
     }
     expect(allowed("run_command")).toBe(true);
@@ -167,6 +173,15 @@ describe("the registry's boundary for a run in a bot's own folder", () => {
     expect(denied(registry, "mcp_read_text_file")).toBe(true);
     expect(denied(registry, "mcp_find_customer")).toBe(false);
     expect(denied(registry, "mcp_not_from_any_server")).toBe(true);
+  });
+
+  it("applies the boundary as soon as the daemon contains a running task", async () => {
+    const task: Any = { id: "test-task", agentConfig: {} };
+    const registry = makeRegistry(task, "auto");
+    expect(denied(registry, "get_env")).toBe(false);
+    task.agentConfig = { botContained: true };
+    await Promise.resolve();
+    expect(denied(registry, "get_env")).toBe(true);
   });
 
   it("leaves runs outside a bot's folder as they were", () => {

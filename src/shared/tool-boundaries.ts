@@ -35,23 +35,94 @@ export type ToolBoundaryClass =
   | "handoff"
   | "connector";
 
-/** Families named by prefix; checked after the computer tools and the exact names below. */
+/**
+ * Families named by prefix; checked after the computer tools and the exact names below. Only
+ * families whose class already reaches this computer: a family a contained run may use is
+ * listed by name, so a new member (say `set_clipboard`) stays unclassified until someone
+ * chooses its class.
+ */
 const PREFIX_CLASSES: ReadonlyArray<readonly [string, ToolBoundaryClass]> = [
   ["android_phone_", "host_device"],
-  ["canvas_", "workspace_files"],
   ["git_", "host_shell"],
-  ["kg_", "app"],
   ["local_photoshop_", "host_computer"],
-  ["monty_", "workspace_files"],
   ["qa_", "local_web"],
-  ["scrape_", "web"],
-  ["set_", "app"],
-  ["skill_", "app"],
-  ["task_list_", "app"],
-  ["youtube_", "web"],
+];
+
+const FAMILY_CLASSES: ReadonlyArray<readonly [ToolBoundaryClass, readonly string[]]> = [
+  [
+    "app",
+    [
+      "kg_add_observation",
+      "kg_create_edge",
+      "kg_create_entity",
+      "kg_delete_edge",
+      "kg_delete_entity",
+      "kg_get_neighbors",
+      "kg_get_subgraph",
+      "kg_invalidate_edge",
+      "kg_search",
+      "kg_update_entity",
+      "set_agent_name",
+      "set_expertise",
+      "set_persona",
+      "set_personality",
+      "set_quirks",
+      "set_response_style",
+      "set_user_name",
+      "set_vibes",
+      "skill_create",
+      "skill_delete",
+      "skill_duplicate",
+      "skill_proposal",
+      "skill_update",
+      "task_list_create",
+      "task_list_list",
+      "task_list_update",
+    ],
+  ],
+  [
+    "workspace_files",
+    [
+      "canvas_add_asset",
+      "canvas_checkpoint",
+      "canvas_checkpoints",
+      "canvas_close",
+      "canvas_create",
+      "canvas_eval",
+      "canvas_export",
+      "canvas_hide",
+      "canvas_list",
+      "canvas_open_url",
+      "canvas_push",
+      "canvas_restore",
+      "canvas_show",
+      "canvas_snapshot",
+      "monty_list_transforms",
+      "monty_run",
+      "monty_run_transform",
+      "monty_transform_file",
+    ],
+  ],
+  [
+    "web",
+    [
+      "scrape_extract",
+      "scrape_multiple",
+      "scrape_page",
+      "scrape_session",
+      "youtube_ask_or_ingest_video",
+      "youtube_ask_video",
+      "youtube_ingest_video",
+      "youtube_list_ingested_videos",
+      "youtube_search_ingested_segments",
+    ],
+  ],
 ];
 
 const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
+  ...Object.fromEntries(
+    FAMILY_CLASSES.flatMap(([boundary, names]) => names.map((name) => [name, boundary])),
+  ),
   // CoWork's own state
   Skill: "app",
   acknowledge_mention: "app",

@@ -1204,7 +1204,7 @@
       "tags": ["Tools"],
       "icon": "☁️",
       "category": "Tools",
-      "updatedAt": "2026-05-11",
+      "updatedAt": "2026-10-22",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/openai-whisper-api.json"
     },
     {
@@ -1318,13 +1318,13 @@
     {
       "id": "price-tracker",
       "name": "Price Tracker",
-      "description": "Track and compare prices across e-commerce websites using stealth scraping.",
+      "description": "Track and compare prices across e-commerce websites using web scraping.",
       "version": "1.0.0",
       "author": "cowork-os",
       "tags": ["Data"],
       "icon": "💰",
       "category": "Data",
-      "updatedAt": "2026-05-11",
+      "updatedAt": "2026-10-22",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/price-tracker.json"
     },
     {
@@ -1438,13 +1438,13 @@
     {
       "id": "security-audit",
       "name": "Security Audit",
-      "description": "Check code for common security vulnerabilities",
-      "version": "1.0.0",
-      "author": "CoWork OS",
-      "tags": ["Development"],
+      "description": "Answer security questions about code, review a file or change for vulnerabilities, or run a full multi-agent audit with a coverage ledger and independently verified findings.",
+      "version": "2.0.0",
+      "author": "CoWork OS Contributors",
+      "tags": ["security", "audit", "vulnerabilities", "pentest", "appsec", "code-review"],
       "icon": "🔒",
       "category": "Development",
-      "updatedAt": "2026-05-11",
+      "updatedAt": "2026-10-22",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/security-audit.json"
     },
     {
@@ -1831,13 +1831,13 @@
     {
       "id": "web-scraper",
       "name": "Web Scraper",
-      "description": "Scrape web pages with anti-bot bypass and structured data extraction using Scrapling.",
+      "description": "Scrape web pages and extract structured data using Scrapling.",
       "version": "1.0.0",
       "author": "cowork-os",
       "tags": ["Data"],
       "icon": "🕸️",
       "category": "Data",
-      "updatedAt": "2026-05-11",
+      "updatedAt": "2026-10-22",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/web-scraper.json"
     },
     {

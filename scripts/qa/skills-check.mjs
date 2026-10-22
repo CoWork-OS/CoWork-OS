@@ -39,6 +39,7 @@ run("node", [
   ...(phase >= 3 ? ["--strict-warnings"] : []),
 ]);
 run("node", ["scripts/qa/skills-audit-report.mjs"]);
+run("node", ["scripts/qa/validate-skills-registry.mjs"]);
 run("node", ["scripts/qa/eval-skills-routing.mjs", ...(phase >= 3 ? ["--strict"] : [])]);
 
 console.log("[skills-check] complete");

@@ -12,7 +12,8 @@
  *   dev server the task opened);
  * - stopped by stop_process, when the task is cancelled (executor cancel and
  *   daemon cancelTask, which task deletion also goes through), when nobody
- *   has polled or started anything for BACKGROUND_PROCESS_IDLE_TIMEOUT_MS,
+ *   has polled or started anything for BACKGROUND_PROCESS_IDLE_TIMEOUT_MS
+ *   (BACKGROUND_PROCESS_ARMED_IDLE_TIMEOUT_MS once completion delivery is armed),
  *   on daemon shutdown, and synchronously on process exit as a backstop;
  * - when the leading process exits, whatever is left of its process group is
  *   killed so no untracked server outlives its record.
@@ -38,6 +39,11 @@ const log = createLogger("BackgroundProcesses");
 export const MAX_BACKGROUND_PROCESSES_PER_TASK = 5;
 export const MAX_BACKGROUND_PROCESSES_TOTAL = 20;
 export const BACKGROUND_PROCESS_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+/**
+ * Idle limit once completion delivery is armed: the agent stops polling and waits for the exit,
+ * so a long quiet job gets longer, but a process that never exits (a dev server) is still reaped.
+ */
+export const BACKGROUND_PROCESS_ARMED_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 export const DEFAULT_STARTUP_WAIT_MS = 5_000;
 export const MAX_STARTUP_WAIT_MS = 30_000;
 export const MAX_OUTPUT_WAIT_MS = 15_000;
@@ -490,7 +496,10 @@ export class BackgroundProcessManager {
     const finishedByTask = new Map<string, ProcessRecord[]>();
     for (const record of this.records.values()) {
       if (record.status === "running") {
-        if (!record.completion && now - record.lastAccessAt >= BACKGROUND_PROCESS_IDLE_TIMEOUT_MS) {
+        const idleLimit = record.completion
+          ? BACKGROUND_PROCESS_ARMED_IDLE_TIMEOUT_MS
+          : BACKGROUND_PROCESS_IDLE_TIMEOUT_MS;
+        if (now - record.lastAccessAt >= idleLimit) {
           void this.stopRecord(record, "idle_timeout");
         }
         continue;

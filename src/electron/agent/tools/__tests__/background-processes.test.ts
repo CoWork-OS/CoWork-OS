@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BACKGROUND_PROCESS_ARMED_IDLE_TIMEOUT_MS,
   BACKGROUND_PROCESS_IDLE_TIMEOUT_MS,
   BackgroundProcessManager,
   MAX_BACKGROUND_PROCESSES_PER_TASK,
@@ -232,6 +233,31 @@ describe("BackgroundProcessManager", () => {
       stop_reason: "idle_timeout",
     });
     expect(manager.summary("task-a", polled.summary.process_id).status).toBe("running");
+    await manager.stopAll("test");
+  });
+
+  it("still stops an armed process that never exits, after the longer idle limit", async () => {
+    let now = 1_000;
+    const manager = new BackgroundProcessManager(() => now);
+    const server = startFake(manager, "task-a", fakeChild(1));
+    const id = server.summary.process_id;
+    const completion = vi.fn();
+    for (let poll = 0; poll < 2; poll++) {
+      manager.observeQuietPoll("task-a", id, manager.read("task-a", id), completion);
+    }
+    expect(manager.observeQuietPoll("task-a", id, manager.read("task-a", id), completion)).toBe(
+      true,
+    );
+    now += BACKGROUND_PROCESS_IDLE_TIMEOUT_MS + 1;
+    manager.sweep();
+    expect(manager.summary("task-a", id).status).toBe("running");
+    now += BACKGROUND_PROCESS_ARMED_IDLE_TIMEOUT_MS;
+    manager.sweep();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(manager.summary("task-a", id)).toMatchObject({
+      status: "stopped",
+      stop_reason: "idle_timeout",
+    });
     await manager.stopAll("test");
   });
 

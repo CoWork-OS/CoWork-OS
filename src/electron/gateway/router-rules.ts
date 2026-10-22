@@ -5,9 +5,7 @@ import type { ChannelType, IncomingMessage, MessageAttachment } from "./channels
 import {
   clampMontyLimits,
   createMontySafeStdlib,
-  MontyProgramCache,
   runMontyCode,
-  sha256Hex,
   type MontyResourceLimits,
 } from "../sandbox/monty-engine";
 
@@ -35,9 +33,7 @@ const ROUTER_MAX_LIMITS: MontyResourceLimits = {
   maxRecursionDepth: 800,
 };
 
-const programCache = new MontyProgramCache(24);
-
-type CachedFile = { mtimeMs: number; code: string; hash: string };
+type CachedFile = { mtimeMs: number; code: string };
 const fileCache = new Map<string, CachedFile>();
 
 function summarizeAttachments(attachments?: MessageAttachment[]): Any[] {
@@ -107,8 +103,7 @@ async function loadRulesCode(workspacePath: string): Promise<CachedFile | null> 
   if (cached && cached.mtimeMs === stat.mtimeMs) return cached;
 
   const code = await fs.readFile(absPath, "utf8");
-  const hash = sha256Hex(code);
-  const next: CachedFile = { mtimeMs: stat.mtimeMs, code, hash };
+  const next: CachedFile = { mtimeMs: stat.mtimeMs, code };
   fileCache.set(absPath, next);
   return next;
 }
@@ -156,15 +151,12 @@ export async function evaluateWorkspaceRouterRules(args: {
     },
   };
 
-  const cacheKey = `router:${args.workspace.id}:${cached.hash}`;
   const res = await runMontyCode({
     code: cached.code,
     input,
     scriptName: "router_rules.monty",
     limits,
     externalFunctions,
-    cache: programCache,
-    cacheKey,
   });
 
   if (!res.ok) {

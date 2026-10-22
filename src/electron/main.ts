@@ -81,6 +81,7 @@ import {
 import mime from "mime-types";
 import { attachImageContextMenu } from "./utils/image-context-menu";
 import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
+import { closeMontyPool } from "./sandbox/monty-engine";
 import { installStdioErrorGuards } from "./utils/stdio-error-guards";
 import { DatabaseManager } from "./database/schema";
 import {
@@ -5104,6 +5105,7 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "local previews", run: () => getLocalPreviewProcessService().stopAll() },
+        { name: "monty sandbox", run: () => closeMontyPool() },
         { name: "host perf monitor", run: () => hostPerfMonitor?.stop() },
         {
           name: "database worker",

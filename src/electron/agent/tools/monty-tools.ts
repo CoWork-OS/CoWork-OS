@@ -7,9 +7,7 @@ import { extractJsonValues } from "../../utils/json-utils";
 import {
   clampMontyLimits,
   createMontySafeStdlib,
-  MontyProgramCache,
   runMontyCode,
-  sha256Hex,
   type MontyResourceLimits,
 } from "../../sandbox/monty-engine";
 import { FileTools } from "./file-tools";
@@ -92,8 +90,6 @@ function parseTransformHeader(snippet: string): { name?: string; description?: s
 }
 
 export class MontyTools {
-  private programCache = new MontyProgramCache(48);
-
   constructor(
     private workspace: Workspace,
     private daemon: AgentDaemon,
@@ -355,15 +351,12 @@ export class MontyTools {
       Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
     );
 
-    const cacheKey = `transform:${absPath}:${sha256Hex(code)}`;
     const res = await runMontyCode({
       code,
       input: (input as Any)?.inputs ?? null,
       scriptName: path.basename(absPath),
       limits,
       externalFunctions,
-      cache: this.programCache,
-      cacheKey,
     });
 
     if (!res.ok) {
@@ -397,7 +390,6 @@ export class MontyTools {
       Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
     );
 
-    const cacheKey = `transform:${absPath}:${sha256Hex(code)}`;
     const res = await runMontyCode({
       code,
       input: {
@@ -409,8 +401,6 @@ export class MontyTools {
       scriptName: path.basename(absPath),
       limits,
       externalFunctions,
-      cache: this.programCache,
-      cacheKey,
     });
 
     if (!res.ok) {

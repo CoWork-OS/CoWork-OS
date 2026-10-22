@@ -5,9 +5,16 @@
  * - Bundled skills (resources/skills/) - lowest precedence
  * - Optional external skill directories - medium precedence
  * - Managed skills (~/Library/Application Support/cowork-os/skills/) - medium-high precedence
- * - Workspace skills (workspace/skills/) - highest precedence
+ * - Workspace skills (<workspace>/skills/) - highest precedence
  *
- * Skills with the same ID from higher precedence sources override lower ones.
+ * Skills with the same ID from higher precedence sources override lower ones, with one
+ * exception: a managed skill that is an unmodified copy of a bundled version CoWork shipped
+ * earlier (see skill-lineage.ts) does not hide the bundled skill. The bundled skill is used
+ * and the set-aside copy is listed in the skill status report.
+ *
+ * The shared loader holds bundled, external, managed and plugin skills. Workspace skills
+ * belong to one workspace, so tasks read them through `forWorkspace(workspacePath)`, a view
+ * that layers that workspace's skills on top without changing what other tasks see.
  */
 
 import * as fs from "fs";
@@ -15,6 +22,7 @@ import * as path from "path";
 import {
   CapabilitySecurityReport,
   CustomSkill,
+  ShadowedSkillCopy,
   SkillSource,
   SkillStatusEntry,
   SkillStatusReport,
@@ -24,6 +32,7 @@ import { SkillEligibilityChecker, getSkillEligibilityChecker } from "./skill-eli
 import { getSkillRegistry as _getSkillRegistry } from "./skill-registry";
 import { InputSanitizer } from "./security";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { isStaleBundledSnapshot } from "./skill-lineage";
 import { createLogger } from "../utils/logger";
 import {
   isModelInvocableSkill,
@@ -146,6 +155,20 @@ export class CustomSkillLoader {
   private skillsConfig?: SkillsConfig;
   private eligibilityChecker: SkillEligibilityChecker;
   private securityReports: Map<string, CapabilitySecurityReport> = new Map();
+  private shadowedSkillCopies: ShadowedSkillCopy[] = [];
+  /** Bumped whenever the shared skill set changes, so workspace views rebuild their merge. */
+  private skillsGeneration = 0;
+
+  /** Set on workspace views only: the shared loader the view reads through. */
+  private scopeRoot: CustomSkillLoader | null = null;
+  private workspaceSkillCache: Map<string, { signature: string; skills: CustomSkill[] }> =
+    new Map();
+  private workspaceViews: Map<string, CustomSkillLoader> = new Map();
+  private scopedMergeCache: {
+    generation: number;
+    signature: string;
+    skills: Map<string, CustomSkill>;
+  } | null = null;
 
   // Debounce state for reloadSkills
   private reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -198,6 +221,7 @@ export class CustomSkillLoader {
    * Initialize the skill loader - loads all skills from all sources
    */
   async initialize(): Promise<void> {
+    if (this.scopeRoot) return this.scopeRoot.initialize();
     if (this.initialized) return;
     if (this.initializationPromise) return this.initializationPromise;
 
@@ -228,10 +252,106 @@ export class CustomSkillLoader {
   }
 
   /**
-   * Set the workspace skills directory
+   * Set the workspace skills directory for this loader. On the shared loader this applies
+   * to every caller, so tasks use `forWorkspace` instead.
    */
   setWorkspaceSkillsDir(workspacePath: string): void {
+    if (this.scopeRoot) {
+      throw new Error("A workspace skill view is fixed to its workspace; use forWorkspace()");
+    }
     this.workspaceSkillsDir = path.join(workspacePath, SKILLS_FOLDER_NAME);
+  }
+
+  /**
+   * A view of this loader that adds `<workspacePath>/skills/` at the highest precedence.
+   * Reads (getSkill, listSkills, routing, guidelines, {baseDir}) see the workspace skills;
+   * the shared loader and other workspaces' views do not. Workspace skill files are re-read
+   * when the folder changes, so a skill saved during a task applies to its next lookup.
+   */
+  forWorkspace(workspacePath: string | null | undefined): CustomSkillLoader {
+    const root = this.scopeRoot ?? this;
+    if (typeof workspacePath !== "string" || workspacePath.trim().length === 0) {
+      return root;
+    }
+    const workspaceSkillsDir = path.join(path.resolve(workspacePath), SKILLS_FOLDER_NAME);
+    const existing = root.workspaceViews.get(workspaceSkillsDir);
+    if (existing) return existing;
+    // A prototype view shares the root's maps and settings; only the workspace folder
+    // and the view's merge cache are its own. Methods that change shared state forward
+    // to the root (see `scopeRoot` checks).
+    const view = Object.create(root) as CustomSkillLoader;
+    view.scopeRoot = root;
+    view.workspaceSkillsDir = workspaceSkillsDir;
+    view.scopedMergeCache = null;
+    root.workspaceViews.set(workspaceSkillsDir, view);
+    return view;
+  }
+
+  /**
+   * The skills this loader answers with: the shared set, plus the workspace skills when
+   * this is a workspace view.
+   */
+  private effectiveSkills(): Map<string, CustomSkill> {
+    const root = this.scopeRoot;
+    if (!root || !this.workspaceSkillsDir) {
+      return this.skills;
+    }
+    const { signature, skills: workspaceSkills } = root.loadWorkspaceSkills(
+      this.workspaceSkillsDir,
+    );
+    const cached = this.scopedMergeCache;
+    if (cached && cached.generation === root.skillsGeneration && cached.signature === signature) {
+      return cached.skills;
+    }
+    let merged = root.skills;
+    if (workspaceSkills.length > 0) {
+      merged = new Map(root.skills);
+      for (const skill of workspaceSkills) {
+        merged.set(skill.id, skill);
+      }
+    }
+    this.scopedMergeCache = { generation: root.skillsGeneration, signature, skills: merged };
+    return merged;
+  }
+
+  /**
+   * Load a workspace skill folder, reusing the last read while no manifest in it changed.
+   */
+  private loadWorkspaceSkills(dir: string): { signature: string; skills: CustomSkill[] } {
+    const signature = this.getSkillDirSignature(dir);
+    const cached = this.workspaceSkillCache.get(dir);
+    if (cached && cached.signature === signature) {
+      return cached;
+    }
+    const entry = {
+      signature,
+      skills: signature ? this.loadSkillsFromDir(dir, "workspace") : [],
+    };
+    this.workspaceSkillCache.set(dir, entry);
+    return entry;
+  }
+
+  private getSkillDirSignature(dir: string): string {
+    try {
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+        return "";
+      }
+      return fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith(SKILL_FILE_EXTENSION) && !this.isSecurityMetadataFile(f))
+        .sort()
+        .map((f) => {
+          try {
+            const stat = fs.statSync(path.join(dir, f));
+            return `${f}:${stat.mtimeMs}:${stat.size}`;
+          } catch {
+            return `${f}:missing`;
+          }
+        })
+        .join("|");
+    } catch {
+      return "";
+    }
   }
 
   /**
@@ -309,6 +429,11 @@ export class CustomSkillLoader {
    * Uses debouncing to prevent rapid consecutive calls
    */
   async reloadSkills(): Promise<CustomSkill[]> {
+    if (this.scopeRoot) {
+      await this.scopeRoot.reloadSkills();
+      return this.listSkills();
+    }
+
     // If already reloading, return the existing promise
     if (this.isReloading && this.reloadPromise) {
       return this.reloadPromise;
@@ -358,17 +483,59 @@ export class CustomSkillLoader {
       : [];
 
     // Merge with precedence: bundled < external < managed < workspace
+    const bundledById = new Map<string, CustomSkill>();
     for (const skill of bundledSkills) {
       this.skills.set(skill.id, skill);
+      bundledById.set(skill.id, skill);
     }
     for (const skill of externalSkills) {
       this.skills.set(skill.id, skill);
     }
+    const shadowed: ShadowedSkillCopy[] = [];
+    const setAsideManagedIds = new Set<string>();
     for (const skill of managedSkills) {
+      const bundled = bundledById.get(skill.id);
+      if (bundled && this.isStaleManagedSnapshot(skill, bundled)) {
+        // An unmodified copy of an earlier bundled version: keep the current bundled skill,
+        // but honour the copy's off switch, which older app versions stored in the copy.
+        const current = this.skills.get(skill.id) ?? bundled;
+        this.skills.set(
+          skill.id,
+          skill.enabled === false && current.enabled !== false
+            ? { ...current, enabled: false }
+            : current,
+        );
+        setAsideManagedIds.add(skill.id);
+        shadowed.push({
+          id: skill.id,
+          name: skill.name,
+          filePath: skill.filePath || "",
+          source: "managed",
+          reason: "stale_bundled_copy",
+          activeSource: current.source || "bundled",
+        });
+        continue;
+      }
+      if (bundled) {
+        shadowed.push({
+          id: bundled.id,
+          name: bundled.name,
+          filePath: bundled.filePath || "",
+          source: "bundled",
+          reason: "overridden_by_managed",
+          activeSource: "managed",
+        });
+      }
       this.skills.set(skill.id, skill);
     }
     for (const skill of workspaceSkills) {
       this.skills.set(skill.id, skill);
+    }
+    this.shadowedSkillCopies = shadowed;
+    this.skillsGeneration += 1;
+    for (const id of setAsideManagedIds) {
+      // The integrity report belongs to the set-aside copy, not the bundled skill in use.
+      this.securityReports.delete(id);
     }
 
     const counts = {
@@ -389,9 +556,29 @@ export class CustomSkillLoader {
       `Loaded ${counts.total} skills (bundled: ${counts.bundled}, external: ${counts.external}, managed: ${counts.managed}, workspace: ${counts.workspace}, overridden: ${overridden})`,
     );
 
-    await this.populateSecurityReports(externalSkills, managedSkills);
+    await this.populateSecurityReports(
+      externalSkills,
+      managedSkills.filter((skill) => !setAsideManagedIds.has(skill.id)),
+    );
 
     return this.listSkills();
+  }
+
+  /**
+   * A managed skill is set aside for its bundled counterpart only when its manifest matches
+   * a bundled version CoWork shipped and it has no companion folder of its own (scripts or
+   * references the user may have changed). Anything else is the user's and keeps winning.
+   */
+  private isStaleManagedSnapshot(managed: CustomSkill, bundled: CustomSkill): boolean {
+    if (!isStaleBundledSnapshot(managed, bundled)) return false;
+    const manifestPath = managed.filePath;
+    if (!manifestPath) return false;
+    const companionDir = path.join(path.dirname(manifestPath), managed.id);
+    try {
+      return !fs.existsSync(companionDir);
+    } catch {
+      return false;
+    }
   }
 
   private isSecurityMetadataFile(fileName: string): boolean {
@@ -464,6 +651,7 @@ export class CustomSkillLoader {
    * Workspace skills take precedence and will not be overridden.
    */
   registerPluginSkill(skill: CustomSkill): void {
+    if (this.scopeRoot) return this.scopeRoot.registerPluginSkill(skill);
     if (!this.validateSkill(skill)) {
       logger.warn(`Invalid plugin skill: ${skill.id}`);
       return;
@@ -475,6 +663,7 @@ export class CustomSkillLoader {
       return;
     }
     this.skills.set(skill.id, skill);
+    this.skillsGeneration += 1;
     logger.debug(`Plugin skill registered: ${skill.id}`);
   }
 
@@ -496,6 +685,7 @@ export class CustomSkillLoader {
    * Workspace skills with the same IDs are preserved because they are user-owned.
    */
   unregisterPluginSkills(pluginName: string): number {
+    if (this.scopeRoot) return this.scopeRoot.unregisterPluginSkills(pluginName);
     let removed = 0;
     for (const [skillId, skill] of this.skills) {
       if (skill.source === "workspace") continue;
@@ -504,6 +694,7 @@ export class CustomSkillLoader {
       removed++;
     }
     if (removed > 0) {
+      this.skillsGeneration += 1;
       logger.debug(`Plugin skills unregistered for ${pluginName}: ${removed}`);
     }
     return removed;
@@ -524,7 +715,7 @@ export class CustomSkillLoader {
    * List all loaded skills
    */
   listSkills(): CustomSkill[] {
-    return Array.from(this.skills.values()).sort((a, b) => {
+    return Array.from(this.effectiveSkills().values()).sort((a, b) => {
       // Sort by priority first (lower = higher priority, default 100)
       const priorityA = a.priority ?? 100;
       const priorityB = b.priority ?? 100;
@@ -832,7 +1023,16 @@ export class CustomSkillLoader {
    * Get a specific skill by ID
    */
   getSkill(id: string): CustomSkill | undefined {
-    return this.skills.get(id);
+    return this.effectiveSkills().get(id);
+  }
+
+  /**
+   * Skill copies the loader did not use because another copy with the same id won:
+   * managed copies set aside for a newer bundled skill, and bundled skills a user's
+   * managed skill overrides.
+   */
+  getShadowedSkillCopies(): ShadowedSkillCopy[] {
+    return this.shadowedSkillCopies.map((entry) => ({ ...entry }));
   }
 
   /**
@@ -1000,6 +1200,7 @@ export class CustomSkillLoader {
       bundledSkillsDir: this.bundledSkillsDir,
       externalSkillDirs: [...this.externalSkillDirs],
       skills: statusEntries,
+      shadowedSkills: this.getShadowedSkillCopies(),
       summary,
     };
   }
@@ -1022,12 +1223,14 @@ export class CustomSkillLoader {
    * Update skills config
    */
   updateConfig(config: SkillsConfig): void {
+    if (this.scopeRoot) return this.scopeRoot.updateConfig(config);
     this.skillsConfig = config;
     this.externalSkillDirs = normalizeExternalSkillDirectories(config.externalSkillDirectories);
     this.eligibilityChecker.updateConfig(config);
   }
 
   setExternalSkillDirs(directories: string[]): string[] {
+    if (this.scopeRoot) return this.scopeRoot.setExternalSkillDirs(directories);
     validateExternalSkillDirectories(directories);
     this.externalSkillDirs = normalizeExternalSkillDirectories(directories);
     this.skillsConfig = {

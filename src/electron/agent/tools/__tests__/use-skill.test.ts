@@ -162,6 +162,9 @@ function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
 // Mock the custom skill loader
 vi.mock("../../custom-skill-loader", () => ({
   getCustomSkillLoader: vi.fn().mockImplementation(() => ({
+    forWorkspace() {
+      return this;
+    },
     getSkill: vi.fn().mockImplementation((id: string) => mockSkills.get(id)),
     listModelInvocableSkills: vi.fn().mockImplementation(() => Array.from(mockSkills.values())),
     listRuntimeSkillDescriptors: vi

@@ -7201,6 +7201,11 @@ ${transcript}
     return this.workspace;
   }
 
+  /** Skills as this task sees them: shared skills plus this workspace's `skills/` folder. */
+  private getSkillLoader() {
+    return getCustomSkillLoader().forWorkspace(this.workspace?.path);
+  }
+
   get runtime(): SessionRuntime {
     return this.getSessionRuntime();
   }
@@ -8921,7 +8926,7 @@ ${transcript}
     // Hints are informational (injected into the planning prompt); the LLM still
     // decides whether to act on them. See selectSkillPlanningHints for the rule.
     try {
-      const skillLoader = getCustomSkillLoader();
+      const skillLoader = this.getSkillLoader();
       const availableToolNames = this.buildAvailableToolNameSet(this.getAvailableTools());
       if (!availableToolNames.has("Skill")) return "";
 
@@ -16023,7 +16028,7 @@ ${transcript}
     const appliedSkills = Array.isArray(this.appliedSkills) ? this.appliedSkills : [];
     if (appliedSkills.length === 0) return [];
     try {
-      const loader = getCustomSkillLoader();
+      const loader = this.getSkillLoader();
       return appliedSkills
         .map((application) => resolveSkillPackReadGrant(loader.getSkill(application.skillId)))
         .filter((grant): grant is SkillPackReadGrant => grant !== null);
@@ -20862,7 +20867,7 @@ ${transcript}
     if (this.planningHintedSkillIds) return this.planningHintedSkillIds;
     // A task resumed after a restart skips planning; rebuild the hint from the same query.
     try {
-      const ranked = getCustomSkillLoader().rankModelInvocableSkillsForQuery(
+      const ranked = this.getSkillLoader().rankModelInvocableSkillsForQuery(
         this.getSkillRoutingQuery(),
         { includePrereqBlockedSkills: true },
       );
@@ -20880,7 +20885,7 @@ ${transcript}
     const normalizedText = this.normalizeSkillInvocationQuery(stepText);
     if (!normalizedText) return false;
     try {
-      const skillLoader = getCustomSkillLoader() as Any;
+      const skillLoader = this.getSkillLoader() as Any;
       if (typeof skillLoader?.listModelInvocableSkills !== "function") return false;
       const skills: Any[] = skillLoader.listModelInvocableSkills();
       return skills.some((skill) =>
@@ -29840,7 +29845,7 @@ You are continuing a previous conversation. The context from the previous conver
   private startNaturalLlmWikiObjectiveCollection(
     parsed: ReturnType<typeof parseNaturalLlmWikiPrompt>,
   ): void {
-    const skill = getCustomSkillLoader().getSkill("llm-wiki");
+    const skill = this.getSkillLoader().getSkill("llm-wiki");
     const parameters: Record<string, unknown> = {};
 
     if (parsed.mode && parsed.mode !== "auto") {
@@ -29942,7 +29947,7 @@ You are continuing a previous conversation. The context from the previous conver
   private getPendingSkillParameterDefinition(
     pending: PendingSkillParameterCollection,
   ): { skill: CustomSkill; parameter: SkillParameter } | null {
-    const skill = getCustomSkillLoader().getSkill(pending.skillId);
+    const skill = this.getSkillLoader().getSkill(pending.skillId);
     if (!skill) return null;
     const parameterName = pending.requiredParameterNames[pending.currentParameterIndex];
     if (!parameterName) return null;
@@ -30188,11 +30193,11 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private resolveSkillSlashCommandName(commandName: string): string | null {
-    return resolveSkillSlashAlias(commandName);
+    return resolveSkillSlashAlias(commandName, this.getSkillLoader());
   }
 
   private getSkillForSlashCommand(skillId: string): CustomSkill | undefined {
-    return getCustomSkillLoader().getSkill(skillId);
+    return this.getSkillLoader().getSkill(skillId);
   }
 
   private escapeSkillInvocationPattern(text: string): string {
@@ -30385,7 +30390,7 @@ You are continuing a previous conversation. The context from the previous conver
       return null;
     }
 
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const candidates = skillLoader
       .listSkills()
       .filter((skill) => skill.type !== "guideline")
@@ -30490,7 +30495,7 @@ You are continuing a previous conversation. The context from the previous conver
     const normalizedSkillId = String(skillId || "").trim();
     if (!normalizedSkillId) return null;
 
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const currentSkill = skillLoader.getSkill(normalizedSkillId);
     if (!currentSkill) {
       return {
@@ -30516,7 +30521,7 @@ You are continuing a previous conversation. The context from the previous conver
     if (!rawQuery) return false;
 
     try {
-      const skillLoader = getCustomSkillLoader();
+      const skillLoader = this.getSkillLoader();
       const ranked = skillLoader.rankModelInvocableSkillsForQuery(rawQuery, {
         availableToolNames: new Set(this.getAvailableTools().map((tool) => tool.name)),
         includePrereqBlockedSkills: true,
@@ -32405,7 +32410,7 @@ You are continuing a previous conversation. The context from the previous conver
     });
 
     // Get enabled guidelines from custom skills
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const contextMode = detectContextMode(
@@ -34552,7 +34557,7 @@ Return ONLY a JSON object:
     }
 
     // Get enabled guidelines from custom skills
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
 
     // Get personality and identity prompts
@@ -42493,7 +42498,7 @@ Return ONLY a JSON object:
     }
 
     // Get enabled guidelines from custom skills
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
 
     // Get personality and identity prompts

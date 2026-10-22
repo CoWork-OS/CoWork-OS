@@ -106,6 +106,9 @@ vi.mock("../../../settings/personality-manager", () => ({
 
 vi.mock("../../custom-skill-loader", () => ({
   getCustomSkillLoader: vi.fn().mockReturnValue({
+    forWorkspace() {
+      return this;
+    },
     getSkill: vi.fn(),
     listModelInvocableSkills: vi.fn().mockReturnValue([]),
     expandPrompt: vi.fn().mockReturnValue(""),

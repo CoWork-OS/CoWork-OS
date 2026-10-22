@@ -542,6 +542,23 @@ export function SkillHubBrowser({
     return <span className="settings-badge settings-badge--neutral">Missing Requirements</span>;
   };
 
+  // Managed skills that override a built-in skill of the same id (the user's own copies).
+  const overridesBuiltInIds = new Set(
+    (skillStatus?.shadowedSkills || [])
+      .filter((entry) => entry.reason === "overridden_by_managed")
+      .map((entry) => entry.id),
+  );
+
+  const getOverrideBadge = (entry: SkillStatusEntry) =>
+    entry.source === "managed" && overridesBuiltInIds.has(entry.id) ? (
+      <span
+        className="settings-badge settings-badge--outline"
+        title="This installed skill replaces the built-in skill with the same id."
+      >
+        Overrides built-in
+      </span>
+    ) : null;
+
   const renderSearchResults = (
     results: SkillRegistryEntry[],
     onInstall: (skillId: string) => void,
@@ -877,6 +894,7 @@ export function SkillHubBrowser({
                         <h4 className="skillhub-title">{skill.name}</h4>
                         {getStatusBadge(skill)}
                         {getSecurityBadge(skill.securityReport)}
+                        {getOverrideBadge(skill)}
                         {skill.category === "ClawHub" && (
                           <span className="settings-badge settings-badge--outline">ClawHub</span>
                         )}
@@ -936,6 +954,9 @@ export function SkillHubBrowser({
     if (!skillStatus) {
       return <div className="settings-empty">Loading skill status...</div>;
     }
+    const staleCopies = (skillStatus.shadowedSkills || []).filter(
+      (entry) => entry.reason === "stale_bundled_copy",
+    );
 
     return (
       <div className="skillhub-tab">
@@ -959,6 +980,19 @@ export function SkillHubBrowser({
             </div>
           </div>
         </div>
+
+        {staleCopies.length > 0 && (
+          <div className="settings-card skillhub-shadowed">
+            <p className="settings-description">
+              {staleCopies.length === 1
+                ? "1 saved copy of a built-in skill matches an older built-in version"
+                : `${staleCopies.length} saved copies of built-in skills match an older built-in version`}
+              , so the current built-in {staleCopies.length === 1 ? "skill is" : "skills are"} used
+              instead: {staleCopies.map((entry) => entry.name).join(", ")}. The old files stay in
+              the skills folder and can be deleted there.
+            </p>
+          </div>
+        )}
 
         {["bundled", "managed", "workspace"].map((source) => {
           const skills = skillStatus.skills.filter((s) => s.source === source);
@@ -984,6 +1018,7 @@ export function SkillHubBrowser({
                     <div className="skillhub-group-badges">
                       {getStatusBadge(skill)}
                       {getSecurityBadge(skill.securityReport)}
+                      {getOverrideBadge(skill)}
                     </div>
                   </div>
                 ))}

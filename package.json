@@ -270,7 +270,6 @@
     "@electron/asar": "3.4.1",
     "@eslint/js": "10.0.1",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/js-yaml": "^4.0.9",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.6.2",
     "@types/pdfkit": "^0.17.5",

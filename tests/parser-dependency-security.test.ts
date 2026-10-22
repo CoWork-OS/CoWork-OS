@@ -33,7 +33,12 @@ process.stdout.write("ok");`,
 describe("installed YAML parser resource guards", () => {
   it("bounds repeated alias merges while preserving ordinary merge precedence", () => {
     runBoundedParser(`
-const { load } = require("js-yaml");
+const { load: loadCore, YAML11_SCHEMA } = require("js-yaml");
+// Merge keys are YAML 1.1; the YAML 1.2 default schema leaves them unexpanded.
+assert.deepEqual(loadCore("defaults: &defaults {size: small}\\nitem: {<<: *defaults}").item, {
+  "<<": { size: "small" },
+});
+const load = (text, options = {}) => loadCore(text, { schema: YAML11_SCHEMA, ...options });
 const ordinary = load("defaults: &defaults {color: blue, size: small}\\nitem: {<<: *defaults, size: large}");
 assert.deepEqual(ordinary.item, { color: "blue", size: "large" });
 
@@ -46,7 +51,8 @@ assert.throws(() => load(aliases, { maxTotalMergeKeys: 64 }), /maxTotalMergeKeys
 
   it("counts empty merge sources against the same budget", () => {
     runBoundedParser(`
-const { load } = require("js-yaml");
+const { load: loadCore, YAML11_SCHEMA } = require("js-yaml");
+const load = (text, options = {}) => loadCore(text, { schema: YAML11_SCHEMA, ...options });
 assert.deepEqual(load("empty: &empty {}\\nitem: {<<: *empty, value: kept}").item, { value: "kept" });
 
 // Empty mappings previously consumed no budget, bypassing the merge-key cap.
@@ -63,9 +69,12 @@ assert.throws(() => load(emptySources, { maxTotalMergeKeys: 64 }), /maxTotalMerg
   it("finishes a large unique-key ordered map and still rejects duplicate keys", () => {
     runBoundedParser(
       `
-const { load } = require("js-yaml");
+const { load: loadCore, YAML11_SCHEMA } = require("js-yaml");
+// !!omap is a YAML 1.1 type; the YAML 1.2 default schema rejects it.
+assert.throws(() => loadCore("!!omap\\n- first: 1"), /unknown sequence tag/);
+const load = (text) => loadCore(text, { schema: YAML11_SCHEMA });
 assert.deepEqual(load("!!omap\\n- first: 1\\n- second: 2"), [{ first: 1 }, { second: 2 }]);
-assert.throws(() => load("!!omap\\n- repeated: 1\\n- repeated: 2"), /cannot resolve/);
+assert.throws(() => load("!!omap\\n- repeated: 1\\n- repeated: 2"), /duplicate key in ordered map/);
 
 // Long common prefixes amplify the old per-entry linear uniqueness scan.
 // The fixed parser accepts the same data with bounded CPU and heap use.

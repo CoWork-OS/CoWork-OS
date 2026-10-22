@@ -194,4 +194,88 @@ describe("ComposerDraftStore", () => {
       "11111111-1111-4111-8111-111111111111",
     ]);
   });
+
+  it("lists the messages a draft owner sent after the draft was started", () => {
+    db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        parent_task_id TEXT,
+        prompt TEXT NOT NULL,
+        user_prompt TEXT,
+        raw_prompt TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE task_events (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        legacy_type TEXT,
+        payload TEXT NOT NULL
+      );
+    `);
+    const header = "Attached files (relative to workspace):";
+    const withFile = `Fix it\n\n${header}\n- image.png (.cowork/uploads/1/image.png)`;
+    const insertTask = db.prepare(
+      "INSERT INTO tasks (id, workspace_id, parent_task_id, prompt, user_prompt, raw_prompt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    insertTask.run("before", "workspace-repo", null, withFile, withFile, null, 900);
+    insertTask.run("sent", "workspace-repo", null, "Fix it", withFile, withFile, 1_100);
+    insertTask.run("child", "workspace-repo", "sent", withFile, withFile, null, 1_200);
+    insertTask.run("unrelated", "workspace-other", null, "Plan lunch", null, null, 1_300);
+    const insertEvent = db.prepare(
+      "INSERT INTO task_events (id, task_id, timestamp, type, legacy_type, payload) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insertEvent.run(
+      "e1",
+      "sent",
+      1_000,
+      "timeline_step_updated",
+      "user_message",
+      JSON.stringify({ message: "too early" }),
+    );
+    insertEvent.run(
+      "e2",
+      "sent",
+      1_400,
+      "timeline_step_updated",
+      "user_message",
+      JSON.stringify({ message: "Diagnose the error" }),
+    );
+    insertEvent.run(
+      "e3",
+      "sent",
+      1_500,
+      "timeline_step_updated",
+      "assistant_message",
+      JSON.stringify({ message: "Done" }),
+    );
+    const repository = new ComposerDraftStore(db);
+
+    // A new-session draft looks across folders, at top-level tasks only.
+    expect(
+      repository.listMessagesSentSince({ taskId: null, since: 1_000, needle: header }),
+    ).toEqual([
+      { workspaceId: "workspace-repo", text: withFile },
+      { workspaceId: "workspace-repo", text: "Fix it" },
+    ]);
+    expect(
+      repository.listMessagesSentSince({ taskId: null, since: 1_000, needle: "Plan lunch" }),
+    ).toEqual([{ workspaceId: "workspace-other", text: "Plan lunch" }]);
+
+    // A task draft looks at that task's prompt and later follow-ups.
+    expect(repository.listMessagesSentSince({ taskId: "sent", since: 1_050, needle: "x" })).toEqual(
+      [
+        { workspaceId: "workspace-repo", text: withFile },
+        { workspaceId: "workspace-repo", text: "Fix it" },
+        { workspaceId: "workspace-repo", text: "Diagnose the error" },
+      ],
+    );
+    expect(repository.listMessagesSentSince({ taskId: "sent", since: 1_150, needle: "x" })).toEqual(
+      [{ workspaceId: "workspace-repo", text: "Diagnose the error" }],
+    );
+    expect(repository.listMessagesSentSince({ taskId: "gone", since: 0, needle: "x" })).toEqual([]);
+  });
 });

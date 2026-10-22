@@ -248,6 +248,12 @@ import {
 } from "../database/repositories";
 
 import { ComposerDraftAttachmentStore } from "../agent/runtime/composer-draft-attachment-store";
+import {
+  composerDraftSentNeedle,
+  composerDraftStartedAt,
+  createSentFileDigest,
+  wasComposerDraftSent,
+} from "../agent/runtime/composer-draft-sent-check";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
 
 import { ActivityRepository } from "../activity/activity-repository-facades";
@@ -341,6 +347,7 @@ import {
   COMPOSER_DRAFT_MAX_ATTACHMENT_TOTAL_BYTES,
   composerDraftMatchesOwner,
   normalizeComposerDraft,
+  type ComposerDraft,
 } from "../../shared/composer-drafts";
 import { isTerminalTaskStatus } from "../../shared/task-status";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
@@ -1982,6 +1989,25 @@ export async function setupIpcHandlers(
       if (!task || task.workspaceId !== owner.workspaceId) {
         throw new Error("Composer draft task does not belong to its workspace.");
       }
+    }
+  };
+  const digestSentFile = createSentFileDigest(
+    async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.path,
+  );
+  const wasComposerDraftAlreadySent = async (draft: ComposerDraft): Promise<boolean> => {
+    const since = composerDraftStartedAt(draft);
+    const needle = composerDraftSentNeedle(draft);
+    if (since === null || !needle) return false;
+    try {
+      const messages = await composerDraftRepo.listMessagesSentSince({
+        taskId: draft.taskId,
+        since,
+        needle,
+      });
+      return await wasComposerDraftSent(draft, messages, digestSentFile);
+    } catch {
+      // Best effort: when the check cannot run, the draft is shown as saved.
+      return false;
     }
   };
   new TaskSessionMetadataRepository(db);
@@ -5480,7 +5506,17 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_GET, async (_, request: unknown) => {
     const owner = validateComposerDraftOwner(request);
     await assertComposerDraftOwner(owner);
-    return composerDraftRepo.get(owner.draftKey, owner);
+    const draft = await composerDraftRepo.get(owner.draftKey, owner);
+    if (!draft || owner.scope !== "local" || !(await wasComposerDraftAlreadySent(draft))) {
+      return draft;
+    }
+    // What already went out in a task is retired instead of restored. A newer
+    // revision saved meanwhile is new input, so that one is returned.
+    if (!(await composerDraftRepo.clear(draft.draftKey, draft.revision))) {
+      return composerDraftRepo.get(owner.draftKey, owner);
+    }
+    await composerDraftAttachmentStore.releaseDraft(draft.draftKey, draft.workspaceId);
+    return null;
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_UPSERT, (_, value: unknown) =>

@@ -6,6 +6,11 @@ import {
   type ComposerDraft,
   type ComposerDraftGetRequest,
 } from "../../shared/composer-drafts";
+import {
+  listMessagesSentSince,
+  type SentComposerMessage,
+  type SentSinceRequest,
+} from "./composer-draft-sent-sql";
 
 type ComposerDraftRow = {
   draft_key: string;
@@ -161,6 +166,11 @@ export class ComposerDraftStore {
       .prepare("SELECT 1 FROM composer_drafts WHERE draft_key = ? LIMIT 1")
       .get(destinationKey);
     return Boolean(source) && !destination;
+  }
+
+  /** See composer-draft-sent-sql.ts. */
+  listMessagesSentSince(request: SentSinceRequest): SentComposerMessage[] {
+    return listMessagesSentSince(this.db, request);
   }
 
   pruneExpired(now = Date.now()): number {

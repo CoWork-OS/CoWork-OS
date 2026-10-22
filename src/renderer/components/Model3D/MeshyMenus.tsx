@@ -6,7 +6,7 @@ import { useSurfaceActions } from "../AnswerSurface/SurfaceActions";
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   // IPC errors arrive wrapped: "Error invoking remote method 'meshy:save': Error: …"
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
 function MenuButton({
@@ -74,10 +74,13 @@ function MenuButton({
 export function MeshyFormatMenu({
   taskId,
   beside,
+  workspacePath,
   chatTaskId,
 }: {
   taskId: string;
   beside?: string;
+  /** The project `beside` may be in. */
+  workspacePath?: string;
   chatTaskId?: string;
 }) {
   const [formats, setFormats] = useState<MeshyFormatOption[] | null>(null);
@@ -88,7 +91,7 @@ export function MeshyFormatMenu({
   const load = () => {
     setStatus(null);
     api
-      .getMeshyFormats?.({ taskId, beside })
+      .getMeshyFormats?.({ taskId, beside, workspacePath })
       .then(setFormats)
       .catch((error: unknown) => setStatus(errorText(error)));
   };
@@ -102,6 +105,7 @@ export function MeshyFormatMenu({
         taskId,
         format: option.key,
         beside,
+        workspacePath,
         chatTaskId,
         reveal: true,
       });

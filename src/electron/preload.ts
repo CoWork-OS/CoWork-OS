@@ -5004,12 +5004,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MODEL3D_READ, data),
   getMeshyStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MESHY_STATUS),
   getMeshyTask: (data: { taskId: string }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_TASK, data),
-  getMeshyFormats: (data: { taskId: string; beside?: string }) =>
+  getMeshyFormats: (data: { taskId: string; beside?: string; workspacePath?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MESHY_FORMATS, data),
   saveMeshyFormat: (data: {
     taskId: string;
     format: string;
     beside?: string;
+    workspacePath?: string;
     chatTaskId?: string;
     reveal?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_SAVE, data),
@@ -9311,11 +9312,13 @@ export interface ElectronAPI {
   getMeshyFormats?: (data: {
     taskId: string;
     beside?: string;
+    workspacePath?: string;
   }) => Promise<import("../shared/meshy").MeshyFormatOption[]>;
   saveMeshyFormat?: (data: {
     taskId: string;
     format: string;
     beside?: string;
+    workspacePath?: string;
     chatTaskId?: string;
     reveal?: boolean;
   }) => Promise<{ path: string }>;

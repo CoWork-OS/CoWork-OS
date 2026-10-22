@@ -11,7 +11,7 @@ type Selection =
 
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
 function formatBytes(bytes: number): string {
@@ -304,7 +304,8 @@ export function ModelGallery({ request }: { request: ModelGalleryRequest }) {
                 {selectedTask && selection.kind === "file" && (
                   <MeshyFormatMenu
                     taskId={selectedTask}
-                    beside={selection.workspacePath ? undefined : selection.path}
+                    beside={selection.path}
+                    workspacePath={selection.workspacePath}
                   />
                 )}
               </div>

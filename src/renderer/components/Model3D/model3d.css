@@ -284,10 +284,13 @@
 
 .model-viewer-btn {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
+  /* The app's base button rule pads 16px a side, which would squeeze the icon to nothing. */
+  padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -319,7 +322,9 @@
   padding: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-bg-primary);
+  /* The theme's surface colours are translucent; lay them over the opaque window colour so
+     the sidebar does not show through the gallery. */
+  background: linear-gradient(var(--color-bg-primary), var(--color-bg-primary)), Canvas;
   color: var(--color-text-primary);
   box-shadow: var(--shadow-md);
   overflow: hidden;

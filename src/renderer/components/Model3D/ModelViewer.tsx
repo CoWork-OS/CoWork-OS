@@ -86,7 +86,10 @@ export function ModelViewer({
         onStatsRef.current?.(loaded);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        // IPC errors arrive wrapped: "Error invoking remote method 'model3d:read': Error: …"
+        setError(message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, ""));
       });
     return () => {
       cancelled = true;

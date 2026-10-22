@@ -28,7 +28,11 @@ describe("meshy IPC", () => {
   let root: string;
   let workspace: string;
   let outside: string;
-  let service: { knownModel: ReturnType<typeof vi.fn>; task: ReturnType<typeof vi.fn> };
+  let service: {
+    knownModel: ReturnType<typeof vi.fn>;
+    task: ReturnType<typeof vi.fn>;
+    formats: ReturnType<typeof vi.fn>;
+  };
   const isKnownWorkspace = vi.fn(async (candidate: string) => candidate === workspace);
 
   beforeEach(async () => {
@@ -44,6 +48,7 @@ describe("meshy IPC", () => {
         throw new Error("That model is not one Meshy saved on this machine");
       }),
       task: vi.fn(async () => ({ status: "SUCCEEDED" })),
+      formats: vi.fn(async () => []),
     };
     registered.clear();
     setupMeshyHandlers({ isKnownWorkspace, service: service as unknown as MeshyService });
@@ -102,5 +107,25 @@ describe("meshy IPC", () => {
     ).rejects.toThrow("only available to the app window");
     await expect(task(appWindow, { taskId: "../../balance" })).rejects.toThrow();
     expect(service.task).not.toHaveBeenCalled();
+  });
+
+  it("lists formats beside a model in the open project, and nowhere else", async () => {
+    const formats = registered.get(IPC_CHANNELS.MESHY_FORMATS)!;
+    const taskId = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+    await formats(appWindow, { taskId, beside: "models/chest.glb", workspacePath: workspace });
+    expect(service.formats).toHaveBeenCalledWith(
+      taskId,
+      path.join(workspace, "models", "chest.glb"),
+    );
+
+    service.formats.mockClear();
+    await expect(
+      formats(appWindow, {
+        taskId,
+        beside: path.join(outside, "secret.glb"),
+        workspacePath: workspace,
+      }),
+    ).rejects.toThrow("not one Meshy saved");
+    expect(service.formats).not.toHaveBeenCalled();
   });
 });

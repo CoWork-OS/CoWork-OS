@@ -16,7 +16,7 @@ function fileName(filePath: string): string {
 
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
 /** A live 3D view while the card holds a slot; a "View in 3D" poster while it is parked. */
@@ -242,7 +242,12 @@ export function ModelCard({
         <span className="model-card-spacer" />
         {showTaskMenus && taskId && <MeshyNextMenu taskId={taskId} />}
         {showTaskMenus && taskId && (path || info?.hasModel) && (
-          <MeshyFormatMenu taskId={taskId} beside={absoluteModelPath} chatTaskId={chatTaskId} />
+          <MeshyFormatMenu
+            taskId={taskId}
+            beside={absoluteModelPath}
+            workspacePath={workspacePath}
+            chatTaskId={chatTaskId}
+          />
         )}
         {(modelPath || info?.hasModel) && (
           <button

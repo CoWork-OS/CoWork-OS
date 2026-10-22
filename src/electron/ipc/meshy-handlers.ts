@@ -27,11 +27,16 @@ const ModelReadSchema = z.object({
   workspacePath: FilePathSchema.optional(),
 });
 const TaskSchema = z.object({ taskId: TaskIdSchema });
-const FormatsSchema = z.object({ taskId: TaskIdSchema, beside: FilePathSchema.optional() });
+const FormatsSchema = z.object({
+  taskId: TaskIdSchema,
+  beside: FilePathSchema.optional(),
+  workspacePath: FilePathSchema.optional(),
+});
 const SaveSchema = z.object({
   taskId: TaskIdSchema,
   format: z.string().regex(/^[a-z0-9]{1,8}(?::[a-z0-9_]{1,40})?$/),
   beside: FilePathSchema.optional(),
+  workspacePath: FilePathSchema.optional(),
   chatTaskId: z.string().trim().min(1).max(200).optional(),
   /** Show the saved file in Finder once it is down. */
   reveal: z.boolean().optional(),
@@ -87,6 +92,7 @@ export async function resolveReadableModel(
 
 export function setupMeshyHandlers(deps: MeshyIpcDeps): void {
   const service = deps.service ?? getMeshyService();
+  const readDeps = { isKnownWorkspace: deps.isKnownWorkspace, service };
   const handle = <T>(
     channel: string,
     rate: (typeof RATE_LIMIT_CONFIGS)[keyof typeof RATE_LIMIT_CONFIGS],
@@ -105,10 +111,7 @@ export function setupMeshyHandlers(deps: MeshyIpcDeps): void {
     RATE_LIMIT_CONFIGS.frequent,
     async (raw): Promise<Model3dFile> => {
       const { filePath, workspacePath } = validateInput(ModelReadSchema, raw, "model");
-      const realPath = await resolveReadableModel(filePath, workspacePath, {
-        isKnownWorkspace: deps.isKnownWorkspace,
-        service,
-      });
+      const realPath = await resolveReadableModel(filePath, workspacePath, readDeps);
       const stat = await fsPromises.stat(realPath);
       if (!stat.isFile()) throw new Error("Not a file");
       if (stat.size > MAX_MODEL_BYTES) throw new Error("This model is too large to show here");
@@ -126,17 +129,20 @@ export function setupMeshyHandlers(deps: MeshyIpcDeps): void {
   });
 
   handle(IPC_CHANNELS.MESHY_FORMATS, RATE_LIMIT_CONFIGS.standard, async (raw) => {
-    const { taskId, beside } = validateInput(FormatsSchema, raw, "Meshy formats");
-    return service.formats(taskId, beside);
+    const { taskId, beside, workspacePath } = validateInput(FormatsSchema, raw, "Meshy formats");
+    // The model shown may be in the open project or one Meshy saved; checked like a read.
+    const anchor = beside ? await resolveReadableModel(beside, workspacePath, readDeps) : undefined;
+    return service.formats(taskId, anchor);
   });
 
   handle(IPC_CHANNELS.MESHY_SAVE, RATE_LIMIT_CONFIGS.standard, async (raw) => {
-    const { taskId, format, beside, chatTaskId, reveal } = validateInput(
+    const { taskId, format, beside, workspacePath, chatTaskId, reveal } = validateInput(
       SaveSchema,
       raw,
       "Meshy download",
     );
-    const saved = await service.save(taskId, format, { beside, chatTaskId: chatTaskId ?? null });
+    const anchor = beside ? await resolveReadableModel(beside, workspacePath, readDeps) : undefined;
+    const saved = await service.save(taskId, format, { anchor, chatTaskId: chatTaskId ?? null });
     if (reveal) shell.showItemInFolder(saved.path);
     return saved;
   });

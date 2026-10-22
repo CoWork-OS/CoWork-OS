@@ -45,6 +45,15 @@ describe("meshy library", () => {
     expect(await library.savedPathFor(TASK)).toBe(saved);
   });
 
+  it("reads a task id from the folder Meshy saved into", async () => {
+    const library = createMeshyLibrary(() => dataDir);
+    const own = path.join(dataDir, "meshy_output", `20261022_chest_${TASK}`);
+    await fs.mkdir(own, { recursive: true });
+    await fs.writeFile(path.join(own, "preview.glb"), "glb");
+    const models = await library.listModels(10);
+    expect(models.find((model) => model.path === path.join(own, "preview.glb"))?.taskId).toBe(TASK);
+  });
+
   it("knows only recorded models and files in its own folder", async () => {
     const library = createMeshyLibrary(() => dataDir);
     const recorded = path.join(project, "chest.glb");
@@ -59,6 +68,15 @@ describe("meshy library", () => {
       await library.isKnownModelPath(path.join(dataDir, "meshy_output", TASK, "model.glb")),
     ).toBe(true);
     expect(await library.isKnownModelPath(path.join(dataDir, "notes.txt"))).toBe(false);
+  });
+
+  it("knows models in its folder when the folder is reached through a symlink", async () => {
+    const linked = path.join(root, "linked-meshy");
+    await fs.symlink(dataDir, linked);
+    const library = createMeshyLibrary(() => linked);
+    const real = path.join(dataDir, "meshy_output", TASK, "model.glb");
+    await fs.writeFile(real, "glb");
+    expect(await library.isKnownModelPath(real)).toBe(true);
   });
 
   it("ignores paths that are not models, are relative or do not exist", async () => {

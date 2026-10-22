@@ -159,9 +159,9 @@ export class MeshyService {
     return info;
   }
 
-  async formats(taskId: string, beside?: string): Promise<MeshyFormatOption[]> {
+  /** `anchor`: the real path of the model shown, already checked by the caller. */
+  async formats(taskId: string, anchor?: string): Promise<MeshyFormatOption[]> {
     assertTaskId(taskId);
-    const anchor = beside ? await this.knownModel(beside) : null;
     const urls = resultUrls(await this.client().task(taskId));
     const options: MeshyFormatOption[] = [];
     for (const key of Object.keys(urls)) {
@@ -186,12 +186,13 @@ export class MeshyService {
 
   /**
    * Saves one file type of a finished task (no credits: Meshy made them all at generation
-   * time) next to `beside`, else under Meshy's folder. Returns the saved path.
+   * time) next to `anchor` (the real path of the model shown, already checked by the
+   * caller), else under Meshy's folder. Returns the saved path.
    */
   async save(
     taskId: string,
     formatKey: string,
-    options: { beside?: string; chatTaskId?: string | null } = {},
+    options: { anchor?: string; chatTaskId?: string | null } = {},
   ): Promise<{ path: string }> {
     assertTaskId(taskId);
     const [format, clip] = formatKey.split(":");
@@ -199,7 +200,7 @@ export class MeshyService {
       throw new Error("Unknown file type");
     }
     if (clip !== undefined && !/^[a-z0-9_]{1,40}$/.test(clip)) throw new Error("Unknown clip");
-    const anchor = options.beside ? await this.knownModel(options.beside) : null;
+    const anchor = options.anchor ?? null;
     const row = await this.client().task(taskId);
     const urls = resultUrls(row);
     const url = formatKey === "glb" && !urls.glb ? viewerGlbUrl(urls) : urls[formatKey];

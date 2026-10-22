@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Box, Maximize2, Play } from "lucide-react";
+import { AlertCircle, Box, KeyRound, Maximize2, Play } from "lucide-react";
 import type { MeshyTaskInfo } from "../../../shared/meshy";
 import { useLiveFrameSlot } from "../../hooks/useLiveFrameSlot";
 import { MeshyFormatMenu, MeshyNextMenu } from "./MeshyMenus";
 import { MODEL_VIEWER_SLOTS, openModelGallery } from "./model-gallery-store";
-import { ModelViewer } from "./ModelViewer";
+import { describeStats, ModelViewer } from "./ModelViewer";
+import type { ModelStats } from "./model-stage";
 import "./model3d.css";
 
 const RUNNING = new Set(["PENDING", "IN_PROGRESS"]);
@@ -16,7 +17,7 @@ function fileName(filePath: string): string {
 
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
 /** A live 3D view while the card holds a slot; a "View in 3D" poster while it is parked. */
@@ -24,28 +25,108 @@ function SlottedViewer({
   path,
   workspacePath,
   poster,
+  onStats,
 }: {
   path: string;
   workspacePath?: string;
   poster?: string | null;
+  onStats: (stats: ModelStats) => void;
 }) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const { live, activate } = useLiveFrameSlot(element, MODEL_VIEWER_SLOTS);
   return (
     <div className="model-card-body" ref={setElement} onPointerDown={activate}>
       {live ? (
-        <ModelViewer source={{ path, workspacePath }} />
+        <ModelViewer source={{ path, workspacePath }} showStats={false} onStats={onStats} />
       ) : (
-        <button
-          type="button"
-          className="model-card-poster"
-          style={poster ? { backgroundImage: `url(${poster})` } : undefined}
-          onClick={activate}
-        >
-          <Play size={22} />
-          <span>View in 3D</span>
-        </button>
+        <Poster image={poster} label="View in 3D" onClick={activate} />
       )}
+    </div>
+  );
+}
+
+function Poster({
+  image,
+  label,
+  disabled,
+  onClick,
+}: {
+  image?: string | null;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="model-card-poster" disabled={disabled} onClick={onClick}>
+      {image && <img alt="" src={image} className="model-card-poster-image" />}
+      <span className="model-card-poster-cta">
+        <span className="model-card-poster-play">
+          <Play size={16} fill="currentColor" />
+        </span>
+        <span>{label}</span>
+      </span>
+    </button>
+  );
+}
+
+const RING_RADIUS = 22;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+
+function TaskProgress({ info, thumbnail }: { info: MeshyTaskInfo; thumbnail: string | null }) {
+  const queued = info.status === "PENDING" && info.progress === 0;
+  return (
+    <div className="model-card-body model-card-progress">
+      {thumbnail && <img alt="" src={thumbnail} className="model-card-progress-backdrop" />}
+      <div className="model-card-progress-center" role="status">
+        <svg className="model-card-ring" viewBox="0 0 52 52" aria-hidden="true">
+          <circle className="model-card-ring-track" cx="26" cy="26" r={RING_RADIUS} />
+          <circle
+            className="model-card-ring-fill"
+            cx="26"
+            cy="26"
+            r={RING_RADIUS}
+            strokeDasharray={RING_LENGTH}
+            strokeDashoffset={RING_LENGTH * (1 - (queued ? 0.04 : info.progress / 100))}
+          />
+        </svg>
+        <span className="model-card-progress-value">{queued ? "…" : `${info.progress}%`}</span>
+        <span className="model-card-progress-stage">
+          {queued ? "Queued at Meshy" : `Meshy is ${info.stage}`}
+        </span>
+      </div>
+      <div className="model-card-progress-bar" aria-hidden="true">
+        <div style={{ width: `${info.progress}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function CompactCard({
+  name,
+  message,
+  tone = "info",
+}: {
+  name: string;
+  message: string;
+  tone?: "info" | "error" | "busy" | "setup";
+}) {
+  return (
+    <div className="model-card is-compact" data-tone={tone}>
+      <span className="model-card-badge" aria-hidden="true">
+        {tone === "busy" ? (
+          <span className="model-spinner" />
+        ) : tone === "error" ? (
+          <AlertCircle size={16} />
+        ) : tone === "setup" ? (
+          <KeyRound size={16} />
+        ) : (
+          <Box size={16} />
+        )}
+      </span>
+      <span className="model-card-compact-text">
+        <span className="model-card-title">{name}</span>
+        <span className="model-card-subtitle">{message}</span>
+      </span>
     </div>
   );
 }
@@ -128,6 +209,7 @@ export function ModelCard({
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [subtitle, setSubtitle] = useState<string | null>(null);
   const modelPath = path ?? savedPath;
   // Files Meshy saved are known by their absolute path; a workspace path is joined first.
   const absoluteModelPath =
@@ -161,112 +243,134 @@ export function ModelCard({
     }
   }, [chatTaskId, modelPath, taskId]);
 
+  if (!modelPath) {
+    if (!taskId) {
+      return (
+        <CompactCard
+          name={name}
+          message="This 3D card needs a path or a Meshy task."
+          tone="error"
+        />
+      );
+    }
+    if (!info) {
+      return error ? (
+        <CompactCard
+          name={name}
+          message={error}
+          tone={/API key/i.test(error) ? "setup" : "error"}
+        />
+      ) : (
+        <CompactCard name={name} message="Checking the Meshy task…" tone="busy" />
+      );
+    }
+    if (info.error) {
+      return (
+        <CompactCard
+          name={name}
+          message={`Meshy task ${info.status.toLowerCase()}: ${info.error}`}
+          tone="error"
+        />
+      );
+    }
+    if (done && !info.hasModel && !thumbnail) {
+      return <CompactCard name={name} message="Done. This task has no 3D file." />;
+    }
+  }
+
   let body;
   if (modelPath) {
-    body = <SlottedViewer path={modelPath} workspacePath={workspacePath} poster={thumbnail} />;
-  } else if (!taskId) {
     body = (
-      <div className="model-card-line model-card-error">
-        This 3D card needs a path or a Meshy task.
-      </div>
+      <SlottedViewer
+        path={modelPath}
+        workspacePath={workspacePath}
+        poster={thumbnail}
+        onStats={(stats) => setSubtitle(describeStats(stats))}
+      />
     );
-  } else if (!info) {
-    body = (
-      <div className="model-card-line">
-        {error ? `Meshy: ${error}` : "Checking the Meshy task…"}
-      </div>
-    );
-  } else if (info.error) {
-    body = (
-      <div className="model-card-line model-card-error">
-        Meshy task {info.status.toLowerCase()}: {info.error}
-      </div>
-    );
-  } else if (!done) {
-    body = (
-      <div className="model-card-progress">
-        {thumbnail && <img alt="" src={thumbnail} className="model-card-progress-thumb" />}
-        <div className="model-card-progress-main">
-          <div className="model-card-line">
-            {info.status === "PENDING" && info.progress === 0
-              ? "Meshy · queued"
-              : `Meshy ${info.progress}% · ${info.stage}`}
-          </div>
-          <div className="model-card-bar">
-            <div className="model-card-bar-fill" style={{ width: `${info.progress}%` }} />
-          </div>
-        </div>
-      </div>
-    );
-  } else if (info.hasModel) {
+  } else if (info && !done) {
+    body = <TaskProgress info={info} thumbnail={thumbnail} />;
+  } else if (info?.hasModel) {
     body = (
       <div className="model-card-body">
-        <button
-          type="button"
-          className="model-card-poster"
-          style={thumbnail ? { backgroundImage: `url(${thumbnail})` } : undefined}
+        <Poster
+          image={thumbnail}
           disabled={opening || streaming}
           onClick={() => void fetchModel()}
-        >
-          <Play size={22} />
-          <span>
-            {opening
+          label={
+            opening
               ? "Downloading the model…"
               : streaming
                 ? "Waiting for the reply to finish…"
-                : (openError ?? "View in 3D")}
-          </span>
-        </button>
+                : (openError ?? "View in 3D")
+          }
+        />
       </div>
     );
-  } else if (info.imageUrls.length || thumbnail) {
-    body = (
-      <div className="model-card-images">{thumbnail && <img alt={name} src={thumbnail} />}</div>
-    );
   } else {
-    body = <div className="model-card-line">Done. This task has no 3D file.</div>;
+    body = (
+      <div className="model-card-body model-card-images">
+        {thumbnail && <img alt={name} src={thumbnail} />}
+      </div>
+    );
   }
 
   const showTaskMenus = Boolean(taskId) && (Boolean(path) || done) && !streaming;
+  const meta = [
+    subtitle,
+    done && typeof info?.credits === "number" ? `${info.credits} credits` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className="model-card" data-model-card={info?.status ?? (path ? "file" : "loading")}>
-      <div className="model-card-header">
-        <Box size={15} className="model-card-icon" />
-        <span className="model-card-title" title={name}>
-          {name}
-        </span>
-        {done && typeof info?.credits === "number" && (
-          <span className="model-card-meta">{info.credits} cr</span>
-        )}
-        <span className="model-card-spacer" />
-        {showTaskMenus && taskId && <MeshyNextMenu taskId={taskId} />}
-        {showTaskMenus && taskId && (path || info?.hasModel) && (
-          <MeshyFormatMenu taskId={taskId} beside={absoluteModelPath} chatTaskId={chatTaskId} />
-        )}
-        {(modelPath || info?.hasModel) && (
-          <button
-            type="button"
-            className="model-card-btn"
-            title="Open in the 3D gallery"
-            disabled={opening}
-            onClick={() => {
-              void fetchModel().then((resolved) =>
-                openModelGallery({
-                  path: resolved ?? undefined,
-                  workspacePath,
-                  taskId,
-                  title: name,
-                }),
-              );
-            }}
-          >
-            <Maximize2 size={13} />
-            <span>Open</span>
-          </button>
-        )}
-      </div>
+    <figure
+      className="model-card"
+      data-model-card={info?.status ?? (path ? "file" : "loading")}
+      aria-label={name}
+    >
       {body}
-    </div>
+      <figcaption className="model-card-top">
+        <span className="model-card-heading">
+          <span className="model-card-title" title={name}>
+            {name}
+          </span>
+          {meta && <span className="model-card-subtitle">{meta}</span>}
+        </span>
+        <span className="model-card-actions">
+          {showTaskMenus && taskId && <MeshyNextMenu taskId={taskId} />}
+          {showTaskMenus && taskId && (path || info?.hasModel) && (
+            <MeshyFormatMenu
+              taskId={taskId}
+              beside={absoluteModelPath}
+              workspacePath={workspacePath}
+              chatTaskId={chatTaskId}
+              iconOnly
+            />
+          )}
+          {(modelPath || info?.hasModel) && (
+            <button
+              type="button"
+              className="model-glass-btn is-icon"
+              title="Open in the 3D gallery"
+              aria-label="Open in the 3D gallery"
+              disabled={opening}
+              onClick={() => {
+                void fetchModel().then((resolved) =>
+                  openModelGallery({
+                    path: resolved ?? undefined,
+                    workspacePath,
+                    taskId,
+                    title: name,
+                  }),
+                );
+              }}
+            >
+              <Maximize2 size={14} />
+            </button>
+          )}
+        </span>
+      </figcaption>
+    </figure>
   );
 }

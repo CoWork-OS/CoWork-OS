@@ -79,6 +79,15 @@ function cleanPrompt(value: unknown): string | null {
   return text ? text.slice(0, MAX_PROMPT_CHARS) : null;
 }
 
+// Meshy names its download folders after the task: `<task>/` (CoWork's saves) or
+// `<time>_<prompt>_<task>/` (the server's own).
+const FOLDER_TASK_ID_RE = /(?:^|_)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+function taskIdFromFolder(filePath: string): string | null {
+  const match = FOLDER_TASK_ID_RE.exec(path.basename(path.dirname(filePath)));
+  return match && isMeshyTaskId(match[1]) ? match[1] : null;
+}
+
 function isInside(child: string, parent: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -216,7 +225,7 @@ export function createMeshyLibrary(
           try {
             const stat = await fsPromises.stat(filePath);
             if (!stat.isFile()) return;
-            const taskId = model?.taskId ?? null;
+            const taskId = model?.taskId ?? taskIdFromFolder(filePath);
             out.push({
               path: filePath,
               name: path.basename(filePath),
@@ -239,7 +248,9 @@ export function createMeshyLibrary(
 
     async isKnownModelPath(realPath) {
       if (!MODEL_FILE_EXT_RE.test(realPath)) return false;
-      if (isInside(realPath, getDataDir())) return true;
+      // Compare real paths: the folder itself may sit behind a symlink (/var -> /private/var).
+      const dataDir = await fsPromises.realpath(getDataDir()).catch(() => getDataDir());
+      if (isInside(realPath, dataDir)) return true;
       const library = await serial(load);
       return library.models.some((model) => model.path === realPath);
     },

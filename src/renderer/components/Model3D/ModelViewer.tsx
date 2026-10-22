@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Box, Grid3x3, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, Box, Grid3x3, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { createModelStage, type ModelStage, type ModelStats } from "./model-stage";
 
 export interface ModelFileSource {
@@ -7,6 +7,9 @@ export interface ModelFileSource {
   path: string;
   workspacePath?: string;
 }
+
+/** Clips beyond this many show in a menu instead of as chips. */
+const MAX_CLIP_CHIPS = 4;
 
 function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
@@ -35,18 +38,47 @@ export function describeStats(stats: ModelStats): string {
   return parts.join(" · ");
 }
 
+function ToolButton({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`model-tool${pressed ? " is-on" : ""}`}
+      title={label}
+      aria-label={label}
+      aria-pressed={pressed}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
- * Loads one model into a three.js stage with orbit, wireframe, grid and clip controls.
- * The stage (and its WebGL context) exists only while this is mounted.
+ * Loads one model into a three.js stage that fills its frame, with a floating toolbar
+ * for animation clips, auto-rotate, wireframe, grid and reset. The stage (and its WebGL
+ * context) exists only while this is mounted.
  */
 export function ModelViewer({
   source,
   autoRotate = false,
+  showStats = true,
   className = "",
   onStats,
 }: {
   source: ModelFileSource;
   autoRotate?: boolean;
+  /** Show the triangle count and size in the corner (a card shows them in its title). */
+  showStats?: boolean;
   className?: string;
   onStats?: (stats: ModelStats) => void;
 }) {
@@ -58,7 +90,7 @@ export function ModelViewer({
   const [error, setError] = useState<string | null>(null);
   const [rotating, setRotating] = useState(autoRotate);
   const [wireframe, setWireframe] = useState(false);
-  const [grid, setGrid] = useState(true);
+  const [grid, setGrid] = useState(false);
   const [clip, setClip] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -86,7 +118,10 @@ export function ModelViewer({
         onStatsRef.current?.(loaded);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        // IPC errors arrive wrapped: "Error invoking remote method 'model3d:read': Error: …"
+        setError(message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, ""));
       });
     return () => {
       cancelled = true;
@@ -102,94 +137,103 @@ export function ModelViewer({
   useEffect(() => stageRef.current?.setGrid(grid), [grid]);
 
   const clips = stats?.clips ?? [];
+  const playClip = (next: number) => {
+    setClip(next);
+    setPaused(false);
+    stageRef.current?.playClip(next);
+  };
 
   return (
-    <div className={`model-viewer ${className}`.trim()}>
-      <div className="model-viewer-stage" ref={hostRef}>
-        {!stats && !error && <div className="model-viewer-overlay">Loading model…</div>}
-        {error && <div className="model-viewer-overlay model-viewer-error">{error}</div>}
-      </div>
+    <div
+      className={`model-viewer ${className}`.trim()}
+      data-state={stats ? "ready" : error ? "error" : "loading"}
+    >
+      <div className="model-viewer-stage" ref={hostRef} />
+      {!stats && !error && (
+        <div className="model-viewer-status" role="status">
+          <span className="model-spinner" aria-hidden="true" />
+          <span>Loading model</span>
+        </div>
+      )}
+      {error && (
+        <div className="model-viewer-status model-viewer-status-error" role="alert">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+      {stats && showStats && (
+        <div
+          className="model-viewer-stats"
+          title={`${stats.vertices.toLocaleString()} vertices, ${stats.meshes} meshes, ${stats.materials} materials`}
+        >
+          {describeStats(stats)}
+        </div>
+      )}
       {stats && (
-        <div className="model-viewer-toolbar">
-          <span
-            className="model-viewer-stats"
-            title={`${stats.vertices.toLocaleString()} vertices, ${stats.meshes} meshes, ${stats.materials} materials`}
-          >
-            {describeStats(stats)}
-          </span>
-          <span className="model-viewer-spacer" />
+        <div className="model-viewer-dock" role="toolbar" aria-label="3D view controls">
           {clips.length > 0 && (
             <>
-              <select
-                className="model-viewer-clip"
-                aria-label="Animation"
-                value={clip}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  setClip(next);
-                  setPaused(false);
-                  stageRef.current?.playClip(next);
-                }}
-              >
-                {clips.map((name, index) => (
-                  <option key={`${index}-${name}`} value={index}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="model-viewer-btn"
-                title={paused ? "Play animation" : "Pause animation"}
-                aria-label={paused ? "Play animation" : "Pause animation"}
+              {clips.length <= MAX_CLIP_CHIPS ? (
+                <div className="model-clip-chips" role="radiogroup" aria-label="Animation">
+                  {clips.map((name, index) => (
+                    <button
+                      key={`${index}-${name}`}
+                      type="button"
+                      role="radio"
+                      aria-checked={clip === index}
+                      className={`model-clip-chip${clip === index ? " is-on" : ""}`}
+                      onClick={() => playClip(index)}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <select
+                  className="model-clip-select"
+                  aria-label="Animation"
+                  value={clip}
+                  onChange={(event) => playClip(Number(event.target.value))}
+                >
+                  {clips.map((name, index) => (
+                    <option key={`${index}-${name}`} value={index}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <ToolButton
+                label={paused ? "Play animation" : "Pause animation"}
                 onClick={() => {
                   stageRef.current?.setPaused(!paused);
                   setPaused(!paused);
                 }}
               >
-                {paused ? <Play size={14} /> : <Pause size={14} />}
-              </button>
+                {paused ? <Play size={15} /> : <Pause size={15} />}
+              </ToolButton>
+              <span className="model-dock-divider" aria-hidden="true" />
             </>
           )}
-          <button
-            type="button"
-            className={`model-viewer-btn${rotating ? " is-on" : ""}`}
-            title="Auto-rotate"
-            aria-label="Auto-rotate"
-            aria-pressed={rotating}
+          <ToolButton
+            label="Auto-rotate"
+            pressed={rotating}
             onClick={() => setRotating((on) => !on)}
           >
-            <RotateCw size={14} />
-          </button>
-          <button
-            type="button"
-            className={`model-viewer-btn${wireframe ? " is-on" : ""}`}
-            title="Wireframe"
-            aria-label="Wireframe"
-            aria-pressed={wireframe}
+            <RotateCw size={15} />
+          </ToolButton>
+          <ToolButton
+            label="Wireframe"
+            pressed={wireframe}
             onClick={() => setWireframe((on) => !on)}
           >
-            <Box size={14} />
-          </button>
-          <button
-            type="button"
-            className={`model-viewer-btn${grid ? " is-on" : ""}`}
-            title="Grid"
-            aria-label="Grid"
-            aria-pressed={grid}
-            onClick={() => setGrid((on) => !on)}
-          >
-            <Grid3x3 size={14} />
-          </button>
-          <button
-            type="button"
-            className="model-viewer-btn"
-            title="Reset view"
-            aria-label="Reset view"
-            onClick={() => stageRef.current?.resetView()}
-          >
-            <RotateCcw size={14} />
-          </button>
+            <Box size={15} />
+          </ToolButton>
+          <ToolButton label="Grid" pressed={grid} onClick={() => setGrid((on) => !on)}>
+            <Grid3x3 size={15} />
+          </ToolButton>
+          <ToolButton label="Reset view" onClick={() => stageRef.current?.resetView()}>
+            <RotateCcw size={15} />
+          </ToolButton>
         </div>
       )}
     </div>

@@ -43,7 +43,7 @@ Both markers are positive provenance: an unmarked task or message never counts. 
 
 **Attached files and reply quotes never count.** Even in a typed prompt or follow-up, two kinds of embedded text are dropped (`userTypedWords` in `src/electron/agent/user-typed-words.ts`):
 
-- **Reply quotes.** A channel reply quote is the "In reply to …" header and the `> ` lines under it that WhatsApp puts in front of a reply (`src/shared/channel-reply-context.ts`). The quote is someone else's message or the agent's own earlier reply. Every quoted line starts with `>`, so quoted text can't end the block early.
+- **Reply quotes.** A channel reply quote is the "In reply to …" header and the `> ` lines under it that WhatsApp puts in front of a reply (`src/shared/channel-reply-context.ts`). The quote is someone else's message or the agent's own earlier reply. Every quoted line starts with `>`, so quoted text can't end the block early. An email's quoted history (the `> ` lines under "On … wrote:") and a reply's `Re:` subject are marked the same way by the email adapter.
 - **Attached files.** Only the text before the attached-files block counts (`textBeforeAttachedFiles` in `src/shared/attachment-summary.ts`). That block is the file list and extracted file contents that the composer, the artifact viewers, browser annotations and the gateway append. The cut never resumes after an end marker, so a document can't close the block early with a fake marker. A request typed above the attachments still counts; a file that says "add a behavioral rule" doesn't.
 
 **Task prompts count** when a person typed them into a composer the owner signed in to:

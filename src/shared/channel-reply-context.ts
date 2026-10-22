@@ -26,6 +26,33 @@ export function formatChannelReplyContext(quotedFrom: string, body: string): str
 }
 
 /**
+ * An email body with its quoted history marked as a reply quote. A mail client quotes the
+ * message being answered as `> ` lines, usually under an "On … wrote:" line; that attribution
+ * becomes the quote's header (one is added where it is missing), so the quoted lines are left
+ * out of the sender's words like a WhatsApp quote. Lines typed between quotes are kept.
+ */
+export function markEmailReplyQuotes(text: string): string {
+  const lines = String(text || "").split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const nextQuoted = lines[i + 1]?.startsWith(">") === true;
+    if (nextQuoted && /^\s*On\b.*\bwrote:\s*$/i.test(line)) {
+      out.push(`${CHANNEL_REPLY_CONTEXT_PREFIX}${line.replace(/\s+/g, " ").trim()}`);
+      continue;
+    }
+    if (line.startsWith(">") && !(out.at(-1) ?? "").startsWith(">")) {
+      const previous = out.at(-1) ?? "";
+      if (!previous.startsWith(CHANNEL_REPLY_CONTEXT_PREFIX)) {
+        out.push(`${CHANNEL_REPLY_CONTEXT_PREFIX}a previous message`);
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/**
  * `text` without its reply quote blocks: each header line and the quoted lines after it. Every
  * line of a quoted message starts with ">", so its text cannot end the block early; what the
  * sender typed follows a blank line and is kept.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CHANNEL_REPLY_CONTEXT_PREFIX,
   formatChannelReplyContext,
+  markEmailReplyQuotes,
   withoutChannelReplyContext,
 } from "../channel-reply-context";
 
@@ -41,5 +42,20 @@ describe("channel reply context", () => {
     );
     const quote = formatChannelReplyContext("+15550000001", quoted)!;
     expect(withoutChannelReplyContext(`${quote}\n\nSure.`)).toBe("\nSure.");
+  });
+
+  it("leaves an email's quoted history out of the sender's words", () => {
+    const reply = [
+      "Sure",
+      "",
+      "On Mon, Oct 20, 2026 at 9:00 AM CoWork <bot@example.com> wrote:",
+      `> ${RULE_REQUEST}`,
+      "> Reply to confirm.",
+    ].join("\n");
+    expect(withoutChannelReplyContext(markEmailReplyQuotes(reply))).toBe("Sure\n");
+    // Without an attribution line, and with a line typed between two quotes.
+    const inline = [`> ${RULE_REQUEST}`, "No thanks.", "> Anything else?"].join("\n");
+    expect(withoutChannelReplyContext(markEmailReplyQuotes(inline))).toBe("No thanks.");
+    expect(markEmailReplyQuotes("No quotes here.")).toBe("No quotes here.");
   });
 });

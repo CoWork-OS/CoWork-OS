@@ -12,6 +12,12 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  CanvasTexture,
+  DoubleSide,
+  HemisphereLight,
+  MeshBasicMaterial,
+  Mesh as MeshObject,
+  PlaneGeometry,
   AnimationMixer,
   Box3,
   Clock,
@@ -135,10 +141,15 @@ export function createModelStage(container: HTMLElement): ModelStage {
   const pmrem = new PMREMGenerator(renderer);
   const environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environment = environment;
-  scene.add(new AmbientLight(0xffffff, 0.3));
-  const keyLight = new DirectionalLight(0xffffff, 1.5);
+  // Soft studio light: sky/ground fill, a warm key and a cool rim from behind.
+  scene.add(new AmbientLight(0xffffff, 0.15));
+  scene.add(new HemisphereLight(0xffffff, 0x3a3a46, 0.55));
+  const keyLight = new DirectionalLight(0xfff4e8, 1.4);
   keyLight.position.set(3, 5, 4);
   scene.add(keyLight);
+  const rimLight = new DirectionalLight(0xdfe8ff, 0.7);
+  rimLight.position.set(-4, 3, -4);
+  scene.add(rimLight);
 
   const camera = new PerspectiveCamera(40, 1, 0.01, 1000);
   camera.position.set(2, 1.5, 2.5);
@@ -149,9 +160,36 @@ export function createModelStage(container: HTMLElement): ModelStage {
   const grid = new GridHelper(4, 16, 0x8a8a8a, 0x5a5a5a);
   for (const material of materialsOf(grid as unknown as Mesh)) {
     material.transparent = true;
-    material.opacity = 0.3;
+    material.opacity = 0.22;
   }
+  grid.visible = false; // the contact shadow grounds the model; the grid is a toggle
   scene.add(grid);
+
+  // A soft contact shadow under the model, drawn once into a radial gradient texture.
+  const shadowCanvas = document.createElement("canvas");
+  shadowCanvas.width = 128;
+  shadowCanvas.height = 128;
+  const shadowContext = shadowCanvas.getContext("2d");
+  if (shadowContext) {
+    const gradient = shadowContext.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, "rgba(0,0,0,0.42)");
+    gradient.addColorStop(0.45, "rgba(0,0,0,0.16)");
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    shadowContext.fillStyle = gradient;
+    shadowContext.fillRect(0, 0, 128, 128);
+  }
+  const shadowTexture = new CanvasTexture(shadowCanvas);
+  const shadowMaterial = new MeshBasicMaterial({
+    map: shadowTexture,
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  const groundShadow = new MeshObject(new PlaneGeometry(1, 1), shadowMaterial);
+  groundShadow.rotation.x = -Math.PI / 2;
+  groundShadow.position.y = 0.001;
+  groundShadow.renderOrder = -1;
+  scene.add(groundShadow);
 
   let model: Object3D | null = null;
   let clips: AnimationClip[] = [];
@@ -228,9 +266,18 @@ export function createModelStage(container: HTMLElement): ModelStage {
     // Stand the model on the grid, centred, and size the grid to its footprint.
     root.position.sub(new Vector3(center.x, box.min.y, center.z));
     const radius = Math.max(size.x, size.y, size.z) || 1;
+    // Fit the bounding sphere in both the vertical and the horizontal field of view, with
+    // room around it for the title above and the toolbar below.
+    const sphere = Math.max(size.length() / 2, 1e-3);
+    const verticalHalf = (camera.fov * Math.PI) / 360;
+    const horizontalHalf = Math.atan(Math.tan(verticalHalf) * Math.max(camera.aspect, 0.1));
+    const fitDistance = sphere / Math.sin(Math.min(verticalHalf, horizontalHalf));
     grid.scale.setScalar(radius / 2);
-    const distance = (radius / (2 * Math.tan((camera.fov * Math.PI) / 360))) * 1.35;
-    const target = new Vector3(0, size.y / 2, 0);
+    groundShadow.scale.set(Math.max(size.x, 0.01) * 1.9, Math.max(size.z, 0.01) * 1.9, 1);
+    groundShadow.position.y = radius * 0.002;
+    const distance = fitDistance * 1.18;
+    // Aim a little above the middle, so the model sits low and clear of the title.
+    const target = new Vector3(0, size.y * 0.56, 0);
     camera.near = radius / 100;
     camera.far = radius * 100;
     camera.position
@@ -370,6 +417,9 @@ export function createModelStage(container: HTMLElement): ModelStage {
       controls.removeEventListener("change", invalidate);
       controls.dispose();
       disposeModel();
+      groundShadow.geometry.dispose();
+      shadowMaterial.dispose();
+      shadowTexture.dispose();
       environment.dispose();
       pmrem.dispose();
       renderer.dispose();

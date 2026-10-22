@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, FolderOpen, Image as ImageIcon, Search, X } from "lucide-react";
+import {
+  Box,
+  Coins,
+  Copy,
+  FolderOpen,
+  Hash,
+  Image as ImageIcon,
+  KeyRound,
+  Search,
+  X,
+} from "lucide-react";
 import type { MeshyGallery, MeshyGalleryItem, MeshyLocalModel } from "../../../shared/meshy";
 import { MeshyFormatMenu, MeshyNextMenu } from "./MeshyMenus";
 import { closeModelGallery, type ModelGalleryRequest } from "./model-gallery-store";
@@ -30,7 +40,7 @@ function selectionFromRequest(request: ModelGalleryRequest): Selection | null {
   };
 }
 
-function Thumb({ url }: { url: string | null }) {
+function Thumb({ url, kind }: { url: string | null; kind: "model" | "image" }) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -47,7 +57,9 @@ function Thumb({ url }: { url: string | null }) {
   return src ? (
     <img alt="" src={src} className="model-gallery-thumb" />
   ) : (
-    <span className="model-gallery-thumb" />
+    <span className="model-gallery-thumb is-placeholder" aria-hidden="true">
+      {kind === "image" ? <ImageIcon size={16} /> : <Box size={16} />}
+    </span>
   );
 }
 
@@ -154,6 +166,9 @@ export function ModelGallery({ request }: { request: ModelGalleryRequest }) {
         ? selection.item.prompt
         : "";
 
+  const recentCount = recent.length;
+  const localCount = local.length;
+
   return (
     <dialog
       ref={dialogRef}
@@ -161,51 +176,53 @@ export function ModelGallery({ request }: { request: ModelGalleryRequest }) {
       aria-label="3D models"
       onClose={closeModelGallery}
       onCancel={closeModelGallery}
+      onClick={(event) => {
+        // A click on the backdrop (the dialog element itself) closes it.
+        if (event.target === dialogRef.current) closeModelGallery();
+      }}
     >
-      <div className="model-gallery-header">
-        <span className="model-gallery-title">3D models</span>
-        {status?.configured && typeof status.balance === "number" && (
-          <span className="model-gallery-balance">
-            {status.balance.toLocaleString()} Meshy credits
-          </span>
-        )}
-        {status?.error && (
-          <span className="model-gallery-balance model-card-error">{status.error}</span>
-        )}
-        <span className="model-card-spacer" />
-        <button
-          type="button"
-          className="model-viewer-btn"
-          aria-label="Close"
-          onClick={closeModelGallery}
-        >
-          <X size={16} />
-        </button>
-      </div>
-      <div className="model-gallery-body">
-        <aside className="model-gallery-list">
-          <label className="model-gallery-search">
-            <Search size={13} />
-            <input
-              type="search"
-              placeholder="Search by prompt"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          {loadError && <div className="model-card-line model-card-error">{loadError}</div>}
-          {!gallery && !loadError && <div className="model-card-line">Loading…</div>}
+      <aside className="model-gallery-side">
+        <div className="model-gallery-brand">
+          <span className="model-gallery-title">3D models</span>
+          {status?.configured && typeof status.balance === "number" && (
+            <span className="model-gallery-credits" title="Meshy credits left">
+              <Coins size={12} />
+              {status.balance.toLocaleString()}
+            </span>
+          )}
+        </div>
+        <label className="model-gallery-search">
+          <Search size={14} />
+          <input
+            type="search"
+            placeholder="Search by prompt"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <div className="model-gallery-list">
+          {loadError && <p className="model-gallery-note is-error">{loadError}</p>}
+          {!gallery && !loadError && (
+            <p className="model-gallery-note">
+              <span className="model-spinner" /> Loading
+            </p>
+          )}
           {status && !status.installed && (
-            <div className="model-card-line">
+            <p className="model-gallery-note">
               Add the Meshy connector in Settings → Connectors to generate models.
-            </div>
+            </p>
           )}
           {status?.installed && !status.configured && (
-            <div className="model-card-line">
-              Add your Meshy API key in Settings → Connectors → Meshy.
+            <p className="model-gallery-note">
+              <KeyRound size={13} /> Add your Meshy API key in Settings → Connectors → Meshy.
+            </p>
+          )}
+          {status?.error && <p className="model-gallery-note is-error">{status.error}</p>}
+          {recentCount > 0 && (
+            <div className="model-gallery-section">
+              Recent from Meshy <span>{recentCount}</span>
             </div>
           )}
-          {recent.length > 0 && <div className="model-gallery-section">Recent from Meshy</div>}
           {recent.map((item) => (
             <button
               key={item.taskId}
@@ -213,19 +230,22 @@ export function ModelGallery({ request }: { request: ModelGalleryRequest }) {
               className={`model-gallery-row${selectedTask === item.taskId ? " is-selected" : ""}`}
               onClick={() => void selectRemote(item)}
             >
-              <Thumb url={item.thumbnailUrl} />
+              <Thumb url={item.thumbnailUrl} kind={item.kind} />
               <span className="model-gallery-row-text">
                 <span className="model-gallery-row-title">{item.prompt || item.taskType}</span>
                 <span className="model-gallery-row-sub">
-                  {item.kind === "image" ? <ImageIcon size={11} /> : null}
-                  {item.taskType}
+                  {item.taskType.replace(/-/g, " ")}
                   {typeof item.credits === "number" ? ` · ${item.credits} cr` : ""}
                   {item.localPath ? " · saved" : ""}
                 </span>
               </span>
             </button>
           ))}
-          {local.length > 0 && <div className="model-gallery-section">On this machine</div>}
+          {localCount > 0 && (
+            <div className="model-gallery-section">
+              On this machine <span>{localCount}</span>
+            </div>
+          )}
           {local.map((model) => (
             <button
               key={model.path}
@@ -234,86 +254,127 @@ export function ModelGallery({ request }: { request: ModelGalleryRequest }) {
               onClick={() => selectLocal(model)}
               title={model.path}
             >
-              <span className="model-gallery-thumb" />
+              <Thumb url={null} kind="model" />
               <span className="model-gallery-row-text">
                 <span className="model-gallery-row-title">{model.prompt || model.name}</span>
                 <span className="model-gallery-row-sub">
-                  {model.name} · {formatBytes(model.bytes)}
+                  {model.prompt ? `${model.name} · ` : ""}
+                  {formatBytes(model.bytes)}
                 </span>
               </span>
             </button>
           ))}
-          {gallery && recent.length === 0 && local.length === 0 && status?.configured && (
-            <div className="model-card-line">No models yet. Ask CoWork to make one.</div>
+          {gallery && recentCount === 0 && localCount === 0 && status?.configured && (
+            <p className="model-gallery-note">No models yet. Ask CoWork to make one.</p>
           )}
-        </aside>
-        <section className="model-gallery-detail">
-          {!selection && <div className="model-gallery-empty">Pick a model to view it.</div>}
-          {selection?.kind === "file" && (
-            <ModelViewer
-              key={selection.path}
-              className="model-gallery-viewer"
-              autoRotate
-              source={{ path: selection.path, workspacePath: selection.workspacePath }}
-            />
+        </div>
+        {gallery && (
+          <div className="model-gallery-folder" title={gallery.dataDir}>
+            <FolderOpen size={12} />
+            <span>{gallery.dataDir}</span>
+          </div>
+        )}
+      </aside>
+      <section className="model-gallery-stage">
+        {!selection && (
+          <div className="model-gallery-empty">
+            <span className="model-card-badge">
+              <Box size={18} />
+            </span>
+            <span>Pick a model to view it</span>
+          </div>
+        )}
+        {selection?.kind === "file" && (
+          <ModelViewer
+            key={selection.path}
+            className="model-gallery-viewer"
+            autoRotate
+            source={{ path: selection.path, workspacePath: selection.workspacePath }}
+          />
+        )}
+        {selection?.kind === "remote" && (
+          <div className="model-gallery-empty">
+            {resolving && (
+              <>
+                <span className="model-spinner" />
+                <span>Downloading the model</span>
+              </>
+            )}
+            {image && <img alt={selectedLabel} src={image} className="model-gallery-image" />}
+            {selectionError && <span className="model-card-error">{selectionError}</span>}
+          </div>
+        )}
+        <div className="model-gallery-top">
+          {selection ? (
+            <span className="model-card-heading">
+              <span className="model-card-title" title={selectedLabel}>
+                {selectedLabel}
+              </span>
+              {selectedTask && (
+                <span className="model-card-subtitle">Meshy task {selectedTask.slice(0, 8)}</span>
+              )}
+            </span>
+          ) : (
+            <span />
           )}
-          {selection?.kind === "remote" && (
-            <div className="model-gallery-empty">
-              {resolving && "Downloading the model…"}
-              {image && <img alt={selectedLabel} src={image} className="model-gallery-image" />}
-              {selectionError && <span className="model-card-error">{selectionError}</span>}
-            </div>
-          )}
-          {selection && (
-            <div className="model-gallery-made-from">
-              <div className="model-gallery-prompt">{selectedLabel}</div>
-              <div className="model-gallery-actions">
-                {selectedLabel && (
-                  <button
-                    type="button"
-                    className="model-card-btn"
-                    onClick={() => copyText(selectedLabel)}
-                  >
-                    <Copy size={13} />
-                    <span>Copy prompt</span>
-                  </button>
-                )}
-                {selectedTask && (
-                  <button
-                    type="button"
-                    className="model-card-btn"
-                    onClick={() => copyText(selectedTask)}
-                  >
-                    <Copy size={13} />
-                    <span>Copy task ID</span>
-                  </button>
-                )}
-                {selection.kind === "file" && !selection.workspacePath && (
-                  <button
-                    type="button"
-                    className="model-card-btn"
-                    onClick={() =>
-                      void window.electronAPI.revealMeshyModel?.({ filePath: selection.path })
-                    }
-                  >
-                    <FolderOpen size={13} />
-                    <span>Show in Finder</span>
-                  </button>
-                )}
-                {selectedTask && <MeshyNextMenu taskId={selectedTask} />}
-                {selectedTask && selection.kind === "file" && (
-                  <MeshyFormatMenu
-                    taskId={selectedTask}
-                    beside={selection.path}
-                    workspacePath={selection.workspacePath}
-                  />
-                )}
-              </div>
-            </div>
-          )}
-        </section>
-      </div>
-      {gallery && <div className="model-gallery-footer">Meshy saves to {gallery.dataDir}</div>}
+          <span className="model-card-actions is-visible">
+            {selection && selectedLabel && (
+              <button
+                type="button"
+                className="model-glass-btn is-icon"
+                title="Copy prompt"
+                aria-label="Copy prompt"
+                onClick={() => copyText(selectedLabel)}
+              >
+                <Copy size={14} />
+              </button>
+            )}
+            {selectedTask && (
+              <button
+                type="button"
+                className="model-glass-btn is-icon"
+                title="Copy task ID"
+                aria-label="Copy task ID"
+                onClick={() => copyText(selectedTask)}
+              >
+                <Hash size={14} />
+              </button>
+            )}
+            {selection?.kind === "file" && !selection.workspacePath && (
+              <button
+                type="button"
+                className="model-glass-btn is-icon"
+                title="Show in Finder"
+                aria-label="Show in Finder"
+                onClick={() =>
+                  void window.electronAPI.revealMeshyModel?.({ filePath: selection.path })
+                }
+              >
+                <FolderOpen size={14} />
+              </button>
+            )}
+            {selectedTask && selection?.kind === "file" && (
+              <MeshyFormatMenu
+                taskId={selectedTask}
+                beside={selection.path}
+                workspacePath={selection.workspacePath}
+                iconOnly
+              />
+            )}
+            {selectedTask && <MeshyNextMenu taskId={selectedTask} />}
+            <span className="model-gallery-divider" aria-hidden="true" />
+            <button
+              type="button"
+              className="model-glass-btn is-icon"
+              title="Close"
+              aria-label="Close"
+              onClick={closeModelGallery}
+            >
+              <X size={15} />
+            </button>
+          </span>
+        </div>
+      </section>
     </dialog>
   );
 }

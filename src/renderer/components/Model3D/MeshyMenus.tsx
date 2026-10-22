@@ -12,12 +12,15 @@ function errorText(error: unknown): string {
 function MenuButton({
   icon,
   label,
+  iconOnly = false,
   disabled,
   onOpen,
   children,
 }: {
   icon: ReactNode;
   label: string;
+  /** Show only the icon (the label becomes its tooltip). */
+  iconOnly?: boolean;
   disabled?: boolean;
   onOpen: () => void;
   children: ReactNode;
@@ -45,8 +48,10 @@ function MenuButton({
     <div className="model-menu" ref={rootRef}>
       <button
         type="button"
-        className="model-card-btn"
+        className={`model-glass-btn${iconOnly ? " is-icon" : ""}${open ? " is-open" : ""}`}
         disabled={disabled}
+        title={iconOnly ? label : undefined}
+        aria-label={iconOnly ? label : undefined}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
@@ -55,8 +60,8 @@ function MenuButton({
         }}
       >
         {icon}
-        <span>{label}</span>
-        <ChevronDown size={12} />
+        {!iconOnly && <span>{label}</span>}
+        {!iconOnly && <ChevronDown size={12} className="model-glass-chevron" />}
       </button>
       {open && (
         <div className="model-menu-list" role="menu" onClick={() => setOpen(false)}>
@@ -76,12 +81,14 @@ export function MeshyFormatMenu({
   beside,
   workspacePath,
   chatTaskId,
+  iconOnly = false,
 }: {
   taskId: string;
   beside?: string;
   /** The project `beside` may be in. */
   workspacePath?: string;
   chatTaskId?: string;
+  iconOnly?: boolean;
 }) {
   const [formats, setFormats] = useState<MeshyFormatOption[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -119,7 +126,14 @@ export function MeshyFormatMenu({
 
   return (
     <>
-      <MenuButton icon={<Download size={13} />} label="Download" disabled={busy} onOpen={load}>
+      <MenuButton
+        icon={<Download size={14} />}
+        label="Download"
+        iconOnly={iconOnly}
+        disabled={busy}
+        onOpen={load}
+      >
+        <div className="model-menu-heading">Download a format</div>
         {!formats && <div className="model-menu-note">{status ?? "Checking files…"}</div>}
         {formats?.length === 0 && <div className="model-menu-note">No files for this task.</div>}
         {formats?.map((option) => (
@@ -134,11 +148,19 @@ export function MeshyFormatMenu({
               {option.format.toUpperCase()}
               {option.clip ? ` · ${option.clip.replace(/_/g, " ")}` : ""}
             </span>
-            {option.savedPath && <Check size={13} aria-label="Already saved" />}
+            {option.savedPath ? (
+              <Check size={13} aria-label="Already saved" />
+            ) : (
+              <span className="model-menu-cost">free</span>
+            )}
           </button>
         ))}
       </MenuButton>
-      {status && formats && <span className="model-card-status">{status}</span>}
+      {status && formats && (
+        <span className="model-card-status" role="status">
+          {status}
+        </span>
+      )}
     </>
   );
 }
@@ -168,7 +190,8 @@ export function MeshyNextMenu({ taskId }: { taskId: string }) {
   };
 
   return (
-    <MenuButton icon={<Sparkles size={13} />} label="Next" onOpen={load}>
+    <MenuButton icon={<Sparkles size={14} />} label="Next" onOpen={load}>
+      <div className="model-menu-heading">Continue with Meshy</div>
       {!actions && <div className="model-menu-note">{error ?? "Loading…"}</div>}
       {actions?.length === 0 && (
         <div className="model-menu-note">Nothing to do next for this task.</div>

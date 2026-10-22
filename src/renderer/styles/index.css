@@ -1481,6 +1481,7 @@ a,
 .spreadsheet-resizable-sidebar > .web-artifact-viewer-sidebar,
 .spreadsheet-resizable-sidebar > .browser-workbench-sidebar,
 .spreadsheet-resizable-sidebar > .browser-workbench-slot,
+.spreadsheet-resizable-sidebar > .artifact-workbench-slot,
 .spreadsheet-resizable-sidebar > .spawned-agent-sidebar {
   flex: 1 1 auto;
   width: 100%;

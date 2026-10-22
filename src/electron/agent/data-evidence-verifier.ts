@@ -408,7 +408,12 @@ export class CsvReportEvidenceVerifier {
       absolutePath,
       basename: path.basename(filePath).toLowerCase(),
       columns: new Set(columns),
-      hasCurrencyMarker: hasCurrencyMarker(content),
+      // Underscores are word characters, so raw-text word boundaries miss
+      // explicit headers such as amount_eur or USD_amount. Normalized header
+      // separators delimit tokens; do not infer currencies from substrings.
+      hasCurrencyMarker:
+        hasCurrencyMarker(content) ||
+        columns.some((column) => hasCurrencyMarker(column.replace(/_/g, " "))),
       rows: dataRows,
     });
   }

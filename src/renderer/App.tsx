@@ -1143,6 +1143,7 @@ const SelectedTaskWorkspaceView = memo(
     } | null>(null);
     // The sidebar element the docked browser workbench is positioned over.
     const [browserWorkbenchSlot, setBrowserWorkbenchSlot] = useState<HTMLDivElement | null>(null);
+    const [artifactWorkbenchSlot, setArtifactWorkbenchSlot] = useState<HTMLDivElement | null>(null);
     const visibleBrowserWorkbench = canUseInteractiveBrowser ? browserWorkbench : null;
     const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
       taskId: string;
@@ -1689,111 +1690,73 @@ const SelectedTaskWorkspaceView = memo(
         </BrowserWorkbenchDock>
       ) : null;
 
-    if (visibleBrowserWorkbench?.mode === "fullscreen" && task) {
+    // Keep the artifact editor in the same React position in both modes. Moving
+    // between separate sidebar/fullscreen branches used to discard unsaved edits.
+    const artifactViewerProps =
+      spreadsheetArtifact && workspace?.path
+        ? {
+            filePath: spreadsheetArtifact.path,
+            workspacePath: workspace.path,
+            mode: spreadsheetArtifact.mode,
+            onClose: closeSpreadsheetArtifact,
+            onFullscreen: showSpreadsheetFullscreen,
+            onExitFullscreen: showSpreadsheetSidebar,
+            onSendMessage: sendSpreadsheetFullscreenMessage,
+            selectedModelLabel:
+              availableModels.find((model) => model.key === selectedModel)?.displayName ||
+              selectedModel,
+            selectedModel,
+            selectedProvider,
+            selectedReasoningEffort,
+            availableModels,
+            availableProviders,
+            workspaceId: workspace.id,
+            onModelChange,
+            onOpenSettings,
+            turnContext: spreadsheetTurnContext,
+          }
+        : null;
+    const artifactWorkbenchDock =
+      spreadsheetArtifact &&
+      artifactViewerProps &&
+      (spreadsheetArtifact.mode === "fullscreen" || !remoteTaskView) ? (
+        <BrowserWorkbenchDock
+          key={`artifact-workbench:${spreadsheetArtifact.kind}:${workspace?.path}:${spreadsheetArtifact.path}`}
+          mode={spreadsheetArtifact.mode}
+          slot={artifactWorkbenchSlot}
+        >
+          <Suspense fallback={<ArtifactSidebarFallback />}>
+            {spreadsheetArtifact.kind === "document" ? (
+              <DocumentArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
+            ) : spreadsheetArtifact.kind === "presentation" ? (
+              <PresentationArtifactViewer
+                {...artifactViewerProps}
+                refreshKey={artifactRefreshKey}
+              />
+            ) : spreadsheetArtifact.kind === "webpage" ? (
+              <WebArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
+            ) : (
+              <SpreadsheetArtifactViewer {...artifactViewerProps} taskId={task?.id} />
+            )}
+          </Suspense>
+        </BrowserWorkbenchDock>
+      ) : null;
+    const workbenchDocks = (
+      <>
+        {browserWorkbenchDock}
+        {artifactWorkbenchDock}
+      </>
+    );
+
+    if (
+      (visibleBrowserWorkbench?.mode === "fullscreen" && task) ||
+      (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path)
+    ) {
       return (
         <>
-          {browserWorkbenchDock}
+          {workbenchDocks}
           {null}
         </>
-      );
-    }
-
-    if (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path) {
-      const selectedModelLabel =
-        availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
-      if (spreadsheetArtifact.kind === "document") {
-        return (
-          <DocumentArtifactViewer
-            filePath={spreadsheetArtifact.path}
-            workspacePath={workspace.path}
-            mode="fullscreen"
-            onClose={closeSpreadsheetArtifact}
-            onFullscreen={showSpreadsheetFullscreen}
-            onExitFullscreen={showSpreadsheetSidebar}
-            onSendMessage={sendSpreadsheetFullscreenMessage}
-            selectedModelLabel={selectedModelLabel}
-            selectedModel={selectedModel}
-            selectedProvider={selectedProvider}
-            selectedReasoningEffort={selectedReasoningEffort}
-            availableModels={availableModels}
-            availableProviders={availableProviders}
-            workspaceId={workspace.id}
-            onModelChange={onModelChange}
-            onOpenSettings={onOpenSettings}
-            turnContext={spreadsheetTurnContext}
-            refreshKey={artifactRefreshKey}
-          />
-        );
-      }
-      if (spreadsheetArtifact.kind === "presentation") {
-        return (
-          <PresentationArtifactViewer
-            filePath={spreadsheetArtifact.path}
-            workspacePath={workspace.path}
-            mode="fullscreen"
-            onClose={closeSpreadsheetArtifact}
-            onFullscreen={showSpreadsheetFullscreen}
-            onExitFullscreen={showSpreadsheetSidebar}
-            onSendMessage={sendSpreadsheetFullscreenMessage}
-            selectedModelLabel={selectedModelLabel}
-            selectedModel={selectedModel}
-            selectedProvider={selectedProvider}
-            selectedReasoningEffort={selectedReasoningEffort}
-            availableModels={availableModels}
-            availableProviders={availableProviders}
-            workspaceId={workspace.id}
-            onModelChange={onModelChange}
-            onOpenSettings={onOpenSettings}
-            turnContext={spreadsheetTurnContext}
-            refreshKey={artifactRefreshKey}
-          />
-        );
-      }
-      if (spreadsheetArtifact.kind === "webpage") {
-        return (
-          <WebArtifactViewer
-            filePath={spreadsheetArtifact.path}
-            workspacePath={workspace.path}
-            mode="fullscreen"
-            onClose={closeSpreadsheetArtifact}
-            onFullscreen={showSpreadsheetFullscreen}
-            onExitFullscreen={showSpreadsheetSidebar}
-            onSendMessage={sendSpreadsheetFullscreenMessage}
-            selectedModelLabel={selectedModelLabel}
-            selectedModel={selectedModel}
-            selectedProvider={selectedProvider}
-            selectedReasoningEffort={selectedReasoningEffort}
-            availableModels={availableModels}
-            availableProviders={availableProviders}
-            workspaceId={workspace.id}
-            onModelChange={onModelChange}
-            onOpenSettings={onOpenSettings}
-            turnContext={spreadsheetTurnContext}
-            refreshKey={artifactRefreshKey}
-          />
-        );
-      }
-      return (
-        <SpreadsheetArtifactViewer
-          filePath={spreadsheetArtifact.path}
-          workspacePath={workspace.path}
-          mode="fullscreen"
-          onClose={closeSpreadsheetArtifact}
-          onFullscreen={showSpreadsheetFullscreen}
-          onExitFullscreen={showSpreadsheetSidebar}
-          onSendMessage={sendSpreadsheetFullscreenMessage}
-          selectedModelLabel={selectedModelLabel}
-          selectedModel={selectedModel}
-          selectedProvider={selectedProvider}
-          selectedReasoningEffort={selectedReasoningEffort}
-          availableModels={availableModels}
-          availableProviders={availableProviders}
-          workspaceId={workspace.id}
-          taskId={task?.id}
-          onModelChange={onModelChange}
-          onOpenSettings={onOpenSettings}
-          turnContext={spreadsheetTurnContext}
-        />
       );
     }
 
@@ -1804,7 +1767,7 @@ const SelectedTaskWorkspaceView = memo(
     );
     return (
       <>
-        {browserWorkbenchDock}
+        {workbenchDocks}
         <div
           ref={splitLayoutRef}
           className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
@@ -1988,45 +1951,8 @@ const SelectedTaskWorkspaceView = memo(
                       />
                     ) : visibleBrowserWorkbench && task ? (
                       <div className="browser-workbench-slot" ref={setBrowserWorkbenchSlot} />
-                    ) : spreadsheetArtifact?.kind === "document" ? (
-                      <DocumentArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                        refreshKey={artifactRefreshKey}
-                      />
-                    ) : spreadsheetArtifact?.kind === "presentation" ? (
-                      <PresentationArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                        refreshKey={artifactRefreshKey}
-                      />
-                    ) : spreadsheetArtifact?.kind === "webpage" ? (
-                      <WebArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                        refreshKey={artifactRefreshKey}
-                      />
                     ) : spreadsheetArtifact ? (
-                      <SpreadsheetArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                      />
+                      <div className="artifact-workbench-slot" ref={setArtifactWorkbenchSlot} />
                     ) : null}
                   </Suspense>
                 </div>

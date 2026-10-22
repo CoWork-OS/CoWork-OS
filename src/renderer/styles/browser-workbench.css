@@ -177,8 +177,14 @@
   height: 0;
 }
 
-.browser-workbench-dock > .browser-workbench {
+.browser-workbench-dock > .browser-workbench,
+.browser-workbench-dock > .spreadsheet-viewer,
+.browser-workbench-dock > .document-viewer,
+.browser-workbench-dock > .presentation-artifact-viewer,
+.browser-workbench-dock > .web-artifact-viewer {
   flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .browser-workbench-tab-shell {

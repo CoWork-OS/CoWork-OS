@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 type DockRect = { left: number; top: number; width: number; height: number };
 
 /**
- * Keeps the browser workbench mounted in one place while it moves between the
- * sidebar and full view.
+ * Keeps a workbench mounted in one place while it moves between the sidebar
+ * and full view. Artifact editors use the same dock to retain unsaved edits.
  *
  * A <webview> reloads its page whenever its element is moved in the DOM, so
  * the workbench is never reparented. In full view the dock fills the layout

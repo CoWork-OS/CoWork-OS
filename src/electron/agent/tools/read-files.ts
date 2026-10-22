@@ -24,6 +24,8 @@ export type ReadFilesResult = {
     truncated?: boolean;
     format?: string;
     content: string;
+    window?: { start: number; end: number; total: number };
+    nextStartChar?: number;
   }>;
   skippedFiles: Array<{
     path: string;
@@ -136,7 +138,7 @@ export async function readFilesByPatterns(
   }
 
   let totalChars = 0;
-  for (const filePath of selectedPaths) {
+  for (const [fileIndex, filePath] of selectedPaths.entries()) {
     try {
       const read = await deps.fileTools.readFile(filePath);
 
@@ -149,25 +151,39 @@ export async function readFilesByPatterns(
             content.slice(0, Math.max(0, remaining - 120)) +
             "\n\n[... truncated by read_files ...]";
         } else {
-          skippedFiles.push({
-            path: filePath,
-            reason: `Skipped: maxTotalChars=${maxTotalChars} reached`,
-          });
+          for (const omittedPath of selectedPaths.slice(fileIndex)) {
+            skippedFiles.push({
+              path: omittedPath,
+              reason: `Skipped: maxTotalChars=${maxTotalChars} reached`,
+            });
+          }
           break;
         }
       }
 
       totalChars += content.length;
+      const contentClipped = content !== read.content;
+      const fileTruncated = Boolean(read.truncated) || contentClipped;
+      truncated ||= fileTruncated;
       files.push({
         path: filePath,
         size: read.size,
-        truncated: Boolean(read.truncated) || content !== read.content,
+        truncated: fileTruncated,
         format: read.format,
         content,
+        // A read_file window is resumable only when all of that window was
+        // delivered. Reusing its end after our own clipping would skip source.
+        ...(!contentClipped ? { window: read.window, nextStartChar: read.nextStartChar } : {}),
       });
 
       if (totalChars >= maxTotalChars) {
         truncated = true;
+        for (const omittedPath of selectedPaths.slice(fileIndex + 1)) {
+          skippedFiles.push({
+            path: omittedPath,
+            reason: `Skipped: maxTotalChars=${maxTotalChars} reached`,
+          });
+        }
         break;
       }
     } catch (error: Any) {
@@ -190,7 +206,7 @@ export async function readFilesByPatterns(
     excludePatterns: exclude,
     totalMatched: allMatchedPaths.length,
     included: files.length,
-    skipped: skippedFiles.length,
+    skipped: allMatchedPaths.length - files.length,
     truncated,
     files,
     skippedFiles,

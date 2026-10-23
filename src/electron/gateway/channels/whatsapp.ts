@@ -27,7 +27,7 @@ import {
   type WAMessage,
   type AnyMessageContent,
   type ConnectionState,
-  type proto,
+  proto,
   type DownloadableMessage,
 } from "baileys";
 import * as fs from "fs";
@@ -53,6 +53,8 @@ import {
 } from "../whatsapp-command-utils";
 import { notifyDetectedIntegrationAuthIssue } from "../../notifications/integration-auth";
 import { createLogger } from "../../utils/logger";
+import { formatChannelReplyContext } from "../../../shared/channel-reply-context";
+import { installWhatsAppProtobufDepthLimit } from "./whatsapp-protobuf-limits";
 
 const log = createLogger("WhatsApp");
 const WHATSAPP_USER_JID_RE = /^(\d+)(?::\d+)?@s\.whatsapp\.net$/i;
@@ -286,6 +288,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     try {
+      // Install before any socket can process server-supplied protobuf bytes.
+      installWhatsAppProtobufDepthLimit(proto);
+
       // Ensure auth directory exists
       await this.ensureDir(this.authDir);
 
@@ -1665,11 +1670,11 @@ export class WhatsAppAdapter implements ChannelAdapter {
     senderName?: string;
     body?: string;
   }): string | undefined {
-    const rawBody = (context.body || "").trim();
-    if (!rawBody) return undefined;
-
-    const quotedFrom = context.senderName || context.senderE164 || "a previous message";
-    return `💬 In reply to ${quotedFrom}\n> ${rawBody.replace(/\n/g, "\n> ")}`;
+    // The shared format lets the admin lane leave the quoted text out of the owner's words.
+    return formatChannelReplyContext(
+      context.senderName || context.senderE164 || "",
+      context.body || "",
+    );
   }
 
   private truncateTextForReplyContext(value: string, maxLength: number): string {

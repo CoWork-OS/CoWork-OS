@@ -139,6 +139,7 @@
     "skills:validate-content": "node scripts/qa/build-react-best-practices-guide.mjs --check && node scripts/qa/validate-skills-content.mjs",
     "skills:audit": "node scripts/qa/skills-audit-report.mjs",
     "skills:eval-routing": "node scripts/qa/eval-skills-routing.mjs",
+    "skills:validate-registry": "node scripts/qa/validate-skills-registry.mjs",
     "qa:eval:build": "node scripts/qa/build_eval_corpus.cjs",
     "qa:eval:run": "node scripts/qa/run_eval_suite.cjs",
     "qa:eval:enforce-regressions": "node scripts/qa/enforce_eval_regression_policy.cjs",
@@ -172,6 +173,7 @@
     "qa:db:memory": "npm run build:cli && node scripts/qa/memory-workload.mjs",
     "qa:db:control-plane": "npm run build:cli && node scripts/qa/control-plane-workload.mjs",
     "qa:db:reads": "npm run build:cli && node scripts/qa/sqlite-reads.mjs",
+    "qa:files:worker-smoke": "npm run build:electron && npm run build:daemon && npm run build:cli && node scripts/qa/file-discovery-smoke.cjs",
     "qa:db:worker-smoke": "npm run build:electron && npm run build:daemon && npm run build:cli && node scripts/qa/database-worker-smoke.mjs",
     "qa:db:workload": "npm run build:cli && node scripts/qa/sqlite-workload.mjs",
     "qa:timeline:backfill": "node scripts/qa/backfill_timeline_completion_telemetry.cjs",
@@ -181,12 +183,12 @@
     "qa:bots:final": "npm run build:daemon && npm run build:electron && node scripts/qa/bot-final-acceptance.mjs",
     "qa:bots:upgrade": "node scripts/qa/bot-release-upgrade-smoke.mjs",
     "qa:memory:upgrade": "node scripts/qa/release-upgrade-memory-smoke.mjs",
-    "qa:harness": "node scripts/qa/check_harness_dependencies.cjs && npm run qa:battery:test && vitest run src/electron/agent/__tests__/executor-lifecycle-mutex.test.ts src/electron/agent/__tests__/executor-context-overflow-recovery.test.ts src/electron/agent/__tests__/executor-image-attachments.test.ts src/electron/agent/llm/__tests__/response-tool-metadata.test.ts src/electron/agent/__tests__/daemon-shutdown.test.ts src/electron/utils/__tests__/graceful-shutdown.test.ts src/electron/agent/runtime/__tests__ src/electron/agent/timeline/__tests__ src/electron/agent/__tests__/timeline-emitter.test.ts src/electron/agent/__tests__/timeline-payload-sanitizer.test.ts src/electron/agent/__tests__/daemon-complete-task.test.ts src/electron/agent/__tests__/context-manager-compaction.test.ts src/electron/agent/__tests__/executor-provider-refresh.test.ts src/electron/agent/__tests__/executor-step-failures.test.ts src/electron/agent/__tests__/executor-entrypoints.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts src/electron/agent/__tests__/executor-followup-acceptance.test.ts src/electron/memory/__tests__/TranscriptStore.test.ts src/electron/memory/__tests__/SessionRecallService.test.ts src/electron/sessions/__tests__ src/electron/eval/__tests__ src/electron/security/__tests__/access-profile-resolver.test.ts src/electron/agent/__tests__/daemon-followup-permissions.test.ts src/electron/agent/__tests__/daemon-agent-messaging.test.ts src/electron/agent/__tests__/daemon-child-task.test.ts src/electron/agent/llm/__tests__/openai-compatible.test.ts src/electron/agent/llm/__tests__/openai-provider.test.ts src/electron/agent/llm/__tests__/azure-openai-provider.test.ts src/electron/agent/llm/__tests__/openrouter-provider.test.ts src/electron/agent/llm/__tests__/ollama-provider.test.ts src/electron/agent/llm/__tests__/provider-tool-arguments.test.ts tests/security/security-harness.test.ts tests/qa-eval-runner.test.ts tests/qa-replay-assertions.test.ts tests/qa-eval-deadline.test.ts tests/qa-workflow-gates.test.ts && node scripts/qa/run_eval_suite.cjs --fixtures-only && npm run -s qa:memory-evals",
+    "qa:harness": "node scripts/qa/check_harness_dependencies.cjs && npm run qa:battery:test && vitest run src/electron/agent/__tests__/executor-lifecycle-mutex.test.ts src/electron/agent/__tests__/executor-context-overflow-recovery.test.ts src/electron/agent/__tests__/executor-image-attachments.test.ts src/electron/agent/llm/__tests__/response-tool-metadata.test.ts src/electron/agent/__tests__/daemon-shutdown.test.ts src/electron/utils/__tests__/graceful-shutdown.test.ts src/electron/agent/runtime/__tests__ src/electron/agent/timeline/__tests__ src/electron/agent/__tests__/timeline-emitter.test.ts src/electron/agent/__tests__/timeline-payload-sanitizer.test.ts src/electron/agent/__tests__/daemon-complete-task.test.ts src/electron/agent/__tests__/context-manager-compaction.test.ts src/electron/agent/__tests__/executor-provider-refresh.test.ts src/electron/agent/__tests__/executor-step-failures.test.ts src/electron/agent/__tests__/executor-entrypoints.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts src/electron/agent/__tests__/executor-followup-acceptance.test.ts src/electron/memory/__tests__/TranscriptStore.test.ts src/electron/memory/__tests__/SessionRecallService.test.ts src/electron/sessions/__tests__ src/electron/eval/__tests__ src/electron/security/__tests__/access-profile-resolver.test.ts src/electron/agent/__tests__/daemon-followup-permissions.test.ts src/electron/agent/__tests__/daemon-agent-messaging.test.ts src/electron/agent/__tests__/daemon-child-task.test.ts src/electron/agent/llm/__tests__/openai-compatible.test.ts src/electron/agent/llm/__tests__/openai-provider.test.ts src/electron/agent/llm/__tests__/azure-openai-provider.test.ts src/electron/agent/llm/__tests__/openrouter-provider.test.ts src/electron/agent/llm/__tests__/ollama-provider.test.ts src/electron/agent/llm/__tests__/provider-tool-arguments.test.ts tests/security/security-harness.test.ts tests/qa-eval-runner.test.ts tests/qa-replay-assertions.test.ts tests/qa-eval-deadline.test.ts tests/qa-workflow-gates.test.ts src/cli/__tests__/drill-interrupt.test.ts src/electron/control-plane/__tests__/work-session-contract-method.test.ts && node scripts/qa/run_eval_suite.cjs --fixtures-only && npm run -s qa:memory-evals",
     "qa:battery:test": "node --test tests/qa-run-battery.test.cjs",
     "qa:memory-evals": "cross-env COWORK_MEMORY_EVALS_STRICT=1 vitest run src/electron/memory/__tests__/evals",
     "qa:memory-health": "node scripts/qa/memory-health.mjs",
     "qa:reliability": "npm run qa:battery:test && npm run qa:eval:run && node scripts/qa/run_battery.cjs",
-    "skills:check:core": "npm run skills:validate-routing && npm run skills:validate-content && npm run skills:audit",
+    "skills:check:core": "npm run skills:validate-routing && npm run skills:validate-content && npm run skills:audit && npm run skills:validate-registry",
     "keychain:cleanup": "node scripts/cleanup-legacy-keychain.mjs",
     "connectors:inventory": "cross-env UPDATE_CONNECTOR_INVENTORY=1 vitest run src/electron/mcp/__tests__/connector-inventory.test.ts",
     "models:sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs",
@@ -202,13 +204,15 @@
     "test:node": "node --test --test-concurrency=4 \"scripts/**/*.test.{cjs,mjs}\" \"tests/**/*.test.{cjs,mjs}\"",
     "test:watch": "vitest",
     "test:coverage": "npm run skills:check && npm run test:node && vitest run --coverage",
-    "skills:build-react-guide": "node scripts/qa/build-react-best-practices-guide.mjs"
+    "skills:build-react-guide": "node scripts/qa/build-react-best-practices-guide.mjs",
+    "skills:lineage": "node scripts/qa/build-bundled-skill-lineage.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.132.1",
+    "@anthropic-ai/sdk": "^0.135.0",
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
-    "@chenglou/pretext": "^0.0.9",
+    "@aws-sdk/credential-provider-ini": "3.973.19",
+    "@chenglou/pretext": "^1.0.0",
     "@earendil-works/pi-ai": "^1.1.0",
     "@electron/rebuild": "4.2.1",
     "@fontsource/montserrat": "^5.3.0",
@@ -217,7 +221,7 @@
     "@grammyjs/transformer-throttler": "^1.2.1",
     "@pdf-lib/fontkit": "^1.1.1",
     "@phosphor-icons/react": "^2.1.10",
-    "@pydantic/monty": "^0.0.4",
+    "@pydantic/monty": "^1.2.0",
     "@slack/bolt": "^5.1.0",
     "@xmldom/xmldom": "^0.9.12",
     "@xterm/addon-fit": "^0.11.0",
@@ -228,19 +232,20 @@
     "chokidar": "^5.0.0",
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
-    "electron": "44.7.0",
+    "electron": "44.9.0",
     "electron-updater": "^6.8.9",
-    "elkjs": "0.9.3",
+    "elkjs": "0.12.0",
     "eventsource": "^5.1.1",
     "exceljs": "npm:devextreme-exceljs-fork@4.4.13",
+    "form-data": "4.0.6",
     "grammy": "^1.39.3",
     "highlight.js": "^11.11.1",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^5.5.0",
     "json5": "^2.2.3",
     "jszip": "^3.10.1",
     "lucide-react": "^1.47.0",
     "mammoth": "^1.11.0",
-    "mermaid": "^12.0.0",
+    "mermaid": "^12.2.0",
     "mime-types": "^3.0.2",
     "node-fetch": "npm:node-fetch-native@1.6.7",
     "node-pty": "^1.1.0",
@@ -252,7 +257,6 @@
     "playwright": "npm:playwright-core@^1.58.2",
     "pptxgenjs": "^4.0.1",
     "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-is": "^19.3.0",
@@ -260,20 +264,23 @@
     "recharts": "^3.10.1",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "three": "^0.186.1",
+    "undici": "8.12.2",
     "uuid": "^14.0.2",
     "ws": "^8.21.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electron/asar": "4.3.1",
+    "@eslint/js": "10.0.1",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/js-yaml": "^4.0.9",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.6.2",
-    "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.17.5",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.186.0",
     "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
@@ -286,12 +293,11 @@
     "eslint": "^10.11.0",
     "globals": "^17.3.0",
     "langium": "4.4.0",
-    "oxfmt": "^0.72.0",
+    "oxfmt": "^0.73.0",
     "oxlint": "^1.47.0",
     "twilio": "^6.1.1",
     "typescript": "^5.9.0",
     "vite": "^8.3.0",
-    "vite-plugin-electron": "^1.1.2",
     "vitest": "^5.0.1"
   },
   "optionalDependencies": {
@@ -302,23 +308,23 @@
   ],
   "overrides": {
     "@azure/msal-node": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "baileys": {
-      "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",
+      "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/d779768cb90a71b3a747de096257530a75815796",
       "@whiskeysockets/eslint-config": "1.0.0"
     },
     "botbuilder": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "botbuilder-core": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "botframework-schema": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "botframework-streaming": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "electron-updater": {
       "lodash.isequal": "npm:@lodash-modularized/isequal@1.0.1"
@@ -327,7 +333,11 @@
     "node-fetch@2": {
       "whatwg-url": "^14.2.0"
     },
-    "node-fetch@3": "$node-fetch"
+    "node-fetch@3": "$node-fetch",
+    "protobufjs": "7.6.5",
+    "pptxgenjs": {
+      "image-size": "2.0.4"
+    }
   },
   "engines": {
     "node": ">=24.0.0"

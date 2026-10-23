@@ -204,7 +204,7 @@ than guessed from the old combined success counter.
 
 ## Implementation Notes
 
-The task automation UI is implemented in `src/renderer/components/MainContent.tsx`.
+The task automation UI is implemented in `src/renderer/components/MainContent/MainContent.tsx`.
 
 Important helper exports:
 

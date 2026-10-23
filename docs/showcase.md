@@ -480,6 +480,30 @@ optimization plan to hit 30fps stable.
 
 ---
 
+### 3D Game Assets with Meshy
+
+Generate props, characters and environment pieces from a prompt or a photo. The agent picks a triangle budget for the asset's role, names the credit cost before each paid step, and shows the result in the chat as a 3D view you can orbit and animate.
+
+**What it handles:**
+
+- Text or image to 3D, with Smart Topology triangle targets per asset type (hero, NPC, weapon, prop)
+- Texturing, retexturing and remeshing to a budget
+- Auto-rigging humanoids, with walking and running clips included; library animations and text-to-motion
+- Exports for each engine: GLB for Godot and the web, FBX for Unity and Unreal, USDZ for Apple AR
+- 3D-print prep: printability check and repair, multicolor 3MF, split into parts
+
+**Example prompt:**
+
+```
+Make three low-poly dungeon props for my Godot game: a treasure chest,
+a barrel and a wall torch, each under 1,500 triangles. Quote the credits
+first, then save GLBs in assets/props/.
+```
+
+**Powered by:** Meshy connector, `meshy-3d` skill. See [3D Models with Meshy](meshy-3d.md)
+
+---
+
 ## Enterprise Integrations
 
 ### CRM & Sales Automation

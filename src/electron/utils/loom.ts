@@ -2,29 +2,35 @@
  * Shared LOOM/Email protocol helpers
  */
 
-import { isLoopbackAddress } from "../security/address-classes";
+import { isLoopbackHostname } from "../security/address-classes";
 
 export type EmailProtocol = "imap-smtp" | "loom";
 
+export const LOOM_BASE_URL_SECURITY_MESSAGE =
+  "LOOM base URL must use HTTPS unless it points to localhost/127.0.0.1/::1";
+
 /**
- * True for a loopback hostname in any spelling the WHATWG URL parser or a
- * human may produce: `::1` and `[::1]`, `localhost` and `*.localhost` in any
- * case, a trailing root dot, all of 127.0.0.0/8 and IPv4-mapped loopback.
+ * True for `localhost`, `127.0.0.1` or `::1`, in any case and with or without
+ * IPv6 brackets: the hosts that may receive the LOOM token over plain HTTP.
  *
- * Delegates to the shared address classifier so LOOM agrees with the rest of
- * the app on what counts as local. The parser keeps IPv6 hostnames bracketed
- * (`new URL("http://[::1]").hostname === "[::1]"`), which a bare `::1`
- * comparison used to reject (issue #602).
+ * Uses the shared narrow check rather than isLoopbackAddress. A trailing root
+ * dot (`localhost.`) goes to the system resolver and `*.localhost`, the rest of
+ * 127.0.0.0/8 and IPv4-mapped forms are outside what the error message
+ * promises, so none of them is a guaranteed loopback host here. The parser
+ * keeps IPv6 hostnames bracketed (`new URL("http://[::1]").hostname ===
+ * "[::1]"`), which a bare `::1` comparison used to reject (issue #602).
  */
 export function isLocalhostHost(hostname: string): boolean {
-  return isLoopbackAddress(hostname);
+  return isLoopbackHostname(String(hostname || "").trim());
 }
 
 export function isSecureOrLocalLoomUrl(rawUrl: string): boolean {
   try {
     const parsed = new URL(rawUrl);
-    if (isLocalhostHost(parsed.hostname)) return true;
-    return parsed.protocol === "https:";
+    if (parsed.protocol === "https:") return true;
+    // Plain HTTP to loopback only; any other scheme fails here rather than at
+    // the first poll.
+    return parsed.protocol === "http:" && isLocalhostHost(parsed.hostname);
   } catch {
     return false;
   }
@@ -39,7 +45,7 @@ export function assertSafeLoomBaseUrl(rawBaseUrl: string): URL {
   }
 
   if (!isSecureOrLocalLoomUrl(parsed.toString())) {
-    throw new Error("LOOM base URL must use HTTPS unless it points to localhost/127.0.0.1/::1");
+    throw new Error(LOOM_BASE_URL_SECURITY_MESSAGE);
   }
 
   return parsed;

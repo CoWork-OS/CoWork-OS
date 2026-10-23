@@ -488,7 +488,7 @@ CoWork OS supports external skill installation through the desktop GUI, not just
 - **Quarantine & report UX**: blocked imported skills move to a dedicated quarantine area with stored reports, retry scan, and removal actions
 - **Optional external directories**: Add one or more absolute read-only skill folders in Settings so shared team skills can load without being copied into CoWork
 - **Warning-only local discovery**: optional external skill directories are not auto-quarantined in v1, but CoWork can still surface unscanned or warning-state badges and reports for those bundles
-- **Clear precedence**: Workspace skills override managed installs, managed installs override external directories, and external directories override bundled defaults
+- **Clear precedence**: Workspace skills (per task, from the task's own workspace) override managed installs, managed installs override external directories, and external directories override bundled defaults; an unmodified managed copy of an older bundled version no longer hides the bundled update
 - **Cross-ecosystem support**: Other external skill stores are supported when they expose Git repos, raw manifests, or raw `SKILL.md` bundle entry points
 - **Shared runtime contract**: Once loaded, external skills follow the same additive execution model as bundled skills. They can add context and scoped directives, but they cannot replace the canonical task prompt.
 
@@ -637,7 +637,7 @@ A set of connected subsystems that make improvement visible and measurable over 
 | **Layered Memory Runtime** | Uses explicit wake-up layers: the pinned `<cowork_user_profile>` block (or `<cowork_hot_memory>` on planning and chat) for `L0`, memory relevant to the request (`<cowork_relevant_memory>` or the plan step's memory section) for `L1`, and tool-driven `L2/L3` recall through `memory_recall` and `context_recall`. |
 | **Retry-Aware Recovery Guidance** | When execution retries or resumes, injects retry count, retry reason/classification, pending verification items, and recent session evidence so the agent keeps moving from the last good state instead of restarting blindly. Planning retries can also include compact playbook context. |
 | **Adaptive Style Engine**         | Observes message length, emoji usage, technical vocabulary, and structured feedback to gradually shift personality settings (response length, emoji usage, explanation depth), stored as an inferred `response_style` fact. Rate-limited to a configurable number of level-shifts per week; never overrides a style you set.                                             |
-| **Playbook-to-Skill Promotion**   | When a playbook pattern is reinforced 3+ times, auto-generates a `skill_proposal` for admin review. No skill is created until explicitly approved.                                                                                                                                         |
+| **Playbook-to-Skill Promotion**   | When a playbook pattern is reinforced 3+ times, auto-generates a `skill_proposal` for admin review. No skill is created until you approve it in the approval prompt, which shows the exact draft; the agent cannot approve its own proposal. |
 | **Channel Persona Adapter**       | Applies channel-appropriate communication directives (Slack = terse/structured, email = formal/greeting+sign-off, WhatsApp = short/emoji, etc.) on top of the core persona without replacing it.                                                                                           |
 | **Evolution Metrics**             | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing.                                                                               |
 | **Daily Log Summarizer**          | Retired in memory repo Phase 3: the memory folder and its dreaming replace daily summaries ([design](memory-repo-phase3-design.md)). |
@@ -893,19 +893,36 @@ The workspace dropdown at the top lets you filter insights to a single workspace
 
 Inspired by [Salesforce's AWU concept](https://www.salesforce.com/agentforce/agentic-work-unit/), an **Agentic Work Unit** represents one successfully completed unit of agent work.
 
-**Definition:** 1 AWU = 1 task with `status = 'completed'` AND `terminal_status` of `ok` or `partial_success`.
+**Definitions** (shared by the live report and the day rollups, in
+`src/electron/reports/awu-outcomes.ts`):
+
+- **Completed unit (any status):** a task with `status = 'completed'` and `terminal_status` of
+  `ok`, `partial_success`, `needs_user_action` or none.
+- **Verified unit:** a completed task with `terminal_status = 'ok'` whose latest outcome contract
+  is not `unmet` or `partial`. It is verified **by contract** when the contract is `satisfied` (a
+  server-side check passed) and **by terminal status** when the task has no contract, or one with
+  nothing the server can check.
+- **Partial** and **needs action** units are counted separately and never as verified.
 
 The AWU section shows:
 
-| Metric               | Description                                                                                                                                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AWU Count**        | Number of completed work units in the period                                                                                                   |
-| **Tokens per AWU**   | Total tokens consumed ÷ AWU count (lower is more efficient)                                                                                    |
-| **Cost per AWU**     | Total cost ÷ AWU count (lower is cheaper)                                                                                                      |
-| **AWUs per Dollar**  | AWU count ÷ total cost (higher is better ROI)                                                                                                  |
-| **Efficiency Trend** | Percentage change in tokens/AWU and cost/AWU vs the previous period. A downward arrow (green) means improvement; upward (red) means regression |
+| Metric                                         | Description                                                                                                                                                             |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Verified work units**                        | Verified units in the period, with partial, needs-action and any-status counts beside it                                                                                |
+| **Cost per verified unit (incl. escalations)** | All model cost in the period, retries and provider escalations included, ÷ verified units. The tooltip shows cost per completed unit of any status for one release     |
+| **Human interventions per task**               | Approval decisions (not auto-approved), answers to input requests and follow-up messages sent after a task started, ÷ completed units. The tooltip lists each count, plus provider escalations and re-runs |
+| **Tokens per AWU**                             | Total tokens ÷ completed units (lower is more efficient)                                                                                                                |
+| **AWUs per Dollar**                            | Completed units ÷ total cost                                                                                                                                            |
+| **Efficiency Trend**                           | Percentage change vs the previous period. A downward arrow (green) means improvement; upward (red) means regression                                                     |
 
 The trend comparison uses the same period length — e.g., if you're viewing a 7-day window, it compares against the prior 7 days. The AWU section is hidden when no tasks were completed in the period.
+
+**History:** before the verified split, "Cost per AWU" divided by every completed unit, including
+partial and needs-action ones. That number is still in the report as cost per completed unit (any
+status). Because verified units are a subset, the headline count and cost per unit change for the
+same work: expect a lower unit count and a higher cost per unit. Provider escalations are counted
+from `llm_routing_changed` events that record a fallback; their cost is already part of the total.
+Computer takeovers are not yet counted as interventions.
 
 ### Period Selection
 
@@ -1118,6 +1135,24 @@ Built-in tools for efficient code navigation and editing:
 | **git_commit** | Commit changes in the workspace (or worktree)        |
 | **git_diff**   | View staged/unstaged changes                         |
 | **git_branch** | List, create, or switch branches                     |
+
+---
+
+## 3D Models (Meshy)
+
+Make 3D models, rigged characters and printable parts with [Meshy](https://www.meshy.ai), and see them in the chat. **Full guide:** [3D Models with Meshy](meshy-3d.md).
+
+- **Meshy connector**: Meshy's own MCP server, pinned and installed from **Settings → Connectors → Meshy** with your API key. 28 tools cover:
+  - text, image and multi-view to 3D;
+  - refine, retexture, remesh, resize, UV unwrap and convert;
+  - rig, animate and text to motion;
+  - printability check and repair, multicolor 3MF, split into parts and slicer handoff;
+  - concept images;
+  - balance and task lists.
+- **Costs on approval cards**: every call that can spend credits asks first. The card leads with the tool's estimated cost and what the task has spent on Meshy. A call that would take a task past 200 credits asks again even under **Always allow**, and tools without a listed price always ask.
+- **3D cards in chat**: replies show models as interactive cards (`::model{path=… task=…}`). You can orbit and zoom, play animation clips, and toggle wireframe, grid and auto-rotate. A Meshy task card tracks the job's progress until the model is ready. **Download** saves any format Meshy already made, free. **Next** offers texture, rig, remesh and the other follow-ups, each with its cost. A `.glb` saved into the workspace shows the same card in the timeline.
+- **3D gallery**: your recent Meshy generations and the models on this machine, with your credit balance, prompt search and a full-size viewer.
+- **Bundled `meshy-3d` skill**: confirm the cost first, submit each job once, choose the format and detail level for the asset's use, and save into the project.
 
 ---
 
@@ -1405,6 +1440,7 @@ Pre-built connectors for enterprise integrations, local services, and creative w
 | **Vercel**           | Deploy               | projects, deployments                                                                                 |
 | **Monday**           | Work Management      | boards, items                                                                                         |
 | **Miro**             | Whiteboard           | boards, content                                                                                       |
+| **Meshy**            | 3D models            | text/image to 3D, texture, remesh, rig, animate, convert, 3D-print prep (credit costs on approvals)   |
 | **Supabase**         | Database             | query, tables, auth                                                                                   |
 | **Excalidraw**       | Diagrams             | create, update elements                                                                               |
 | **Stripe**           | Payments             | customers, payments, products                                                                         |
@@ -1452,7 +1488,7 @@ Two orchestration tools are available for runtime setup and governed expansion:
 | Tool                | Purpose                                                                                                                                                               |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `integration_setup` | Chat-native Tier-1 integration management with `list`, `inspect`, and `configure`, including OAuth, health checks, and stale-plan protection via `expected_plan_hash` |
-| `skill_proposal`    | Approval-gated skill proposal lifecycle (`create`, `list`, `approve`, `reject`) with workspace-local persistence and duplicate cooldown controls                      |
+| `skill_proposal`    | Approval-gated skill proposal lifecycle (`create`, `list`, `approve`, `reject`) with workspace-local persistence and duplicate cooldown controls; `approve` asks the user with the exact draft before saving |
 
 Tier-1 providers currently covered by `integration_setup`: `resend`, `google-workspace`, `jira`, `linear`, `hubspot`, `salesforce`, `zendesk`, `servicenow`.
 

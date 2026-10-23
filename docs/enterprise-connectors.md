@@ -143,7 +143,7 @@ Mailtrap
 
 ### Creative / Architecture
 
-Rhino, Blender, ComfyUI
+Rhino, Blender, ComfyUI, Meshy (3D models; see [3D Models with Meshy](meshy-3d.md))
 
 ### Local services
 
@@ -211,6 +211,69 @@ Return JSON in a consistent envelope so the agent can reason about results acros
 ```
 
 When errors happen, return MCP `isError: true` with a clear error message.
+
+### Idempotent Writes
+
+For every call that can change something, CoWork records a tool attempt with an idempotency key
+derived from the task, step, tool and canonical arguments, so a retry of the same call carries the
+same key. MCP calls send it in the request's `_meta`:
+
+```
+{ "name": "salesforce.create_record", "arguments": { ... },
+  "_meta": { "cowork.idempotencyKey": "<32 hex>", "cowork.attemptId": "<uuid>" } }
+```
+
+Read-only calls carry no `_meta`. A write tool should:
+
+- use the key, or an `idempotencyKey` argument the caller passed, to run the write at most once;
+- pass it on as the API's own idempotency header when the API has one (Resend does);
+- report `status` in the result and in `structuredContent`: `created` (written now),
+  `already_exists` (an earlier attempt with this key made the change; it was not made again) or
+  `unknown` (the API call ended without a response, so the change may or may not exist; return
+  it with `isError: true`).
+
+CoWork treats `already_exists` as success, so the agent does not retry or duplicate, and
+`unknown` as an unknown outcome: the attempt is recorded as such and the agent is told to check
+the target before retrying.
+
+The bundled Salesforce (`create_record`), HubSpot (`create_object`), Jira (`create_issue`) and
+Resend (`send_email`, `create_webhook`) connectors do this with a per-process ledger (24 hours).
+After an attempt that ended without a response they look for what it may have created before
+writing again: Salesforce by `Name` created in the last day, Jira by exact summary in the project
+created in the last day, Resend webhooks by endpoint; Resend email relies on its own
+`Idempotency-Key`, and HubSpot reports a duplicate contact (409) as `already_exists`. The ledger
+does not survive a connector restart. The Linear connector has no write tools. The template in
+`connectors/templates/mcp-connector` shows the pattern.
+
+### Write Previews and Receipts
+
+A write tool can say what it would do before the user approves it. It advertises this in its
+`tools/list` entry with `"_meta": { "cowork.preview": true }`. When such a tool needs approval,
+CoWork first calls it with `"_meta": { "cowork.preview": true }` and the same arguments. The tool
+must change nothing and answer with:
+
+```
+"structuredContent": { "status": "preview", "prepared": {
+  "kind": "preview", "summary": "Send the email \"Invoice\" to 2 recipients",
+  "references": [], "payload": { "fields": [ { "label": "To", "value": "a@example.com" } ] } } }
+```
+
+The approval then shows the summary and the fields, labeled "Described by <server>", instead of
+the raw arguments. A preview call carries no idempotency key, so it never
+uses up the key of the real write. CoWork only asks local (stdio) connectors: a remote server
+would receive the arguments before the user approved sending them. If the connector does not
+answer within 15 seconds, or answers with anything else, the approval shows the arguments as
+before. The text is the connector's own description; a connector that advertises previews and
+still writes on a preview call is broken, and CoWork cannot tell.
+
+After a real write, a tool can return a `receipt` in `structuredContent`: `status` (`verified`,
+`contradicted` or `unavailable`), `summary`, `checkedAt` and `evidence`
+(`source` and `claim` pairs). CoWork records it as evidence on the task, so the outcome check sees
+what the connector found rather than only what the agent says. The bundled connectors read the
+record back after creating it: Jira the issue's summary, Salesforce the record, HubSpot the
+object, Resend the email and its last event. When the read-back fails, the receipt is
+`unavailable` and the write still counts as done. A retry that finds an earlier write
+(`already_exists`) carries no receipt. Resend's `create_webhook` has a preview and no receipt.
 
 ### Required Baseline Tools
 
@@ -410,7 +473,7 @@ These connectors are included in the local MCP registry and appear in **Settings
 | **Dev Tools**               | Hugging Face, Ahrefs, Mermaid Chart, Cloudflare, Honeycomb, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba                           |
 | **Finance**                 | Stripe, PayPal, Square, Attio                                                                                                                                                   |
 | **Legal**                   | Clinical Trials                                                                                                                                                                 |
-| **Creative / Architecture** | Rhino, Blender, ComfyUI                                                                                                                                                         |
+| **Creative / Architecture** | Rhino, Blender, ComfyUI, Meshy                                                                                                                                                  |
 | **Local services**          | Maps (OSM or Google, with timezone lookup), Home Assistant                                                                                                                      |
 | **Finance data**            | FactSet, LSEG, S&P Global, Daloopa, Morningstar, Moody's, MT Newswires, Aiera, PitchBook, Chronograph, Egnyte                                                                   |
 

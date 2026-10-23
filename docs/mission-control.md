@@ -147,6 +147,28 @@ The **Operations** tab is the company-operations view. It appears when a company
 - **Execution Map**: planner-managed issues.
 - **Planner**: the Strategic Planner (below).
 - **Automation**: recent automation outcomes, each with its task, the next step and **Retry notification**.
+- **Hygiene**: generated software nobody uses, owns, or that depends on something gone (below). It covers the whole profile, so it also works without a company.
+
+### Shared changes
+
+When two or more tasks change the same file, Mission Control shows it. In the same folder it is
+under **Needs attention** (the later task's writes to the file are refused until the other one
+finishes); in separate worktrees it is a review to do in Build's merge review before merging
+either. The item goes away when the tasks finish or their worktrees are merged or removed. See
+[Shared-change coordination](worktrees.md#shared-change-coordination).
+
+### Hygiene
+
+Hygiene checks the skills you or the agent made (managed and workspace skills; bundled and read-only external skills are not listed), Playbook entries, scheduled automations, event triggers and curated rules. An item is listed when:
+
+- **Unused 60+ / 90+ days**: no use since then. Uses are skill applications and Playbook recalls (counted in `lifecycle_meta`), automation runs, trigger fires and rule recalls (from each one's own store). An automation with a next scheduled run is never unused, however rarely it runs.
+- **No owner**: a skill, automation or trigger with nobody recorded as responsible. A skill's author counts; you can type an owner in the row.
+- **Broken dependency**: it depends on a workspace that no longer exists or an item that was retired or removed. Automations, triggers, Playbook entries and rules depend on their workspace.
+- **No evidence**: a rule unused for 90 days that names no failure it prevents (see [Rules](evolving-agent-intelligence.md#rules-what-they-protect-and-their-evidence)).
+
+Nothing is deleted. **Retire** disables a skill, automation or trigger, archives a rule, and stops a Playbook entry from being recalled; it also marks the item retired, so anything that depends on it shows a broken dependency. **Keep** restarts the item's 90-day timer. **Show everything** lists every checked item, to set owners and rule evidence before anything is flagged.
+
+Not covered yet: generated artifacts (they are opened by file path, with no per-artifact use record).
 
 Selecting an issue opens its details: description, **Open linked task**, recent comments, and recent runs with their timeline.
 

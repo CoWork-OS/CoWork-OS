@@ -156,6 +156,8 @@ export interface MCPTool {
     idempotentHint?: boolean;
     openWorldHint?: boolean;
   };
+  /** Tool metadata; `cowork.preview: true` means the tool can describe a write first (WP13). */
+  _meta?: Record<string, unknown>;
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;
@@ -374,11 +376,29 @@ export interface MCPElicitationResult {
 export interface MCPToolCallOptions {
   /** Trusted caller gate after queueing, immediately before transport submission. */
   beforeSend?: () => Promise<void>;
+  /**
+   * The tool attempt's idempotency key, stable across retries of the same call. Sent in the
+   * request's `_meta` so a server can return the first result instead of acting twice.
+   */
+  idempotencyKey?: string;
+  /** The tool attempt this call belongs to; sent in `_meta` with the key. */
+  attemptId?: string;
+  /**
+   * Ask the tool to describe the write instead of doing it (`_meta["cowork.preview"]`). Only
+   * for tools that advertise it; the answer is `structuredContent.status === "preview"`.
+   */
+  preview?: boolean;
   onElicitation?: (request: MCPElicitationRequest) => Promise<MCPElicitationResult>;
   signal?: AbortSignal;
 }
 
 export type MCPTransportRequestOptions = Pick<MCPToolCallOptions, "beforeSend" | "signal">;
+
+/** `_meta` keys CoWork sends on `tools/call`; a connector reads them to deduplicate writes. */
+export const MCP_IDEMPOTENCY_META_KEY = "cowork.idempotencyKey";
+export const MCP_ATTEMPT_META_KEY = "cowork.attemptId";
+/** On a tool definition: the tool can describe a write. On a call: describe, do not act. */
+export const MCP_PREVIEW_META_KEY = "cowork.preview";
 
 // MCP Protocol Methods
 export const MCP_METHODS = {
@@ -483,6 +503,12 @@ export interface MCPRegistryEntry {
   defaultArgs?: string[];
   defaultEnv?: Record<string, string>;
   defaultUrl?: string;
+  /** Stdio only: start the server in its own folder under the app data dir (its default output lands there). */
+  useDataDirAsCwd?: boolean;
+  /** Approval mode a fresh install starts with (e.g. "writes": reads run, anything else asks). */
+  defaultToolsApprovalMode?: MCPToolApprovalMode;
+  /** Request timeout a fresh install starts with, for servers whose tools wait on long jobs. */
+  defaultRequestTimeout?: number;
 
   // Tool information
   tools: Array<{

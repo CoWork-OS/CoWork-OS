@@ -1,17 +1,30 @@
 #!/usr/bin/env node
 /**
  * Upgrade-path acceptance from the previous release. A disposable profile is created
- * by the PREVIOUS build (its compiled stores, then one run of its desktop app, which
- * seeds the legacy named bot roster and default team), and is then opened by the
- * current Node daemon (twice) and the current desktop app. User bots, prompts, teams,
- * membership, history, pending decisions, routines and memory must be preserved, and
- * the new schema must be added in place. No provider is configured and no channel or
- * model is contacted.
+ * by the PREVIOUS build (its compiled stores, a channel with paired users written as raw
+ * SQL, then one run of its desktop app, which may seed its own roster), and is then opened
+ * by the current Node daemon (twice) and the current desktop app. User bots, prompts,
+ * teams, membership, history, pending decisions, routines and memory must be preserved,
+ * whatever the previous build seeded is kept as user data, and the new schema must be
+ * added in place: the agent_roles columns (access_profile_id, works_on, desktop_host,
+ * desktop_group) are added empty, and the one-time channel_users pairing reset (#459)
+ * revokes every legacy grant and pending code once, never again. No provider is
+ * configured and no channel or model is contacted.
  *
- *   git worktree add --detach /tmp/cowork-baseline <previous-release-ref>
- *   (cd /tmp/cowork-baseline && ln -s "$PWD/node_modules" node_modules \
- *     && npm run build:daemon && npm run build:electron)
- *   COWORK_UPGRADE_BASELINE=/tmp/cowork-baseline node scripts/qa/bot-release-upgrade-smoke.mjs
+ * The baseline is the published package of the previous release (a git checkout of an
+ * older tag may not build against the current node_modules). Pin the exact version:
+ * setup re-runs npm install, which would otherwise resolve a caret range to a newer one.
+ *
+ *   mkdir /tmp/cowork-baseline && cd /tmp/cowork-baseline
+ *   echo '{"name":"baseline","private":true}' > package.json
+ *   npm install --ignore-scripts --omit=optional --save-exact cowork-os@0.5.60
+ *   node node_modules/electron/install.js   # the Electron binary (skipped by --ignore-scripts)
+ *   npm run --prefix node_modules/cowork-os setup
+ *   cd - && npm run build:daemon && npm run build:electron
+ *   COWORK_UPGRADE_BASELINE=/tmp/cowork-baseline/node_modules/cowork-os npm run qa:bots:upgrade
+ *
+ * A built checkout of the previous release works as the baseline too. UP_KEEP_PROFILE=1
+ * keeps the profile for inspection.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -28,11 +41,12 @@ const Database = require("better-sqlite3");
 const electronExecutable = require("electron");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const baseline = process.env.COWORK_UPGRADE_BASELINE;
-assert(baseline, "Set COWORK_UPGRADE_BASELINE to a built checkout of the previous release");
+assert(baseline, "Set COWORK_UPGRADE_BASELINE to the previous release (installed package or built checkout)");
 for (const entry of ["dist/daemon/daemon/main.js", "dist/electron/electron/main.js"])
   await fs.access(path.join(baseline, entry)).catch(() => {
-    throw new Error(`The baseline checkout is missing ${entry}; build it first`);
+    throw new Error(`The baseline is missing ${entry}; build or set it up first`);
   });
+const baselineVersion = JSON.parse(await fs.readFile(path.join(baseline, "package.json"), "utf8")).version;
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-release-upgrade-"));
 const workspacePath = path.join(profile, "workspace");
 const dbPath = path.join(profile, "cowork-os.db");
@@ -98,8 +112,16 @@ function seedWithBaseline() {
       const routines=new RoutineService({db,getCronService:()=>null,getEventTriggerService:()=>null,loadHooksSettings:()=>({enabled:false,token:'x',path:'/hooks',maxBodyBytes:1024,presets:[],mappings:[]}),saveHooksSettings:()=>{},createTask:async()=>{throw new Error('no dispatch');}});
       const routine=await routines.create({name:'My paused routine',enabled:false,workspaceId:ws.id,prompt:'Paused',connectors:[],triggers:[{id:'manual',type:'manual',enabled:true}]});
       await routines.stopWorkflowRuntime();
+      // A channel with a paired user (a legacy global grant) and one with a pending code.
+      // Raw SQL over the columns every release has, so no store signature is assumed.
+      const now=Date.now();
+      db.prepare("INSERT INTO channels (id,type,name,enabled,config,security_config,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run('up-channel','telegram','Upgrade channel',0,'{}',JSON.stringify({mode:'pairing'}),'disconnected',now,now);
+      const user=db.prepare("INSERT INTO channel_users (id,channel_id,channel_user_id,display_name,username,allowed,pairing_code,pairing_attempts,pairing_expires_at,created_at,last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+      user.run('up-user-paired','up-channel','tg-1001','Paired user','paired',1,null,0,null,now-60000,now-30000);
+      user.run('up-user-pending','up-channel','tg-1002','Pending user','pending',0,'QA1234',1,now+3600000,now-50000,now-20000);
       manager.close();
-      process.stdout.write('SEED='+JSON.stringify({workspaceId:ws.id,mine:mine.id,renamed:renamed.id,retired:retired.id,team:team.id,waiting:waiting.id,routine:routine.id})+'\n');
+      process.stdout.write('SEED='+JSON.stringify({workspaceId:ws.id,mine:mine.id,renamed:renamed.id,retired:retired.id,team:team.id,waiting:waiting.id,routine:routine.id,channelUsers:['up-user-paired','up-user-pending']})+'\n');
     })().catch(e=>{console.error(e);manager.close();process.exitCode=1;});
   `;
   const result = spawnSync(process.execPath, ["-e", source], {
@@ -215,8 +237,8 @@ async function runtime(cwd, kind) {
       if (!done) {
         child.kill("SIGKILL");
         await exited;
-        // The 0.5.54 desktop app does not exit on SIGTERM (its shutdown hangs after the
-        // database closes); a forced stop is accepted for the previous build only.
+        // Older desktop builds (0.5.54) do not exit on SIGTERM (their shutdown hangs after
+        // the database closes); a forced stop is accepted for the previous build only.
         if (allowForcedStop) return { forced: true };
         throw new Error(`${kind} runtime did not stop`);
       }
@@ -225,40 +247,54 @@ async function runtime(cwd, kind) {
   };
 }
 
-function snapshot() {
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+/** The agent_roles columns added in 0.5.61; empty for every role that existed before. */
+const NEW_ROLE_COLUMNS = ["access_profile_id", "works_on", "desktop_host", "desktop_group"];
+/** The channel_users columns of the one-time pairing reset (#459). */
+const PAIRING_COLUMNS = ["allowed_dm", "allowed_group", "pairing_context"];
+
+function withDb(read, { readonly = true } = {}) {
+  const db = new Database(dbPath, { readonly, fileMustExist: true });
   try {
-    return {
-      roles: db
-        .prepare(
-          `SELECT id,name,display_name,description,system_prompt,is_active,is_system,role_kind,
-                  capabilities,model_key,provider_type
-           FROM agent_roles ORDER BY id`,
-        )
-        .all(),
-      teams: db.prepare("SELECT id,workspace_id,name,lead_agent_role_id FROM agent_teams ORDER BY id").all(),
-      members: db.prepare("SELECT team_id,agent_role_id FROM agent_team_members ORDER BY team_id,agent_role_id").all(),
-      tasks: db
-        .prepare(
-          `SELECT id,workspace_id,status,assigned_agent_role_id,parent_task_id,title,prompt,result_summary
-           FROM tasks ORDER BY id`,
-        )
-        .all(),
-      approvals: db.prepare("SELECT id,task_id,status,type,description,details FROM approvals ORDER BY id").all(),
-      routines: db.prepare("SELECT id,workspace_id,definition_json FROM automation_routines ORDER BY id").all(),
-    };
+    return read(db);
   } finally {
     db.close();
   }
 }
-const tableNames = () => {
-  const db = new Database(dbPath, { readonly: true });
-  try {
-    return new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name));
-  } finally {
-    db.close();
-  }
-};
+const columnNames = (table) =>
+  withDb((db) => new Set(db.pragma(`table_info(${table})`).map((column) => column.name)));
+const tableNames = () =>
+  withDb((db) => new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name)));
+
+function snapshot() {
+  return withDb((db) => ({
+    roles: db
+      .prepare(
+        `SELECT id,name,display_name,description,system_prompt,is_active,is_system,role_kind,
+                capabilities,model_key,provider_type
+         FROM agent_roles ORDER BY id`,
+      )
+      .all(),
+    teams: db.prepare("SELECT id,workspace_id,name,lead_agent_role_id FROM agent_teams ORDER BY id").all(),
+    members: db.prepare("SELECT team_id,agent_role_id FROM agent_team_members ORDER BY team_id,agent_role_id").all(),
+    tasks: db
+      .prepare(
+        `SELECT id,workspace_id,status,assigned_agent_role_id,parent_task_id,title,prompt,result_summary
+         FROM tasks ORDER BY id`,
+      )
+      .all(),
+    approvals: db.prepare("SELECT id,task_id,status,type,description,details FROM approvals ORDER BY id").all(),
+    routines: db.prepare("SELECT id,workspace_id,definition_json FROM automation_routines ORDER BY id").all(),
+  }));
+}
+/** Channel users with every column the profile has (the pairing columns once added). */
+const channelUsers = () => withDb((db) => db.prepare("SELECT * FROM channel_users ORDER BY id").all());
+/** The new agent_roles columns of the given roles. */
+const newRoleColumns = (ids) =>
+  withDb((db) =>
+    db
+      .prepare(`SELECT id,${NEW_ROLE_COLUMNS.join(",")} FROM agent_roles WHERE id IN (${ids.map(() => "?").join(",")})`)
+      .all(...ids),
+  );
 
 let active;
 try {
@@ -269,12 +305,28 @@ try {
   const baselineStop = await active.stop({ allowForcedStop: true });
   active = null;
   const old = snapshot();
+  // Whatever the previous desktop build seeded (0.5.54 seeds a named roster and a default
+  // team; later builds seed nothing) is ordinary user data from here on.
   const legacyRoster = old.roles.filter((role) => /^(atlas|forge|scribe)/.test(role.name));
   const legacyTeam = old.teams.find((team) => team.name === "CoWork Bot Team");
-  assert(legacyRoster.length > 0, "The previous desktop build is expected to seed its named roster");
-  assert(!tableNames().has("bot_responsibilities"), "The baseline must predate the new schema");
+  const tablesBefore = tableNames();
+  const roleColumnsBefore = columnNames("agent_roles");
+  const pairingColumnsBefore = columnNames("channel_users");
+  const usersBefore = channelUsers();
+  assert.deepEqual(
+    usersBefore.map((user) => user.id),
+    seed.channelUsers,
+    "The previous build keeps the seeded channel users",
+  );
+  // A baseline that predates the reset must run it on the first upgraded start.
+  const expectPairingReset = PAIRING_COLUMNS.some((column) => !pairingColumnsBefore.has(column));
+  // Columns the baseline already has are not new for this upgrade.
+  const rolesColumnsAdded = NEW_ROLE_COLUMNS.filter((column) => !roleColumnsBefore.has(column));
+  const oldRoleIds = old.roles.map((role) => role.id);
+  const oldRoleExtras = rolesColumnsAdded.length === NEW_ROLE_COLUMNS.length ? null : newRoleColumns(oldRoleIds);
 
   const proofs = [];
+  let usersAfterFirstStart = null;
   for (const [label, cwd, kind] of [
     ["current Node daemon, first start", root, "node"],
     ["current Node daemon, second start", root, "node"],
@@ -324,19 +376,85 @@ try {
       "responsibility_action_review_claims",
     ])
       assert(tables.has(table), `${label}: missing upgraded table ${table}`);
+
+    // agent_roles: the new columns exist and are not invented for existing roles.
+    const roleColumns = columnNames("agent_roles");
+    for (const column of NEW_ROLE_COLUMNS) assert(roleColumns.has(column), `${label}: agent_roles.${column} missing`);
+    const extras = newRoleColumns(oldRoleIds);
+    if (oldRoleExtras) assert.deepEqual(extras, oldRoleExtras, `${label}: existing role settings must not change`);
+    else
+      for (const role of extras)
+        for (const column of NEW_ROLE_COLUMNS)
+          assert.equal(role[column], null, `${label}: ${role.id}.${column} must start empty`);
+
+    // channel_users (#459): the first upgraded start revokes every legacy grant and pending
+    // code but keeps the users; a grant made afterwards survives every later start.
+    const pairingColumns = columnNames("channel_users");
+    for (const column of PAIRING_COLUMNS)
+      assert(pairingColumns.has(column), `${label}: channel_users.${column} missing`);
+    const users = channelUsers();
+    const identity = ({ id, channel_id, channel_user_id, display_name, username, created_at }) => ({
+      id,
+      channel_id,
+      channel_user_id,
+      display_name,
+      username,
+      created_at,
+    });
+    assert.deepEqual(users.map(identity), usersBefore.map(identity), `${label}: channel users must be kept`);
+    if (!usersAfterFirstStart) {
+      if (expectPairingReset)
+        for (const user of users)
+          assert.deepEqual(
+            {
+              allowed: user.allowed,
+              allowed_dm: user.allowed_dm,
+              allowed_group: user.allowed_group,
+              pairing_code: user.pairing_code,
+              pairing_expires_at: user.pairing_expires_at,
+              pairing_context: user.pairing_context,
+            },
+            {
+              allowed: 0,
+              allowed_dm: 0,
+              allowed_group: 0,
+              pairing_code: null,
+              pairing_expires_at: null,
+              pairing_context: null,
+            },
+            `${label}: legacy pairing of ${user.id} must be revoked`,
+          );
+      else assert.deepEqual(users, usersBefore, `${label}: context-scoped pairing must not change`);
+      // The user pairs again in a direct message; that grant is not a legacy one.
+      withDb(
+        (db) =>
+          db
+            .prepare(
+              "UPDATE channel_users SET allowed = 1, allowed_dm = 1, pairing_context = 'dm' WHERE id = 'up-user-paired'",
+            )
+            .run(),
+        { readonly: false },
+      );
+      usersAfterFirstStart = channelUsers();
+    } else {
+      assert.deepEqual(users, usersAfterFirstStart, `${label}: the pairing reset must run only once`);
+    }
     proofs.push({ label, preserved: true, systemRolesAdded: added.length });
   }
   console.log(
     JSON.stringify(
       {
         status: "passed",
-        baselineCommit: spawnSync("git", ["-C", baseline, "rev-parse", "--short", "HEAD"], {
-          encoding: "utf8",
-        }).stdout.trim(),
+        baselineVersion,
         previousDesktopForcedStop: Boolean(baselineStop?.forced),
         legacyRosterPreserved: legacyRoster.map((role) => role.name),
         legacyTeamPreserved: legacyTeam ? legacyTeam.name : null,
         userBotsPreserved: [seed.mine, seed.renamed, seed.retired].length,
+        roleColumnsAdded: rolesColumnsAdded,
+        pairingReset: expectPairingReset,
+        channelUsersKept: seed.channelUsers.length,
+        // Tables of removed features are dropped on purpose; the ones read above stay.
+        tablesDropped: [...tablesBefore].filter((table) => !tableNames().has(table)).sort(),
         proofs,
         modelExecution: false,
         channelDelivery: false,

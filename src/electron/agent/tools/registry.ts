@@ -12,6 +12,10 @@ import {
   isComputerToolBlocked,
   type BotWorksOn,
 } from "../../../shared/bot-computer";
+import {
+  isToolBoundaryAllowedForContainedRun,
+  toolBoundaryClass,
+} from "../../../shared/tool-boundaries";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -72,6 +76,7 @@ import { YouTubeTools } from "./youtube-tools";
 import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
+import { EventWaitTools } from "./event-wait-tools";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -129,6 +134,7 @@ import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
   evaluateWorkspaceFilesystemAccess,
+  isApprovalRequiredWorkspacePath,
   resolveWorkspaceFilesystemAccessWithApproval,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
@@ -136,7 +142,7 @@ import { BuiltinToolsSettingsManager } from "./builtin-settings";
 import { BrowserSettingsManager } from "../../settings/browser-settings-manager";
 import { DEVELOPER_MODE_BROWSER_TOOLS } from "../../../shared/browser-settings";
 import { getCustomSkillLoader } from "../custom-skill-loader";
-import { SkillProposalService } from "../skills/SkillProposalService";
+import { SkillProposalService, type SkillProposalRecord } from "../skills/SkillProposalService";
 import { SkillEvalService, type SkillEvalCase } from "../skills/SkillEvalService";
 import { PersonalityManager } from "../../settings/personality-manager";
 import {
@@ -247,7 +253,26 @@ import {
   withToolPromptMetadataList,
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
-import { buildMcpApprovalPresentation } from "./mcp-approval-preview";
+import {
+  parseWritePreview,
+  parseWriteReceipt,
+  renderWritePreview,
+  supportsWritePreview,
+} from "../../mcp/write-preview";
+import type { ApplicationPreparedChange } from "../../../shared/application-execution";
+import { buildMcpApprovalPresentation, withMcpCostLines } from "./mcp-approval-preview";
+import {
+  bookCharge,
+  chargeExceedsLimit,
+  chargeLines,
+  chargeSpent,
+  pendingCharge,
+  refundCharge,
+  type PendingCharge,
+} from "../../mcp/tool-costs";
+import { costPolicyForServer, isMeshyServerConfig } from "../../meshy/meshy-server";
+import { applyMeshyToolResult } from "../../meshy/meshy-tool-results";
+import { getMeshyService } from "../../meshy/meshy-service";
 import { getNumbatService } from "../../security/numbat";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 import {
@@ -296,6 +321,67 @@ const SKILL_MUTATION_TOOLS = new Set([
   "skill_update",
   "skill_delete",
 ]);
+
+// Words that appear in many skill IDs or guesses and say nothing about which skill is meant.
+const SKILL_ID_FILLER_TOKENS = new Set([
+  "skill",
+  "skills",
+  "the",
+  "and",
+  "for",
+  "to",
+  "of",
+  "in",
+  "a",
+]);
+
+function skillIdTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 1 && !SKILL_ID_FILLER_TOKENS.has(token)),
+  );
+}
+
+function rankSkillIdGuess(
+  requestedId: string,
+  skills: CustomSkill[],
+): { id: string; overlap: number }[] {
+  const wanted = skillIdTokens(requestedId);
+  if (wanted.size === 0) return [];
+  return skills
+    .map((skill) => {
+      const offered = skillIdTokens(`${skill.id} ${skill.name || ""}`);
+      let shared = 0;
+      for (const token of wanted) if (offered.has(token)) shared++;
+      return { id: skill.id, overlap: shared / wanted.size };
+    })
+    .filter((entry) => entry.overlap >= 0.5)
+    .sort((a, b) => b.overlap - a.overlap || a.id.localeCompare(b.id));
+}
+
+/**
+ * Suggest real skill IDs for an unknown one: skills whose ID or name share at least half of
+ * the requested ID's meaningful words, best overlap first.
+ */
+function suggestSkillIds(requestedId: string, skills: CustomSkill[], limit = 5): string[] {
+  return rankSkillIdGuess(requestedId, skills)
+    .slice(0, limit)
+    .map((entry) => entry.id);
+}
+
+/**
+ * Resolve a guessed skill ID when it is unambiguous: at least two meaningful words, all of
+ * them found in exactly one skill's ID or name. Anything looser stays a suggestion.
+ */
+function resolveGuessedSkillId(requestedId: string, skills: CustomSkill[]): string | null {
+  if (skillIdTokens(requestedId).size < 2) return null;
+  const [best, next] = rankSkillIdGuess(requestedId, skills);
+  if (!best || best.overlap < 1) return null;
+  if (next && next.overlap >= 1) return null;
+  return best.id;
+}
 
 function getApprovalTypeForRuntimeKind(
   approvalKind: RuntimeToolApprovalKind | undefined,
@@ -617,6 +703,24 @@ const registryLogger = createLogger("ToolRegistry");
 
 /** Servers exposing more tools than this load them through tool_search instead of every request. */
 export const MCP_DEFERRED_SERVER_TOOL_THRESHOLD = 25;
+/** A connector's write preview must answer within this, or the approval shows arguments. */
+const MCP_PREVIEW_TIMEOUT_MS = 15_000;
+
+/** The executor's tool attempt from the runtime context, when it is well formed. */
+function readToolAttempt(
+  runtime: Record<string, unknown> | undefined,
+): { idempotencyKey: string; attemptId: string } | undefined {
+  const value = runtime?.toolAttempt as
+    | { idempotencyKey?: unknown; attemptId?: unknown }
+    | undefined;
+  return value &&
+    typeof value.idempotencyKey === "string" &&
+    value.idempotencyKey &&
+    typeof value.attemptId === "string" &&
+    value.attemptId
+    ? { idempotencyKey: value.idempotencyKey, attemptId: value.attemptId }
+    : undefined;
+}
 
 export class ToolRegistry {
   private static mermaidValidationInitialized = false;
@@ -642,6 +746,7 @@ export class ToolRegistry {
   private nativeAppTools: NativeAppTools;
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
+  private eventWaitTools: EventWaitTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -736,6 +841,7 @@ export class ToolRegistry {
     this.nativeAppTools = new NativeAppTools(this.fileTools, daemon, taskId);
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
+    this.eventWaitTools = new EventWaitTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1030,7 +1136,7 @@ export class ToolRegistry {
     }
 
     if (visibleToolSet.has("Skill")) {
-      const skillLoader = getCustomSkillLoader();
+      const skillLoader = this.getSkillLoader();
       const availableToolNames = new Set(orderedVisibleTools.map((tool) => tool.name));
       const resolvedSkillShortlistSize =
         typeof options?.skillShortlistSize === "number" &&
@@ -1398,10 +1504,74 @@ export class ToolRegistry {
     return isComputerToolBlocked(worksOn, kind);
   }
 
+  private botContainedCache: { value: boolean } | null = null;
+
+  /**
+   * A run in a bot's own folder; fails closed if the task cannot be read. Every tool the
+   * registry lists is checked against it, so the answer is cached: "contained" for good (a
+   * task never leaves its bot's folder), "not contained" only until the current synchronous
+   * pass ends, since the daemon can contain a running task at any time. A task that could not
+   * be read counts as contained for that pass only.
+   */
+  private isBotContainedTask(): boolean {
+    if (this.botContainedCache) return this.botContainedCache.value;
+    let value: boolean;
+    let readContained = false;
+    try {
+      value = this.daemon.getTask?.(this.taskId)?.agentConfig?.botContained === true;
+      readContained = value;
+    } catch {
+      value = true;
+    }
+    const cache = { value };
+    this.botContainedCache = cache;
+    if (!readContained) {
+      queueMicrotask(() => {
+        if (this.botContainedCache === cache) this.botContainedCache = null;
+      });
+    }
+    return value;
+  }
+
+  /**
+   * Whether an MCP tool's connector runs as a program on this computer (stdio) rather than as
+   * a remote service. Fails closed: a tool whose server cannot be found counts as local.
+   */
+  private isLocalConnectorTool(toolName: string, prefix: string): boolean {
+    try {
+      const rawName = toolName.slice(prefix.length);
+      const id = MCPClientManager.getInstance().getServerIdForTool(rawName);
+      const server = MCPSettingsManager.loadSettings().servers?.find((entry) => entry.id === id);
+      return !server || server.transport === "stdio";
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * The boundary of a run in a bot's own folder, by the tool's class (shared/tool-boundaries):
+   * a tool nobody classified, or one that reaches past the bot's folder, is refused.
+   */
+  private isBlockedByBotContainment(toolName: string): boolean {
+    if (!this.isBotContainedTask()) return false;
+    let prefix = "mcp_";
+    try {
+      prefix = MCPSettingsManager.loadSettings().toolNamePrefix || prefix;
+    } catch {
+      // Settings unavailable: the default prefix still classifies connector tools.
+    }
+    const boundary = toolBoundaryClass(toolName, { mcpToolNamePrefix: prefix });
+    return !isToolBoundaryAllowedForContainedRun(boundary, {
+      worksOn: this.currentBotWorksOn(),
+      localConnector: boundary === "connector" && this.isLocalConnectorTool(toolName, prefix),
+    });
+  }
+
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
     if (this.isBlockedByBotWorksOn(toolName)) return true;
+    if (this.isBlockedByBotContainment(toolName)) return true;
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
@@ -1627,6 +1797,10 @@ export class ToolRegistry {
 
     // Always add cron/scheduling tools (enables task scheduling)
     allTools.push(...CronTools.getToolDefinitions());
+    // Waiting on an event needs the runtime's event trigger engine.
+    if (this.daemon.hasEventWaitSupport?.()) {
+      allTools.push(...EventWaitTools.getToolDefinitions());
+    }
     if (MCPEventService.getActive()) {
       allTools.push({
         name: "manage_connector_events",
@@ -1918,6 +2092,31 @@ export class ToolRegistry {
     }
   }
 
+  /** The declared cost of an MCP tool call for this task's tally, when its server declares one. */
+  private getMcpToolCharge(toolName: string, input: unknown): PendingCharge | null {
+    const settings = MCPSettingsManager.loadSettings();
+    const prefix = settings.toolNamePrefix || "mcp_";
+    if (!toolName.startsWith(prefix)) return null;
+    const rawToolName = toolName.slice(prefix.length);
+    try {
+      const manager = MCPClientManager.getInstance();
+      const serverId = manager.getServerIdForTool(rawToolName);
+      if (!serverId) return null;
+      const policy = costPolicyForServer(MCPSettingsManager.getServer(serverId));
+      if (!policy) return null;
+      const tool = manager.getAllTools().find((entry) => entry.name === rawToolName);
+      return pendingCharge(
+        policy,
+        this.taskId,
+        serverId,
+        tool?.serverToolName ?? rawToolName,
+        input,
+      );
+    } catch {
+      return null;
+    }
+  }
+
   private getMcpEndpointForTool(toolName: string): string | null {
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
@@ -2016,7 +2215,8 @@ export class ToolRegistry {
    * workspace skill directory is active. That directory is outside the
    * workspace, so it must use the same exact-path approval contract as the
    * ordinary file tools. Keep this classification input-aware so a workspace
-   * skill mutation remains a normal workspace write.
+   * skill mutation remains a workspace write (one the PermissionEngine asks about,
+   * see getSkillManagementWorkspaceTarget).
    */
   private getSkillManagementFilesystemBoundary(
     toolName: string,
@@ -2027,38 +2227,8 @@ export class ToolRegistry {
     pathOperations: Array<{ path: string; operation: "read" | "write" | "delete" }>;
     operation: "read" | "write" | "delete";
   } | null {
-    if (!SKILL_MUTATION_TOOLS.has(toolName)) return null;
-
-    const skillLoader = getCustomSkillLoader();
-    const candidates: Array<{ value: unknown; operation: "read" | "write" | "delete" }> = [];
-    if (toolName === "skill_create") {
-      const id = typeof input?.id === "string" ? input.id.trim() : "";
-      const directory = skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
-      if (id && /^[a-z0-9-]+$/.test(id)) {
-        candidates.push({ value: path.join(directory, `${id}.json`), operation: "write" });
-      }
-    } else if (toolName === "skill_duplicate") {
-      const newId = typeof input?.new_id === "string" ? input.new_id.trim() : "";
-      const sourceId =
-        typeof input?.source_skill_id === "string" ? input.source_skill_id.trim() : "";
-      const sourceSkill = sourceId ? skillLoader.getSkill(sourceId) : undefined;
-      if (sourceSkill?.filePath && sourceSkill.source !== "bundled") {
-        candidates.push({ value: sourceSkill.filePath, operation: "read" });
-      }
-      const directory = skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
-      if (newId && /^[a-z0-9-]+$/.test(newId)) {
-        candidates.push({ value: path.join(directory, `${newId}.json`), operation: "write" });
-      }
-    } else {
-      const skillId = typeof input?.skill_id === "string" ? input.skill_id.trim() : "";
-      const skill = skillId ? skillLoader.getSkill(skillId) : undefined;
-      if (skill?.filePath && skill.source !== "bundled" && skill.source !== "external") {
-        candidates.push({
-          value: skill.filePath,
-          operation: toolName === "skill_delete" ? "delete" : "write",
-        });
-      }
-    }
+    const candidates = this.getSkillManagementTargets(toolName, input);
+    if (candidates.length === 0) return null;
 
     const outside = candidates.filter(({ value, operation }) => {
       if (typeof value !== "string" || !value.trim()) return false;
@@ -2084,6 +2254,58 @@ export class ToolRegistry {
           ? "write"
           : "read",
     };
+  }
+
+  /**
+   * The workspace skill file a skill management tool would write or delete, when it is one
+   * the PermissionEngine asks about (isApprovalRequiredWorkspacePath). It goes to the
+   * permission check as the request path, because these tools name a skill, not a file.
+   */
+  private getSkillManagementWorkspaceTarget(toolName: string, input?: Any): string | null {
+    for (const { value, operation } of this.getSkillManagementTargets(toolName, input)) {
+      if (operation === "read" || typeof value !== "string" || !value.trim()) continue;
+      if (isApprovalRequiredWorkspacePath(this.workspace.path, value)) return value;
+    }
+    return null;
+  }
+
+  private getSkillManagementTargets(
+    toolName: string,
+    input?: Any,
+  ): Array<{ value: unknown; operation: "read" | "write" | "delete" }> {
+    if (!SKILL_MUTATION_TOOLS.has(toolName)) return [];
+
+    const skillLoader = this.getSkillLoader();
+    const candidates: Array<{ value: unknown; operation: "read" | "write" | "delete" }> = [];
+    if (toolName === "skill_create") {
+      const id = typeof input?.id === "string" ? input.id.trim() : "";
+      const directory = this.getSkillCreationDir();
+      if (id && /^[a-z0-9-]+$/.test(id)) {
+        candidates.push({ value: path.join(directory, `${id}.json`), operation: "write" });
+      }
+    } else if (toolName === "skill_duplicate") {
+      const newId = typeof input?.new_id === "string" ? input.new_id.trim() : "";
+      const sourceId =
+        typeof input?.source_skill_id === "string" ? input.source_skill_id.trim() : "";
+      const sourceSkill = sourceId ? skillLoader.getSkill(sourceId) : undefined;
+      if (sourceSkill?.filePath && sourceSkill.source !== "bundled") {
+        candidates.push({ value: sourceSkill.filePath, operation: "read" });
+      }
+      const directory = this.getSkillCreationDir();
+      if (newId && /^[a-z0-9-]+$/.test(newId)) {
+        candidates.push({ value: path.join(directory, `${newId}.json`), operation: "write" });
+      }
+    } else {
+      const skillId = typeof input?.skill_id === "string" ? input.skill_id.trim() : "";
+      const skill = skillId ? skillLoader.getSkill(skillId) : undefined;
+      if (skill?.filePath && skill.source !== "bundled" && skill.source !== "external") {
+        candidates.push({
+          value: skill.filePath,
+          operation: toolName === "skill_delete" ? "delete" : "write",
+        });
+      }
+    }
+    return candidates;
   }
 
   private async assertSkillFilesystemAccess(
@@ -2161,6 +2383,13 @@ export class ToolRegistry {
     // directly for each external input/output path. Advertise that boundary to
     // the executor so the outer tool timeout includes the human response.
     if (canonicalToolName === "batch_image_process") return "external_file_access";
+    // Approving a skill proposal saves a skill that later tasks load. The handler asks the
+    // user itself (requestSkillProposalApproval); advertising risk_gate here makes the
+    // PermissionEngine treat the call as explicit consent (Plan mode denies it, a profile
+    // that never asks denies it) and gives it the approval-gated timeout.
+    if (canonicalToolName === "skill_proposal" && input?.action === "approve") {
+      return "risk_gate";
+    }
     if (TOOL_GROUPS["group:write"].includes(canonicalToolName as Any)) {
       return "workspace_write";
     }
@@ -2353,6 +2582,8 @@ export class ToolRegistry {
       toolName === "voice_call" ||
       // The PACT admission service asks for approval per operation (effect class, scopes).
       toolName === "pact_send_message" ||
+      // skill_proposal approve asks once its checks pass, showing the draft it will save.
+      (toolName === "skill_proposal" && input?.action === "approve") ||
       isComputerUseToolName(toolName)
     );
   }
@@ -2544,12 +2775,42 @@ export class ToolRegistry {
       const pactApproval = context.request.name.startsWith("pact_")
         ? await this.pactTools.approvalDestination(context.request.name, context.request.input)
         : {};
-      const mcpApproval = serverName
-        ? buildMcpApprovalPresentation(context.request.name, serverName, context.request.input)
+      // A tool that spends a vendor's credits names its estimate on the approval card, and a
+      // call that would take the task past the server's spend limit always asks.
+      const mcpCharge = serverName
+        ? this.getMcpToolCharge(context.request.name, context.request.input)
         : null;
+      const mcpChargeSpent = mcpCharge ? chargeSpent(mcpCharge) : 0;
+      const mcpBudgetGate = mcpCharge ? chargeExceedsLimit(mcpCharge, mcpChargeSpent) : false;
+      const mcpCostLines = mcpCharge ? chargeLines(mcpCharge, mcpChargeSpent) : [];
+      // Booked in the same synchronous step as the check, so parallel calls in one step see
+      // each other's spend; a call refused before it runs gives its booking back.
+      let mcpChargeBooked = false;
+      if (mcpCharge && !mcpBudgetGate) {
+        bookCharge(mcpCharge);
+        mcpChargeBooked = true;
+      }
+      const releaseMcpCharge = () => {
+        if (mcpCharge && mcpChargeBooked) refundCharge(mcpCharge);
+        mcpChargeBooked = false;
+      };
+      const mcpApproval = serverName
+        ? buildMcpApprovalPresentation(
+            context.request.name,
+            serverName,
+            context.request.input,
+            mcpCostLines,
+          )
+        : null;
+      const skillWorkspaceTarget = this.getSkillManagementWorkspaceTarget(
+        context.request.name,
+        context.request.input,
+      );
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
+        // A workspace skill file the skill tool would change; an external target below wins.
+        ...(skillWorkspaceTarget ? { path: skillWorkspaceTarget } : {}),
         ...(serverName ? { serverName } : {}),
         ...(mcpApproval?.approvalPreview ? { approvalPreview: mcpApproval.approvalPreview } : {}),
         ...browserUseApproval,
@@ -2691,6 +2952,7 @@ export class ToolRegistry {
           await getNumbatService()?.recordBlockedDecision(pipeline.agentSecurity.decisionId);
         }
         const reason = pipeline.reason ? `: ${pipeline.reason}` : "";
+        releaseMcpCharge();
         throw Object.assign(
           new Error(`Tool "${context.request.name}" blocked by policy${reason}`),
           {
@@ -2699,13 +2961,14 @@ export class ToolRegistry {
         );
       }
 
-      if (pipeline.decision === "require_approval") {
+      if (pipeline.decision === "require_approval" || mcpBudgetGate) {
         if (
-          !(responsibilityActionReview && pipeline.approvalSource !== "semantic_review") &&
-          (pipeline.approvalSource === "semantic_review" ||
-            !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
-            pipeline.approvalSource === "workspace_policy" ||
-            pipeline.approvalSource === "runtime_metadata")
+          mcpBudgetGate ||
+          (!(responsibilityActionReview && pipeline.approvalSource !== "semantic_review") &&
+            (pipeline.approvalSource === "semantic_review" ||
+              !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
+              pipeline.approvalSource === "workspace_policy" ||
+              pipeline.approvalSource === "runtime_metadata"))
         ) {
           const requester = (this.daemon as Any)?.requestApproval;
           if (typeof requester !== "function") {
@@ -2723,10 +2986,31 @@ export class ToolRegistry {
               : mcpApproval
                 ? mcpApproval.description
                 : `Allow ${context.request.name} to access the requested resource?`;
-          const details = { ...approvalDetails, reason: pipeline.reason || null };
+          // A local connector that can describe its write is asked what it would do, so the
+          // approval shows the effect rather than raw arguments (WP13).
+          const connectorPreview = mcpApproval
+            ? await this.fetchMcpWritePreview(
+                context.request.name,
+                context.request.input,
+                serverName ?? undefined,
+                context.request.runtime?.signal instanceof AbortSignal
+                  ? context.request.runtime.signal
+                  : undefined,
+              )
+            : null;
+          const details = {
+            ...approvalDetails,
+            ...(connectorPreview
+              ? {
+                  approvalPreview: withMcpCostLines(connectorPreview.approvalPreview, mcpCostLines),
+                  preparedChange: connectorPreview.prepared,
+                }
+              : {}),
+            reason: pipeline.reason || null,
+          };
           const options = {
             allowAutoApprove:
-              pipeline.approvalSource === "semantic_review"
+              pipeline.approvalSource === "semantic_review" || mcpBudgetGate
                 ? false
                 : effectiveApprovalType !== "location_access",
             signal:
@@ -2734,6 +3018,7 @@ export class ToolRegistry {
                 ? context.request.runtime.signal
                 : undefined,
             requireExplicitApproval:
+              mcpBudgetGate ||
               pipeline.approvalSource === "semantic_review" ||
               pipeline.approvalSource === "workspace_policy" ||
               pipeline.approvalSource === "runtime_metadata",
@@ -2798,6 +3083,7 @@ export class ToolRegistry {
                       options,
                     );
           if (approved !== true) {
+            releaseMcpCharge();
             throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
               policyTrace: pipeline.trace,
             });
@@ -2812,6 +3098,11 @@ export class ToolRegistry {
           context.request.input,
           responsibilityActionReview,
         );
+        // A call over the limit is booked once the user has approved it.
+        if (mcpCharge && !mcpChargeBooked) {
+          bookCharge(mcpCharge);
+          mcpChargeBooked = true;
+        }
         const result = await next(context);
         let outputBytes: number | undefined;
         try {
@@ -3008,7 +3299,12 @@ export class ToolRegistry {
     register("skill_duplicate", async ({ request }) => this.executeSkillDuplicate(request.input));
     register("skill_update", async ({ request }) => this.executeSkillUpdate(request.input));
     register("skill_delete", async ({ request }) => this.executeSkillDelete(request.input));
-    register("skill_proposal", async ({ request }) => this.executeSkillProposal(request.input));
+    register("skill_proposal", async ({ request }) =>
+      this.executeSkillProposal(
+        request.input,
+        request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+      ),
+    );
     register(
       "glob",
       async ({ request }) => this.globTools.glob(request.input),
@@ -3598,6 +3894,11 @@ export class ToolRegistry {
     );
     register("schedule_task", async ({ request }) => this.cronTools.executeAction(request.input));
     register(
+      "wait_for_event",
+      async ({ request }) => this.eventWaitTools.waitForEvent(request.input),
+      serialSchedulerSpec,
+    );
+    register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
       serialSchedulerSpec,
@@ -4185,12 +4486,19 @@ export class ToolRegistry {
    * Callback for handling workspace switches (set by executor)
    */
   private workspaceSwitchHandler?: (newWorkspace: Workspace) => Promise<void>;
+  /** Why this task may not switch workspaces at all, checked before any lookup or creation. */
+  private workspaceSwitchRefusal?: () => string | undefined;
 
   /**
-   * Set the callback for handling workspace switches
+   * Set the callback for handling workspace switches, and optionally a check that refuses any
+   * switch for this task (a bot working in its own folder).
    */
-  setWorkspaceSwitchHandler(handler: (newWorkspace: Workspace) => Promise<void>): void {
+  setWorkspaceSwitchHandler(
+    handler: (newWorkspace: Workspace) => Promise<void>,
+    refusal?: () => string | undefined,
+  ): void {
     this.workspaceSwitchHandler = handler;
+    this.workspaceSwitchRefusal = refusal;
   }
 
   /**
@@ -4217,6 +4525,8 @@ export class ToolRegistry {
         error: "Workspace switching is not available in this context",
       };
     }
+    const refusal = this.workspaceSwitchRefusal?.();
+    if (refusal) return { success: false, error: refusal };
 
     try {
       // Look up the workspace
@@ -4875,7 +5185,11 @@ ${
   hasAnyVisibleTools("manage_connector_events")
     ? "- manage_connector_events: Discover connected MCP event types, subscribe with saved instructions, continue this task on delivery, and stop monitoring when asked"
     : ""
-}
+}${
+      hasAnyVisibleTools("wait_for_event")
+        ? "\n- wait_for_event: Pause this task until a workspace file change, GitHub event or webhook arrives, instead of polling or sleeping; then finish the turn"
+        : ""
+    }
 
 ${
   hasAnyVisibleTools(
@@ -4961,7 +5275,7 @@ Channel Message Log (Local Gateway):
 - set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
     // Add skills available through the Skill tool
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const availableToolNames = new Set(this.getTools().map((tool) => tool.name));
     const resolvedSkillShortlistSize =
       typeof options?.skillShortlistSize === "number" && Number.isFinite(options.skillShortlistSize)
@@ -5485,6 +5799,7 @@ ${skillDescriptions}`;
 
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
+    if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Canvas tools
@@ -5892,7 +6207,7 @@ ${skillDescriptions}`;
     }
 
     // MCP tools (prefixed with mcp_ by default)
-    const mcpToolResult = await this.tryExecuteMCPTool(name, input);
+    const mcpToolResult = await this.tryExecuteMCPTool(name, input, _runtime);
     if (mcpToolResult !== null) {
       return mcpToolResult;
     }
@@ -6055,9 +6370,14 @@ ${skillDescriptions}`;
 
     try {
       const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
+      const toolAttempt = readToolAttempt(runtime);
       const result = await mcpManager.callTool(mcpToolName, input, {
         signal,
         beforeSend,
+        // The same call retried carries the same key, so the server can avoid acting twice.
+        ...(toolAttempt
+          ? { idempotencyKey: toolAttempt.idempotencyKey, attemptId: toolAttempt.attemptId }
+          : {}),
         onElicitation: async (request) => {
           const server = request.computerUseApp ? this.getCodexConsentServer(name) : null;
           if (server && request.computerUseApp) {
@@ -6129,8 +6449,54 @@ ${skillDescriptions}`;
           return approved === true ? { action: "accept", content: {} } : { action: "decline" };
         },
       });
+      // A write the server could not confirm (an error result with `status: "unknown"`, the
+      // connector contract in docs/enterprise-connectors.md) is an unknown outcome: recorded as
+      // such and checked before any retry. Read calls carry no attempt, so their data is untouched.
+      const structured = result?.structuredContent as
+        | { status?: unknown; message?: unknown }
+        | undefined;
+      if (toolAttempt && result?.isError === true && structured?.status === "unknown") {
+        const detail =
+          typeof structured.message === "string"
+            ? structured.message.slice(0, 300)
+            : "the server could not confirm the write";
+        throw new Error(`Outcome unknown: ${detail}`);
+      }
+      // A write's receipt (ids, read-back) becomes evidence for the task (WP13).
+      const receipt = parseWriteReceipt(result);
+      if (receipt) {
+        this.daemon.recordToolReceipt?.(this.taskId, {
+          tool: mcpToolName,
+          serverName: routedServer?.name,
+          receipt,
+          ...(toolAttempt ? { idempotencyKey: toolAttempt.idempotencyKey } : {}),
+        });
+      }
       // Format MCP result and process any generated files
-      return await this.formatMCPResult(result, mcpToolName, input);
+      const formatted = await this.formatMCPResult(result, mcpToolName, input);
+      if (routedServer && isMeshyServerConfig(routedServer) && result) {
+        const meshyTool = mcpManager
+          .getAllTools()
+          .find((candidate) => candidate.name === mcpToolName);
+        return await applyMeshyToolResult(formatted, {
+          tool: meshyTool?.serverToolName ?? mcpToolName,
+          input,
+          result,
+          workspacePath: this.workspace.path,
+          chatTaskId: this.taskId,
+          library: getMeshyService().getLibrary(),
+          onWorkspaceFile: async (relativePath, absolutePath, mimeType) => {
+            this.daemon.logEvent(this.taskId, "file_created", {
+              path: relativePath,
+              type: "model",
+              source: "mcp",
+              mimeType,
+            });
+            await this.daemon.registerArtifact(this.taskId, absolutePath, mimeType);
+          },
+        });
+      }
+      return formatted;
     } catch (error: Any) {
       const message = String(error?.message || "");
       if (isConnectorBlockedError(error)) {
@@ -6156,6 +6522,55 @@ ${skillDescriptions}`;
       }
       // Tool was registered but execution failed - propagate the error with context
       throw new Error(`MCP tool '${mcpToolName}' failed: ${message}`);
+    }
+  }
+
+  /**
+   * Ask a connector what a write would do, before the approval (WP13). Only for tools that
+   * advertise `_meta["cowork.preview"]` on a local (stdio) server: a remote server would receive
+   * the arguments before the user approved sending them. The connector does nothing in this
+   * call, and its answer is its own description, so the approval labels it as such. Any failure
+   * leaves the arguments preview.
+   */
+  private async fetchMcpWritePreview(
+    name: string,
+    input: unknown,
+    serverName: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<{
+    approvalPreview: { label: string; text: string };
+    prepared: ApplicationPreparedChange;
+  } | null> {
+    try {
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || "mcp_";
+      if (!name.startsWith(prefix)) return null;
+      const mcpManager = MCPClientManager.getInstance();
+      const mcpToolName = name.slice(prefix.length);
+      const tool = mcpManager.getAllTools().find((candidate) => candidate.name === mcpToolName);
+      if (!supportsWritePreview(tool)) return null;
+      const serverId = mcpManager.getServerIdForTool(mcpToolName);
+      const server = settings.servers?.find((candidate) => candidate.id === serverId);
+      if (server?.transport !== "stdio") return null;
+      const result = await Promise.race([
+        mcpManager.callTool(mcpToolName, (input ?? {}) as Record<string, Any>, {
+          preview: true,
+          ...(signal ? { signal } : {}),
+        }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), MCP_PREVIEW_TIMEOUT_MS)),
+      ]);
+      const prepared = parseWritePreview(result);
+      if (!prepared) return null;
+      return {
+        approvalPreview: {
+          // The approval card caps labels at 40 characters.
+          label: `Described by ${serverName || server.name}`,
+          text: renderWritePreview(prepared),
+        },
+        prepared,
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -6411,8 +6826,23 @@ ${skillDescriptions}`;
     return application;
   }
 
+  /** Skills as this task sees them: shared skills plus this workspace's `skills/` folder. */
+  private getSkillLoader() {
+    return getCustomSkillLoader().forWorkspace(this.workspace?.path);
+  }
+
+  /**
+   * Where skill_create and skill_duplicate save new skills: the shared loader's folder
+   * (the managed skills folder), so a skill the agent creates is available in every
+   * workspace as before. Workspace skills are saved through approved skill proposals.
+   */
+  private getSkillCreationDir(): string {
+    const sharedLoader = getCustomSkillLoader();
+    return sharedLoader.getWorkspaceSkillsDir() || sharedLoader.getManagedSkillsDir();
+  }
+
   private buildSkillRuntimeDescriptor(skill: CustomSkill) {
-    return getCustomSkillLoader().getRuntimeSkillDescriptor(skill);
+    return this.getSkillLoader().getRuntimeSkillDescriptor(skill);
   }
 
   private resolveSkillArgsToParameters(
@@ -6534,7 +6964,7 @@ ${skillDescriptions}`;
     args?: string;
     trigger?: SkillApplicationTrigger;
   }): Promise<Any> {
-    const skill_id = String(input.skill || "").trim();
+    const requestedSkillId = String(input.skill || "").trim();
     const rawArgs = String(input.args || "").trim();
     const trigger: SkillApplicationTrigger =
       input.trigger === "slash" ||
@@ -6546,18 +6976,34 @@ ${skillDescriptions}`;
     const isManualInvocation = trigger === "slash";
     const isAutomaticInvocation = !isManualInvocation;
 
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
+    // A model that knows a skill only from its description often guesses the ID
+    // ("unity-in-app-purchases" for "unity:implement-in-app-purchases"). When the guess
+    // matches exactly one skill on every meaningful word, load that skill instead of failing.
+    const resolvedSkillId =
+      isAutomaticInvocation && !skillLoader.getSkill(requestedSkillId)
+        ? resolveGuessedSkillId(requestedSkillId, skillLoader.listModelInvocableSkills())
+        : null;
+    const skill_id = resolvedSkillId ?? requestedSkillId;
+    const resolvedFrom = resolvedSkillId ? { resolved_from: requestedSkillId } : {};
     const skill = skillLoader.getSkill(skill_id);
     const descriptor = skill ? this.buildSkillRuntimeDescriptor(skill) : null;
 
     if (!skill) {
-      // List available skills to help the agent
+      // List available skills to help the agent. Models often guess an ID from a skill's
+      // description ("unity-in-app-purchases" for "unity:implement-in-app-purchases"), and
+      // the first 20 skills rarely include the intended one, so lead with close matches.
       const availableSkills = skillLoader.listRuntimeSkillDescriptors().map((entry) => entry.name);
+      const closestSkillIds = suggestSkillIds(skill_id, skillLoader.listModelInvocableSkills());
       return {
         success: false,
         error: `Skill '${skill_id}' not found`,
+        ...(closestSkillIds.length > 0 ? { did_you_mean: closestSkillIds } : {}),
         available_skills: availableSkills.slice(0, 20), // Show up to 20 skills
-        hint: "Use one of the listed skill IDs exposed through the Skill tool.",
+        hint:
+          closestSkillIds.length > 0
+            ? `Retry Skill with the exact ID, for example '${closestSkillIds[0]}'.`
+            : "Use one of the listed skill IDs exposed through the Skill tool.",
       };
     }
 
@@ -6789,6 +7235,7 @@ ${skillDescriptions}`;
       return {
         success: true,
         skill: skill_id,
+        ...resolvedFrom,
         skill_name: skill.name,
         message: `Loaded skill '${skill.name}' for this task.`,
         application_summary:
@@ -6841,8 +7288,11 @@ ${skillDescriptions}`;
     return {
       success: true,
       skill: skill_id,
+      ...resolvedFrom,
       skill_name: skill.name,
-      message: `Loaded skill '${skill.name}' for this task.`,
+      message: resolvedSkillId
+        ? `Loaded skill '${skill.name}' (ID '${skill_id}'; '${requestedSkillId}' does not exist) for this task.`
+        : `Loaded skill '${skill.name}' for this task.`,
       application_summary: `Loaded skill "${skill.name}" as hidden context for the current task.`,
       skill_invocation_id: invocationId,
     };
@@ -6960,7 +7410,7 @@ ${skillDescriptions}`;
       return skill.invocation?.userInvocable !== false;
     }
 
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     try {
       const task = await this.daemon.getTaskById(this.taskId);
       const prompt =
@@ -6980,7 +7430,7 @@ ${skillDescriptions}`;
     include_disabled?: boolean;
   }): Promise<Any> {
     const { source = "all", include_disabled = true } = input;
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
 
     let skills = skillLoader.listSkills();
 
@@ -7029,7 +7479,7 @@ ${skillDescriptions}`;
    */
   private async executeSkillGet(input: { skill_id: string }): Promise<Any> {
     const { skill_id } = input;
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const skill = skillLoader.getSkill(skill_id);
 
     if (!skill) {
@@ -7088,7 +7538,7 @@ ${skillDescriptions}`;
     }>;
     enabled?: boolean;
   }): Promise<Any> {
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
 
     // Check if skill with this ID already exists
     const existing = skillLoader.getSkill(input.id);
@@ -7115,13 +7565,12 @@ ${skillDescriptions}`;
     }
 
     try {
-      const storageDirectory =
-        skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
+      const storageDirectory = this.getSkillCreationDir();
       await this.assertSkillFilesystemAccess(
         path.join(storageDirectory, `${input.id}.json`),
         "write",
       );
-      const newSkill = await skillLoader.createSkill({
+      const newSkill = await getCustomSkillLoader().createSkill({
         id: input.id,
         name: input.name,
         description: input.description,
@@ -7171,7 +7620,7 @@ ${skillDescriptions}`;
     };
   }): Promise<Any> {
     const { source_skill_id, new_id, modifications = {} } = input;
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
 
     // Get the source skill
     const sourceSkill = skillLoader.getSkill(source_skill_id);
@@ -7206,14 +7655,13 @@ ${skillDescriptions}`;
       if (sourceSkill.filePath && sourceSkill.source !== "bundled") {
         await this.assertSkillFilesystemAccess(sourceSkill.filePath, "read", "source skill");
       }
-      const storageDirectory =
-        skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
+      const storageDirectory = this.getSkillCreationDir();
       await this.assertSkillFilesystemAccess(
         path.join(storageDirectory, `${new_id}.json`),
         "write",
       );
       // Create the duplicated skill with modifications
-      const newSkill = await skillLoader.createSkill({
+      const newSkill = await getCustomSkillLoader().createSkill({
         id: new_id,
         name: modifications.name || `${sourceSkill.name} (Copy)`,
         description: modifications.description || sourceSkill.description,
@@ -7270,7 +7718,7 @@ ${skillDescriptions}`;
     };
   }): Promise<Any> {
     const { skill_id, updates } = input;
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
 
     const skill = skillLoader.getSkill(skill_id);
     if (!skill) {
@@ -7333,7 +7781,7 @@ ${skillDescriptions}`;
    */
   private async executeSkillDelete(input: { skill_id: string }): Promise<Any> {
     const { skill_id } = input;
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
 
     const skill = skillLoader.getSkill(skill_id);
     if (!skill) {
@@ -7389,29 +7837,95 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Ask the user to approve one skill proposal before it is saved as a skill. The request
+   * goes through daemon.requestApproval, which evaluates the PermissionEngine first: a deny
+   * rule, Plan mode or a profile that never asks refuses it, and explicit consent keeps an
+   * allow rule or a standing approval from answering for the user. The preview is the draft
+   * exactly as it will be written.
+   */
+  private async requestSkillProposalApproval(
+    proposal: SkillProposalRecord,
+    skillPath: string,
+    replacesSkillId: string | null,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (typeof this.daemon?.requestApproval !== "function" || signal?.aborted) return false;
+    const draft = proposal.draftSkill;
+    const previewLines = [
+      `Name: ${draft.name}`,
+      `ID: ${draft.id}`,
+      `Description: ${draft.description}`,
+      ...(proposal.requiredTools.length > 0
+        ? [`Required tools: ${proposal.requiredTools.join(", ")}`]
+        : []),
+      ...(proposal.riskNote ? [`Risk note: ${proposal.riskNote}`] : []),
+      `Evidence: ${proposal.evidenceStatus}`,
+      ...proposal.evidence.slice(0, 10).map((entry) => `- ${entry}`),
+      ...(Array.isArray(draft.parameters) && draft.parameters.length > 0
+        ? [`Parameters: ${JSON.stringify(draft.parameters)}`]
+        : []),
+      "",
+      "Prompt:",
+      draft.prompt,
+    ];
+    const description = replacesSkillId
+      ? `Replace skill "${replacesSkillId}" with the proposed "${draft.name}"? Later tasks will use it.`
+      : `Save the proposed skill "${draft.name}"? Later tasks will be able to use it.`;
+    try {
+      return (
+        (await this.daemon.requestApproval(
+          this.taskId,
+          "risk_gate",
+          description,
+          {
+            tool: "skill_proposal",
+            params: { action: "approve", proposal_id: proposal.id },
+            proposalId: proposal.id,
+            skillId: draft.id,
+            skillPath,
+            ...(replacesSkillId ? { replacesSkillId } : {}),
+            approvalPreview: { label: "Skill", text: previewLines.join("\n") },
+          },
+          {
+            allowAutoApprove: false,
+            requireExplicitApproval: true,
+            noStandingApproval: true,
+            signal,
+          },
+        )) === true
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Manage approval-gated skill proposals
    */
-  private async executeSkillProposal(input: {
-    action?: "create" | "list" | "approve" | "reject" | "eval";
-    proposal_id?: string;
-    status?: "pending" | "approved" | "rejected" | "all";
-    problem_statement?: string;
-    evidence?: string[];
-    required_tools?: string[];
-    risk_note?: string;
-    draft_skill?: {
-      id?: string;
-      name?: string;
-      description?: string;
-      prompt?: string;
-      icon?: string;
-      category?: string;
-      parameters?: Any[];
-      enabled?: boolean;
-    };
-    eval_cases?: SkillEvalCase[];
-    rejection_reason?: string;
-  }): Promise<Any> {
+  private async executeSkillProposal(
+    input: {
+      action?: "create" | "list" | "approve" | "reject" | "eval";
+      proposal_id?: string;
+      status?: "pending" | "approved" | "rejected" | "all";
+      problem_statement?: string;
+      evidence?: string[];
+      required_tools?: string[];
+      risk_note?: string;
+      draft_skill?: {
+        id?: string;
+        name?: string;
+        description?: string;
+        prompt?: string;
+        icon?: string;
+        category?: string;
+        parameters?: Any[];
+        enabled?: boolean;
+      };
+      eval_cases?: SkillEvalCase[];
+      rejection_reason?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<Any> {
     const action = input.action || "list";
     const proposalsPath = path.join(this.workspace.path, ".cowork", "skills", "proposals");
     const evalsPath = path.join(this.workspace.path, ".cowork", "skills", "evals");
@@ -7588,20 +8102,14 @@ ${skillDescriptions}`;
         };
       }
 
-      const skillLoader = getCustomSkillLoader();
-      // Enforce workspace-scoped materialization for approved proposals.
-      skillLoader.setWorkspaceSkillsDir(this.workspace.path);
+      const skillLoader = this.getSkillLoader();
       const existing = skillLoader.getSkill(proposal.draftSkill.id);
-      const workspaceSkillsDirectory =
-        typeof (skillLoader as Any).getWorkspaceSkillsDir === "function"
-          ? skillLoader.getWorkspaceSkillsDir()
-          : null;
+      // Approved proposals materialize in this workspace's skill folder, the one this
+      // task's workspace view of the loader reads. Nothing is written until the user
+      // approves, and other workspaces never see the saved skill.
       const materializationPath =
         existing?.filePath ||
-        path.join(
-          workspaceSkillsDirectory || path.join(this.workspace.path, "skills"),
-          `${proposal.draftSkill.id}.json`,
-        );
+        path.join(this.workspace.path, "skills", `${proposal.draftSkill.id}.json`);
       try {
         await this.assertSkillFilesystemAccess(
           materializationPath,
@@ -7617,17 +8125,41 @@ ${skillDescriptions}`;
         };
       }
 
+      if (existing?.source === "bundled") {
+        return {
+          success: false,
+          action,
+          message:
+            `Cannot apply proposal to bundled skill '${existing.id}'. ` +
+            "Duplicate the skill first or choose a different id.",
+        };
+      }
+
+      // Only the user approves a proposal, never the agent that drafted it. The checks above
+      // run first so the user is asked only about a proposal that can be applied, and the
+      // draft shown in the request is the in-memory copy materialized below.
+      const userApproved = await this.requestSkillProposalApproval(
+        proposal,
+        materializationPath,
+        existing ? existing.id : null,
+        signal,
+      );
+      if (!userApproved) {
+        this.daemon.logEvent(this.taskId, "log", {
+          message: `Skill proposal '${proposal.id}' was not approved`,
+          proposalId: proposal.id,
+        });
+        return {
+          success: false,
+          action,
+          approval_denied: true,
+          message:
+            "This skill proposal was not approved: the user declined it, or this task cannot ask for approval. No skill was saved and the proposal stays pending; do not retry unless the user asks to review it.",
+        };
+      }
+
       let materializedSkill: Any;
       if (existing) {
-        if (existing.source === "bundled") {
-          return {
-            success: false,
-            action,
-            message:
-              `Cannot apply proposal to bundled skill '${existing.id}'. ` +
-              "Duplicate the skill first or choose a different id.",
-          };
-        }
         materializedSkill = await skillLoader.updateSkill(existing.id, {
           name: proposal.draftSkill.name,
           description: proposal.draftSkill.description,
@@ -7842,7 +8374,8 @@ ${skillDescriptions}`;
         name: "read_files",
         description:
           "Read multiple files in one call using glob patterns. Useful for quickly attaching context without many read_file calls. " +
-          'Supports exclusion patterns by prefixing with "!". Example: ["src/**/*.ts", "!src/**/__tests__/**"].',
+          'Supports exclusion patterns by prefixing with "!". Example: ["src/**/*.ts", "!src/**/__tests__/**"]. ' +
+          "For truncated files, continue with read_file using path and nextStartChar when present; otherwise re-read the file in smaller windows.",
         input_schema: {
           type: "object",
           properties: {
@@ -8638,7 +9171,7 @@ ${skillDescriptions}`;
         name: "skill_proposal",
         description:
           "Manage approval-gated skill proposals. Create proposals for missing capabilities, list pending proposals, evaluate drafts, and approve/reject proposals. " +
-          "Skill mutations happen only after explicit approve.",
+          "approve asks the user to review the draft and saves the skill only if they approve it; a declined proposal stays pending.",
         input_schema: {
           type: "object",
           properties: {
@@ -10866,7 +11399,14 @@ ${skillDescriptions}`;
     if (!validTypes.includes(type)) {
       throw new Error(`Invalid rule type: ${type}. Valid: ${validTypes.join(", ")}`);
     }
-    const rule = String(input.rule ?? "").trim();
+    // The rule is written into the personality prompt of every later task, like a quirk, so it
+    // gets the same length cap and instruction-override filter as set_quirks.
+    const MAX_RULE_LENGTH = 300;
+    const rawRule = String(input.rule ?? "");
+    if (rawRule.length > MAX_RULE_LENGTH) {
+      throw new Error(`Rule too long (max ${MAX_RULE_LENGTH} characters, got ${rawRule.length})`);
+    }
+    const rule = this.sanitizeQuirkInput(rawRule);
     if (!rule) {
       throw new Error("Rule text cannot be empty");
     }
@@ -10887,7 +11427,15 @@ ${skillDescriptions}`;
     success: boolean;
     message: string;
   } {
-    const domain = String(input.domain ?? "").trim();
+    // The domain lands in every later personality prompt too: same cap and filter as a quirk.
+    const MAX_DOMAIN_LENGTH = 100;
+    const rawDomain = String(input.domain ?? "");
+    if (rawDomain.length > MAX_DOMAIN_LENGTH) {
+      throw new Error(
+        `Domain too long (max ${MAX_DOMAIN_LENGTH} characters, got ${rawDomain.length})`,
+      );
+    }
+    const domain = this.sanitizeQuirkInput(rawDomain);
     if (!domain) {
       throw new Error("Domain cannot be empty");
     }

@@ -81,6 +81,7 @@ import {
 import mime from "mime-types";
 import { attachImageContextMenu } from "./utils/image-context-menu";
 import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
+import { closeMontyPool } from "./sandbox/monty-engine";
 import { installStdioErrorGuards } from "./utils/stdio-error-guards";
 import { DatabaseManager } from "./database/schema";
 import {
@@ -127,6 +128,8 @@ import { RecurringApprovalService } from "./security/recurring-approval-reposito
 import { ProactiveSuggestionsService } from "./agent/ProactiveSuggestionsService";
 import { AgentDaemon } from "./agent/daemon";
 import { approvalPromptsDisabled } from "./agent/approval-policy";
+import { composerFollowUpProvenance } from "./agent/follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT } from "./agent/task-prompt-provenance";
 
 import { CoreMemoryCandidateService } from "./core/CoreMemoryCandidateService";
 
@@ -195,6 +198,7 @@ import { DurableContextService } from "./memory/DurableContextService";
 import { BoxBrainService } from "./memory/BoxBrainService";
 import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
+import { MemorySourceRecheckService } from "./memory/MemorySourceRecheckService";
 import { startMemoryEngine } from "./memory/memory-engine-bootstrap";
 import { startMemoryRepo, stopMemoryRepo } from "./memory/repo/memory-repo-bootstrap";
 import { getMemoryRepoDreamer } from "./memory/repo/MemoryRepoDreamer";
@@ -262,15 +266,20 @@ import { getBrowserWorkbenchService } from "./browser/browser-workbench-service"
 import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
 import { getBrowserSessionManager } from "./browser/browser-session-manager";
 import { attachBrowserGuest } from "./browser/browser-guest-attach";
+import { attachBrowserColorScheme } from "./browser/browser-color-scheme";
+import { resolveBrowserColorScheme } from "../shared/browser-settings";
 import { BrowserUnloadGuard } from "./browser/browser-unload-guard";
 import { BrowserScreenShare } from "./browser/browser-screen-share";
 import { BrowserTabViewHost, setBrowserTabViewHost } from "./browser/browser-tab-views";
+import { popupBrowserToolbarMenu } from "./browser/browser-toolbar-menu";
+import { BROWSER_TOOLBAR_MENU_POPUP } from "../shared/browser-toolbar-menu";
 import { applyBrowserUserAgent } from "./browser/browser-user-agent";
 import { BrowserDownloadManager } from "./browser/browser-download-manager";
 import {
   createBrowserHistoryRecorder,
   registerBrowserPlatformIpc,
 } from "./browser/browser-platform-ipc";
+import { registerLifecycleIpc } from "./lifecycle/lifecycle-ipc";
 import {
   registerBrowserCredentialsIpc,
   shredFileOnDisk,
@@ -723,6 +732,22 @@ function prepareBrowserWorkbenchPartition(partition: string): Electron.Session {
 
 /** Guest handling for an in-app browser page: the same for a <webview> tab and a native tab view. */
 function attachBrowserWorkbenchGuest(guest: Electron.WebContents, partition: string): void {
+  attachBrowserColorScheme(guest, {
+    getPreference: () =>
+      resolveBrowserColorScheme(
+        BrowserSettingsManager.loadSettings().colorScheme,
+        AppearanceManager.loadSettings().themeMode,
+      ),
+    subscribe: (listener) => {
+      const stopBrowser = BrowserSettingsManager.onChange(listener);
+      const stopAppearance = AppearanceManager.onChange(listener);
+      return () => {
+        stopBrowser();
+        stopAppearance();
+      };
+    },
+    apply: (colorScheme) => getBrowserSessionManager().setContentsColorScheme(guest, colorScheme),
+  });
   const profileKey = browserProfileKeyFromPartition(partition) || "default";
   attachBrowserGuest(guest, {
     service: getBrowserWorkbenchService(),
@@ -2186,7 +2211,9 @@ if (isMacSafeStorageMigrationWorker) {
                 "default-src 'self'; " +
                   "script-src 'self'; " +
                   "style-src 'self' 'unsafe-inline'; " + // Allow inline styles for React
-                  "img-src 'self' data: media: https:; " + // Allow images from self, data URIs, HTTPS, and preview media URLs
+                  // blob: is for textures inside a .glb, which the 3D viewer decodes from
+                  // object URLs it creates itself (model-stage.ts).
+                  "img-src 'self' data: blob: media: https:; " + // Allow images from self, data URIs, HTTPS, and preview media URLs
                   "font-src 'self' data:; " + // Allow fonts from self and data URIs
                   "connect-src 'self' https:; " + // Allow API calls to HTTPS endpoints
                   "media-src 'self' data: blob: media: https:; " + // Allow inline video previews via blob/data URLs and the media:// protocol
@@ -2551,6 +2578,10 @@ if (isMacSafeStorageMigrationWorker) {
         // Quiet mode starts no background jobs: no periodic cleanup or deferred archive cleanup.
         MemoryService.initialize(dbManager, { backgroundJobs: !startupQuietMode });
         CuratedMemoryService.initialize(dbManager);
+        // Memories whose source file or record changed (WP15): flags for recall and prompts.
+        void MemorySourceRecheckService.getDefault()
+          .load()
+          .catch((error) => logger.warn("Could not load memory source flags:", error));
         // Memory engine (docs/memory-engine.md): memory_items is the only store of facts
         // about the user. The retired legacy lanes are copied in once, awaited here, before
         // queue recovery and IPC can read memory.
@@ -4062,10 +4093,13 @@ if (isMacSafeStorageMigrationWorker) {
                 logger.warn("[EventTriggers] Could not record routine trigger fire:", error);
               });
             },
+            onEventWaitFired: (params) => agentDaemon.resumeAfterEventWait(params),
           },
           db,
         );
         const currentTriggerService = eventTriggerService;
+        // wait_for_event parks tasks on temporary triggers in this engine.
+        agentDaemon.setEventWaitRegistry?.(currentTriggerService);
         const mcpClientManager = MCPClientManager.getInstance();
         const syncMcpTriggerSubscriptions = async (): Promise<void> => {
           const subscriptions = currentTriggerService
@@ -4109,6 +4143,12 @@ if (isMacSafeStorageMigrationWorker) {
             void currentTriggerService
               .evaluateEvent(triggerEvent)
               .catch((error) => logger.warn("Connector trigger event failed:", error));
+          }
+          // A connector record changed: memories saved from it are flagged (WP15).
+          if (event.type === "resource_updated" && event.resourceUri) {
+            void MemorySourceRecheckService.getDefault()
+              .onConnectorRecordChanged(event.resourceUri)
+              .catch((error) => logger.debug("Memory source recheck failed:", error));
           }
         });
         void syncMcpTriggerSubscriptions();
@@ -4314,6 +4354,21 @@ if (isMacSafeStorageMigrationWorker) {
           },
           emitTrigger: (event) => {
             void currentTriggerService.evaluateEvent(event);
+            // A workspace file changed: memories saved from it are flagged (WP15).
+            const workspaceId = String(event.fields.workspaceId ?? "");
+            const relPath = String(event.fields.path ?? "");
+            if (event.source === "file_change" && workspaceId && relPath) {
+              const workspacePath = workspaceRepo.findById(workspaceId)?.path;
+              if (workspacePath) {
+                void MemorySourceRecheckService.getDefault()
+                  .onFileChanged({
+                    workspaceId,
+                    relPath,
+                    absolutePath: path.join(workspacePath, relPath),
+                  })
+                  .catch((error) => logger.debug("Memory source recheck failed:", error));
+              }
+            }
           },
           wakeHeartbeats: ({ text, mode, workspaceId, category }) => {
             void submitHeartbeatSignalForAll({
@@ -4570,6 +4625,9 @@ if (isMacSafeStorageMigrationWorker) {
                   workspaceId,
                   ...(accessProfileId ? { agentConfig: { accessProfileId } } : {}),
                   source: "api",
+                  // Web Access is the owner's composer in a browser: the prompt is typed and may
+                  // expose the admin-lane tools (Task.promptProvenance).
+                  ...USER_TYPED_TASK_PROMPT,
                 });
               }
               case "task:get": {
@@ -4595,6 +4653,8 @@ if (isMacSafeStorageMigrationWorker) {
                       | "accessProfileId"
                       | "integrationMentions"
                       | "expectedTurnId"
+                      | "surfaceOrigin"
+                      | "textProvenance"
                     >
                   | undefined;
                 try {
@@ -4619,6 +4679,9 @@ if (isMacSafeStorageMigrationWorker) {
                     ...(sanitized.integrationMentions !== undefined
                       ? { integrationMentions: sanitized.integrationMentions }
                       : {}),
+                    // Web Access is the owner's composer in a browser: typed unless an answer
+                    // surface sent it. Only typed text can expose the admin-lane tools.
+                    ...composerFollowUpProvenance(sanitized.surfaceOrigin),
                   };
                 } catch (err) {
                   throw new Error(
@@ -5044,6 +5107,7 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "local previews", run: () => getLocalPreviewProcessService().stopAll() },
+        { name: "monty sandbox", run: () => closeMontyPool() },
         { name: "host perf monitor", run: () => hostPerfMonitor?.stop() },
         {
           name: "database worker",
@@ -5327,6 +5391,10 @@ if (isMacSafeStorageMigrationWorker) {
         bounds: tabId ? readBounds(data.bounds) : null,
       });
     });
+    ipcMain.handle(BROWSER_TOOLBAR_MENU_POPUP, (event, data: Any) => {
+      if (!mainWindow || event.sender.id !== mainWindow.webContents.id || !data) return null;
+      return popupBrowserToolbarMenu(mainWindow, data);
+    });
     ipcMain.handle(IPC_CHANNELS.BROWSER_TAB_VIEW_CAPTURE, async (event, data: Any) => {
       const key = readTabViewKey(event, data);
       return key ? getBrowserTabViewHost().capture(key) : null;
@@ -5400,6 +5468,28 @@ if (isMacSafeStorageMigrationWorker) {
       service: getBrowserWorkbenchService(),
       downloads: getBrowserDownloadManager(),
       sessionFromPartition: (partition) => session.fromPartition(partition),
+      confirmAgentKeyRotation: async () => {
+        const options: Electron.MessageBoxOptions = {
+          type: "warning",
+          buttons: ["Create new key", "Cancel"],
+          defaultId: 1,
+          cancelId: 1,
+          message: "Create a new agent identity key?",
+          detail:
+            "Sites verify CoWork's signatures with the key in your published directory. Publish the new directory before sites see the new key; the old key stays listed for 7 days.",
+        };
+        const result =
+          mainWindow && !mainWindow.isDestroyed()
+            ? await dialog.showMessageBox(mainWindow, options)
+            : await dialog.showMessageBox(options);
+        return result.response === 0;
+      },
+    });
+    registerLifecycleIpc({
+      ipcMain,
+      getDatabase: () => dbManager.getDatabase(),
+      getCronService: () => cronService,
+      getTriggerService: () => eventTriggerService,
     });
     const isVaultOwner = (event: Any) =>
       Boolean(
@@ -5757,8 +5847,23 @@ if (isMacSafeStorageMigrationWorker) {
         screenshotPath: typeof data.screenshotPath === "string" ? data.screenshotPath : undefined,
         createdBy:
           data.createdBy === "agent" || data.createdBy === "review" ? data.createdBy : "user",
+        intent:
+          data.intent === "change" || data.intent === "comment" || data.intent === "question"
+            ? data.intent
+            : undefined,
+        // Bounded by the store: string values only, 50 keys.
+        before: data.before && typeof data.before === "object" ? data.before : undefined,
+        after: data.after && typeof data.after === "object" ? data.after : undefined,
       });
       logAnnotationEvent("annotation_created", annotation);
+      // A file target: record the revision the user pointed at, so the change can be undone.
+      if (surfaceType === "file" || surfaceType === "artifact" || surfaceType === "diff") {
+        try {
+          return (await agentDaemon.pinAnnotationTarget(annotation.id)) ?? annotation;
+        } catch (error) {
+          console.warn("[Annotations] Could not record the pointed-at revision:", error);
+        }
+      }
       return annotation;
     });
 
@@ -5795,6 +5900,14 @@ if (isMacSafeStorageMigrationWorker) {
       });
       if (annotation) logAnnotationEvent("annotation_resolved", annotation);
       return annotation || null;
+    });
+
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_UNDO, async (_event, data: Any) => {
+      const id = typeof data?.id === "string" ? data.id.trim() : "";
+      const undoToken = typeof data?.undoToken === "string" ? data.undoToken.trim() : "";
+      if (!id) throw new Error("Annotation id is required");
+      if (!undoToken) throw new Error("Undo token is required");
+      return await agentDaemon.undoAnnotationChange(id, undoToken);
     });
 
     ipcMain.handle(IPC_CHANNELS.ANNOTATION_DISMISS, async (_event, data: Any) => {

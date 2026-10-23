@@ -25,6 +25,22 @@ function event(
 }
 
 describe("deriveRevisionAwarePlanSteps", () => {
+  it("uses the latest new-run boundary when a previous follow-up already had a plan", () => {
+    const history = [
+      event("previous-run", 1, "task_resumed", { newRunStarted: true }),
+      event("previous-plan", 2, "plan_created", {
+        plan: { steps: [{ id: "previous", description: "Previous follow-up", status: "pending" }] },
+      }),
+      event("current-run", 3, "task_resumed", { newRunStarted: true }),
+      event("current-plan", 4, "plan_created", {
+        plan: { steps: [{ id: "current", description: "Current follow-up", status: "pending" }] },
+      }),
+    ];
+    const original = structuredClone(history);
+    expect(deriveRevisionAwarePlanSteps(history)).toMatchObject([{ id: "current" }]);
+    expect(history).toEqual(original);
+  });
+
   it("fences the previous failed plan at a new follow-up run and accepts a fresh plan", () => {
     const history = [
       event("old-plan", 1, "plan_created", {

@@ -6,11 +6,13 @@
 import os from "os";
 import path from "path";
 import * as fs from "fs/promises";
-import type {
-  ImageAttachment,
-  IntegrationMentionSelection,
-  PermissionMode,
-  QuotedAssistantMessage,
+import {
+  isMessageSurfaceOrigin,
+  type ImageAttachment,
+  type IntegrationMentionSelection,
+  type MessageSurfaceOrigin,
+  type PermissionMode,
+  type QuotedAssistantMessage,
 } from "../../shared/types";
 import type { AccessProfileId } from "../../shared/access-profiles";
 import { ErrorCodes } from "./protocol";
@@ -40,6 +42,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
   accessProfileId?: AccessProfileId;
   shellAccess?: boolean;
   integrationMentions?: IntegrationMentionSelection[];
+  surfaceOrigin?: MessageSurfaceOrigin;
 } {
   const p = (params ?? {}) as Record<string, unknown>;
   const modeResult = InteractionModeSchema.optional().safeParse(p.interactionMode);
@@ -142,6 +145,14 @@ export function sanitizeTaskMessageParams(params: unknown): {
     integrationMentions = parsed.data;
   }
 
+  // A remote device's composer says when an answer surface sent the text (a button the model
+  // wrote, page code, shell output). Without it the text counts as typed by the user, so an
+  // origin this build does not know is refused rather than dropped.
+  if (p.surfaceOrigin !== undefined && !isMessageSurfaceOrigin(p.surfaceOrigin)) {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid surfaceOrigin" };
+  }
+  const surfaceOrigin = p.surfaceOrigin as MessageSurfaceOrigin | undefined;
+
   return {
     taskId,
     message,
@@ -156,6 +167,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
     accessProfileId,
     shellAccess,
     integrationMentions,
+    surfaceOrigin,
   };
 }
 

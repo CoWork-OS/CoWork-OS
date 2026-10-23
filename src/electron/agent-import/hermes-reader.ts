@@ -9,14 +9,16 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { load as loadYaml } from "js-yaml";
+import { load as loadYaml, YAML11_SCHEMA } from "js-yaml";
 import {
   IMPORT_PROVIDER_LABELS,
+  modelProviderLabel,
   readyItem,
   secretItem,
   skippedItem,
   splitIdList,
   type ImportChannelType,
+  type ImportModelProviderId,
   type ImportPlan,
   type ImportProviderId,
   type ImportSchedule,
@@ -28,6 +30,7 @@ import {
   isDirectory,
   isFile,
   isSecretEnvKey,
+  localModelEndpoint,
   parseEnvText,
   providerFromName,
   readTextIfExists,
@@ -334,7 +337,9 @@ export function readHermesHome(home: string, options: ReadSourceOptions): Import
   const configText = readTextIfExists(path.join(home, "config.yaml"));
   if (configText !== null) {
     try {
-      config = asRecord(loadYaml(configText));
+      // Hermes writes config.yaml with PyYAML (YAML 1.1); js-yaml 5 defaults to YAML 1.2,
+      // which leaves `<<` merge keys unexpanded.
+      config = asRecord(loadYaml(configText, { schema: YAML11_SCHEMA }));
     } catch {
       items.push(
         skippedItem(
@@ -375,11 +380,14 @@ export function readHermesHome(home: string, options: ReadSourceOptions): Import
     typeof modelValue === "string" ? modelValue.trim() : asString(modelSection.default);
   const providerName = asString(modelSection.provider);
   if (modelName || providerName) {
-    let provider =
-      providerName && providerName !== "auto"
-        ? providerFromName(providerName, asString(modelSection.base_url))
-        : null;
-    if (!provider && (!providerName || providerName === "auto") && keyedProviders.size === 1) {
+    const baseUrl = asString(modelSection.base_url);
+    const autoProvider = !providerName || providerName === "auto";
+    // A local server first: Hermes routes ollama, lmstudio, vllm and llama.cpp through
+    // its custom provider, so the name or the base_url says which server it is.
+    const local = localModelEndpoint(providerName, baseUrl);
+    let provider: ImportModelProviderId | null =
+      local?.provider ?? (autoProvider ? null : providerFromName(providerName, baseUrl));
+    if (!provider && autoProvider && keyedProviders.size === 1) {
       provider = [...keyedProviders][0];
     }
     const label = `Model: ${modelName || providerName}`;
@@ -389,9 +397,16 @@ export function readHermesHome(home: string, options: ReadSourceOptions): Import
             "model",
             "model",
             label,
-            { kind: "model", provider, model: modelName || undefined },
             {
-              detail: IMPORT_PROVIDER_LABELS[provider],
+              kind: "model",
+              provider,
+              model: modelName || undefined,
+              ...(local ? { baseUrl: local.baseUrl } : {}),
+            },
+            {
+              detail: local
+                ? `${modelProviderLabel(provider)} at ${local.baseUrl}`
+                : modelProviderLabel(provider),
             },
           )
         : skippedItem(

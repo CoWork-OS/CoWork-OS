@@ -38,6 +38,14 @@ export interface ToolExposureMetadata {
 
 export interface ToolAvailabilityContext extends ToolPolicyContext {
   taskText?: string;
+  /**
+   * Only words the user wrote: the prompt they gave the task and their latest message. Never
+   * agent output, plan steps, tool results, another agent's message, or the task title (a model
+   * rewrites it). The admin lane reads this alone, so the agent cannot write its way into its
+   * own persona tools. Attached files' text and a channel's quote of the message being answered
+   * are left out as well (user-typed-words.ts): neither is the user asking for anything.
+   */
+  userText?: string;
   recentlyUsedTools?: Iterable<string>;
   requiredTools?: Iterable<string>;
 }
@@ -90,6 +98,11 @@ const EXPLICIT_ONLY_TOOLS = new Set([
   "set_user_name",
   "set_response_style",
   "set_quirks",
+  // Both save into the personality prompt of every later task, like the persona tools
+  // above. Without this entry they fell through to the conditional system lane, so the
+  // agent could reach them without the user asking for a rule or an expertise change.
+  "add_behavioral_rule",
+  "set_expertise",
   "set_vibes",
   "update_lore",
   "manage_heartbeat",
@@ -289,8 +302,10 @@ const BUSINESS_INTERACTION_INTENT_PATTERN =
 /** Explicit references, used alone when auto-routing is off. */
 const PACT_EXPLICIT_INTENT_PATTERN =
   /\b(?:pact|business agent|agent card|pact_discover|pact_send_message)\b/i;
+// "behavioral rule" and "expertise" expose add_behavioral_rule and set_expertise, the two
+// admin tools that are named by what the user asks to change rather than by a persona word.
 const ADMIN_INTENT_PATTERN =
-  /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup)\b/i;
+  /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup|behaviou?ral rules?|behaviou?r rules?|expertise)\b/i;
 
 function normalizeTaskText(taskText?: string): string {
   return String(taskText || "")
@@ -442,6 +457,11 @@ export function getToolExposureMetadata(toolName: string): ToolExposureMetadata 
   return inferToolExposureMetadata(String(toolName || "").trim());
 }
 
+/** The admin lane: only the user's own words (`userText`) may expose these tools. */
+export function isUserIntentOnlyTool(toolName: string, runtime?: RuntimeToolMetadata): boolean {
+  return inferToolExposureMetadata(String(toolName || "").trim(), runtime).lane === "admin";
+}
+
 /** Host-classified desktop MCP tools; tags are never taken from server descriptions. */
 export function isMcpComputerUseRuntime(runtime?: RuntimeToolMetadata): boolean {
   return runtime?.capabilityTags[0] === "system" && runtime.capabilityTags.includes("mcp");
@@ -467,6 +487,17 @@ export function evaluateToolAvailability(
     !isMcpComputerUseRuntime(runtime)
   ) {
     return { decision: "allow", metadata };
+  }
+
+  // Admin tools (all explicit-only) save into the system prompt of every later task, so only
+  // the user's own words may expose them. taskText also carries the agent's last output and
+  // its plan step, which the agent (or injected content it repeats) can fill with "persona".
+  // The step contract's requiredTools comes from those agent-written steps, and a recent use
+  // does not show who asked for it, so neither affinity opens this lane either.
+  if (metadata.lane === "admin") {
+    return ADMIN_INTENT_PATTERN.test(normalizeTaskText(ctx.userText))
+      ? { decision: "allow", metadata }
+      : { decision: "defer", reason: "explicit_admin_intent_required", metadata };
   }
 
   if (hasToolAffinity(normalizedToolName, ctx.requiredTools)) {
@@ -535,10 +566,6 @@ export function evaluateToolAvailability(
         BUSINESS_INTERACTION_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }
         : { decision: "defer", reason: "business_interaction_intent_missing", metadata };
-    case "admin":
-      return ADMIN_INTENT_PATTERN.test(taskText)
-        ? { decision: "allow", metadata }
-        : { decision: "defer", reason: "explicit_admin_intent_required", metadata };
     case "orchestration":
       return ORCHESTRATION_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }
@@ -632,6 +659,8 @@ const ALWAYS_MUTATING = new Set([
   "stop_process",
   "run_applescript",
   "schedule_task",
+  // Parks the task and adds a temporary trigger: not for plan or analyze modes.
+  "wait_for_event",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",
@@ -707,7 +736,7 @@ function isMutatingGitTool(toolName: string): boolean {
   return toolName.startsWith("git_") && !READONLY_GIT_TOOLS.has(toolName);
 }
 
-function isMutatingTool(toolName: string): boolean {
+export function isMutatingTool(toolName: string): boolean {
   // Canonical taxonomy first, so this classifier cannot disagree with
   // TOOL_GROUPS. ALWAYS_MUTATING and MUTATING_PREFIXES are hand-maintained and
   // missed several group:write tools (organize_folder, compile_latex,

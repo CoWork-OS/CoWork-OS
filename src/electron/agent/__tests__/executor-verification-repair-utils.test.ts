@@ -144,6 +144,52 @@ const TRANSCRIPT_COMPARISON_TABLE = [
 ].join("\n");
 
 describe("verification severity guidance", () => {
+  it("accepts filename citations when that is the requested source format", () => {
+    const prompt =
+      "Read both handover files. Produce launch-handover.md. Cite filenames and distinguish approvals from proposals.";
+    expect(requestsSourceLinks(prompt)).toBe(false);
+    const guidance = buildVerificationSeverityGuidance({ prompt });
+    expect(guidance).toContain("source filenames");
+    expect(guidance).not.toContain("needs a direct link");
+    expect(guidance).toContain("Verify that each cited file supports the claim");
+  });
+
+  it("retains explicit link requirements alongside filename citations", () => {
+    const prompt = "Cite source filenames and include direct links to the sources.";
+    expect(requestsSourceLinks(prompt)).toBe(true);
+    expect(buildVerificationSeverityGuidance({ prompt })).toContain("needs a direct link");
+  });
+
+  it("honors source filenames requested in presentation speaker notes", () => {
+    const prompt =
+      "Review notes.md and create deck.pptx. Include source filenames and limitations in speaker notes.";
+    expect(requestsSourceLinks(prompt)).toBe(false);
+    expect(buildVerificationSeverityGuidance({ prompt })).toContain(
+      "Named source filenames satisfy that format",
+    );
+  });
+
+  it("keeps ordinary source preservation at the supported audit scope", () => {
+    const guidance = buildVerificationSeverityGuidance({
+      prompt: "Create a handover. Preserve all sources unchanged.",
+    });
+    expect(guidance).toContain("authoritative mutation audit recording all file writes");
+    expect(guidance).toContain(
+      "If shell/external writes or incomplete audit coverage are involved",
+    );
+    expect(guidance).toContain("State that evidence scope");
+  });
+
+  it.each(["compare SHA-256 checksums", "check exact equality", "compare byte-for-byte"])(
+    "does not substitute operation-level evidence for explicit stronger verification: %s",
+    (check) => {
+      const guidance = buildVerificationSeverityGuidance({
+        prompt: `Preserve all sources unchanged and ${check}.`,
+      });
+      expect(guidance).not.toContain("sufficient operation-level evidence");
+    },
+  );
+
   it("makes a content difference between matching outputs and a missing file link blocking", () => {
     const guidance = buildVerificationSeverityGuidance({ prompt: NORTHSTAR_PROMPT });
     expect(guidance).toContain("Use WARN_NON_BLOCKING only for optional or cosmetic issues");

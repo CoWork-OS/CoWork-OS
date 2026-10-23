@@ -11,7 +11,11 @@ import type {
   ComputerUseHelperWindow,
   ComputerUseScreenshotPayload,
 } from "./helper-runtime";
+import { createHash } from "crypto";
 import { ComputerUseHelperRuntime } from "./helper-runtime";
+import { CuaSpaceClient } from "./cua-space/client";
+import { CuaSpaceProvider } from "./cua-space/provider";
+import { CuaSpaceSettingsManager, resolveCuaSpaceEndpoint } from "./cua-space/settings";
 
 export interface ComputerUseProvider {
   getHelperPath(): string;
@@ -105,9 +109,38 @@ export interface ComputerUseProvider {
 }
 
 let providerFactory: (() => ComputerUseProvider) | null = null;
+let cuaSpaceProvider: { key: string; provider: CuaSpaceProvider } | null = null;
+
+/**
+ * When the Cua Space backend is enabled, a misconfigured Space throws instead of
+ * falling back: silently driving the host desktop would defeat the isolation the
+ * user opted into.
+ */
+function resolveCuaSpaceProvider(): ComputerUseProvider | null {
+  const settings = CuaSpaceSettingsManager.load();
+  if (!settings.enabled) {
+    if (cuaSpaceProvider) {
+      cuaSpaceProvider.provider.stop();
+      cuaSpaceProvider = null;
+    }
+    return null;
+  }
+  const endpoint = resolveCuaSpaceEndpoint(settings.url, settings.token);
+  const key = createHash("sha256")
+    .update(`${endpoint.origin}\n${settings.token ?? ""}`)
+    .digest("hex");
+  if (cuaSpaceProvider?.key !== key) {
+    cuaSpaceProvider?.provider.stop();
+    cuaSpaceProvider = {
+      key,
+      provider: new CuaSpaceProvider(new CuaSpaceClient(endpoint, settings.token), endpoint.origin),
+    };
+  }
+  return cuaSpaceProvider.provider;
+}
 
 export function getComputerUseProvider(): ComputerUseProvider {
-  return providerFactory?.() ?? ComputerUseHelperRuntime.getInstance();
+  return providerFactory?.() ?? resolveCuaSpaceProvider() ?? ComputerUseHelperRuntime.getInstance();
 }
 
 export function setComputerUseProviderFactoryForTesting(

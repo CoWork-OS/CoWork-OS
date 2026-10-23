@@ -65,6 +65,11 @@ export interface ControlPlaneSettings {
   managedDevices?: ManagedDevice[];
   /** Selected managed device for legacy remote actions */
   activeManagedDeviceId?: string;
+  /**
+   * Serve CoWork's agent card at `/.well-known/agent-card.json` on this server (WP16). Off by
+   * default: the card names the installed skills and connectors.
+   */
+  publishAgentCard?: boolean;
 }
 
 /**

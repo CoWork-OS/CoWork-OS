@@ -1,3 +1,4 @@
+import "../../agent/tools/__tests__/file-discovery-test-worker";
 /**
  * The memory repo as an app-owned root (docs/memory-repo-phase1-design.md §6.4): writes are a
  * hard `protected_path` boundary everywhere under it, reads need the task's memory repo

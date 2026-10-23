@@ -49,7 +49,7 @@ products:
         supports: model-provider configuration
   hermes:
     sources:
-      - url: https://github.com/hermes-agent-org/hermes
+      - url: https://github.com/NousResearch/hermes-agent
         supports: open agent repository and runtime scope
-      - url: https://github.com/hermes-agent-org/hermes/blob/main/website/docs/integrations/providers.md
+      - url: https://github.com/NousResearch/hermes-agent/blob/main/website/docs/integrations/providers.md
         supports: provider integrations

@@ -24,6 +24,8 @@ export type ReadFilesResult = {
     truncated?: boolean;
     format?: string;
     content: string;
+    window?: { start: number; end: number; total: number };
+    nextStartChar?: number;
   }>;
   skippedFiles: Array<{
     path: string;
@@ -77,9 +79,15 @@ export async function readFilesByPatterns(
   const warnings: string[] = [];
   const matched = new Map<string, { size: number }>();
 
+  const results = await deps.globTools.globMany({
+    patterns: [...include, ...exclude],
+    path: basePath,
+    maxResults,
+  });
+  let resultIndex = 0;
   let anyPatternTruncated = false;
   for (const pattern of include) {
-    const res = await deps.globTools.glob({ pattern, path: basePath, maxResults });
+    const res = results[resultIndex++];
     if (!res.success) {
       warnings.push(`Glob failed for pattern "${pattern}": ${res.error || "unknown error"}`);
       continue;
@@ -96,7 +104,7 @@ export async function readFilesByPatterns(
   }
 
   for (const pattern of exclude) {
-    const res = await deps.globTools.glob({ pattern, path: basePath, maxResults });
+    const res = results[resultIndex++];
     if (!res.success) {
       warnings.push(
         `Exclude glob failed for pattern "!${pattern}": ${res.error || "unknown error"}`,
@@ -130,7 +138,7 @@ export async function readFilesByPatterns(
   }
 
   let totalChars = 0;
-  for (const filePath of selectedPaths) {
+  for (const [fileIndex, filePath] of selectedPaths.entries()) {
     try {
       const read = await deps.fileTools.readFile(filePath);
 
@@ -143,25 +151,39 @@ export async function readFilesByPatterns(
             content.slice(0, Math.max(0, remaining - 120)) +
             "\n\n[... truncated by read_files ...]";
         } else {
-          skippedFiles.push({
-            path: filePath,
-            reason: `Skipped: maxTotalChars=${maxTotalChars} reached`,
-          });
+          for (const omittedPath of selectedPaths.slice(fileIndex)) {
+            skippedFiles.push({
+              path: omittedPath,
+              reason: `Skipped: maxTotalChars=${maxTotalChars} reached`,
+            });
+          }
           break;
         }
       }
 
       totalChars += content.length;
+      const contentClipped = content !== read.content;
+      const fileTruncated = Boolean(read.truncated) || contentClipped;
+      truncated ||= fileTruncated;
       files.push({
         path: filePath,
         size: read.size,
-        truncated: Boolean(read.truncated) || content !== read.content,
+        truncated: fileTruncated,
         format: read.format,
         content,
+        // A read_file window is resumable only when all of that window was
+        // delivered. Reusing its end after our own clipping would skip source.
+        ...(!contentClipped ? { window: read.window, nextStartChar: read.nextStartChar } : {}),
       });
 
       if (totalChars >= maxTotalChars) {
         truncated = true;
+        for (const omittedPath of selectedPaths.slice(fileIndex + 1)) {
+          skippedFiles.push({
+            path: omittedPath,
+            reason: `Skipped: maxTotalChars=${maxTotalChars} reached`,
+          });
+        }
         break;
       }
     } catch (error: Any) {
@@ -184,7 +206,7 @@ export async function readFilesByPatterns(
     excludePatterns: exclude,
     totalMatched: allMatchedPaths.length,
     included: files.length,
-    skipped: skippedFiles.length,
+    skipped: allMatchedPaths.length - files.length,
     truncated,
     files,
     skippedFiles,

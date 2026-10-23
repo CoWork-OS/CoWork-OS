@@ -49,6 +49,8 @@ import {
 } from "../electron/utils/runtime-mode";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
 import { sanitizeTaskMessageParams } from "../electron/control-plane/sanitize";
+import { composerFollowUpProvenance } from "../electron/agent/follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT } from "../electron/agent/task-prompt-provenance";
 import { registerControlPlaneCoreMethods } from "../electron/control-plane/registerControlPlaneCoreMethods";
 import { registerAgentSecurityMethods } from "../electron/control-plane/registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "../electron/control-plane/registerStrategicPlannerMethods";
@@ -1060,6 +1062,9 @@ export function registerControlPlaneMethods(
           ? { assignedAgentRoleId: validated.assignedAgentRoleId }
           : undefined,
         boardColumn: validated.assignedAgentRoleId ? "todo" : undefined,
+        // An admin client is the owner's own composer on another device (remote view, web UI,
+        // CLI), as for task.sendMessage: the prompt is typed and may expose the admin-lane tools.
+        ...USER_TYPED_TASK_PROMPT,
         requestIdentity: {
           title: validated.title,
           prompt: validated.prompt,
@@ -1116,6 +1121,8 @@ export function registerControlPlaneMethods(
       agentConfig: normalizedAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
+      // The owner's own composer on another device, as above.
+      ...USER_TYPED_TASK_PROMPT,
     });
 
     if (shouldGenerateTaskTitle(validated.title, validated.prompt, validated.generateTitle)) {
@@ -1249,6 +1256,7 @@ export function registerControlPlaneMethods(
       accessProfileId,
       shellAccess,
       integrationMentions,
+      surfaceOrigin,
     } = sanitizeTaskMessageParams(params);
     const result = await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
@@ -1260,6 +1268,9 @@ export function registerControlPlaneMethods(
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+      // An admin client is the owner's composer on another device (remote view, web UI):
+      // typed unless an answer surface sent it. Only typed text can expose the admin-lane tools.
+      ...composerFollowUpProvenance(surfaceOrigin),
     });
     return { ok: true, ...result };
   });

@@ -60,6 +60,7 @@ import {
 import { showDesktopNotification } from "../notifications/desktop-delivery";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
+import { USER_TYPED_TASK_PROMPT } from "../agent/task-prompt-provenance";
 
 const trayLogger = createLogger("TrayManager");
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
@@ -533,6 +534,9 @@ export class TrayManager {
           undefined,
           PermissionSettingsManager.loadSettings(),
         ),
+        // The owner typed this into the tray's quick task field, so it may expose the
+        // admin-lane tools (Task.promptProvenance).
+        ...USER_TYPED_TASK_PROMPT,
       });
 
       this.currentQuickTaskId = task.id;

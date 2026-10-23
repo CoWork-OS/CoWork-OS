@@ -172,7 +172,7 @@ Customize remains the authoring and enable/disable surface. There is no separate
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | App command catalog and parser                                | `src/shared/message-shortcuts.ts`                                                |
 | Renderer picker option builder                                | `src/renderer/utils/message-slash-options.ts`                                    |
-| Main composer integration                                     | `src/renderer/components/MainContent.tsx`                                        |
+| Main composer integration                                     | `src/renderer/components/MainContent/MainContent.tsx`                                        |
 | Side Chat panel and `/side` app wiring                        | `src/renderer/components/SideChatPanel.tsx`, `src/renderer/App.tsx`              |
 | Side task fork and live parent-status injection               | `src/electron/agent/daemon.ts`                                                   |
 | Side Chat prompt rules and read-only chat execution           | `src/electron/agent/executor.ts`                                                 |

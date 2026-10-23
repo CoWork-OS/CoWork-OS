@@ -8,6 +8,12 @@ import type { BackgroundProcessSummary } from "./tools/background-processes";
 import { editQueuedFollowUp, listQueuedTaskInputs } from "./queued-task-input";
 import type { EditQueuedTaskInput, QueuedTaskInput } from "../../shared/queued-task-input";
 import {
+  botWorkspaceId,
+  isBotWorkspaceId,
+  normalizeBotFileAccess,
+  shouldContainBotRun,
+} from "../../shared/bot-containment";
+import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
 } from "../agents/collaborative-execution";
@@ -28,7 +34,10 @@ import {
   type ResponsibilityActionReviewOutcome,
   type ResponsibilityActionReviewPayload,
 } from "../automation/responsibility-task-policy";
-import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../shared/approval-draft-presentation";
+import {
+  ASSISTANT_APPROVAL_QUESTION_ID,
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+} from "../../shared/approval-draft-presentation";
 import { isCodexComputerUseServer } from "../mcp/codex-computer-use";
 import { MCPSettingsManager } from "../mcp/settings";
 import { CanvasManager } from "../canvas/canvas-manager";
@@ -38,8 +47,12 @@ import {
   ArtifactRepository,
   InputRequestRepository,
   storageStatements,
+  ToolAttemptRepository,
+  LifecycleMetaRepository,
+  ResourceClaimRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
+import { describeUnverifiedAttempts, unresolvedUnknownAttempts } from "./runtime/tool-attempts";
 import {
   FOLLOW_UP_RECOVERY_TASK_STATUSES,
   hasUnstartedFollowUpReceipt,
@@ -99,8 +112,24 @@ import {
   ApplicationTaskToolGateway,
 } from "../applications/daemon-application-execution";
 import type { ApplicationExecutionService } from "../applications/ApplicationExecutionService";
+import type { ApplicationVerification } from "../../shared/application-execution";
+import type {
+  EventTrigger,
+  TriggerCondition,
+  TriggerEvent,
+  TriggerSource,
+} from "../triggers/types";
+import {
+  describeArrivedEvent,
+  EVENT_WAIT_FOLLOW_UP,
+  EVENT_WAIT_PREFIX,
+  type EventWaitRegistry,
+} from "./event-wait";
 import type { ApplicationToolGateway } from "../applications/ApplicationAdapterCatalog";
 import { APPLICATION_DECISION_PREFIX, resolveApplicationInput } from "./tools/application-tools";
+import { AnnotationResultService } from "../annotations/AnnotationResultService";
+import { RevisionSnapshotStore } from "../annotations/revision-snapshots";
+import { getUserDataDir } from "../utils/user-data-dir";
 import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
@@ -124,6 +153,8 @@ import {
 } from "./llm/usage-telemetry";
 import type { LlmCallRow } from "../database/llm-call-events";
 import { TaskMutationLedger } from "./task-mutation-ledger";
+import { USER_TYPED_FOLLOW_UP } from "./follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT, forkedTaskPromptProvenance } from "./task-prompt-provenance";
 import { LLMProviderFactory } from "./llm/provider-factory";
 import { createConfiguredJevProvider, isJevActiveHarnessEnabled } from "./jev";
 import { routeModelWithJev } from "./jev/model-routing";
@@ -170,8 +201,10 @@ import {
   isTempWorkspaceId,
   ImageAttachment,
   Annotation,
+  AnnotationCreateInput,
   QuotedAssistantMessage,
   TaskFollowUpInput,
+  TaskPromptProvenance,
   AgentMessageDeliveryStatus,
   AgentMessageSendResult,
   AgentTeamRun,
@@ -197,7 +230,17 @@ import {
   WorkerRoleKind,
   VerificationVerdict,
   LLMProviderType,
+  InterruptInFlightCall,
+  WaitState,
+  ToolAttempt,
+  LifecycleKind,
+  ResourceClaimHolder,
 } from "../../shared/types";
+import {
+  fileResource,
+  RESOURCE_CONFLICT_WAIT_PREFIX,
+  ResourceConflictError,
+} from "./resource-claims";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
@@ -228,16 +271,22 @@ import { sanitizeTimelinePayloadForStorage } from "./timeline-payload-sanitizer"
 import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/task-status";
 import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
-import { APPROVAL_REQUEST_TIMEOUT_MS } from "./approval-timeouts";
+import {
+  APPROVAL_GRANT_TTL_MS,
+  APPROVAL_REQUEST_TIMEOUT_MS,
+  formatApprovalWindow,
+} from "./approval-timeouts";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
 import { isExplicitExportConsentRequest } from "./visual-consent-policy";
 import { isHeadlessMode } from "../utils/runtime-mode";
 import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
+  canOfferAssistantAlwaysAllow,
   isHighImpactApprovalDecision,
   isAssistantApprovalInputRequest,
-  parseAssistantApprovalAnswer,
+  findAssistantApprovalOptionLabel,
+  parseAssistantApprovalAction,
   shouldUseAssistantApprovalInput,
 } from "./assistant-approval";
 import { TaskQueueManager } from "./queue-manager";
@@ -246,6 +295,7 @@ import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { loadPolicies } from "../admin/policies";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
 import { ComputerViewService } from "../computer-use/computer-view-service";
+import { BotDesktopManager } from "../computer-use/bot-desktop-manager";
 import { getNumbatService } from "../security/numbat";
 import {
   decideTaskOutcome,
@@ -723,6 +773,7 @@ type DaemonFollowUpOptions = Pick<
   | "inReplyToMessageId"
   | "inReplyToTaskId"
   | "surfaceOrigin"
+  | "textProvenance"
 > & {
   /** Internal lifecycle fence for process notifications; never accepted from renderer input. */
   admissionGuard?: () => void;
@@ -817,7 +868,22 @@ const INLINE_APPROVAL_UNAVAILABLE_MESSAGE =
   "(CLI, headless, sub-agent, automated, or no-human-input task).";
 const INLINE_APPROVAL_TIMEOUT_MESSAGE =
   "Approval denied: no response to the approval request within " +
-  `${Math.round(APPROVAL_REQUEST_TIMEOUT_MS / 60_000)} minutes.`;
+  `${formatApprovalWindow(APPROVAL_REQUEST_TIMEOUT_MS)}.`;
+
+/** True when a bot runs this task, directly or through a task it delegated. */
+export function isBotOwnedTask(
+  taskRepo:
+    | { findById(id: string): Pick<Task, "assignedAgentRoleId" | "parentTaskId"> | undefined }
+    | undefined,
+  taskId: string,
+): boolean {
+  let task = taskRepo?.findById(taskId);
+  for (let depth = 0; task && depth < 16; depth += 1) {
+    if (task.assignedAgentRoleId) return true;
+    task = task.parentTaskId ? taskRepo?.findById(task.parentTaskId) : undefined;
+  }
+  return false;
+}
 
 /**
  * AgentDaemon is the core orchestrator that manages task execution
@@ -859,6 +925,7 @@ export class AgentDaemon extends EventEmitter {
   private applicationExecutionService?: ApplicationExecutionService;
   private applicationTaskTools = new ApplicationTaskToolGateway();
   private annotationRepo: AnnotationRepository;
+  private annotationResults?: AnnotationResultService;
   private activityRepo: ActivityStore;
   private agentRoleRepo: AgentRoleStore;
   private mentionRepo: MentionStore;
@@ -905,6 +972,9 @@ export class AgentDaemon extends EventEmitter {
   private pactDatabase!: Database.Database;
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private maintenanceIntervalHandle?: ReturnType<typeof setInterval>;
+  /** The event trigger engine `wait_for_event` adds its temporary triggers to. */
+  private eventWaitRegistry?: EventWaitRegistry;
+  private eventWaitSweepRunning = false;
   private vacuumRetryHandle?: ReturnType<typeof setTimeout>;
   /** Set when timeline projections run in the database worker for this run (DB3). */
   private timelineProjection: TimelineProjectionQueue | null = null;
@@ -1025,6 +1095,7 @@ export class AgentDaemon extends EventEmitter {
       updateTaskStatus: (taskId: string, status: TaskStatus) =>
         this.taskRepo.update(taskId, { status }),
       onTaskTimeout: (taskId: string) => this.handleTaskTimeout(taskId),
+      isWaitingForUser: (taskId: string) => this.hasPendingUserDecisionForTask(taskId),
     });
     this.verificationOutcomeV2Enabled =
       parseBooleanEnv("COWORK_VERIFICATION_OUTCOME_V2", false) ||
@@ -1065,7 +1136,11 @@ export class AgentDaemon extends EventEmitter {
     });
 
     // Start periodic cleanup of old executors
-    this.cleanupIntervalHandle = setInterval(() => this.cleanupOldExecutors(), 120_000); // Run every 2 minutes
+    this.cleanupIntervalHandle = setInterval(() => {
+      this.cleanupOldExecutors();
+      // Event waits past their timeout resume here, so a timeout lands within two minutes.
+      void this.sweepEventWaits();
+    }, 120_000); // Run every 2 minutes
 
     // Deferred database maintenance: prune old events and vacuum
     setTimeout(() => {
@@ -1075,6 +1150,169 @@ export class AgentDaemon extends EventEmitter {
         24 * 60 * 60 * 1000,
       );
     }, 60_000);
+  }
+
+  /** Give `wait_for_event` this runtime's event trigger engine. */
+  setEventWaitRegistry(registry: EventWaitRegistry | undefined): void {
+    this.eventWaitRegistry = registry;
+  }
+
+  hasEventWaitSupport(): boolean {
+    return Boolean(this.eventWaitRegistry);
+  }
+
+  /**
+   * Park a task on an event (agent-first roadmap WP12): a temporary one-shot trigger and an
+   * external wait. The task pauses when it next finishes and continues when the event arrives
+   * (with the event's fields) or when the wait times out.
+   */
+  async beginEventWait(
+    taskId: string,
+    input: {
+      source: TriggerSource;
+      conditions: TriggerCondition[];
+      timeoutMs: number;
+      reason: string;
+    },
+  ): Promise<{ triggerId: string; expiresAt: number }> {
+    const registry = this.eventWaitRegistry;
+    if (!registry) throw new Error("Waiting for events is not available in this runtime.");
+    const task = this.taskRepo.findById(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const expiresAt = Date.now() + input.timeoutMs;
+    const trigger: EventTrigger = await registry.addTrigger({
+      name: `Waiting: ${input.reason}`.slice(0, 120),
+      description: "Temporary trigger made by wait_for_event; removed when the wait ends.",
+      enabled: true,
+      source: input.source,
+      conditions: input.conditions,
+      conditionLogic: "all",
+      action: {
+        type: "create_task",
+        config: {
+          runMode: "thread_follow_up",
+          targetTaskId: taskId,
+          prompt: EVENT_WAIT_FOLLOW_UP,
+          eventWait: { taskId, expiresAt, reason: input.reason },
+        },
+      },
+      workspaceId: task.workspaceId,
+      cooldownMs: 0,
+    });
+    this.workSessionContractService.beginWait(taskId, {
+      kind: "external",
+      requestId: `${EVENT_WAIT_PREFIX}${trigger.id}`,
+      reason: input.reason,
+      expiresAt,
+      payload: { triggerId: trigger.id, source: input.source, conditions: input.conditions },
+    });
+    this.logEvent(taskId, "event_wait_started", {
+      triggerId: trigger.id,
+      source: input.source,
+      conditions: input.conditions,
+      expiresAt,
+      reason: input.reason,
+    });
+    return { triggerId: trigger.id, expiresAt };
+  }
+
+  /** The task's event waits that have not ended. */
+  private pendingEventWaits(taskId: string): WaitState[] {
+    const session = this.workSessionContractService.getForTask(taskId)?.session;
+    if (!session) return [];
+    return this.workSessionContractService
+      .getRepository()
+      .listWaitStates(session.id, { status: "pending" })
+      .filter((wait) => wait.kind === "external" && wait.requestId?.startsWith(EVENT_WAIT_PREFIX));
+  }
+
+  /** A task that asked to wait for an event pauses instead of completing. */
+  private parkForEventWait(taskId: string): boolean {
+    let waits: WaitState[];
+    try {
+      waits = this.pendingEventWaits(taskId);
+    } catch {
+      return false;
+    }
+    if (waits.length === 0) return false;
+    this.updateTask(taskId, { status: "paused" });
+    this.logEvent(taskId, "event_wait_parked", {
+      message: "Waiting for an event before continuing.",
+      waits: waits.map((wait) => ({
+        reason: wait.reason,
+        expiresAt: wait.expiresAt,
+        triggerId: wait.payload?.triggerId,
+      })),
+    });
+    this.finishQueueSlot(taskId);
+    return true;
+  }
+
+  /** The event a parked task waited for arrived: end the wait and continue the task with it. */
+  async resumeAfterEventWait(params: {
+    taskId: string;
+    triggerId: string;
+    event: TriggerEvent;
+  }): Promise<void> {
+    const requestId = `${EVENT_WAIT_PREFIX}${params.triggerId}`;
+    if (!this.pendingEventWaits(params.taskId).some((wait) => wait.requestId === requestId)) {
+      return;
+    }
+    this.workSessionContractService.resolveWait(params.taskId, "external", requestId, "resolved", {
+      source: params.event.source,
+      fields: params.event.fields,
+    });
+    this.logEvent(params.taskId, "event_wait_resolved", {
+      triggerId: params.triggerId,
+      source: params.event.source,
+      outcome: "event",
+    });
+    await this.resumeTaskAfterDurableWait(params.taskId, describeArrivedEvent(params.event));
+  }
+
+  /**
+   * Remove spent wait triggers (fired, ended or for a finished task) and resume tasks whose
+   * wait timed out, telling them no event came.
+   */
+  async sweepEventWaits(now = Date.now()): Promise<void> {
+    const registry = this.eventWaitRegistry;
+    if (!registry || this.eventWaitSweepRunning) return;
+    this.eventWaitSweepRunning = true;
+    try {
+      for (const trigger of registry.listTriggers()) {
+        const wait = trigger.action.config.eventWait;
+        if (!wait) continue;
+        const requestId = `${EVENT_WAIT_PREFIX}${trigger.id}`;
+        const task = this.taskRepo.findById(wait.taskId);
+        const pending =
+          task && !isTerminalTaskStatus(deriveCanonicalTaskStatus(task))
+            ? this.pendingEventWaits(wait.taskId).some((entry) => entry.requestId === requestId)
+            : false;
+        if (!pending) {
+          await registry.removeTrigger(trigger.id);
+          continue;
+        }
+        if (wait.expiresAt > now) continue;
+        await registry.removeTrigger(trigger.id);
+        this.workSessionContractService.resolveWait(wait.taskId, "external", requestId, "expired", {
+          reason: "timeout",
+        });
+        this.logEvent(wait.taskId, "event_wait_resolved", {
+          triggerId: trigger.id,
+          source: trigger.source,
+          outcome: "timeout",
+        });
+        await this.resumeTaskAfterDurableWait(
+          wait.taskId,
+          `No matching ${trigger.source} event arrived before the wait timed out` +
+            `${wait.reason ? ` (${wait.reason})` : ""}. Decide how to continue without it.`,
+        );
+      }
+    } catch (error) {
+      log.warn("Event wait sweep failed:", error);
+    } finally {
+      this.eventWaitSweepRunning = false;
+    }
   }
 
   /** Get the worktree manager instance. */
@@ -1120,6 +1358,151 @@ export class AgentDaemon extends EventEmitter {
   /** Return the durable Phase 4 contracts/evidence/lineage service. */
   getWorkSessionContractService(): WorkSessionContractService {
     return this.workSessionContractService;
+  }
+
+  private toolAttemptRepository?: ToolAttemptRepository;
+  private lifecycleMetaRepository?: LifecycleMetaRepository;
+  private resourceClaimRepository?: ResourceClaimRepository;
+  /** `taskId\nresourceKey` of writes refused for a conflict, whose wait is still open. */
+  private readonly openResourceConflicts = new Set<string>();
+  /** Tasks with a call whose outcome became unknown; only these read attempts at completion. */
+  private tasksWithUnknownToolOutcomes?: Set<string>;
+
+  noteToolOutcomeUnknown(taskId: string): void {
+    (this.tasksWithUnknownToolOutcomes ??= new Set()).add(taskId);
+  }
+
+  /**
+   * Count one use of generated software (a skill applied, a playbook entry recalled) for the
+   * Hygiene tab. Fire-and-forget: it never delays or fails the caller.
+   */
+  recordLifecycleUse(kind: LifecycleKind, id: string): void {
+    if (!id) return;
+    try {
+      this.lifecycleMetaRepository ??= new LifecycleMetaRepository(this.getDatabase());
+      void this.lifecycleMetaRepository
+        .recordUse({ kind, id, at: Date.now() })
+        .catch((error) => log.debug(`Could not record a use of ${kind} ${id}:`, error));
+    } catch (error) {
+      log.debug(`Could not record a use of ${kind} ${id}:`, error);
+    }
+  }
+
+  /**
+   * Record a connector write's receipt as evidence for the task (WP13): what the API returned
+   * and, when the connector read the record back, what it found.
+   */
+  recordToolReceipt(
+    taskId: string,
+    input: {
+      tool: string;
+      serverName?: string;
+      receipt: ApplicationVerification;
+      idempotencyKey?: string;
+    },
+  ): void {
+    const { receipt } = input;
+    try {
+      this.workSessionContractService.recordEvidence(taskId, {
+        claim: receipt.summary,
+        sourceType: "tool_output",
+        sourceRef: `mcp:${input.serverName ?? "connector"}:${input.tool}`,
+        status:
+          receipt.status === "verified"
+            ? "supporting"
+            : receipt.status === "contradicted"
+              ? "contradicting"
+              : "neutral",
+        confidence: receipt.status === "verified" ? 1 : 0,
+        basis: receipt.status === "unavailable" ? "unknown" : "observed",
+        capturedAt: receipt.checkedAt,
+        ...(receipt.expiresAt ? { freshnessExpiresAt: receipt.expiresAt } : {}),
+        snippet: JSON.stringify(receipt.evidence).slice(0, 8_000),
+        idempotencyKey: `mcp_receipt:${input.tool}:${input.idempotencyKey ?? receipt.checkedAt}`,
+      });
+      this.logEvent(taskId, "tool_receipt_recorded", {
+        tool: input.tool,
+        status: receipt.status,
+        summary: receipt.summary.slice(0, 300),
+      });
+    } catch (error) {
+      log.debug(`Could not record the receipt of ${input.tool}:`, error);
+    }
+  }
+
+  /** Durable attempts of tool calls that write or whose effect is unknown. */
+  getToolAttemptRepository(): ToolAttemptRepository {
+    this.toolAttemptRepository ??= new ToolAttemptRepository(this.getDatabase());
+    return this.toolAttemptRepository;
+  }
+
+  /** Calls a previous process left `started` can no longer report: their outcome is unknown. */
+  private async recoverInterruptedToolAttempts(): Promise<void> {
+    try {
+      const repository = this.getToolAttemptRepository();
+      const running = [...this.activeTasks.keys()];
+      // Each round is bounded; a crash leaves at most a handful of open calls per task.
+      for (let round = 0; round < 20; round += 1) {
+        const taskIds = await repository.recoverStartedAttempts(running, Date.now());
+        if (taskIds.length === 0) break;
+        for (const taskId of taskIds) this.noteToolOutcomeUnknown(taskId);
+      }
+    } catch (error) {
+      log.warn("Could not recover interrupted tool attempts:", error);
+    }
+  }
+
+  /** Write or unknown-effect calls of a task whose outcome is still unknown. */
+  private async findUnverifiedToolAttempts(taskId: string): Promise<ToolAttempt[]> {
+    try {
+      return unresolvedUnknownAttempts(await this.getToolAttemptRepository().listForTask(taskId));
+    } catch (error) {
+      log.warn(`Could not read tool attempts for ${taskId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Calls that were running when a stop was requested. Calls still open become `unknown`:
+   * the executor stopped, so nothing will report their result.
+   */
+  private async collectInFlightToolCalls(
+    taskId: string,
+    requestedAt: number,
+  ): Promise<InterruptInFlightCall[]> {
+    try {
+      const repository = this.getToolAttemptRepository();
+      const closed = await repository.markStartedUnknown(
+        taskId,
+        "stopped_while_running",
+        Date.now(),
+      );
+      if (closed.length > 0) this.noteToolOutcomeUnknown(taskId);
+      const attempts = await repository.listForTask(taskId);
+      return attempts
+        .filter(
+          (attempt) =>
+            attempt.startedAt <= requestedAt &&
+            (attempt.finishedAt === undefined || attempt.finishedAt >= requestedAt),
+        )
+        .slice(-20)
+        .map((attempt) => ({
+          toolName: attempt.toolName,
+          attemptId: attempt.id,
+          idempotencyKey: attempt.idempotencyKey,
+          effect: attempt.effect,
+          outcome:
+            attempt.status === "completed"
+              ? "completed"
+              : attempt.status === "unknown" || attempt.status === "checked"
+                ? "unknown"
+                : "cancelled",
+          ...(attempt.target ? { target: attempt.target } : {}),
+        }));
+    } catch (error) {
+      log.warn(`Could not read in-flight tool calls for ${taskId}:`, error);
+      return [];
+    }
   }
 
   getApplicationExecutionService(): ApplicationExecutionService {
@@ -1326,6 +1709,10 @@ export class AgentDaemon extends EventEmitter {
       }
       this.vacuumWhenIdle(500);
       await this.runSessionAutoPrune(repo);
+      const prunedSnapshots = await this.getAnnotationResults().pruneSnapshots();
+      if (prunedSnapshots > 0) {
+        log.info(`DB maintenance: removed ${prunedSnapshots} kept revision copies`);
+      }
     } catch (error) {
       log.error("DB maintenance failed:", error);
     }
@@ -1650,6 +2037,90 @@ export class AgentDaemon extends EventEmitter {
    * - Merge denied tools into AgentConfig.toolRestrictions (deny-wins)
    * - Apply provider/model/personality defaults
    */
+  /**
+   * Moves a bot's run into the bot's own folder when nobody started it by hand
+   * (shouldContainBotRun), and marks every task working in a bot's folder as contained so it
+   * runs under the sandboxed access limit and cannot switch workspaces. Returns the task as it
+   * should run; the move and the mark are persisted.
+   */
+  private containBotTask(task: Task): Task {
+    let workspaceId = task.workspaceId;
+    if (!isBotWorkspaceId(workspaceId) && task.assignedAgentRoleId) {
+      const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
+      if (
+        role &&
+        shouldContainBotRun(
+          this.getTaskAncestorChain(task),
+          normalizeBotFileAccess(role.fileAccess),
+        )
+      ) {
+        workspaceId = this.ensureBotWorkspace(role).id;
+      }
+    }
+    if (!isBotWorkspaceId(workspaceId)) return task;
+    if (workspaceId === task.workspaceId && task.agentConfig?.botContained === true) return task;
+
+    const agentConfig: AgentConfig = { ...task.agentConfig, botContained: true };
+    this.taskRepo.update(task.id, { agentConfig });
+    if (workspaceId !== task.workspaceId) this.updateTaskWorkspace(task.id, workspaceId);
+    return { ...task, workspaceId, agentConfig };
+  }
+
+  /** The bot desktop's ~/work folder on this computer, when its files live in one. */
+  private botDesktopWorkFolder(roleId: string): { desktopKey: string; folder: string } | undefined {
+    try {
+      return BotDesktopManager.getInstance().hostWorkFolder(roleId);
+    } catch {
+      // The desktop service is not running (CLI, tests): the bot keeps its plain own folder.
+      return undefined;
+    }
+  }
+
+  /** The task followed by its ancestors, nearest first (bounded, so a cycle cannot hang). */
+  private getTaskAncestorChain(task: Task): Task[] {
+    const chain = [task];
+    let current: Task | undefined = task;
+    while (current?.parentTaskId && chain.length < 16) {
+      current = this.taskRepo.findById(current.parentTaskId);
+      if (current) chain.push(current);
+    }
+    return chain;
+  }
+
+  /**
+   * The bot's own folder and its hidden workspace row, created on first use. A bot set to "Its
+   * own desktop" uses the folder its desktop sees as ~/work, so its file tools and its desktop
+   * work on the same files; bots sharing a desktop share that folder and row.
+   */
+  private ensureBotWorkspace(role: AgentRole): Workspace {
+    const desktop = role.worksOn === "own_desktop" ? this.botDesktopWorkFolder(role.id) : undefined;
+    const id = botWorkspaceId(desktop?.desktopKey ?? role.id);
+    const folder = desktop?.folder ?? path.join(getUserDataDir(), "bots", role.id, "work");
+    fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    const existing = this.workspaceRepo.findById(id);
+    if (existing?.path === folder) return existing;
+    const now = Date.now();
+    const label = desktop?.desktopKey.startsWith("shared:")
+      ? `Shared desktop ${desktop.desktopKey.slice("shared:".length)}`
+      : `${role.displayName || role.name} (${desktop ? "own desktop" : "own folder"})`;
+    this.workspaceRepo.upsertWithId({
+      id,
+      name: label,
+      path: folder,
+      createdAt: existing?.createdAt ?? now,
+      lastUsedAt: now,
+      permissions: {
+        ...DEFAULT_WORKSPACE_PERMISSIONS,
+        shell: true,
+        unrestrictedFileAccess: false,
+        allowedPaths: [],
+      },
+    });
+    const created = this.workspaceRepo.findById(id);
+    if (!created) throw new Error(`Bot folder workspace ${id} was not created`);
+    return created;
+  }
+
   private applyAgentRoleOverrides(task: Task): { task: Task; changed: boolean } {
     const roleId = task.assignedAgentRoleId;
     if (!roleId) return { task, changed: false };
@@ -2443,6 +2914,9 @@ export class AgentDaemon extends EventEmitter {
     // runs off the host thread; its tasks are recovered with the delayed resume.
     const followUpRecoveryCandidates = this.scanUnstartedUserFollowUps();
 
+    // Tool calls a previous process left running can no longer report their result.
+    void this.recoverInterruptedToolAttempts();
+
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
     const staleTransientRetryTasks = this.taskRepo
@@ -3014,8 +3488,9 @@ export class AgentDaemon extends EventEmitter {
       // created so the current turn gets the hybrid/execute team contract and
       // can see the bot handoff tool.
       const teamNormalizedTask = this.ensureBotTaskTeam(task);
-      const { task: effectiveTask, changed: roleOverridesChanged } =
+      const { task: roleAdjustedTask, changed: roleOverridesChanged } =
         this.applyAgentRoleOverrides(teamNormalizedTask);
+      const effectiveTask = this.containBotTask(roleAdjustedTask);
       if (roleOverridesChanged) {
         try {
           this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
@@ -3218,6 +3693,7 @@ export class AgentDaemon extends EventEmitter {
             workspace.id,
             workspace.path,
             executionTask.agentConfig?.worktreeBaseBranch,
+            executionTask.agentConfig?.worktreeBaseCommit,
           );
 
           // Create a virtual workspace pointing to the worktree
@@ -4135,6 +4611,12 @@ export class AgentDaemon extends EventEmitter {
     fromEventId?: string;
     sideChat?: boolean;
     initialMessage?: string;
+    /**
+     * True only when the owner asked for the fork (the desktop app, the verified owner on a
+     * channel): the fork's title carries the caller's branch label, so only then may it keep
+     * the source task's Task.promptProvenance.
+     */
+    keepPromptProvenance?: boolean;
   }): Promise<Task> {
     const sourceTask = this.taskRepo.findById(params.taskId);
     if (!sourceTask) {
@@ -4163,6 +4645,13 @@ export class AgentDaemon extends EventEmitter {
       sourceTask.userPrompt ||
       sourceTask.rawPrompt ||
       sourceTask.prompt;
+    // The fork's title and prompt are the user's only when the owner asked for the fork and it
+    // reuses the source task's own prompt, which the user wrote; a message picked from the
+    // history may have been injected.
+    const forkProvenance = forkedTaskPromptProvenance(
+      sourceTask,
+      params.keepPromptProvenance === true && !explicitPrompt && !forkHistory.prefillPrompt,
+    );
 
     const sideChatAgentConfig: AgentConfig | undefined = params.sideChat
       ? {
@@ -4192,6 +4681,7 @@ export class AgentDaemon extends EventEmitter {
       workspaceId: sourceTask.workspaceId,
       agentConfig: sideChatAgentConfig,
       source: params.sideChat ? "side_chat" : sourceTask.source || "manual",
+      ...forkProvenance,
       taskOverrides: {
         sessionId: crypto.randomUUID(),
         branchFromTaskId: sourceTask.id,
@@ -4218,7 +4708,14 @@ export class AgentDaemon extends EventEmitter {
     });
     this.logTaskIntentRouted(forkedTask.id, derived);
     if (params.sideChat && initialMessage) {
-      void this.sendMessage(forkedTask.id, initialMessage).catch((error) => {
+      // The user typed the side chat's first message in the desktop app.
+      void this.sendMessage(
+        forkedTask.id,
+        initialMessage,
+        undefined,
+        undefined,
+        USER_TYPED_FOLLOW_UP,
+      ).catch((error) => {
         log.error(`[AgentDaemon] Failed to start sidechat ${forkedTask.id}:`, error);
         this.logEvent(forkedTask.id, "log", {
           message: "Side conversation failed to start",
@@ -4540,6 +5037,8 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+    /** Only for a title and prompt a person typed; see Task.promptProvenance. */
+    promptProvenance?: TaskPromptProvenance;
     autoStart?: boolean;
     graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
@@ -4569,6 +5068,8 @@ export class AgentDaemon extends EventEmitter {
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
     boardColumn?: Task["boardColumn"];
+    /** Only for a title and prompt a person typed; see Task.promptProvenance. */
+    promptProvenance?: TaskPromptProvenance;
     requestIdentity?: unknown;
     capturedAttachments?: QueuedAttachmentBytes[];
     autoStart?: boolean;
@@ -4733,6 +5234,7 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+    promptProvenance?: TaskPromptProvenance;
     graphAdmission?: GraphTaskAdmission;
   }) {
     const { input, derived } = this.prepareTaskCreation(params);
@@ -4764,6 +5266,7 @@ export class AgentDaemon extends EventEmitter {
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
     boardColumn?: Task["boardColumn"];
+    promptProvenance?: TaskPromptProvenance;
   }) {
     const botTeamAgentConfig = normalizeBotConversationAgentConfig(params.agentConfig);
     const taskAgentConfig = applyDefaultAccessProfile(
@@ -4794,7 +5297,14 @@ export class AgentDaemon extends EventEmitter {
       typeof safeTaskOverrides?.sessionId === "string" && safeTaskOverrides.sessionId.trim()
         ? safeTaskOverrides.sessionId.trim()
         : undefined;
+    // Build Compare: every variant runs the same check before it can finish.
+    const compareCheckCommand = derived.agentConfig?.compareGroupId
+      ? derived.agentConfig.compareCheckCommand?.trim()
+      : undefined;
     const input: TaskAdmissionInput = {
+      ...(compareCheckCommand && !safeTaskOverrides?.successCriteria
+        ? { successCriteria: { type: "shell_command" as const, command: compareCheckCommand } }
+        : {}),
       title: params.title,
       prompt: derived.prompt,
       rawPrompt: params.prompt,
@@ -4808,6 +5318,10 @@ export class AgentDaemon extends EventEmitter {
       ...safeTaskOverrides,
       ...(params.boardColumn ? { boardColumn: params.boardColumn } : {}),
       ...(sessionId ? { sessionId } : {}),
+      // Only the caller's explicit argument marks the prompt as typed: neither taskOverrides
+      // (TASK_OVERRIDE_ALLOWLIST) nor agentConfig can carry it, so a copied config or a
+      // remote client's overrides cannot make someone else's text count as the user's.
+      ...(params.promptProvenance === "user_typed" ? USER_TYPED_TASK_PROMPT : {}),
       resumeStrategy,
     };
     return { input, derived };
@@ -6686,9 +7200,17 @@ export class AgentDaemon extends EventEmitter {
     ).catch((error) => {
       log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
     });
+    const inFlight = await this.collectInFlightToolCalls(taskId, input.requestedAt);
+    const unverified = inFlight.filter((call) => call.outcome === "unknown");
+    const message =
+      unverified.length > 0
+        ? `${input.message}. ${unverified.length === 1 ? "1 call was" : `${unverified.length} calls were`} in flight and not verified: ${unverified
+            .map((call) => (call.target ? `${call.toolName} on ${call.target}` : call.toolName))
+            .join("; ")}`
+        : input.message;
     // Persist cancellation for running tasks too (important for remote clients querying task status).
-    if (controlAuthority) this.cancelTaskRecord(taskId, input.message, { controlAuthority });
-    else this.cancelTaskRecord(taskId, input.message);
+    if (controlAuthority) this.cancelTaskRecord(taskId, message, { controlAuthority });
+    else this.cancelTaskRecord(taskId, message);
     this.logEvent(taskId, "agent_interrupt_confirmed", {
       taskId,
       reason: "cancel",
@@ -6696,6 +7218,7 @@ export class AgentDaemon extends EventEmitter {
       requestedAt: input.requestedAt,
       confirmedAt: Date.now(),
       status: "cancelled",
+      ...(inFlight.length > 0 ? { inFlight } : {}),
     });
 
     // Always notify queue manager to remove from running set
@@ -7781,7 +8304,7 @@ export class AgentDaemon extends EventEmitter {
     if (!grant) return undefined;
     taskGrants.delete(trackingKey);
     if (taskGrants.size === 0) grants.delete(taskId);
-    if (Date.now() - grant.grantedAt > APPROVAL_REQUEST_TIMEOUT_MS || !grant.revisionHash)
+    if (Date.now() - grant.grantedAt > APPROVAL_GRANT_TTL_MS || !grant.revisionHash)
       return undefined;
     try {
       const approval = await this.approvalRepo.findById(grant.approvalId);
@@ -8259,7 +8782,7 @@ export class AgentDaemon extends EventEmitter {
     } | null,
     trackingKey = type,
     signal?: AbortSignal,
-    validateDecision?: (approved: boolean) => Promise<boolean>,
+    validateDecision?: (approved: boolean, action: ApprovalResponseAction) => Promise<boolean>,
     approvalBinding?: { approvalId: string; revisionHash: string },
   ): Promise<boolean> {
     if (signal?.aborted) {
@@ -8307,7 +8830,8 @@ export class AgentDaemon extends EventEmitter {
         buildAssistantApprovalRequest(type, description, details),
         ...(approvalBinding ? [approvalBinding] : []),
       );
-      // An unanswered card must not block the tool forever. It times out like
+      // An unanswered card waits for the person (the tool and task deadlines are
+      // paused meanwhile), but not forever: after the answer window it lapses like
       // a queued approval and resolves as a denial.
       const waiters: Promise<InputRequestResponse>[] = [
         responsePromise,
@@ -8339,10 +8863,15 @@ export class AgentDaemon extends EventEmitter {
         typeof details === "object" &&
         typeof details.responsibilityActionReview === "object" &&
         details.responsibilityActionReview?.version === 1;
-      let approved =
-        response.status === "submitted" &&
-        parseAssistantApprovalAnswer(response.answers, isResponsibilityActionReview);
-      if (validateDecision) approved = await validateDecision(approved);
+      let action: ApprovalResponseAction =
+        response.status === "submitted"
+          ? parseAssistantApprovalAction(response.answers, isResponsibilityActionReview)
+          : "deny_once";
+      // Answers come from the renderer: an "Always allow" the card never offered is refused.
+      if (action === "allow_workspace" && !canOfferAssistantAlwaysAllow(details))
+        action = "deny_once";
+      let approved = action !== "deny_once";
+      if (validateDecision) approved = await validateDecision(approved, action);
       if (signal?.aborted) {
         throw new Error("Approval request cancelled because tool execution ended");
       }
@@ -8352,6 +8881,7 @@ export class AgentDaemon extends EventEmitter {
           requestId: response.requestId,
           assistantInput: true,
           approvalType: type,
+          action,
           reason: "assistant_input",
         });
       } else {
@@ -8442,7 +8972,8 @@ export class AgentDaemon extends EventEmitter {
       `Reply to your permission request (the operation was not run): ${reply}`,
       undefined,
       undefined,
-      { deliveryMode: "follow_up", messageSource: "user" },
+      // The person answering this task's approval card typed the reply.
+      { deliveryMode: "follow_up", messageSource: "user", ...USER_TYPED_FOLLOW_UP },
     ).catch((error) => {
       log.warn(`Could not deliver the approval reply to task ${taskId}:`, error);
     });
@@ -9002,9 +9533,14 @@ export class AgentDaemon extends EventEmitter {
       (type !== "workspace_write" || !this.isValidResponsibilityActionReviewDetails(details))
     )
       return false;
-    const allowAutoApprove = isResponsibilityActionReview
-      ? false
-      : opts?.allowAutoApprove !== false;
+    // A bot's tasks often run unattended (gateway, heartbeat), so reaching a
+    // file outside its workspace always waits for a person: no allow rule,
+    // auto-reviewer or session-wide auto-approve answers for them.
+    const allowAutoApprove =
+      isResponsibilityActionReview ||
+      (type === "external_file_access" && isBotOwnedTask(this.taskRepo, taskId))
+        ? false
+        : opts?.allowAutoApprove !== false;
     const enrichedDetails =
       details && typeof details === "object" && !Array.isArray(details)
         ? { ...details }
@@ -9348,7 +9884,13 @@ export class AgentDaemon extends EventEmitter {
         await this.approvalRepo.resolvePending(approval.id, "denied", approval);
         return false;
       }
-      const validateDecision = async (approved: boolean): Promise<boolean> => {
+      // Set by validateDecision; the cast keeps TypeScript from narrowing it to the initial value.
+      let chosenAction = "deny_once" as ApprovalResponseAction;
+      const validateDecision = async (
+        approved: boolean,
+        action: ApprovalResponseAction,
+      ): Promise<boolean> => {
+        chosenAction = action;
         if (!approved) {
           if (isResponsibilityActionReview) {
             try {
@@ -9432,6 +9974,25 @@ export class AgentDaemon extends EventEmitter {
           validateDecision,
           { approvalId: approval.id, revisionHash: approvalRequestRevisionHash(approval) },
         );
+        // "Always allow" saves a workspace rule for the prompt scope through the same path as
+        // the dialog's workspace scope. It runs only after the decision passed validation, so a
+        // stale or superseded card never leaves a rule behind. A failed save keeps the one-time
+        // allow: the person approved this operation either way.
+        if (approved && chosenAction === "allow_workspace") {
+          try {
+            const persistence = await this.persistApprovalActionRule(chosenAction, approval);
+            this.logEvent(taskId, "log", {
+              type: "tool_authorization",
+              decision: "allow",
+              reason: "assistant_always_allow",
+              approvalId: approval.id,
+              approvalType: type,
+              persistence,
+            });
+          } catch (error) {
+            log.warn("Failed to save an Always allow rule:", error);
+          }
+        }
         if (approved && type === "external_file_access") {
           this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
         }
@@ -9488,7 +10049,7 @@ export class AgentDaemon extends EventEmitter {
 
     // Wait for user response, then revalidate captured files at the resumption boundary.
     const approved = await new Promise<boolean>((resolve, reject) => {
-      // Timeout after 5 minutes
+      // Lapse once the answer window has passed without a decision.
       const timeoutHandle = setTimeout(() => {
         const pending = this.pendingApprovals.get(approval.id);
         if (pending && !pending.resolved) {
@@ -9696,6 +10257,25 @@ export class AgentDaemon extends EventEmitter {
     }
 
     try {
+      const findLinkedInputId = (this.inputRequestRepo as Any)?.findLinkedInputId;
+      const linkedInputId: string | undefined =
+        typeof findLinkedInputId === "function"
+          ? await findLinkedInputId.call(this.inputRequestRepo, approvalId)
+          : undefined;
+      if (linkedInputId) {
+        const status = await this.respondToApprovalThroughLinkedInput(
+          approvalId,
+          linkedInputId,
+          requestedAction,
+          attribution,
+          channelResolutionGuard,
+        );
+        // A refused answer changes nothing; a corrected retry must still reach the card.
+        if (status === "handled")
+          approvalIdempotency.complete(idempotencyKey, { success: true, status });
+        else approvalIdempotency.remove(idempotencyKey);
+        return status;
+      }
       const pending = this.pendingApprovals.get(approvalId);
       if (pending && !pending.resolved) {
         const approvalForDecision: ApprovalRequest =
@@ -10038,6 +10618,71 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * An inline approval keeps its approval row for queue surfaces (`approval.list`,
+   * `cowork approvals`), but the tool waits on the linked input card. Answer that card so the
+   * waiter's own validation records the decision. The restart-recovery path would record a grant
+   * the waiting tool never sees, and the card would then time out as a denial.
+   */
+  private async respondToApprovalThroughLinkedInput(
+    approvalId: string,
+    inputId: string,
+    action: ApprovalResponseAction,
+    attribution?: SessionActionAttribution,
+    channelResolutionGuard?: ChannelDecisionResolutionGuard,
+  ): Promise<"handled" | "duplicate" | "not_found" | "in_progress"> {
+    // Channels answer only the approvals they displayed; inline cards are never sent to one.
+    if (channelResolutionGuard) return "not_found";
+    const [approval, request, binding] = await Promise.all([
+      this.approvalRepo.findById(approvalId),
+      this.inputRequestRepo.findById(inputId),
+      this.inputRequestRepo.getApprovalBinding(inputId),
+    ]);
+    // A card answered, dismissed or timed out elsewhere decided this approval already.
+    if (
+      !approval ||
+      !request ||
+      binding?.approvalId !== approvalId ||
+      binding.taskId !== approval.taskId ||
+      request.taskId !== approval.taskId ||
+      request.status !== "pending" ||
+      approval.status !== "pending" ||
+      binding.revisionHash !== approvalRequestRevisionHash(approval)
+    )
+      return "not_found";
+    const liveWaiter = this.pendingInputRequests.get(inputId);
+    // Without a waiter only a reviewed write can resume (from its card); any other card is stale.
+    if (
+      (!liveWaiter || liveWaiter.resolved) &&
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval)
+    )
+      return "not_found";
+    const question = request.questions.find(
+      (candidate) =>
+        candidate.id === ASSISTANT_APPROVAL_QUESTION_ID ||
+        candidate.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+    );
+    const optionLabel = findAssistantApprovalOptionLabel(question?.options, action);
+    if (!question || !optionLabel) return "not_found";
+    const { status } = await this.respondToInputRequest({
+      requestId: inputId,
+      status: "submitted",
+      answers: { [question.id]: { optionLabel } },
+    });
+    if (status === "handled") {
+      this.logEvent(approval.taskId, "log", {
+        type: "approval_response",
+        approvalId,
+        requestId: inputId,
+        action,
+        answer: optionLabel,
+        ...(attribution ? { decidedBy: attribution } : {}),
+      });
+    }
+    // "duplicate" means another answer won the card, not this one.
+    return status === "duplicate" ? "not_found" : status;
+  }
+
+  /**
    * Synchronous so a task's pending approvals are denied before its terminal update, as
    * before (DB6): the approval row write is issued here and completes during the call on
    * the host backend; in the worker it is queued in order and its failure is logged.
@@ -10335,15 +10980,92 @@ export class AgentDaemon extends EventEmitter {
    * Log an event for a task
    */
   async captureTaskMutationBaseline(taskId: string, candidatePath: string): Promise<void> {
-    const ledger = this.taskMutationLedger;
-    if (!ledger) return;
     const task = this.taskRepo.findById(taskId);
     const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
     const workspaceRoot = task?.worktreePath || workspace?.path;
-    if (!workspaceRoot) return;
+    if (!task || !workspaceRoot) return;
+    // Throws when another task in the same folder is changing this file: the write is refused.
+    await this.claimTaskResource(task, workspaceRoot, candidatePath);
+    const ledger = this.taskMutationLedger;
+    if (!ledger) return;
     await ledger.captureBaseline(taskId, workspaceRoot, candidatePath, {
       isolatedWorktree: Boolean(task?.worktreePath),
     });
+  }
+
+  /**
+   * The top task of a task's parent/child tree (bounded, so a cycle cannot hang it). Build
+   * Compare variants are alternatives to each other, so a Compare group is one family.
+   */
+  private taskFamilyRoot(task: Task): string {
+    const compareGroupId = task.agentConfig?.compareGroupId;
+    if (compareGroupId) return `compare:${compareGroupId}`;
+    let current = task;
+    for (let depth = 0; depth < 20 && current.parentTaskId; depth += 1) {
+      const parent = this.taskRepo.findById(current.parentTaskId);
+      if (!parent) break;
+      current = parent;
+    }
+    return current.id;
+  }
+
+  /**
+   * Claim a file before a task writes it (shared-change coordination, WP11). A task in the
+   * shared folder is refused while another task there is changing the same file: the write
+   * fails with a clear message and a conflict wait is recorded until a later write of the file
+   * goes ahead or the task ends. Tasks in worktrees always get their claim; overlapping changes
+   * are shown in Mission Control and in the merge review. A failure to record a claim never
+   * blocks a write.
+   */
+  private async claimTaskResource(
+    task: Task,
+    workspaceRoot: string,
+    candidatePath: string,
+  ): Promise<void> {
+    const resource = fileResource(workspaceRoot, candidatePath);
+    if (!resource) return;
+    let result: { claimed: boolean; others: ResourceClaimHolder[] };
+    try {
+      this.resourceClaimRepository ??= new ResourceClaimRepository(this.getDatabase());
+      result = await this.resourceClaimRepository.claim({
+        id: crypto.randomUUID(),
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        resourceKey: resource.key,
+        label: resource.label,
+        intent: task.title,
+        isolated: Boolean(task.worktreePath),
+        familyRoot: this.taskFamilyRoot(task),
+        at: Date.now(),
+      });
+    } catch (error) {
+      log.debug(`Could not record a claim on ${resource.label}:`, error);
+      return;
+    }
+    const conflictKey = `${task.id}\n${resource.key}`;
+    const requestId = `${RESOURCE_CONFLICT_WAIT_PREFIX}${resource.key}`;
+    if (result.claimed) {
+      if (this.openResourceConflicts.delete(conflictKey)) {
+        this.workSessionContractService.resolveWait(task.id, "external", requestId, "resolved", {
+          reason: "write_went_ahead",
+        });
+      }
+      return;
+    }
+    const other = result.others.find((holder) => !holder.isolated) ?? result.others[0];
+    this.openResourceConflicts.add(conflictKey);
+    this.workSessionContractService.beginWait(task.id, {
+      kind: "external",
+      requestId,
+      reason: `${resource.label} is being changed by "${other.title}" in the same folder`,
+      payload: { conflict: true, resource: resource.label, otherTaskId: other.taskId },
+    });
+    this.logEvent(task.id, "resource_conflict", {
+      path: resource.label,
+      otherTaskId: other.taskId,
+      otherTaskTitle: other.title,
+    });
+    throw new ResourceConflictError(resource.label, other);
   }
 
   private recordTaskMutationImpact(
@@ -10423,6 +11145,11 @@ export class AgentDaemon extends EventEmitter {
 
   private logEventWithinTaskRowReadScope(taskId: string, type: string, payload: Any): void {
     const timestamp = Date.now();
+    if (type === "task_completed" || type === "follow_up_completed") {
+      // The agent's turn is over: link what it changed to the annotations it was addressing.
+      // Optional call: event logging also runs on partial daemon objects.
+      this.settleAnnotationsSoon?.(taskId);
+    }
     const payloadObj: Record<string, unknown> =
       payload && typeof payload === "object" && !Array.isArray(payload)
         ? ({ ...(payload as Record<string, unknown>) } as Record<string, unknown>)
@@ -13118,7 +13845,7 @@ export class AgentDaemon extends EventEmitter {
     operation: AccessFilesystemOperation = "write",
   ): void {
     const key = this.getExternalFileApprovalKey(taskId, rawPath, operation);
-    if (key) this.externalFileApprovalGrants.set(key, Date.now() + 5 * 60 * 1000);
+    if (key) this.externalFileApprovalGrants.set(key, Date.now() + APPROVAL_GRANT_TTL_MS);
   }
 
   consumeExternalFileApproval(
@@ -15416,6 +16143,8 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
     if (this.reconcilePendingUserUpdateBeforeCompletion(taskId).deferred) return;
+    // wait_for_event: park instead of completing until the event arrives or the wait times out.
+    if (this.parkForEventWait(taskId)) return;
 
     let hasApplicationOperations = false;
     if (this.applicationExecutionService) {
@@ -15460,6 +16189,27 @@ export class AgentDaemon extends EventEmitter {
           ...metadata,
           terminalStatus: "partial_success",
           failureClass: "contract_error",
+        };
+      }
+    }
+
+    // A write whose outcome stayed unknown (timeout, lost transport) and was never read back or
+    // repeated successfully: the work cannot count as done until someone checks it.
+    const unverifiedToolCalls = this.tasksWithUnknownToolOutcomes?.delete(taskId)
+      ? await this.findUnverifiedToolAttempts(taskId)
+      : [];
+    if (unverifiedToolCalls.length > 0) {
+      const note = describeUnverifiedAttempts(unverifiedToolCalls);
+      resultSummary =
+        typeof resultSummary === "string" && resultSummary.trim()
+          ? `${resultSummary.trim()}\n\n${note}`
+          : note;
+      const current = metadata?.terminalStatus;
+      if (current === undefined || current === "ok" || current === "partial_success") {
+        metadata = {
+          ...metadata,
+          terminalStatus: "needs_user_action",
+          terminalStatusReason: "tool_outcome_unknown",
         };
       }
     }
@@ -16523,6 +17273,67 @@ export class AgentDaemon extends EventEmitter {
     await this.timelineRowsCommitted(taskId);
   }
 
+  /** Point at the result (WP14): annotation revisions, results and undo. */
+  getAnnotationResults(): AnnotationResultService {
+    this.annotationResults ??= new AnnotationResultService({
+      annotations: this.annotationRepo,
+      contract: this.workSessionContractService,
+      snapshots: new RevisionSnapshotStore(path.join(getUserDataDir(), "artifact-revisions")),
+      workspaceRootForTask: async (taskId) => {
+        const task = this.taskRepo.findById(taskId);
+        return task ? this.workspaceRepo.findById(task.workspaceId)?.path : undefined;
+      },
+      logEvent: (taskId, type, payload) => this.logEvent(taskId, type, payload),
+      log: (message, error) => log.warn(message, error),
+    });
+    return this.annotationResults;
+  }
+
+  /** Settle in the background; event logging never waits for it or fails because of it. */
+  private settleAnnotationsSoon(taskId: string): void {
+    let results: AnnotationResultService;
+    try {
+      results = this.getAnnotationResults();
+    } catch (error) {
+      log.debug(`Annotation results are unavailable for ${taskId}:`, error);
+      return;
+    }
+    void results
+      .settle(taskId)
+      .catch((error) => log.warn(`Could not settle annotations for ${taskId}:`, error));
+  }
+
+  /** Record the revision of the file a new annotation points at, so its change can be undone. */
+  async pinAnnotationTarget(annotationId: string): Promise<Annotation | undefined> {
+    return this.getAnnotationResults().pinTarget(annotationId);
+  }
+
+  /** Undo the change that addressed an annotation. */
+  async undoAnnotationChange(annotationId: string, undoToken: string) {
+    return this.getAnnotationResults().undo(annotationId, undoToken);
+  }
+
+  /**
+   * An edit the user started by pointing at part of a file (document editor): the annotation is
+   * recorded on the task doing the edit and is being addressed from the start.
+   */
+  async recordPointedEdit(input: AnnotationCreateInput): Promise<Annotation | undefined> {
+    try {
+      const annotation = await this.annotationRepo.create(input);
+      await this.annotationRepo.markAddressing(input.taskId, [annotation.id]);
+      this.logEvent(input.taskId, "annotation_created", {
+        annotationId: annotation.id,
+        surfaceType: annotation.surfaceType,
+        body: annotation.body,
+        targetRef: annotation.targetRef,
+      });
+      return await this.pinAnnotationTarget(annotation.id);
+    } catch (error) {
+      log.warn(`Could not record the pointed edit for ${input.taskId}:`, error);
+      return undefined;
+    }
+  }
+
   private async buildAnnotationFollowUpContext(
     taskId: string,
     message: string,
@@ -16553,8 +17364,17 @@ export class AgentDaemon extends EventEmitter {
           target?.xpath ? `xpath=${target.xpath}` : "",
           target?.tagName ? `tag=${target.tagName}` : "",
           target?.textQuote ? `text=${JSON.stringify(target.textQuote)}` : "",
+          target?.sheetName ? `sheet=${target.sheetName}` : "",
+          target?.cellRange ? `cells=${target.cellRange}` : "",
+          typeof target?.page === "number" ? `page=${target.page}` : "",
+          target?.blockId ? `block=${target.blockId}` : "",
           rect,
           viewport,
+        ].filter(Boolean);
+        const values = [
+          annotation.intent ? `Intent: ${annotation.intent}` : "",
+          annotation.before ? `Values now: ${JSON.stringify(annotation.before)}` : "",
+          annotation.after ? `Values asked for: ${JSON.stringify(annotation.after)}` : "",
         ].filter(Boolean);
         const stylePatch = annotation.stylePatch
           ? [`Style guidance: ${JSON.stringify(annotation.stylePatch)}`]
@@ -16566,6 +17386,7 @@ export class AgentDaemon extends EventEmitter {
           `Annotation ${index + 1} (${annotation.id}) [${annotation.surfaceType}, ${annotation.status}]`,
           `User request: ${annotation.body}`,
           targetParts.length > 0 ? `Target: ${targetParts.join("; ")}` : "Target: unavailable",
+          ...values,
           ...stylePatch,
           ...screenshot,
           "",
@@ -16771,7 +17592,9 @@ export class AgentDaemon extends EventEmitter {
       this.taskRepo.update(taskId, { agentConfig: overrideResult.task.agentConfig });
     }
     const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(overrideResult.task);
-    const persistentWorkerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const persistentWorkerRoleBoundary = normalizeWorkerRoleTaskConfig(
+      this.containBotTask(roleAdjustedTask),
+    );
     const taskWithFollowUpOverride = effectiveOptions?.agentConfigOverride
       ? {
           ...persistentWorkerRoleBoundary.task,
@@ -16783,6 +17606,8 @@ export class AgentDaemon extends EventEmitter {
               persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
             // Nor the "Works on" limit inherited from a delegating bot.
             inheritedBotWorksOn: persistentWorkerRoleBoundary.task.agentConfig?.inheritedBotWorksOn,
+            // Nor the bot's-own-folder limit.
+            botContained: persistentWorkerRoleBoundary.task.agentConfig?.botContained,
           },
         }
       : persistentWorkerRoleBoundary.task;
@@ -17039,6 +17864,9 @@ export class AgentDaemon extends EventEmitter {
         effectiveOptions?.inReplyToMessageId,
         effectiveOptions?.inReplyToTaskId,
         effectiveOptions?.surfaceOrigin,
+        // The queued item keeps only the text with annotation context added, which quotes
+        // result text the user did not type; such an item does not carry their provenance.
+        effectiveMessage === message ? effectiveOptions?.textProvenance : undefined,
         effectiveOptions?.notificationKind,
       );
       // queueFollowUp snapshots the pending item; include that row in the return
@@ -17271,6 +18099,9 @@ export class AgentDaemon extends EventEmitter {
           inReplyToMessageId: effectiveOptions?.inReplyToMessageId,
           inReplyToTaskId: effectiveOptions?.inReplyToTaskId,
           surfaceOrigin: effectiveOptions?.surfaceOrigin,
+          textProvenance: effectiveOptions?.textProvenance,
+          // Open annotations add the result text they point at, which the user did not type.
+          typedText: message,
           onAccepted: onAgentMessageAccepted ?? onQueuedUserFollowUpAccepted,
           onProviderDispatchStarted: onQueuedUserFollowUpProviderDispatchStarted,
           onProviderDispatchCompleted: onQueuedUserFollowUpProviderDispatchCompleted,
@@ -19339,6 +20170,7 @@ export class AgentDaemon extends EventEmitter {
               senderLabel: followUp.senderLabel,
               inReplyToMessageId: followUp.inReplyToMessageId,
               inReplyToTaskId: followUp.inReplyToTaskId,
+              textProvenance: followUp.textProvenance,
               requestFingerprint: followUpMessageId
                 ? this.getDurableTaskFollowUpRequestFingerprint(taskId, followUpMessageId)
                 : undefined,

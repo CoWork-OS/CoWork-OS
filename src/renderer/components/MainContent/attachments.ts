@@ -1,6 +1,9 @@
 import {
+  ATTACHED_FILES_SUMMARY_HEADER,
   ATTACHMENT_CONTENT_END_MARKER,
   ATTACHMENT_CONTENT_START_MARKER,
+} from "../../../shared/attachment-summary";
+import {
   MAX_IMAGE_OCR_CHARS,
   buildImageAttachmentViewerOptions,
   buildPdfAttachmentContent,
@@ -26,6 +29,26 @@ export type PendingAttachment = SelectedFileInfo & {
   draftSha256?: string;
   status?: "available" | "unavailable";
 };
+
+/** Fence file-picker and FileReader replies to the composer that requested them. */
+export function createPendingAttachmentOwnerFence() {
+  let ownerKey: string | undefined;
+  let generation = 0;
+  return {
+    setOwner(nextOwnerKey: string) {
+      if (nextOwnerKey === ownerKey) return;
+      ownerKey = nextOwnerKey;
+      generation += 1;
+    },
+    capture() {
+      const startedGeneration = generation;
+      return () => generation === startedGeneration;
+    },
+    invalidate() {
+      generation += 1;
+    },
+  };
+}
 
 type ResolvedDraftAttachment = {
   attachment: PendingAttachment;
@@ -188,7 +211,7 @@ export const composeMessageWithAttachments = async (
   const summary =
     attachmentSummaryLines.length === 0
       ? ""
-      : `Attached files (relative to workspace):\n${attachmentSummaryLines.join("\n\n")}`;
+      : `${ATTACHED_FILES_SUMMARY_HEADER}\n${attachmentSummaryLines.join("\n\n")}`;
   return {
     message: summary ? `${base}\n\n${summary}` : base,
     extractionWarnings,

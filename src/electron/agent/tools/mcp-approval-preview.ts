@@ -14,14 +14,33 @@ function hasArguments(input: unknown): boolean {
   return true;
 }
 
+/**
+ * A costed call (a tool that spends the vendor's credits) puts its estimate and the task's
+ * spend above the arguments, so the price is the first thing on the card.
+ */
+export function withMcpCostLines(
+  preview: { label: string; text: string } | undefined,
+  costLines: readonly string[],
+): { label: string; text: string } | undefined {
+  if (costLines.length === 0) return preview;
+  const cost = costLines.join("\n");
+  if (!preview) return { label: "Cost", text: cost };
+  return { label: `Cost and ${preview.label.toLowerCase()}`, text: `${cost}\n\n${preview.text}` };
+}
+
 export function buildMcpApprovalPresentation(
   toolName: string,
   serverName: string,
   input: unknown,
+  costLines: readonly string[] = [],
 ): McpApprovalPresentation {
   const target = `Allow ${toolName} to call ${serverName}`;
   if (!hasArguments(input)) {
-    return { description: `${target} with no arguments?` };
+    const approvalPreview = withMcpCostLines(undefined, costLines);
+    return {
+      description: `${target} with no arguments?`,
+      ...(approvalPreview ? { approvalPreview } : {}),
+    };
   }
   let text: string;
   try {
@@ -31,6 +50,6 @@ export function buildMcpApprovalPresentation(
   }
   return {
     description: `${target} with the arguments shown below?`,
-    approvalPreview: { label: "Arguments", text },
+    approvalPreview: withMcpCostLines({ label: "Arguments", text }, costLines),
   };
 }

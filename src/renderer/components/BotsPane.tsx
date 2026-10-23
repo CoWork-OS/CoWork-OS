@@ -527,6 +527,8 @@ export function CreateBotDialog({
     worksOn: "auto",
     desktopHost: "",
     desktopGroup: "",
+    fileAccess: "own_folder",
+    desktopNetwork: "internet",
   }));
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -570,6 +572,10 @@ export function CreateBotDialog({
             : {}),
           ...(values.worksOn === "own_desktop" && values.desktopGroup.trim()
             ? { desktopGroup: values.desktopGroup.trim().toLowerCase() }
+            : {}),
+          ...(values.fileAccess !== "own_folder" ? { fileAccess: values.fileAccess } : {}),
+          ...(values.worksOn === "own_desktop" && values.desktopNetwork !== "internet"
+            ? { desktopNetwork: values.desktopNetwork }
             : {}),
           color: DEFAULT_BOT_COLOR,
           capabilities: ["code"],

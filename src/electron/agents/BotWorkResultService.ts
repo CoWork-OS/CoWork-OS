@@ -168,12 +168,14 @@ export class BotWorkResultService {
         check,
         reason,
       })),
-      evidence: evidence.map(({ id, claim, sourceType, capturedAt, status }) => ({
+      evidence: evidence.map(({ id, claim, sourceType, capturedAt, status, basis, dataAsOf }) => ({
         id,
         claim,
         sourceType,
         capturedAt,
         status,
+        ...(basis ? { basis } : {}),
+        ...(dataAsOf !== undefined ? { dataAsOf } : {}),
       })),
       truncated: manifest.truncated,
       issues,

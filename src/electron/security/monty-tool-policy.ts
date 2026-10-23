@@ -3,9 +3,7 @@ import type { GatewayContextType, Workspace } from "../../shared/types";
 import {
   clampMontyLimits,
   createMontySafeStdlib,
-  MontyProgramCache,
   runMontyCode,
-  sha256Hex,
   type MontyResourceLimits,
 } from "../sandbox/monty-engine";
 
@@ -65,10 +63,9 @@ const MAX_LIMITS: MontyResourceLimits = {
   maxRecursionDepth: 1200,
 };
 
-const programCache = new MontyProgramCache(24);
 const isTestEnv = !!process.env.VITEST || process.env.NODE_ENV === "test";
 
-type CachedPolicyFile = { mtimeMs: number; code: string; hash: string };
+type CachedPolicyFile = { mtimeMs: number; code: string };
 const fileCache = new Map<string, CachedPolicyFile>();
 const nativeFs = process.getBuiltinModule("fs") as typeof import("node:fs");
 
@@ -92,8 +89,7 @@ async function loadPolicyCode(workspacePath: string): Promise<CachedPolicyFile |
   if (cached && cached.mtimeMs === stat.mtimeMs) return cached;
 
   const code = await nativeFs.promises.readFile(absPath, "utf8");
-  const hash = sha256Hex(code);
-  const next: CachedPolicyFile = { mtimeMs: stat.mtimeMs, code, hash };
+  const next: CachedPolicyFile = { mtimeMs: stat.mtimeMs, code };
   fileCache.set(absPath, next);
   return next;
 }
@@ -161,15 +157,12 @@ export async function evaluateMontyToolPolicy(args: {
       timestampMs: Date.now(),
     };
 
-    const cacheKey = `tool_policy:${args.workspace.id}:${cached.hash}`;
     const res = await runMontyCode({
       code: cached.code,
       input,
       scriptName: "tools_policy.monty",
       limits,
       externalFunctions,
-      cache: programCache,
-      cacheKey,
     });
 
     if (!res.ok) {

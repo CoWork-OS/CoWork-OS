@@ -853,21 +853,40 @@ export class BrowserWorkbenchService {
     this.allowLocalPreviewUrl(url);
     this.emitCursor(session, { x: 32, y: 32, kind: "navigate", label: "Navigate", pulse: true });
     const loadPromise = this.waitForLoad(contents, 45_000);
+    // While this agent navigation loads, the partition's header hook signs each main-frame hop
+    // when declared identity is on. Nothing is stored on the entry, so reloads are not signed.
+    const agentNavigation =
+      typeof contents.id === "number"
+        ? this.browserSessionManager.beginAgentNavigation?.(contents.id)
+        : undefined;
+    let signed: Array<{ keyid: string; authority: string }> = [];
     try {
-      await contents.loadURL(url);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes("ERR_ABORTED")) {
-        throw error;
+      try {
+        await contents.loadURL(url);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("ERR_ABORTED")) {
+          throw error;
+        }
       }
+      await loadPromise.catch(() => undefined);
+    } finally {
+      signed = agentNavigation?.end() ?? [];
     }
-    await loadPromise.catch(() => undefined);
     const landedUrl = contents.getURL?.() || url;
     const signIn = await detectSignInWall(contents, landedUrl).catch(() => false);
     if (signIn) this.emitSignInRequired(input.taskId, input.sessionId, landedUrl);
     return {
       success: true,
       url: landedUrl,
+      ...(signed.length
+        ? {
+            agentIdentity: {
+              keyid: signed[0].keyid,
+              signedAuthorities: [...new Set(signed.map((entry) => entry.authority))],
+            },
+          }
+        : {}),
       title: contents.getTitle?.() || "",
       status: null,
       visible: true,

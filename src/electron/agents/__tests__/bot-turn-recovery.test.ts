@@ -10,6 +10,13 @@ const user = event("user_message", {
 });
 
 describe("bot user-turn recovery", () => {
+  it("leaves an empty or assistant-only timeline without a recoverable user turn", () => {
+    expect(findUnfinishedBotUserTurn([])).toBeUndefined();
+    expect(
+      findUnfinishedBotUserTurn([event("assistant_message", { message: "Commentary" })]),
+    ).toBeUndefined();
+  });
+
   it("recovers the latest user request after commentary and tool results", () => {
     expect(
       findUnfinishedBotUserTurn([
@@ -35,6 +42,18 @@ describe("bot user-turn recovery", () => {
         event("user_message", { message: "Read newer context", messageSource: "user" }),
       ])?.message,
     ).toBe("Read newer context");
+  });
+
+  it("finds the latest user turn without mutating timeline order", () => {
+    const timeline = [
+      user,
+      event("user_message", { message: "Latest request", messageSource: "user" }),
+      event("assistant_message", { message: "Working" }),
+    ];
+    const original = [...timeline];
+    Object.freeze(timeline);
+    expect(findUnfinishedBotUserTurn(timeline)?.message).toBe("Latest request");
+    expect(timeline).toEqual(original);
   });
   it.each([
     { message: "Start chatting with Coordinator." },

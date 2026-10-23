@@ -47,6 +47,7 @@ export class AppearanceManager {
   private static legacySettingsPath: string;
   private static cachedSettings: AppearanceSettings | null = null;
   private static migrationCompleted = false;
+  private static listeners = new Set<(settings: AppearanceSettings) => void>();
 
   /**
    * Initialize the AppearanceManager
@@ -377,10 +378,23 @@ export class AppearanceManager {
       syncDevLogSettingsFile(validatedSettings.devRunLoggingEnabled === true);
       this.cachedSettings = validatedSettings;
       console.log("[AppearanceManager] Settings saved to encrypted database");
+      for (const listener of this.listeners) {
+        try {
+          listener(validatedSettings);
+        } catch {
+          // One listener failing must not block the others.
+        }
+      }
     } catch (error) {
       console.error("[AppearanceManager] Failed to save settings:", error);
       throw error;
     }
+  }
+
+  /** Called after every save, e.g. so browser pages can follow the app's theme. */
+  static onChange(listener: (settings: AppearanceSettings) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   /**

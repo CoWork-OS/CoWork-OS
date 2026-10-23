@@ -5,6 +5,8 @@ import {
 } from "../agents/collaborative-execution";
 import { closeBrowserTabViewsForTask } from "../browser/browser-tab-views";
 import { ComposerPredictionCoordinator } from "../agent/ComposerPredictionCoordinator";
+import { composerFollowUpProvenance } from "../agent/follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT } from "../agent/task-prompt-provenance";
 import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
@@ -137,7 +139,10 @@ import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
 import { createMailboxStatementPort } from "../mailbox/mailbox-statement-port";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
-import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/managed-session-schemas";
+import {
+  ManagedSessionRequirementCorrectionRequestSchema,
+  SessionHandoffExportIpcRequestSchema,
+} from "../../shared/managed-session-schemas";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
@@ -243,6 +248,12 @@ import {
 } from "../database/repositories";
 
 import { ComposerDraftAttachmentStore } from "../agent/runtime/composer-draft-attachment-store";
+import {
+  composerDraftSentNeedle,
+  composerDraftStartedAt,
+  createSentFileDigest,
+  wasComposerDraftSent,
+} from "../agent/runtime/composer-draft-sent-check";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
 
 import { ActivityRepository } from "../activity/activity-repository-facades";
@@ -336,6 +347,7 @@ import {
   COMPOSER_DRAFT_MAX_ATTACHMENT_TOTAL_BYTES,
   composerDraftMatchesOwner,
   normalizeComposerDraft,
+  type ComposerDraft,
 } from "../../shared/composer-drafts";
 import { isTerminalTaskStatus } from "../../shared/task-status";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
@@ -416,6 +428,7 @@ import {
   JevTestProviderRequestSchema,
   SearchSettingsSchema,
   NotionSettingsSchema,
+  CuaSpaceSettingsSchema,
   BoxSettingsSchema,
   OneDriveSettingsSchema,
   GoogleWorkspaceSettingsSchema,
@@ -442,6 +455,8 @@ import {
   AgentRoleWorksOnSchema,
   AgentRoleDesktopHostSchema,
   AgentRoleDesktopGroupSchema,
+  AgentRoleFileAccessSchema,
+  AgentRoleDesktopNetworkSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -495,6 +510,8 @@ import {
   upsertGoogleWorkspaceAccount,
 } from "../../shared/google-workspace";
 import { setupTaskTraceHandlers } from "./task-trace-handlers";
+import { createTaskReadHandler } from "./task-read-authorization";
+import { PrincipalCapabilityMiddleware } from "../security/PrincipalCapabilityMiddleware";
 import { buildVideoPreviewTranscodeArgs } from "./video-preview-transcode";
 import {
   YouTubeIngestionService,
@@ -536,6 +553,12 @@ import {
 } from "../computer-use/bot-task-recordings";
 import { registerAndroidPhoneHandlers } from "./android-phone-handlers";
 import { ComputerUseHelperRuntime } from "../computer-use/helper-runtime";
+import { CuaSpaceClient, testCuaSpaceConnection } from "../computer-use/cua-space/client";
+import {
+  CuaSpaceSettingsManager,
+  resolveCuaSpaceEndpoint,
+} from "../computer-use/cua-space/settings";
+import type { CuaSpaceConnectionResult, CuaSpaceSettingsUpdate } from "../../shared/cua-space";
 import {
   MCPServerConfigSchema,
   MCPServerUpdateSchema,
@@ -605,6 +628,7 @@ import {
 } from "../attention/attention-sources";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { setupAnswerSurfaceHandlers } from "./answer-surface-handlers";
+import { setupMeshyHandlers } from "./meshy-handlers";
 import { AnswerDataError, readAnswerDataTable } from "../answer-surfaces/answer-data";
 import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
 import { hasHiddenSegment } from "../../shared/answer-surfaces/data";
@@ -1196,6 +1220,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST_FOR_WORKSPACES, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_REFRESH, RATE_LIMIT_CONFIGS.standard);
@@ -1206,6 +1231,12 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_EDIT, RATE_LIMIT_CONFIGS.limited)
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+// Cua Space settings carry a credential, and the test reaches a user-supplied host.
+rateLimiter.configure(
+  IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS,
+  RATE_LIMIT_CONFIGS.limited,
+);
+rateLimiter.configure(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -1630,6 +1661,7 @@ export async function setupIpcHandlers(
     resourcesDir: findBotDesktopResources,
     desktopHostFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopHost,
     desktopGroupFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopGroup,
+    desktopNetworkFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopNetwork,
     desktopHosts: () =>
       agentDaemon
         .getActiveAgentRoles()
@@ -1963,12 +1995,36 @@ export async function setupIpcHandlers(
       }
     }
   };
+  const digestSentFile = createSentFileDigest(
+    async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.path,
+  );
+  const wasComposerDraftAlreadySent = async (draft: ComposerDraft): Promise<boolean> => {
+    const since = composerDraftStartedAt(draft);
+    const needle = composerDraftSentNeedle(draft);
+    if (since === null || !needle) return false;
+    try {
+      const messages = await composerDraftRepo.listMessagesSentSince({
+        taskId: draft.taskId,
+        since,
+        needle,
+      });
+      return await wasComposerDraftSent(draft, messages, digestSentFile);
+    } catch {
+      // Best effort: when the check cannot run, the draft is shown as saved.
+      return false;
+    }
+  };
   new TaskSessionMetadataRepository(db);
   const botNotificationPreferenceRepo = new BotNotificationPreferenceRepository(db);
   const approvalRepo = new ApprovalRepository(db);
   const inputRequestRepo = new InputRequestRepository(db);
   const workContextService = new WorkContextService(db);
   const sessionMembershipService = new SessionMembershipService(db);
+  const principalCapabilities = new PrincipalCapabilityMiddleware(db, sessionMembershipService);
+  const handleTaskRead = <Args extends unknown[], Result>(
+    channel: string,
+    read: (event: IpcMainInvokeEvent, ...args: Args) => Result,
+  ) => ipcMain.handle(channel, createTaskReadHandler(principalCapabilities, read));
   const recurringApprovalService = new RecurringApprovalService(db);
   const protectedCredentialService = new ProtectedCredentialService(db);
   const localPreviewService = getLocalPreviewProcessService();
@@ -2120,7 +2176,31 @@ export async function setupIpcHandlers(
 
   // Seed default agent roles if none exist
   await agentRoleRepo.seedDefaults();
-  setupTaskTraceHandlers({ taskTraceRepo });
+  setupTaskTraceHandlers({
+    taskTraceRepo,
+    authorizeTaskView: (event, taskId) =>
+      principalCapabilities.authorizeTaskRead(taskId, principalForEvent(event)),
+    listVisibleTasks: async (event, request) => {
+      const principalId = principalForEvent(event);
+      if (principalId === sessionMembershipService.getLocalPrincipal().principalId)
+        return undefined;
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (limit, offset) =>
+          request.workspaceId
+            ? taskRepo.findByWorkspace(request.workspaceId, limit, offset)
+            : taskRepo.findAll(limit, offset),
+        "view",
+        principalId,
+        Number.MAX_SAFE_INTEGER,
+        0,
+      );
+      return tasks;
+    },
+    filterVisibleTaskIds: (event, ids) =>
+      principalForEvent(event) === sessionMembershipService.getLocalPrincipal().principalId
+        ? Promise.resolve(ids)
+        : principalCapabilities.authorizeTaskIds(ids, "view", principalForEvent(event)),
+  });
 
   // Helper to validate path is within workspace (prevent path traversal attacks).
   // Sibling handlers such as FILE_IMPORT_TO_WORKSPACE resolve the root from the
@@ -5177,6 +5257,9 @@ export async function setupIpcHandlers(
       budgetCost,
       agentConfig: normalizedAgentConfig,
       assignedAgentRoleId,
+      // The owner typed this prompt into the desktop composer, so it may expose the admin-lane
+      // tools (Task.promptProvenance). Set here, never read from the renderer's payload.
+      ...USER_TYPED_TASK_PROMPT,
     });
 
     if (generateTitle && !normalizedAgentConfig?.botConversation) {
@@ -5408,7 +5491,7 @@ export async function setupIpcHandlers(
     return task;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_GET, async (_, id: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_GET, async (_, id: string) => {
     const startedAt = Date.now();
     const task = await taskRepo.findById(id);
     const dbMs = Date.now() - startedAt;
@@ -5427,7 +5510,17 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_GET, async (_, request: unknown) => {
     const owner = validateComposerDraftOwner(request);
     await assertComposerDraftOwner(owner);
-    return composerDraftRepo.get(owner.draftKey, owner);
+    const draft = await composerDraftRepo.get(owner.draftKey, owner);
+    if (!draft || owner.scope !== "local" || !(await wasComposerDraftAlreadySent(draft))) {
+      return draft;
+    }
+    // What already went out in a task is retired instead of restored. A newer
+    // revision saved meanwhile is new input, so that one is returned.
+    if (!(await composerDraftRepo.clear(draft.draftKey, draft.revision))) {
+      return composerDraftRepo.get(owner.draftKey, owner);
+    }
+    await composerDraftAttachmentStore.releaseDraft(draft.draftKey, draft.workspaceId);
+    return null;
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_UPSERT, (_, value: unknown) =>
@@ -5552,14 +5645,36 @@ export async function setupIpcHandlers(
     if (requestedSize > COMPOSER_DRAFT_MAX_ATTACHMENT_SIZE) {
       throw new Error("Draft attachment exceeds the 25 MB limit.");
     }
-    const ref = await composerDraftAttachmentStore.put({
-      draftKey: owner.draftKey,
-      workspaceId: owner.workspaceId,
-      name: requireString(value.name, "name"),
-      ...(optionalString(value.mimeType) ? { mimeType: optionalString(value.mimeType) } : {}),
-      ...(optionalString(value.dataBase64) ? { dataBase64: optionalString(value.dataBase64) } : {}),
-      ...(optionalString(value.sourcePath) ? { sourcePath: optionalString(value.sourcePath) } : {}),
-    });
+    let copied: import("../../shared/composer-drafts").DraftAttachmentRef | null = null;
+    if (value.copyFrom) {
+      // Both drafts must be owned by real workspaces/tasks; the bytes never
+      // leave the store, so no file-picker approval is involved.
+      const source = validateComposerDraftOwner(value.copyFrom);
+      await assertComposerDraftOwner(source);
+      copied = await composerDraftAttachmentStore.copy(
+        {
+          draftKey: source.draftKey,
+          workspaceId: source.workspaceId,
+          refId: requireString(value.copyFrom.refId, "refId"),
+        },
+        { draftKey: owner.draftKey, workspaceId: owner.workspaceId },
+      );
+      if (!copied) return null;
+    }
+    const ref =
+      copied ??
+      (await composerDraftAttachmentStore.put({
+        draftKey: owner.draftKey,
+        workspaceId: owner.workspaceId,
+        name: requireString(value.name, "name"),
+        ...(optionalString(value.mimeType) ? { mimeType: optionalString(value.mimeType) } : {}),
+        ...(optionalString(value.dataBase64)
+          ? { dataBase64: optionalString(value.dataBase64) }
+          : {}),
+        ...(optionalString(value.sourcePath)
+          ? { sourcePath: optionalString(value.sourcePath) }
+          : {}),
+      }));
     if (usage.bytes + ref.size > COMPOSER_DRAFT_MAX_ATTACHMENT_TOTAL_BYTES) {
       await composerDraftAttachmentStore.release(owner.draftKey, owner.workspaceId, ref.refId);
       throw new Error("Draft attachments exceed the 100 MB per-draft limit.");
@@ -5593,7 +5708,7 @@ export async function setupIpcHandlers(
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_PROGRESS_GET, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.SESSION_PROGRESS_GET, async (_, taskId: string) => {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId || normalizedTaskId.length > 128) return undefined;
     // Progress is projected state; give pending projections a moment, then read anyway.
@@ -5603,7 +5718,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.SESSION_SEARCH,
-    async (_, request?: { query?: string; workspaceId?: string; limit?: number }) => {
+    async (event, request?: { query?: string; workspaceId?: string; limit?: number }) => {
       const query = typeof request?.query === "string" ? request.query.trim().slice(0, 120) : "";
       if (query.length < 2) return [];
       const workspaceId =
@@ -5612,14 +5727,33 @@ export async function setupIpcHandlers(
         typeof request?.limit === "number" && Number.isFinite(request.limit)
           ? Math.min(50, Math.max(1, Math.floor(request.limit)))
           : 20;
-      return agentDaemon.searchSessions(query, workspaceId || undefined, limit);
+      const principalId = principalForEvent(event);
+      if (principalId === sessionMembershipService.getLocalPrincipal().principalId) {
+        return agentDaemon.searchSessions(query, workspaceId || undefined, limit);
+      }
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) =>
+          taskRepo.search(query, {
+            workspaceId: workspaceId || undefined,
+            limit: pageLimit,
+            offset: pageOffset,
+          }),
+        "view",
+        principalId,
+        limit,
+        0,
+      );
+      return tasks.flatMap((task) => {
+        const progress = agentDaemon.getSessionProgress(task.id);
+        return progress ? [{ task, progress }] : [];
+      });
     },
   );
 
   ipcMain.handle(
     IPC_CHANNELS.TASK_LIST,
     async (
-      _,
+      event,
       opts?: {
         limit?: number;
         offset?: number;
@@ -5650,13 +5784,20 @@ export async function setupIpcHandlers(
               "bot conversation filter",
             );
       const startedAt = Date.now();
-      const tasks = await taskRepo.findAll(limit, offset, {
-        prioritizeSidebar: opts?.prioritizeSidebar === true,
-        includeArchivedSessions: opts?.includeArchivedSessions !== false,
-        botConversation,
-        excludeSources: opts?.excludeSources,
-        cursor: opts?.cursor,
-      });
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) =>
+          taskRepo.findAll(pageLimit, pageOffset, {
+            prioritizeSidebar: opts?.prioritizeSidebar === true,
+            includeArchivedSessions: opts?.includeArchivedSessions !== false,
+            botConversation,
+            excludeSources: opts?.excludeSources,
+            cursor: opts?.cursor,
+          }),
+        "view",
+        principalForEvent(event),
+        limit,
+        offset,
+      );
       const dbMs = Date.now() - startedAt;
       const jsonStartedAt = Date.now();
       const serializedBytes = getSerializedByteSize(tasks);
@@ -5675,7 +5816,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.TASK_LIST_SIDEBAR,
     async (
-      _,
+      event,
       opts?: {
         limit?: number;
         offset?: number;
@@ -5702,14 +5843,21 @@ export async function setupIpcHandlers(
           ? undefined
           : validateInput(WorkspaceIdSchema, opts.workspaceId, "sidebar workspace filter");
       const startedAt = Date.now();
-      const tasks = await taskRepo.findSidebarSummaries(limit, offset, {
-        prioritizeSidebar: opts?.prioritizeSidebar === true,
-        includeArchivedSessions: opts?.includeArchivedSessions === true,
-        excludeBotConversations: opts?.excludeBotConversations !== false,
-        excludeSources: opts?.excludeSources,
-        workspaceId,
-        cursor: opts?.cursor,
-      });
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) =>
+          taskRepo.findSidebarSummaries(pageLimit, pageOffset, {
+            prioritizeSidebar: opts?.prioritizeSidebar === true,
+            includeArchivedSessions: opts?.includeArchivedSessions === true,
+            excludeBotConversations: opts?.excludeBotConversations !== false,
+            excludeSources: opts?.excludeSources,
+            workspaceId,
+            cursor: opts?.cursor,
+          }),
+        "view",
+        principalForEvent(event),
+        limit,
+        offset,
+      );
       const dbMs = Date.now() - startedAt;
       const jsonStartedAt = Date.now();
       const serializedBytes = getSerializedByteSize(tasks);
@@ -5887,7 +6035,7 @@ export async function setupIpcHandlers(
   );
 
   // Export task summaries as a structured JSON blob (prompt-free by design)
-  ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (_, rawQuery?: TaskExportQuery) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (event, rawQuery?: TaskExportQuery) => {
     checkRateLimit(IPC_CHANNELS.TASK_EXPORT_JSON);
 
     const query: TaskExportQuery = {
@@ -5920,10 +6068,19 @@ export async function setupIpcHandlers(
       );
     } else if (query.workspaceId) {
       const all = await taskRepo.findByWorkspace(query.workspaceId);
-      tasks = all.slice(offset, offset + limit);
+      tasks = (
+        await principalCapabilities.filterTasks(all, "view", principalForEvent(event))
+      ).slice(offset, offset + limit);
     } else {
-      tasks = await taskRepo.findAll(limit, offset);
+      ({ tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) => taskRepo.findAll(pageLimit, pageOffset),
+        "view",
+        principalForEvent(event),
+        limit,
+        offset,
+      ));
     }
+    tasks = await principalCapabilities.filterTasks(tasks, "view", principalForEvent(event));
 
     const taskIds = tasks.map((task) => task.id);
     const events =
@@ -6072,6 +6229,9 @@ export async function setupIpcHandlers(
         validated.initialMessage.trim().length > 0
           ? { initialMessage: validated.initialMessage.trim() }
           : {}),
+        // The owner forked this in the desktop app: the fork may keep the source task's prompt
+        // provenance (Task.promptProvenance).
+        keepPromptProvenance: true,
       });
       if (forkedTask) {
         try {
@@ -6245,14 +6405,22 @@ export async function setupIpcHandlers(
   // ============ Sub-Agent / Parallel Agent Handlers ============
 
   // Get child tasks for a parent task
-  ipcMain.handle(IPC_CHANNELS.AGENT_GET_CHILDREN, async (_, parentTaskId: string) => {
-    return agentDaemon.getChildTasks(parentTaskId);
+  handleTaskRead(IPC_CHANNELS.AGENT_GET_CHILDREN, async (event, parentTaskId: string) => {
+    return principalCapabilities.filterTasks(
+      await agentDaemon.getChildTasks(parentTaskId),
+      "view",
+      principalForEvent(event),
+    );
   });
 
   // Get status of specific agents
-  ipcMain.handle(IPC_CHANNELS.AGENT_GET_STATUS, async (_, taskIds: string[]) => {
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_STATUS, async (event, taskIds: string[]) => {
     const tasks = [];
-    for (const id of taskIds) {
+    const ids =
+      principalForEvent(event) === sessionMembershipService.getLocalPrincipal().principalId
+        ? taskIds
+        : await principalCapabilities.authorizeTaskIds(taskIds, "view", principalForEvent(event));
+    for (const id of ids) {
       const task = await agentDaemon.getTaskById(id);
       if (task) {
         tasks.push({
@@ -6270,7 +6438,7 @@ export async function setupIpcHandlers(
 
   // Task events handler - get historical events from database
   // For collaborative root tasks, also include file events from child tasks.
-  ipcMain.handle(IPC_CHANNELS.TASK_EVENTS, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_EVENTS, async (event, taskId: string) => {
     const startedAt = Date.now();
     const maxEvents = 600;
     const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
@@ -6278,7 +6446,11 @@ export async function setupIpcHandlers(
     // Include child task file events for collaborative roots
     const task = await taskRepo.findById(taskId);
     if (task?.agentConfig?.collaborativeMode) {
-      const childTasks = await taskRepo.findByParent(taskId);
+      const childTasks = await principalCapabilities.filterTasks(
+        await taskRepo.findByParent(taskId),
+        "view",
+        principalForEvent(event),
+      );
       if (childTasks.length > 0) {
         const childIds = childTasks.map((c) => c.id);
         const fileTypes = ["file_created", "file_modified", "file_deleted", "artifact_created"];
@@ -6314,63 +6486,78 @@ export async function setupIpcHandlers(
     return result;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_TIMELINE_PAGE, async (_, request: TaskTimelinePageRequest) => {
-    const startedAt = Date.now();
-    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
-    const task = taskId ? await taskRepo.findById(taskId) : undefined;
-    const childTaskIds = task?.agentConfig?.collaborativeMode
-      ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
-      : [];
-    const page = taskEventRepo.findTimelinePage({
-      taskId,
-      cursor: request?.cursor ?? null,
-      limit: request?.limit,
-      byteLimit: request?.byteLimit,
-      singleEventByteLimit: request?.singleEventByteLimit,
-      ...(childTaskIds.length > 0
-        ? {
-            additionalTaskIds: childTaskIds,
-            additionalTaskEventTypes: [...COLLABORATIVE_CHILD_TIMELINE_EVENT_TYPES],
-          }
-        : {}),
-    });
-    const dbMs = Date.now() - startedAt;
-    const jsonStartedAt = Date.now();
-    const serializedBytes = getSerializedByteSize(page);
-    const jsonMs = Date.now() - jsonStartedAt;
-    logIpcPerf(IPC_CHANNELS.TASK_TIMELINE_PAGE, {
-      taskId: page.taskId,
-      rowCount: page.events.length,
-      hasMoreHistory: page.hasMoreHistory,
-      dbMs,
-      jsonMs,
-      mapMs: dbMs,
-      payloadBytes: page.summary.payloadBytes,
-      largestEventPayloadBytes: page.summary.largestEventPayloadBytes,
-      truncatedEventCount: page.summary.truncatedEventCount,
-      serializedBytes,
-    });
-    if (page.warnings?.length) {
-      logger.warn(
-        `[IpcPayloadWarning] ${JSON.stringify({
-          channel: IPC_CHANNELS.TASK_TIMELINE_PAGE,
-          taskId: page.taskId,
-          warnings: page.warnings,
-        })}`,
-      );
-    }
-    return page;
-  });
+  handleTaskRead(
+    IPC_CHANNELS.TASK_TIMELINE_PAGE,
+    async (event, request: TaskTimelinePageRequest) => {
+      const startedAt = Date.now();
+      const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+      const task = taskId ? await taskRepo.findById(taskId) : undefined;
+      const childTaskIds = task?.agentConfig?.collaborativeMode
+        ? (
+            await principalCapabilities.filterTasks(
+              await taskRepo.findByParent(taskId),
+              "view",
+              principalForEvent(event),
+            )
+          ).map((child) => child.id)
+        : [];
+      const page = taskEventRepo.findTimelinePage({
+        taskId,
+        cursor: request?.cursor ?? null,
+        limit: request?.limit,
+        byteLimit: request?.byteLimit,
+        singleEventByteLimit: request?.singleEventByteLimit,
+        ...(childTaskIds.length > 0
+          ? {
+              additionalTaskIds: childTaskIds,
+              additionalTaskEventTypes: [...COLLABORATIVE_CHILD_TIMELINE_EVENT_TYPES],
+            }
+          : {}),
+      });
+      const dbMs = Date.now() - startedAt;
+      const jsonStartedAt = Date.now();
+      const serializedBytes = getSerializedByteSize(page);
+      const jsonMs = Date.now() - jsonStartedAt;
+      logIpcPerf(IPC_CHANNELS.TASK_TIMELINE_PAGE, {
+        taskId: page.taskId,
+        rowCount: page.events.length,
+        hasMoreHistory: page.hasMoreHistory,
+        dbMs,
+        jsonMs,
+        mapMs: dbMs,
+        payloadBytes: page.summary.payloadBytes,
+        largestEventPayloadBytes: page.summary.largestEventPayloadBytes,
+        truncatedEventCount: page.summary.truncatedEventCount,
+        serializedBytes,
+      });
+      if (page.warnings?.length) {
+        logger.warn(
+          `[IpcPayloadWarning] ${JSON.stringify({
+            channel: IPC_CHANNELS.TASK_TIMELINE_PAGE,
+            taskId: page.taskId,
+            warnings: page.warnings,
+          })}`,
+        );
+      }
+      return page;
+    },
+  );
 
-  ipcMain.handle(
+  handleTaskRead(
     IPC_CHANNELS.TASK_EVENT_DETAIL,
-    async (_, request: TaskEventDetailRequest): Promise<TaskEventDetailResult> => {
+    async (event, request: TaskEventDetailRequest): Promise<TaskEventDetailResult> => {
       const startedAt = Date.now();
       const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
       const eventId = typeof request?.eventId === "string" ? request.eventId.trim() : "";
       const task = taskId ? await taskRepo.findById(taskId) : undefined;
       const childTaskIds = task?.agentConfig?.collaborativeMode
-        ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
+        ? (
+            await principalCapabilities.filterTasks(
+              await taskRepo.findByParent(taskId),
+              "view",
+              principalForEvent(event),
+            )
+          ).map((child) => child.id)
         : [];
       const result = taskEventRepo.findEventDetailById(eventId, {
         taskId,
@@ -6409,7 +6596,7 @@ export async function setupIpcHandlers(
   );
 
   // Semantic timeline projection — normalizer runs on the read path, no DB changes needed
-  ipcMain.handle(IPC_CHANNELS.TASK_SEMANTIC_TIMELINE, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_SEMANTIC_TIMELINE, async (_, taskId: string) => {
     const startedAt = Date.now();
     const maxEvents = 1200;
     const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
@@ -6441,7 +6628,7 @@ export async function setupIpcHandlers(
     return timeline;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_LEARNING_PROGRESS, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_LEARNING_PROGRESS, async (_, taskId: string) => {
     const events = taskEventRepo.findByTaskId(taskId);
     const learningEvents = events
       .filter(
@@ -6613,7 +6800,16 @@ export async function setupIpcHandlers(
           ...(validated.integrationMentions !== undefined
             ? { integrationMentions: validated.integrationMentions }
             : {}),
-          ...(validated.surfaceOrigin ? { surfaceOrigin: validated.surfaceOrigin } : {}),
+          // Typed into the composer unless an answer surface sent it (model-written button,
+          // page code, shell output); only typed text can expose the admin-lane tools. A
+          // collaborator who may contribute to this session is someone else: the admin lane
+          // changes the owner's agent for every later task, so only the local owner counts.
+          ...(authorization.actor.principalId ===
+          sessionMembershipService.getLocalPrincipal().principalId
+            ? composerFollowUpProvenance(validated.surfaceOrigin)
+            : validated.surfaceOrigin
+              ? { surfaceOrigin: validated.surfaceOrigin }
+              : {}),
         },
       );
       // If the message was queued for a running executor, the executor owns
@@ -6715,7 +6911,7 @@ export async function setupIpcHandlers(
   });
 
   // Artifact handlers
-  ipcMain.handle(IPC_CHANNELS.ARTIFACT_LIST, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.ARTIFACT_LIST, async (_, taskId: string) => {
     return artifactRepo.findByTaskId(taskId);
   });
 
@@ -7015,6 +7211,15 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_CANCEL_IPC, async (_, sessionId: string) => {
     return managedSessionService.cancelSession(sessionId);
+  });
+  ipcMain.handle(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, async (_, request: unknown) => {
+    checkRateLimit(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC);
+    const validated = validateInput(
+      SessionHandoffExportIpcRequestSchema,
+      request,
+      "session handoff export",
+    );
+    return managedSessionService.exportHandoff(validated);
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_LIST_IPC, async (_, params?: Any) => {
     return workContextService.list(params || {});
@@ -10067,6 +10272,15 @@ export async function setupIpcHandlers(
         validateInput(AgentRoleDesktopGroupSchema, request.desktopGroup, "shared desktop") ??
         undefined;
     }
+    if (request.fileAccess !== undefined) {
+      request.fileAccess =
+        validateInput(AgentRoleFileAccessSchema, request.fileAccess, "files") ?? undefined;
+    }
+    if (request.desktopNetwork !== undefined) {
+      request.desktopNetwork =
+        validateInput(AgentRoleDesktopNetworkSchema, request.desktopNetwork, "desktop network") ??
+        undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -10124,6 +10338,20 @@ export async function setupIpcHandlers(
         AgentRoleDesktopGroupSchema,
         normalizedRequest.desktopGroup,
         "shared desktop",
+      );
+    }
+    if (normalizedRequest.fileAccess !== undefined) {
+      normalizedRequest.fileAccess = validateInput(
+        AgentRoleFileAccessSchema,
+        normalizedRequest.fileAccess,
+        "files",
+      );
+    }
+    if (normalizedRequest.desktopNetwork !== undefined) {
+      normalizedRequest.desktopNetwork = validateInput(
+        AgentRoleDesktopNetworkSchema,
+        normalizedRequest.desktopNetwork,
+        "desktop network",
       );
     }
     const result = await agentRoleRepo.update(normalizedRequest);
@@ -11807,6 +12035,14 @@ export async function setupIpcHandlers(
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 
+  // 3D model cards in chat and the Meshy connector's cards and gallery.
+  setupMeshyHandlers({
+    isKnownWorkspace: async (workspacePath) => {
+      const resolved = path.resolve(workspacePath);
+      return Boolean(await workspaceRepo.findByPath(resolved));
+    },
+  });
+
   // Interactive answer surfaces: saved control values and photos found by description.
   setupAnswerSurfaceHandlers({
     taskExists: async (taskId) => Boolean(await taskRepo.findById(taskId)),
@@ -11836,9 +12072,10 @@ export async function setupIpcHandlers(
         truncated: row.table.truncated || row.table.rows.length > limit,
       };
     },
-    authorizeTaskView: (event, taskId) => {
-      authorizeTaskForEvent(event, taskId, "view");
-    },
+    authorizeTask: (event, taskId, capability) =>
+      capability === "view"
+        ? principalCapabilities.authorizeTaskRead(taskId, principalForEvent(event))
+        : authorizeTaskForEvent(event, taskId, capability),
     // Answer data: exactly the named file in the task's own workspace (no fallbacks), after
     // symlinks, outside hidden folders and the app's data folder, and allowed by the
     // workspace's read policy, the same rules the agent's file tools follow.
@@ -12518,6 +12755,51 @@ function setupMCPHandlers(): void {
       screenCaptureStatus: helperStatus.screenRecording ? "granted" : "denied",
       error: helperStatus.error ?? null,
     };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_GET_CUA_SPACE_SETTINGS, async () =>
+    CuaSpaceSettingsManager.getDisplaySettings(),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS, async (_, update) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS);
+    const validated = validateInput(
+      CuaSpaceSettingsSchema,
+      update,
+      "Cua Space settings",
+    ) as CuaSpaceSettingsUpdate;
+    const before = CuaSpaceSettingsManager.load();
+    CuaSpaceSettingsManager.save(validated);
+    const after = CuaSpaceSettingsManager.load();
+    // A session's remembered window ids belong to the computer it started on.
+    if (
+      before.enabled !== after.enabled ||
+      (after.enabled && (before.url !== after.url || before.token !== after.token))
+    ) {
+      await ComputerUseSessionManager.getInstance().endSessionManual();
+    }
+    return CuaSpaceSettingsManager.getDisplaySettings();
+  });
+
+  let cuaSpaceTest: Promise<CuaSpaceConnectionResult> | null = null;
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE, async () => {
+    // One probe at a time; a repeat click joins the running one.
+    if (cuaSpaceTest) return await cuaSpaceTest;
+    checkRateLimit(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE);
+    const settings = CuaSpaceSettingsManager.load();
+    let endpoint: ReturnType<typeof resolveCuaSpaceEndpoint>;
+    try {
+      endpoint = resolveCuaSpaceEndpoint(settings.url, settings.token);
+    } catch (error) {
+      return { reachable: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    cuaSpaceTest = testCuaSpaceConnection(
+      new CuaSpaceClient(endpoint, settings.token),
+      endpoint.origin,
+    ).finally(() => {
+      cuaSpaceTest = null;
+    });
+    return await cuaSpaceTest;
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_END_SESSION, async () => {

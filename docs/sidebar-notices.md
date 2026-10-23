@@ -43,5 +43,6 @@ Append an entry to `SIDEBAR_NOTICES`:
 
 | id | What it does |
 | --- | --- |
+| `meshy-3d-v1` | Announces 3D models with Meshy. Its first-use tooltip explains the feature and where to add the key; the notice opens Meshy's setup in Settings → Connectors. See [3D Models with Meshy](meshy-3d.md). |
 | `use-cases-gallery-v1` | Opens the "See how people use CoWork OS" gallery (`UseCasesGallery.tsx`) centered over the visible composer: the welcome screen or Build. Anywhere else it opens over the whole window. |
 | `composer-predictions-v1` | Appears after the first usable composer prediction. Its first-use tooltip explains Tab acceptance and the on/off setting. The notice and **Open settings** action open Appearance settings. Hidden on hosts without the prediction API. |

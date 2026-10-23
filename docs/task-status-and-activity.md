@@ -56,6 +56,16 @@ Unsupported metrics remain absent until a producer exposes an explicit typed cou
 may add `records_updated` through the same canonical outcome contract once their success semantics
 and count are reliable.
 
+### Unknown outcomes
+
+A write whose call timed out, lost its connection or was stopped while running may or may not have
+taken effect. Its activity row reads "Outcome unknown: …" with a warning marker instead of a failure,
+and it adds nothing to the impact metrics: no changed file or created artifact is counted for it.
+When the task stops, the confirmation row reads "Stopped. 1 call was in flight; its result was not
+verified". A task that ends with such a call unresolved finishes as "Completed - action required"
+and its summary names the call. See
+[Tool Attempts and Unknown Outcomes](execution-runtime-model.md#tool-attempts-and-unknown-outcomes).
+
 ## Mutation attribution
 
 Before a core file tool mutates a path, the daemon captures its first task-local baseline under the

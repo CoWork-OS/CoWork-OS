@@ -728,6 +728,8 @@ function fitReadFilesPayload(parsed: Record<string, Any>, maxChars: number): str
   const files = parsed.files as Array<Record<string, Any>>;
   const budget = maxChars - TRUNCATION_NOTE_RESERVE;
   const originals = files.map((file) => ({ ...file }));
+  const originalFileCount = files.length;
+  const originalSkipped = typeof parsed.skipped === "number" ? parsed.skipped : 0;
 
   const buildSlots = (): TrimSlot[] =>
     files.map((file, index) => {
@@ -765,13 +767,17 @@ function fitReadFilesPayload(parsed: Record<string, Any>, maxChars: number): str
         assign: (value) => {
           if (value === content || value === "") {
             Object.assign(file, original, { content: value });
-            delete file.nextStartChar;
             return;
           }
           file.content = value;
           file.truncated = true;
+          delete file.nextStartChar;
+          delete file.window;
           if (lastRender?.value === value && lastRender.nextStartChar !== undefined) {
             file.nextStartChar = lastRender.nextStartChar;
+            if (isPlainObject(original.window)) {
+              file.window = { ...original.window, end: lastRender.nextStartChar };
+            }
           }
         },
       };
@@ -793,7 +799,11 @@ function fitReadFilesPayload(parsed: Record<string, Any>, maxChars: number): str
 
   parsed.truncated = true;
   if (typeof parsed.included === "number") parsed.included = files.length;
-  if (skippedFiles && typeof parsed.skipped === "number") parsed.skipped = skippedFiles.length;
+  if (typeof parsed.skipped === "number") {
+    // A single skippedFiles summary can stand for many files omitted by
+    // maxFiles. Count actual newly dropped files without losing that total.
+    parsed.skipped = originalSkipped + originalFileCount - files.length;
+  }
   const notice =
     "Some file contents were trimmed to fit the tool-result budget; each trimmed file says " +
     "where to continue with read_file.";

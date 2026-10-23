@@ -1,3 +1,4 @@
+import "./file-discovery-test-worker";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
@@ -205,6 +206,63 @@ describe("readFilesByPatterns", () => {
     expect(res.files[0].content.length).toBeLessThanOrEqual(1000);
     // The cut file itself must say it is partial, not only the overall result.
     expect(res.files[0]).toEqual(expect.objectContaining({ path: "src/big.txt", truncated: true }));
+  });
+
+  it("reports partial source windows and preserves their read_file continuation", async () => {
+    const content = "x".repeat(35_000) + "\nIMPORTANT FINDING AT THE END\n";
+    writeFile(path.join(tmpDir, "src", "large.ts"), content);
+
+    const res = await readFilesByPatterns(
+      { patterns: ["src/*.ts"], maxTotalChars: 100_000 },
+      { globTools, fileTools },
+    );
+
+    expect(res.truncated).toBe(true);
+    expect(res.files[0]).toEqual(
+      expect.objectContaining({
+        path: "src/large.ts",
+        truncated: true,
+        window: { start: 0, end: 30_000, total: Buffer.byteLength(content) },
+        nextStartChar: 30_000,
+      }),
+    );
+    const continuation = await fileTools.readFile(res.files[0].path, {
+      startChar: res.files[0].nextStartChar,
+    });
+    expect(continuation.content).toContain("IMPORTANT FINDING AT THE END");
+  });
+
+  it("counts and identifies every file omitted by the aggregate content budget", async () => {
+    writeFile(path.join(tmpDir, "src", "a.txt"), "x".repeat(1500));
+    writeFile(path.join(tmpDir, "src", "b.txt"), "b".repeat(200));
+    writeFile(path.join(tmpDir, "src", "c.txt"), "c".repeat(200));
+
+    const res = await readFilesByPatterns(
+      { patterns: ["src/*.txt"], maxTotalChars: 1000 },
+      { globTools, fileTools },
+    );
+
+    expect(res.included).toBe(1);
+    expect(res.skipped).toBe(2);
+    expect(res.skippedFiles.map((file) => file.path)).toEqual(["src/b.txt", "src/c.txt"]);
+    // The underlying window was clipped further, so its original end is not a
+    // safe continuation offset (it would skip the undisclosed source).
+    expect(res.files[0].nextStartChar).toBeUndefined();
+    expect(res.files[0].window).toBeUndefined();
+  });
+
+  it("counts all files omitted by maxFiles instead of counting the summary entry", async () => {
+    for (const name of ["a", "b", "c", "d"]) {
+      writeFile(path.join(tmpDir, "src", `${name}.ts`), `export const ${name} = 1;\n`);
+    }
+
+    const res = await readFilesByPatterns(
+      { patterns: ["src/*.ts"], maxFiles: 1 },
+      { globTools, fileTools },
+    );
+
+    expect(res.skipped).toBe(3);
+    expect(res.included + res.skipped).toBe(res.totalMatched);
   });
 
   it("remaps stale absolute paths that include the workspace folder name", async () => {

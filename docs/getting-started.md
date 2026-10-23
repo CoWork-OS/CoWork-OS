@@ -404,9 +404,9 @@ When an action falls outside what the selected access profile allows without ask
 
 - What it wants to do
 - Why it needs to do it
-- **Deny** and **Allow once** buttons
+- **Deny** and **Allow once** buttons, plus **Always allow** when the request has a scope that can be remembered for this workspace
 
-A card that gets no answer times out after 5 minutes. Unattended runs (schedules, triggers) deny instead of waiting. See [Access Profiles](access-profiles.md).
+A card waits for your answer for up to 24 hours, and the task stays paused meanwhile; time spent waiting does not count against the task or tool time limits. Unattended runs (schedules, triggers) deny instead of waiting. See [Access Profiles](access-profiles.md).
 
 ## Connect Channels and Apps (Optional)
 

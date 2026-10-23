@@ -49,6 +49,8 @@ Active follow-ups do not reassign the task's workspace or role. When a chat alre
 
 Ordinary remote text sent while a task is running is treated as a follow-up to that task. This keeps chat usage natural: send more context, corrections, files, or constraints without needing a special command.
 
+Only messages from the chat's verified owner, including `/steer` and `/queue`, count as the user's own words. A task the owner starts from a channel is marked as typed by the user too. A quoted reply (WhatsApp's "In reply to …" block) is left out of the owner's words, because the quoted text is someone else's message or the agent's own. Messages and tasks from any other sender in the chat are delivered as usual but never count, so they cannot open the admin-lane tools: persona, behavioral rules, expertise, lore, heartbeat and integration setup. See [Agent Self-Modification Gates](security/self-modification-gates.md).
+
 Use explicit commands when you want to change the task lifecycle:
 
 | Command                      | Behavior                                                                                                                                   |

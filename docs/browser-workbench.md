@@ -130,6 +130,8 @@ Selector inputs remain supported for compatibility, but refs are preferred becau
 
 Snapshot output is treated as untrusted web content. The agent can use it to decide what to click or read, but it should not treat page text, ARIA labels, console output, network metadata, or storage values as instructions.
 
+The workbench sometimes sends page content to the task for you: **Ask CoWork About This**, sending console errors, an answer drawn from a video, an annotation without a typed note, or an **Adjust** change list. That message is tagged as page content (`surfaceOrigin: "browser_page"`). It reaches the task like any message, but it never counts as text you typed, so it cannot open the admin-lane tools (persona, behavioral rules, expertise and similar). See [Agent Self-Modification Gates](security/self-modification-gates.md).
+
 ## Browser Controls
 
 The Browser Workbench header and toolbar are functional, not cosmetic:
@@ -141,6 +143,7 @@ The Browser Workbench header and toolbar are functional, not cosmetic:
   - **Annotate screenshot** captures the page, opens an annotation layer, and can save the marked-up image or send it to the agent as an image attachment.
   - **Save screenshot** captures the current visible browser page into the workspace.
   - **Open in system browser** opens the page outside CoWork.
+  - **Appearance** (Match app, Light, Dark) sets the light or dark scheme pages see, for every tab. Match app, the default, follows the app's theme; Light or Dark is saved in browser settings and kept until changed. It never changes the app's own theme.
   - **Page size** (Fit to panel, Desktop, Tablet, Mobile) resizes the visible webview for responsive checks. A forced size shows as a chip next to the address bar; click it to fit the panel again.
   - **Element outlines** draws the boxes and refs of CoWork's latest snapshot of the tab.
   - **Diagnostics** opens a compact browser panel for console, network, downloads, storage, and trace context.
@@ -214,7 +217,7 @@ For sites that require an existing signed-in Chrome profile, use an explicit fal
 
 - `@Browser` in the composer opens the in-app browser for the task, and CoWork then browses in the visible workbench even when browsing defaults to the background.
 - When an action makes the page open a popup or tab, the result reports `switchedToTab` and later actions target it; when that popup closes, the result reports `activeTabClosed` and actions return to its opener.
-- Annotate: click an element, or drag to annotate an area (the elements inside it are recorded). For one element, Adjust edits text, font, size, weight, line height, colors, margin, padding, radius and alignment with a live preview in the page; the annotation carries the requested changes and before/after screenshots, and the page is put back when the annotation is saved or cancelled.
+- Annotate: click an element, or drag to annotate an area (the elements inside it are recorded). For one element, Adjust edits text, font, size, weight, line height, colors, margin, padding, radius and alignment with a live preview in the page; the annotation carries the requested changes and before/after screenshots, and the page is put back when the annotation is saved or cancelled. The adjusted properties are stored as the annotation's `before` and `after` values with intent `change`; see [Point at the result](work-session-model.md#point-at-the-result).
 
 - While CoWork acts in the workbench, a banner says what it is doing and a click on the page asks whether to take over. Taking over pauses CoWork: its next browser tool calls return `paused_by_user` until you press Resume.
 - When an agent navigation lands on a sign-in page (a known identity provider, or a login page with a password field), the tool result says `needs_user_sign_in`. CoWork can offer a private login prompt or an existing saved login through `browser_vault`. You can also sign in yourself; Done tells CoWork to continue. Filling fields is not proof of authentication: CoWork must verify the resulting signed-in page.
@@ -247,6 +250,12 @@ Browser V2 treats browser side effects as governed workspace actions:
 - Clear browsing data with a time range clears history in that range, and cookies and site storage for the sites visited in it (from history). Cached files can only be cleared for all time.
 - Cmd+Shift+B (Ctrl+Shift+B) in a task opens the browser, or switches it between the sidebar and full view.
 - Settings > Browser: search engine, download location, restore tabs, open conversation links in the in-app browser, Chrome-compatible user agent (applies after restart), recording history, CoWork downloads and uploads (ask / allow / block), developer mode, and per-workspace history, remembered site permissions and browsing data. Access profiles and admin policies still decide which sites can be reached; these settings cannot widen them.
+
+- Settings > Browser > Agent identity (off by default): when on, https pages CoWork opens carry a
+  Web Bot Auth signature on the navigation request and each redirect hop if a key directory origin
+  is set; the browser keeps its Chrome-compatible user agent, and reloads and pages you open
+  yourself are never signed. See
+  [How CoWork identifies itself to websites](security-guide.md#how-cowork-identifies-itself-to-websites).
 
 ## Importing Cookies And Saved Logins
 

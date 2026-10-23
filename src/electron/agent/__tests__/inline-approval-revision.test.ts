@@ -186,9 +186,151 @@ suite("inline approval canonical request and resumption", () => {
         validate,
       ),
     ).toBe(false);
-    expect(validate).toHaveBeenCalledWith(true);
+    expect(validate).toHaveBeenCalledWith(true, "allow_once");
     expect(runtime.recordPermissionSuccess).not.toHaveBeenCalled();
     expect(runtime.recordPermissionDenial).toHaveBeenCalledWith("exact");
     expect(daemon.logEvent).not.toHaveBeenCalledWith("task", "approval_granted", expect.anything());
+  });
+  it.each(["saved", "revoked", "not_offered"])(
+    "saves an Always allow rule only after validation passes (%s)",
+    async (scenario) => {
+      const task = {
+        id: "task",
+        status: "executing",
+        agentConfig: { accessProfileId: "ask_for_approval" },
+      };
+      const runtime = { recordPermissionSuccess: vi.fn(), recordPermissionDenial: vi.fn() };
+      const suggestedActions = [
+        { action: "deny_once", label: "Deny once", effect: "deny" },
+        { action: "allow_once", label: "Allow once", effect: "allow" },
+        ...(scenario === "not_offered"
+          ? []
+          : [{ action: "allow_workspace", label: "Allow for workspace", effect: "allow" }]),
+      ];
+      const daemon = {
+        approvalRepo: store,
+        taskRepo: { findById: () => task },
+        pendingApprovals: new Map(),
+        requestUserInput: vi.fn().mockResolvedValue({
+          requestId: "input-fixture",
+          status: "submitted",
+          answers: { approval_decision: { optionLabel: "Always allow" } },
+        }),
+        dismissPendingAssistantApproval: vi.fn().mockResolvedValue(undefined),
+        requestAssistantApproval: AgentDaemon.prototype["requestAssistantApproval"],
+        isApprovalAuthorityCurrent: vi.fn().mockResolvedValue(scenario !== "revoked"),
+        persistApprovalActionRule: vi.fn().mockResolvedValue({
+          effect: "allow",
+          destination: "workspace",
+          dbPersisted: true,
+        }),
+        evaluatePermissionRequest: vi.fn().mockResolvedValue({
+          evaluation: {
+            decision: "ask",
+            reason: { type: "mode", mode: "default", summary: "Review" },
+          },
+          promptDetails: {
+            scope: { kind: "tool", toolName: "http_request" },
+            scopePreview: "tool http_request",
+            suggestedActions,
+          },
+          trackingKey: "exact",
+          authorizationKey: "exact",
+          workspace: { id: "ws", path: directory, permissions },
+          runtime,
+        }),
+        logEvent: vi.fn(),
+        updateTask: vi.fn(),
+        grantExternalFileApprovalsFromDetails: vi.fn(),
+      } as Any;
+      const approved = await AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task",
+        "data_export",
+        "Send the report",
+        { tool: "http_request" },
+        { allowAutoApprove: false },
+      );
+      const card = daemon.requestUserInput.mock.calls[0][1];
+      expect(card.questions[0].options.map((option: Any) => option.label)).toEqual(
+        scenario === "not_offered"
+          ? ["Deny", "Allow once"]
+          : ["Deny", "Always allow", "Allow once"],
+      );
+      expect(approved).toBe(scenario === "saved");
+      if (scenario === "saved") {
+        const row = db.prepare("SELECT * FROM approvals").get() as Any;
+        expect(daemon.persistApprovalActionRule).toHaveBeenCalledWith(
+          "allow_workspace",
+          expect.objectContaining({ id: row.id, taskId: "task", type: "data_export" }),
+        );
+        expect(daemon.logEvent).toHaveBeenCalledWith(
+          "task",
+          "log",
+          expect.objectContaining({ reason: "assistant_always_allow", approvalId: row.id }),
+        );
+        expect(daemon.logEvent).toHaveBeenCalledWith(
+          "task",
+          "approval_granted",
+          expect.objectContaining({ action: "allow_workspace" }),
+        );
+      } else {
+        expect(daemon.persistApprovalActionRule).not.toHaveBeenCalled();
+        expect(runtime.recordPermissionSuccess).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("keeps the one-time allow when saving the Always allow rule fails", async () => {
+    const daemon = {
+      approvalRepo: store,
+      taskRepo: {
+        findById: () => ({
+          id: "task",
+          status: "executing",
+          agentConfig: { accessProfileId: "ask_for_approval" },
+        }),
+      },
+      pendingApprovals: new Map(),
+      requestUserInput: vi.fn().mockResolvedValue({
+        requestId: "input-fixture",
+        status: "submitted",
+        answers: { approval_decision: { optionLabel: "Always allow" } },
+      }),
+      dismissPendingAssistantApproval: vi.fn().mockResolvedValue(undefined),
+      requestAssistantApproval: AgentDaemon.prototype["requestAssistantApproval"],
+      isApprovalAuthorityCurrent: vi.fn().mockResolvedValue(true),
+      persistApprovalActionRule: vi.fn().mockRejectedValue(new Error("rules store locked")),
+      evaluatePermissionRequest: vi.fn().mockResolvedValue({
+        evaluation: {
+          decision: "ask",
+          reason: { type: "mode", mode: "default", summary: "Review" },
+        },
+        promptDetails: {
+          scope: { kind: "tool", toolName: "http_request" },
+          suggestedActions: [
+            { action: "allow_workspace", label: "Allow for workspace", effect: "allow" },
+          ],
+        },
+        trackingKey: "exact",
+        authorizationKey: "exact",
+        workspace: { id: "ws", path: directory, permissions },
+        runtime: { recordPermissionSuccess: vi.fn(), recordPermissionDenial: vi.fn() },
+      }),
+      logEvent: vi.fn(),
+      updateTask: vi.fn(),
+      grantExternalFileApprovalsFromDetails: vi.fn(),
+    } as Any;
+    await expect(
+      AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task",
+        "data_export",
+        "Send the report",
+        { tool: "http_request" },
+        { allowAutoApprove: false },
+      ),
+    ).resolves.toBe(true);
+    expect(daemon.persistApprovalActionRule).toHaveBeenCalledOnce();
   });
 });

@@ -3,6 +3,7 @@ import { MousePointer2, RefreshCw } from "lucide-react";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { DesktopOnlyCard } from "./DesktopOnlyCard";
 import { AndroidPhoneSettings } from "./AndroidPhoneSettings";
+import { CuaSpaceSettings } from "./CuaSpaceSettings";
 
 type ScreenStatus = "granted" | "denied" | "not-determined" | "unknown";
 
@@ -63,6 +64,7 @@ function ComputerUseSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cuaSpaceEnabled, setCuaSpaceEnabled] = useState(false);
 
   const isMac = platform === "darwin";
   const isWindows = platform === "win32";
@@ -145,9 +147,12 @@ function ComputerUseSettingsPanel() {
       </div>
 
       <div className="computer-use-platform-note">
-        Computer use runs on this computer with its local permissions; it does not create a separate
-        hosted computer.
+        {cuaSpaceEnabled
+          ? "Computer use runs in the Cua Space below. The permissions on this computer are not used while it is on."
+          : "Computer use runs on this computer with its local permissions unless you turn on a Cua Space below."}
       </div>
+
+      <CuaSpaceSettings onEnabledChange={setCuaSpaceEnabled} />
 
       {error ? <div className="settings-error">{error}</div> : null}
 

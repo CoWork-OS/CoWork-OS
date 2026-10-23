@@ -10,11 +10,14 @@ import { BotMascot } from "./bot-mascot/BotMascot";
 import { BotIconPicker } from "./bot-mascot/BotIconPicker";
 import { BotModelField } from "./BotModelField";
 import {
+  BOT_DESKTOP_NETWORK_OPTIONS,
   BOT_WORKS_ON_OPTIONS,
   isValidDesktopGroup,
   isValidDesktopHost,
+  type BotDesktopNetwork,
   type BotWorksOn,
 } from "../../shared/bot-computer";
+import { BOT_FILE_ACCESS_OPTIONS, type BotFileAccess } from "../../shared/bot-containment";
 import "./bot-form.css";
 
 export interface BotFormValues {
@@ -32,6 +35,10 @@ export interface BotFormValues {
   desktopHost: string;
   /** For its own desktop: a shared desktop's name; empty means a desktop of its own. */
   desktopGroup: string;
+  /** Which files runs nobody started by hand work on. */
+  fileAccess: BotFileAccess;
+  /** For its own desktop: what it may reach on the network. */
+  desktopNetwork: BotDesktopNetwork;
 }
 
 /** Why the Runs on value can't be saved, or null when it can. */
@@ -294,6 +301,48 @@ export function BotFormDialog({
                   </small>
                 </label>
               ) : null}
+              {values.worksOn === "own_desktop" ? (
+                <label className="bot-form-field">
+                  <span>Network</span>
+                  <select
+                    className="bot-form-desktop-network"
+                    value={values.desktopNetwork}
+                    onChange={(event) =>
+                      set({ desktopNetwork: event.target.value as BotDesktopNetwork })
+                    }
+                  >
+                    {BOT_DESKTOP_NETWORK_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small className="bot-form-hint">
+                    {BOT_DESKTOP_NETWORK_OPTIONS.find(
+                      (option) => option.value === values.desktopNetwork,
+                    )?.description ?? ""}{" "}
+                    A shared desktop uses the narrowest setting of its bots.
+                  </small>
+                </label>
+              ) : null}
+              <label className="bot-form-field">
+                <span>Files</span>
+                <select
+                  className="bot-form-file-access"
+                  value={values.fileAccess}
+                  onChange={(event) => set({ fileAccess: event.target.value as BotFileAccess })}
+                >
+                  {BOT_FILE_ACCESS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <small className="bot-form-hint">
+                  {BOT_FILE_ACCESS_OPTIONS.find((option) => option.value === values.fileAccess)
+                    ?.description ?? ""}
+                </small>
+              </label>
             </>
           )}
           {error ? (

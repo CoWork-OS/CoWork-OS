@@ -93,6 +93,23 @@ describe("MontyTools", () => {
     });
   });
 
+  it("monty_run json_parse rejects non-string input like json.loads", async () => {
+    // A dict used to round-trip through the serializer and come back as {}.
+    const res = await tools.montyRun({ code: 'json_parse({"a": 1})', inputs: {} });
+
+    expect(res.success).toBe(false);
+    expect(JSON.stringify(res.error)).toMatch(
+      /json_parse expects a JSON string or bytes, not dict/,
+    );
+  });
+
+  it("monty_run json_stringify keeps Python ints beyond the safe range", async () => {
+    const res = await tools.montyRun({ code: 'json_stringify({"id": 2**70})', inputs: {} });
+
+    expect(res.success).toBe(true);
+    expect(res.output).toBe('{"id":1180591620717411303424}');
+  });
+
   it("extract_json pulls JSON from code fences and prose", async () => {
     const text = [
       "Here you go:",

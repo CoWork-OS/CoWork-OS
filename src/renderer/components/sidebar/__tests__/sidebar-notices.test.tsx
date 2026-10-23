@@ -77,6 +77,15 @@ describe("composer prediction discovery", () => {
     expect(opened).toHaveBeenCalledExactlyOnceWith({ tab: "appearance" });
   });
 
+  it("opens the connectors settings from the Meshy notice", () => {
+    const opened = vi.fn();
+    events.addEventListener("open-settings", (event) => opened((event as CustomEvent).detail));
+    SIDEBAR_NOTICES.find((notice) => notice.id === "meshy-3d-v1")!.onActivate({
+      openUseCasesFallback: vi.fn(),
+    });
+    expect(opened).toHaveBeenCalledExactlyOnceWith({ tab: "connectors", connector: "meshy" });
+  });
+
   it("retains one-time tip behavior within the session when storage is unavailable", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {

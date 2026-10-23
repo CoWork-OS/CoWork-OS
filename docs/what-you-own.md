@@ -69,6 +69,24 @@ open with its history, and the next message goes to the new model. The global de
 conversations are unchanged. See [Bots and conversations](bots-and-conversations.md) for the
 handoff note a provider change adds and for a bot's own model.
 
+To move an unfinished session to another installation or start it fresh with a different model,
+export a handoff package (Mission Control → task → **Export handoff**, or `cowork handoff export`).
+It is a folder of JSON and file copies under `<workspace>/.cowork/handoffs/`:
+
+| Survives a handoff                                              | Does not survive                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Goal, requirements and their status                             | Cookies, running processes and open browser sessions              |
+| Decisions, constraints, assumptions, and reversed decisions     | Approvals already granted                                         |
+| Approvals and answers still pending (asked again after import)  | Values and files that look like credentials (redacted or left out) |
+| Evidence with its capture time and freshness                    | Files changed after the session recorded them                     |
+| Files the session wrote, checked by sha256                      | Hidden, dependency and agent-instruction files (kept in the package) |
+| Recent transcript excerpts and the latest checkpoint summary    | The full transcript                                               |
+
+Secret redaction is pattern based, so review a package before you share it. The package's
+checksum detects damage but does not prove who exported it.
+
+See [Managed Agents — Durable Session Handoffs](managed-agents.md#durable-session-handoffs).
+
 The optional `local-balanced-v1` profile for local models works with a lighter budget: at most 10
 tools and 768 tokens of memory. See [Local-model execution](local-model-execution.md).
 
@@ -92,6 +110,10 @@ CoWork stores your data locally. Running a task sends data to the services that 
   It never sends prompts, files, URLs, model routes or account data. See [CoWork Pulse](cowork-pulse.md).
 - **Skill and pack registries** are downloaded from GitHub when you browse or install skills and
   packs.
+- **Declared agent identity**, when you turn it on (Settings > Browser), tells the sites CoWork
+  visits for you that it is CoWork, and can sign those requests. The key directory you publish
+  holds only public keys and is public by design; the private key stays on your machine,
+  encrypted in the settings store.
 
 ## What CoWork doesn't do
 
@@ -108,6 +130,7 @@ Some data has no open export format today:
 - full conversation history, apart from **Copy as Markdown** one conversation at a time
 - the knowledge graph, task archive, commitments and notes about other people
 
-This data lives in the profile database and moves only with a profile export.
+This data lives in the profile database and moves only with a profile export. An in-progress
+session can move as a handoff package (see [Switching models](#switching-models)).
 
 For encryption details and network destinations, see the [Security Guide](security-guide.md).

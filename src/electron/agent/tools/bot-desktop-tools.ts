@@ -158,7 +158,7 @@ export class BotDesktopTools {
       {
         name: "desktop_run",
         description:
-          "Use to run a shell command inside your own desktop (not on the person's computer), e.g. to install a tool or read a downloaded file. Your files are in ~/work.",
+          "Use to run a shell command inside your own desktop (not on the person's computer), e.g. to install a tool, run a script or read a downloaded file. Your files are in ~/work. When this run works in your own folder, that folder is ~/work: files you write with the file tools are there, and commands for them run here, not on the person's computer.",
         input_schema: {
           type: "object",
           properties: {

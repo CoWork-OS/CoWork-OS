@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { hashMemoryItemContent } from "../../memory-items-types";
 import {
   applyDreamOperations,
   buildDreamInput,
@@ -8,6 +9,35 @@ import {
 } from "../memory-repo-dream-plan";
 
 const NOW = Date.UTC(2026, 9, 5);
+
+describe("buildDreamInput source rechecks", () => {
+  const berlin = {
+    file: "me.md",
+    entryHash: hashMemoryItemContent("Lives in Berlin"),
+    source: "docs/profile.md",
+    changedAt: NOW,
+    excerpt: "Moved to Lisbon.",
+  };
+
+  it("marks the entry and shows its current source", () => {
+    const input = buildDreamInput({ files: files(), tasks: [], now: NOW, rechecks: [berlin] });
+    expect(input.user).toMatch(/L\d+ \[user\] Lives in Berlin \(source changed\)/);
+    expect(input.user).toContain("<source_changes>");
+    expect(input.user).toContain(
+      "docs/profile.md changed on 2026-10-05. Current source:\nMoved to Lisbon.",
+    );
+    expect(input.rechecked).toEqual([berlin]);
+    expect(input.system).toContain("(source changed)");
+  });
+
+  it("drops a recheck whose file the size cap left out", () => {
+    const big = files();
+    big.set("me.md", `${big.get("me.md")}${"- filler entry [by: agent]\n".repeat(3_000)}`);
+    const input = buildDreamInput({ files: big, tasks: [], now: NOW, rechecks: [berlin] });
+    expect(input.user).not.toContain("<source_changes>");
+    expect(input.rechecked).toBeUndefined();
+  });
+});
 
 function files(): Map<string, string> {
   return new Map([

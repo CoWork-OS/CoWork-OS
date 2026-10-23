@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import type { AgentRoleData } from "../../electron/preload";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { botMascotIcon, resolveBotMascot } from "../../shared/bot-mascots";
-import { normalizeBotWorksOn } from "../../shared/bot-computer";
+import { normalizeBotDesktopNetwork, normalizeBotWorksOn } from "../../shared/bot-computer";
+import { normalizeBotFileAccess } from "../../shared/bot-containment";
 import { describeDesktopHostError } from "./BotFormDialog";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 import { AgentRoleEditorDialog } from "./AgentRoleEditorDialog";
@@ -40,6 +41,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     worksOn: "auto",
     desktopHost: "",
     desktopGroup: "",
+    fileAccess: "own_folder",
+    desktopNetwork: "internet",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,6 +70,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           worksOn: normalizeBotWorksOn(loaded.worksOn),
           desktopHost: loaded.desktopHost || "",
           desktopGroup: loaded.desktopGroup || "",
+          fileAccess: normalizeBotFileAccess(loaded.fileAccess),
+          desktopNetwork: normalizeBotDesktopNetwork(loaded.desktopNetwork),
         });
       } catch (cause) {
         if (!cancelled) {
@@ -120,6 +125,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           values.worksOn === "own_desktop"
             ? values.desktopGroup.trim().toLowerCase() || null
             : null,
+        fileAccess: values.fileAccess,
+        desktopNetwork: values.desktopNetwork,
       });
       if (!updated) throw new Error("Could not save this bot.");
       await onSaved?.(updated);

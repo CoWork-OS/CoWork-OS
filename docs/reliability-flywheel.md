@@ -285,11 +285,22 @@ Reliability numbers only count what actually happened:
 - **Pulse**: the `usefulTasks` network field keeps its name for compatibility and remains a
   completion proxy (completed with terminal `ok`, `partial_success` or none), not user-accepted
   value.
+- **Coverage**: a search, list or query that did not cover its scope (a result limit, a time
+  budget, a domain-policy filter, another page, or a search the budget refused) is listed in a
+  fixed "Not checked" block at the end of the task summary, so "nothing found" is not reported as
+  "absent". A later complete check of the same scope removes the line.
+- **Evidence basis**: evidence entries record `basis` (`observed` when the source was read or a
+  verifier checked it, `inferred` for a model-written verification report, `unknown` when no
+  verifier was available) and `dataAsOf` (when the source data was last updated) next to
+  `capturedAt` (when it was read). Requirements are satisfied only by server-side checks
+  (`file_exists` inspection), never by search results or inferred evidence.
 
 Regression suites: `pulse-lifecycle.test.ts`, `pulse-worker-dedup.test.ts`,
 `acp-prompt-outcome.test.ts`, `cron/__tests__/outcome-counts.test.ts`,
 `memory/__tests__/PlaybookService.test.ts`, `MemoryService.playbook-recall.test.ts`,
-`SkillProposalService.evidence.test.ts`, and `update-manager-freshness.test.ts`.
+`SkillProposalService.evidence.test.ts`, `update-manager-freshness.test.ts`,
+`not-checked-ledger.test.ts`, `WorkSessionContractService.test.ts` (evidence basis) and
+`work-session-evidence-basis-migration.test.ts`.
 
 ## CI, Nightly, and Release Gates
 

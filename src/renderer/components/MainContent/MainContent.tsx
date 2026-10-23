@@ -60,6 +60,7 @@ import {
 import { resolveBotMascot } from "../../../shared/bot-mascots";
 import { isCliAgentChildTask } from "../../../shared/cli-agent-detection";
 import type { ComposerDraft, DraftAttachmentRef } from "../../../shared/composer-drafts";
+import { createComposerSubmissionAcceptance } from "../../utils/composer-submission-acceptance";
 import { predictionRevision } from "../../../shared/composer-predictions";
 import {
   buildPersistentGoalAgentConfig,
@@ -243,6 +244,7 @@ import {
 import { preloadableLazy } from "../../utils/preloadable-lazy";
 import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
 import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
+import { ModelGalleryHost } from "../Model3D/ModelGalleryHost";
 import { AttachmentTile } from "../AttachmentTile";
 import { BotCollaborationHeader } from "../BotCollaborationHeader";
 import { BotConversationHistory } from "../BotConversationHistory";
@@ -313,6 +315,7 @@ import { getAccessProfilePresentation } from "./access-profile-presentation";
 import { getInlinePreviewKindForTaskEvent } from "./artifact-logic";
 import {
   composeMessageWithAttachments,
+  createPendingAttachmentOwnerFence,
   guessVisualAttachmentMimeType,
   isVideoVisualAttachmentMimeType,
   joinWorkspaceRelativePath,
@@ -1051,11 +1054,27 @@ function MainContentComponent({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isPreparingMessage, setIsPreparingMessage] = useState(false);
+  const attachmentOwnerFenceRef = useRef(createPendingAttachmentOwnerFence());
+  attachmentOwnerFenceRef.current.setOwner(
+    JSON.stringify([
+      workspace?.id ?? null,
+      selectedTaskId ?? task?.id ?? null,
+      remoteSession?.deviceId ?? null,
+    ]),
+  );
+  useEffect(() => {
+    const ownerFence = attachmentOwnerFenceRef.current;
+    return () => ownerFence.invalidate();
+  }, []);
   const pendingFollowUpSubmissionRef = useRef<{
     taskId: string;
     fingerprint: string;
     messageId: string;
+    acceptance: ReturnType<typeof createComposerSubmissionAcceptance>;
   } | null>(null);
+  useEffect(() => {
+    pendingFollowUpSubmissionRef.current?.acceptance.observe(rawEvents);
+  }, [rawEvents]);
   const [agentRoles, setAgentRoles] = useState<AgentRoleData[]>([]);
   const [integrationMentionOptions, setIntegrationMentionOptions] = useState<
     IntegrationMentionOption[]
@@ -4534,8 +4553,11 @@ function MainContentComponent({
   }, [task?.id]);
 
   const reportAttachmentError = (message: string) => {
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
     setAttachmentError(message);
-    window.setTimeout(() => setAttachmentError(null), 5000);
+    window.setTimeout(() => {
+      if (isCurrentOwner()) setAttachmentError(null);
+    }, 5000);
   };
 
   const readFileAsBase64 = (file: File): Promise<string> =>
@@ -4554,9 +4576,11 @@ function MainContentComponent({
       reader.readAsDataURL(file);
     });
 
-  const appendPendingAttachments = (files: PendingAttachment[]) => {
-    if (files.length === 0) return;
+  const appendPendingAttachments = (files: PendingAttachment[], isCurrentOwner: () => boolean) => {
+    if (files.length === 0 || !isCurrentOwner()) return;
     setPendingAttachments((prev) => {
+      // React may defer this updater until after another workspace is rendered.
+      if (!isCurrentOwner()) return prev;
       const existingKeys = new Set(
         prev.map((attachment) => attachment.path || `${attachment.name}-${attachment.size}`),
       );
@@ -4579,6 +4603,7 @@ function MainContentComponent({
   };
 
   const handleAttachFiles = async () => {
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
     try {
       const pickerDefaultPath =
         workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id)
@@ -4591,8 +4616,10 @@ function MainContentComponent({
           ...file,
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         })),
+        isCurrentOwner,
       );
     } catch (error) {
+      if (!isCurrentOwner()) return;
       console.error("Failed to select files:", error);
       reportAttachmentError("Failed to add attachments. Please try again.");
     }
@@ -4608,7 +4635,7 @@ function MainContentComponent({
 
   useEffect(() => {
     if (!onStageDraftAttachment) return;
-    const draftKeyAtStage = draftSnapshot?.draftKey;
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
     for (const attachment of pendingAttachments) {
       if (
         attachment.draftRefId ||
@@ -4620,11 +4647,7 @@ function MainContentComponent({
       stagingAttachmentIdsRef.current.add(attachment.id);
       void onStageDraftAttachment(attachment).then((ref) => {
         stagingAttachmentIdsRef.current.delete(attachment.id);
-        if (!pendingAttachmentIdsRef.current.has(attachment.id)) {
-          if (ref?.refId) void onReleaseDraftAttachment?.(ref.refId);
-          return;
-        }
-        if (draftKeyAtStage && draftSnapshot?.draftKey !== draftKeyAtStage) {
+        if (!isCurrentOwner() || !pendingAttachmentIdsRef.current.has(attachment.id)) {
           if (ref?.refId) void onReleaseDraftAttachment?.(ref.refId);
           return;
         }
@@ -4706,6 +4729,7 @@ function MainContentComponent({
     if (!isFileDrag(event)) return;
     event.preventDefault();
     setIsDraggingFiles(false);
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
 
     const droppedFiles = Array.from(event.dataTransfer.files || []);
     try {
@@ -4727,8 +4751,9 @@ function MainContentComponent({
         }),
       );
 
-      appendPendingAttachments(pending);
+      appendPendingAttachments(pending, isCurrentOwner);
     } catch (error) {
+      if (!isCurrentOwner()) return;
       console.error("Failed to handle dropped files:", error);
       reportAttachmentError("Failed to attach dropped files.");
     }
@@ -4747,6 +4772,7 @@ function MainContentComponent({
     }
     if (clipboardFiles.length === 0) return;
     event.preventDefault();
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
 
     try {
       const pending = await Promise.all(
@@ -4762,8 +4788,9 @@ function MainContentComponent({
         }),
       );
 
-      appendPendingAttachments(pending);
+      appendPendingAttachments(pending, isCurrentOwner);
     } catch (error) {
+      if (!isCurrentOwner()) return;
       console.error("Failed to handle pasted files:", error);
       reportAttachmentError("Failed to attach pasted files.");
     }
@@ -5385,10 +5412,15 @@ function MainContentComponent({
           globalThis.crypto?.randomUUID?.() ||
           `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         submittedFollowUpMessageId = messageId;
+        const acceptance = createComposerSubmissionAcceptance(
+          submittedTaskId || task?.id || "",
+          messageId,
+        );
         pendingFollowUpSubmissionRef.current = {
           taskId: submittedTaskId || task?.id || "",
           fingerprint: message.trim().replace(/\s+/g, " ").toLowerCase(),
           messageId,
+          acceptance,
         };
         // @Browser opens the visible in-app browser for this task right away.
         if (
@@ -5407,11 +5439,15 @@ function MainContentComponent({
             interactionMode: selectedInteractionMode,
             integrationMentions: selectedIntegrationMentions,
             returnOnAccepted: true,
+            deliveryMode: "follow_up",
             messageId,
             ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
           },
         );
-        submissionResult = submission;
+        // The journal may acknowledge the message before IPC returns. Clear at
+        // either durable acknowledgement, without waiting for the provider turn.
+        acceptance.observe(rawEvents);
+        submissionResult = acceptance.waitFor(submission);
         shouldDeferComposerClear = true;
         // IPC can remain pending for the full turn. Keep the composer available
         // for steering, but restore a failed draft if the user has not moved on.
@@ -5419,6 +5455,7 @@ function MainContentComponent({
           .then(async (sent) => {
             if (
               sent === false &&
+              !acceptance.hasReceipt() &&
               activeModeDraftKeyRef.current === modeDraftKey &&
               modeSubmissionRevisionRef.current === submissionRevision
             ) {
@@ -5426,10 +5463,12 @@ function MainContentComponent({
               setPendingAttachments((current) => (current.length ? current : pendingAttachments));
             }
             if (pendingFollowUpSubmissionRef.current?.messageId === messageId) {
-              if (sent === false) pendingFollowUpSubmissionRef.current = null;
+              if (sent === false && !acceptance.hasReceipt())
+                pendingFollowUpSubmissionRef.current = null;
             }
           })
           .catch((error) => {
+            if (acceptance.hasReceipt()) return;
             if (
               activeModeDraftKeyRef.current === modeDraftKey &&
               modeSubmissionRevisionRef.current === submissionRevision
@@ -9438,6 +9477,7 @@ function MainContentComponent({
             )}
           </div>
         </div>
+        <ModelGalleryHost />
       </SurfaceActionProvider>
 
       {headerActionError && (

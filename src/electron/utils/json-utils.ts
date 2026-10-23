@@ -15,26 +15,37 @@ function sortKeysDeep(value: unknown, seen: WeakSet<object>): unknown {
   if (seen.has(value as object)) return value;
   seen.add(value as object);
 
+  let result: unknown = value;
   if (Array.isArray(value)) {
-    return value.map((v) => sortKeysDeep(v, seen));
-  }
-
-  if (isPlainObject(value)) {
-    const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+    result = value.map((v) => sortKeysDeep(v, seen));
+  } else if (isPlainObject(value)) {
+    // Code-unit order, like Python's sort_keys; localeCompare varied with the
+    // ICU locale and put "a" before "B".
+    const keys = Object.keys(value).sort();
     const out: Record<string, unknown> = {};
     for (const k of keys) {
       out[k] = sortKeysDeep((value as Record<string, unknown>)[k], seen);
     }
-    return out;
+    result = out;
   }
 
-  return value;
+  // `seen` holds only the current path: a cycle is left for JSON.stringify to
+  // reject, while an object that appears twice is sorted at both places.
+  seen.delete(value as object);
+  return result;
 }
 
+type JsonWithRawJson = JSON & { rawJSON?: (text: string) => unknown };
+const rawJson = (JSON as JsonWithRawJson).rawJSON;
+
+/**
+ * Python ints beyond the safe range reach the sandbox as BigInt, which
+ * JSON.stringify rejects. Write the exact digits as a JSON number, as
+ * json.dumps does, or as a string where the runtime has no JSON.rawJSON.
+ */
 function bigintReplacer(_key: string, value: unknown): unknown {
   if (typeof value !== "bigint") return value;
-  const asNumber = Number(value);
-  return Number.isSafeInteger(asNumber) ? asNumber : value.toString();
+  return rawJson ? rawJson(value.toString()) : value.toString();
 }
 
 /**
@@ -43,16 +54,18 @@ function bigintReplacer(_key: string, value: unknown): unknown {
  * `JSON.stringify` returns `undefined` for `undefined`, functions and symbols,
  * so reading `out.length` crashed on those; they now produce `"null"`, matching
  * what `JSON.stringify` emits for them inside arrays (issue #608). `BigInt`
- * values are written as numbers when they fit safely, otherwise as decimal
- * strings, so large Python ints keep their digits. Circular structures and
- * throwing `toJSON` methods raise an error, like Python's `json.dumps`,
- * instead of returning text that could be mistaken for a real `null`.
+ * values are written as exact JSON numbers, so large Python ints keep their
+ * digits. Circular structures and throwing `toJSON` methods raise an error,
+ * like Python's `json.dumps`, instead of returning text that could be mistaken
+ * for a real `null`.
  */
 export function stableJsonStringify(value: unknown, options?: JsonStringifyOptions): string {
   const indent = typeof options?.indent === "number" ? Math.max(0, Math.min(8, options.indent)) : 0;
+  // 0, negative and NaN fall back to the default instead of disabling the cap.
+  const requestedMax = options?.maxOutputChars;
   const maxOutputChars =
-    typeof options?.maxOutputChars === "number"
-      ? Math.max(0, Math.min(500_000, options.maxOutputChars))
+    typeof requestedMax === "number" && requestedMax > 0
+      ? Math.min(500_000, requestedMax)
       : 200_000;
 
   const sortKeys = !!options?.sortKeys;
@@ -69,8 +82,11 @@ export function stableJsonStringify(value: unknown, options?: JsonStringifyOptio
     throw new Error(`Value is not JSON serializable: ${reason}`);
   }
 
-  if (maxOutputChars > 0 && out.length > maxOutputChars) {
-    out = out.slice(0, maxOutputChars) + "\n[... truncated ...]";
+  if (out.length > maxOutputChars) {
+    // Don't cut between the two halves of a surrogate pair.
+    const lastKept = out.charCodeAt(maxOutputChars - 1);
+    const cut = lastKept >= 0xd800 && lastKept <= 0xdbff ? maxOutputChars - 1 : maxOutputChars;
+    out = out.slice(0, cut) + "\n[... truncated ...]";
   }
 
   return out;

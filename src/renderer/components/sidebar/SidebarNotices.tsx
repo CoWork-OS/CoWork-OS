@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, Orbit, Sparkles, X } from "lucide-react";
+import { ArrowUpRight, Box, Orbit, Sparkles, X } from "lucide-react";
 import { useComposerPredictionAvailable } from "../../hooks/useComposerPredictions";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { requestUseCasesGallery } from "../use-cases-events";
@@ -49,6 +49,21 @@ export const SIDEBAR_NOTICES: SidebarNotice[] = [
       Boolean(window.electronAPI?.getComposerPrediction),
     onActivate: () => {
       window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "appearance" } }));
+    },
+  },
+  {
+    id: "meshy-3d-v1",
+    icon: Box,
+    label: "New: 3D models with Meshy",
+    tip: {
+      title: "Make 3D models in chat",
+      description:
+        "Ask for a game asset, a character or a 3D print. Meshy builds it, the approval card shows the credit cost first, and the model appears in the chat as a 3D view. Add your Meshy key in Settings → Connectors → Meshy.",
+    },
+    onActivate: () => {
+      window.dispatchEvent(
+        new CustomEvent("open-settings", { detail: { tab: "connectors", connector: "meshy" } }),
+      );
     },
   },
   {

@@ -2540,11 +2540,15 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message user-message">
-                      {(surfaceOrigin === "answer" || surfaceOrigin === "page") && (
+                      {(surfaceOrigin === "answer" ||
+                        surfaceOrigin === "page" ||
+                        surfaceOrigin === "browser_page") && (
                         <div className="user-message-surface-origin">
                           {surfaceOrigin === "page"
                             ? "Sent from an interactive page"
-                            : "Sent from a button in the answer"}
+                            : surfaceOrigin === "browser_page"
+                              ? "Sent from the browser"
+                              : "Sent from a button in the answer"}
                         </div>
                       )}
                       <UserMessageImageGallery

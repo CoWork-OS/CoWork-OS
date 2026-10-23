@@ -1,5 +1,10 @@
 import type { ComputerViewState } from "../shared/computer-view";
 import {
+  BROWSER_TOOLBAR_MENU_POPUP,
+  type BrowserToolbarMenuAction,
+  type BrowserToolbarMenuRequest,
+} from "../shared/browser-toolbar-menu";
+import {
   BROWSER_VAULT_IPC,
   type BrowserVaultItem,
   type BrowserVaultAnswer,
@@ -12,6 +17,11 @@ import {
 } from "../shared/composer-predictions";
 import type { ApprovalRequest, SpaceSandboxConfig, SandboxType } from "../shared/types";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
+import type {
+  CuaSpaceConnectionResult,
+  CuaSpaceDisplaySettings,
+  CuaSpaceSettingsUpdate,
+} from "../shared/cua-space";
 import type {
   ApprovalDraftPreview,
   InlineApprovalDraftReview,
@@ -175,6 +185,7 @@ import type {
   Annotation,
   AnnotationCreateInput,
   AnnotationListQuery,
+  AnnotationUndoResult,
   AnnotationUpdateInput,
   BrowserAnnotationTargetRef,
   BrowserAnnotationTargetResolveResult,
@@ -224,6 +235,7 @@ import type {
   ManagedEnvironment,
   ManagedSession,
   ManagedSessionCreateInput,
+  SessionHandoffExportResult,
   ManagedSessionEvent,
   ManagedSessionRequirementCorrectionRequest,
   ManagedSessionUserMessageRequest,
@@ -1715,6 +1727,10 @@ interface AgentRoleData {
   worksOn?: import("../shared/bot-computer").BotWorksOn;
   desktopHost?: string;
   desktopGroup?: string;
+  /** Which files runs nobody started by hand work on; unset means its own folder. */
+  fileAccess?: import("../shared/bot-containment").BotFileAccess;
+  /** What its own desktop may reach on the network; unset means internet only. */
+  desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1759,6 +1775,8 @@ interface CreateAgentRoleRequest {
   worksOn?: import("../shared/bot-computer").BotWorksOn;
   desktopHost?: string;
   desktopGroup?: string;
+  fileAccess?: import("../shared/bot-containment").BotFileAccess;
+  desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1794,6 +1812,8 @@ interface UpdateAgentRoleRequest {
   worksOn?: import("../shared/bot-computer").BotWorksOn | null;
   desktopHost?: string | null;
   desktopGroup?: string | null;
+  fileAccess?: import("../shared/bot-containment").BotFileAccess | null;
+  desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -2533,6 +2553,34 @@ contextBridge.exposeInMainWorld("electronAPI", {
       success: boolean;
       settings?: BrowserSettingsState;
     }>,
+  resolveWorktreeBaseCommit: (data: { workspaceId: string; branch?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT, data) as Promise<{
+      commit: string;
+    }>,
+  getMergeReview: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_MERGE_REVIEW, workspaceId) as Promise<MergeReview>,
+  getHygieneReport: (data?: { includeAll?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_HYGIENE_REPORT, data) as Promise<HygieneReport>,
+  retireLifecycleItem: (data: { kind: LifecycleKind; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_RETIRE, data) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  keepLifecycleItem: (data: { kind: LifecycleKind; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_KEEP, data) as Promise<{ success: boolean }>,
+  setLifecycleMeta: (data: LifecycleMetaInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_SET_META, data) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  getAgentIdentityDirectory: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_IDENTITY_DIRECTORY_GET,
+    ) as Promise<AgentIdentityDirectoryResult>,
+  rotateAgentIdentityKey: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_IDENTITY_KEY_ROTATE,
+    ) as Promise<AgentIdentityDirectoryResult>,
   listBrowserSitePermissions: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, data) as Promise<
       BrowserSitePermissionEntry[]
@@ -2649,6 +2697,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) as Promise<Annotation | null>,
   dismissAnnotation: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_DISMISS, { id }) as Promise<Annotation | null>,
+  undoAnnotationChange: (id: string, undoToken: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_UNDO, {
+      id,
+      undoToken,
+    }) as Promise<AnnotationUndoResult>,
   onBrowserWorkbenchOpenRequest: (callback: (request: BrowserWorkbenchOpenRequest) => void) => {
     const handler = (_: Any, request: BrowserWorkbenchOpenRequest) => callback(request);
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_OPEN_REQUEST, handler);
@@ -2669,6 +2722,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
   },
+  popupBrowserToolbarMenu: (data: BrowserToolbarMenuRequest) =>
+    ipcRenderer.invoke(
+      BROWSER_TOOLBAR_MENU_POPUP,
+      data,
+    ) as Promise<BrowserToolbarMenuAction | null>,
   // Native tab views (browser engine "native"): the main process owns each tab's page.
   openBrowserTabView: (data: {
     taskId: string;
@@ -3745,6 +3803,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_CANCEL_IPC, sessionId) as Promise<
       ManagedSession | undefined
     >,
+  exportSessionHandoff: (request: { sessionId?: string; taskId?: string }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC,
+      request,
+    ) as Promise<SessionHandoffExportResult>,
   listWorkContexts: (params?: {
     workspaceId?: string;
     includeArchived?: boolean;
@@ -4504,6 +4567,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, input),
 
   getComputerUseStatus: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_STATUS),
+  getCuaSpaceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_CUA_SPACE_SETTINGS),
+  saveCuaSpaceSettings: (update: CuaSpaceSettingsUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS, update),
+  testCuaSpaceConnection: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE),
   getAndroidPhoneStatus: () => ipcRenderer.invoke("androidPhone:status"),
   saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) =>
     ipcRenderer.invoke("androidPhone:settings", settings),
@@ -4941,6 +5008,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
     taskId: string;
     sources: import("../shared/answer-surfaces/data").AnswerSurfaceData;
   }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA, data),
+  // 3D model cards (::model{}) and the Meshy connector's cards and gallery
+  readModel3d: (data: { filePath: string; workspacePath?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MODEL3D_READ, data),
+  getMeshyStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MESHY_STATUS),
+  getMeshyTask: (data: { taskId: string }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_TASK, data),
+  getMeshyFormats: (data: { taskId: string; beside?: string; workspacePath?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_FORMATS, data),
+  saveMeshyFormat: (data: {
+    taskId: string;
+    format: string;
+    beside?: string;
+    workspacePath?: string;
+    chatTaskId?: string;
+    reveal?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_SAVE, data),
+  getMeshyActions: (data: { taskId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_ACTIONS, data),
+  getMeshyGallery: (data?: { limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_GALLERY, data),
+  getMeshyImage: (data: { url: string }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_IMAGE, data),
+  revealMeshyModel: (data: { filePath: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_REVEAL, data),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -6224,6 +6313,19 @@ export interface BrowserWorkbenchUserNavigateResult {
 export type BrowserSettings = import("../shared/browser-settings").BrowserSettings;
 export type BrowserSettingsState = import("../shared/browser-settings").BrowserSettingsState;
 export type BrowserDataType = import("../shared/browser-settings").BrowserDataType;
+export type HygieneReport = import("../shared/types").HygieneReport;
+export type MergeReview = import("../shared/types").MergeReview;
+export type LifecycleKind = import("../shared/types").LifecycleKind;
+export type LifecycleMetaInput = {
+  kind: LifecycleKind;
+  id: string;
+  owner?: string | null;
+  protects?: string | null;
+  evidence?: string | null;
+  dependsOn?: import("../shared/types").LifecycleRef[];
+};
+export type AgentIdentityDirectoryResult =
+  import("../shared/browser-settings").AgentIdentityDirectoryResult;
 export type BrowserSitePermissionEntry =
   import("../shared/browser-settings").BrowserSitePermissionEntry;
 
@@ -6658,6 +6760,30 @@ export interface ElectronAPI {
   saveBrowserSettings: (
     settings: Partial<BrowserSettings>,
   ) => Promise<{ success: boolean; settings?: BrowserSettingsState }>;
+  /** Build Compare: the commit a branch points to now, so every variant starts from it. */
+  resolveWorktreeBaseCommit: (data: {
+    workspaceId: string;
+    branch?: string;
+  }) => Promise<{ commit: string }>;
+  /** Worktree changes waiting to merge, grouped by intent, with combined-state checks. */
+  getMergeReview: (workspaceId: string) => Promise<MergeReview>;
+  /** Mission Control > Operations > Hygiene: unused, ownerless and broken generated software. */
+  getHygieneReport: (data?: { includeAll?: boolean }) => Promise<HygieneReport>;
+  /** Archive or disable the item where its store can, and mark it retired. Nothing is deleted. */
+  retireLifecycleItem: (data: {
+    kind: LifecycleKind;
+    id: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  /** Keep the item: its idle timer restarts. */
+  keepLifecycleItem: (data: { kind: LifecycleKind; id: string }) => Promise<{ success: boolean }>;
+  setLifecycleMeta: (data: LifecycleMetaInput) => Promise<{ success: boolean; error?: string }>;
+  /** The public key directory (JWK Set) to host for declared agent identity. */
+  getAgentIdentityDirectory: () => Promise<AgentIdentityDirectoryResult>;
+  /**
+   * Replace the declared-identity key after a native confirmation; null when the user cancels.
+   * The hosted directory must then be updated.
+   */
+  rotateAgentIdentityKey: () => Promise<AgentIdentityDirectoryResult>;
   listBrowserSitePermissions: (data: {
     workspaceId: string;
   }) => Promise<BrowserSitePermissionEntry[]>;
@@ -6760,6 +6886,7 @@ export interface ElectronAPI {
   updateAnnotation: (id: string, patch: AnnotationUpdateInput) => Promise<Annotation | null>;
   resolveAnnotation: (id: string, resolvedByEventId?: string) => Promise<Annotation | null>;
   dismissAnnotation: (id: string) => Promise<Annotation | null>;
+  undoAnnotationChange: (id: string, undoToken: string) => Promise<AnnotationUndoResult>;
   onBrowserWorkbenchOpenRequest: (
     callback: (request: BrowserWorkbenchOpenRequest) => void,
   ) => () => void;
@@ -6774,6 +6901,9 @@ export interface ElectronAPI {
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => () => void;
   /** A page asks to share a screen or window: the picker's choices. */
+  popupBrowserToolbarMenu: (
+    data: BrowserToolbarMenuRequest,
+  ) => Promise<BrowserToolbarMenuAction | null>;
   /** Native tab views (browser engine "native"); see src/electron/browser/browser-tab-views.ts. */
   openBrowserTabView: (data: {
     taskId: string;
@@ -7515,6 +7645,11 @@ export interface ElectronAPI {
     sessionId: string,
   ) => Promise<{ resumed: boolean; session?: ManagedSession }>;
   cancelManagedSession: (sessionId: string) => Promise<ManagedSession | undefined>;
+  /** Write a handoff package for a managed session or a task under its workspace. */
+  exportSessionHandoff: (request: {
+    sessionId?: string;
+    taskId?: string;
+  }) => Promise<SessionHandoffExportResult>;
   listWorkContexts: (params?: {
     workspaceId?: string;
     includeArchived?: boolean;
@@ -8723,6 +8858,11 @@ export interface ElectronAPI {
     screenCaptureStatus: string;
     error: string | null;
   }>;
+  getCuaSpaceSettings: () => Promise<CuaSpaceDisplaySettings>;
+  /** Rejects with the validation reason when an enabled Space URL or token is unusable. */
+  saveCuaSpaceSettings: (update: CuaSpaceSettingsUpdate) => Promise<CuaSpaceDisplaySettings>;
+  /** Checks the saved Space: reachable, and the token is accepted by cua-spacesd. */
+  testCuaSpaceConnection: () => Promise<CuaSpaceConnectionResult>;
   getAndroidPhoneStatus: () => Promise<AndroidPhoneStatus>;
   saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) => Promise<AndroidPhoneSettings>;
   installAndroidPhoneRuntime: () => Promise<void>;
@@ -9177,6 +9317,33 @@ export interface ElectronAPI {
     taskId: string;
     sources: import("../shared/answer-surfaces/data").AnswerSurfaceData;
   }) => Promise<Record<string, import("../shared/answer-surfaces/data").AnswerDataResult>>;
+  /** Desktop only: a .glb/.gltf from the workspace or one Meshy saved, for the 3D viewer. */
+  readModel3d?: (data: {
+    filePath: string;
+    workspacePath?: string;
+  }) => Promise<import("../shared/meshy").Model3dFile>;
+  getMeshyStatus?: () => Promise<import("../shared/meshy").MeshyStatus>;
+  getMeshyTask?: (data: { taskId: string }) => Promise<import("../shared/meshy").MeshyTaskInfo>;
+  getMeshyFormats?: (data: {
+    taskId: string;
+    beside?: string;
+    workspacePath?: string;
+  }) => Promise<import("../shared/meshy").MeshyFormatOption[]>;
+  saveMeshyFormat?: (data: {
+    taskId: string;
+    format: string;
+    beside?: string;
+    workspacePath?: string;
+    chatTaskId?: string;
+    reveal?: boolean;
+  }) => Promise<{ path: string }>;
+  getMeshyActions?: (data: { taskId: string }) => Promise<{
+    balance: number | null;
+    actions: import("../shared/meshy").MeshyNextAction[];
+  }>;
+  getMeshyGallery?: (data?: { limit?: number }) => Promise<import("../shared/meshy").MeshyGallery>;
+  getMeshyImage?: (data: { url: string }) => Promise<{ dataUrl: string }>;
+  revealMeshyModel?: (data: { filePath: string }) => Promise<{ success: boolean; error?: string }>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

@@ -1,13 +1,19 @@
 import { isValidSlashCommandName, normalizeSlashCommandName } from "../../shared/message-shortcuts";
 import { isPackAllowed } from "../admin/policies";
 import { PluginRegistry } from "../extensions/registry";
-import { getCustomSkillLoader } from "./custom-skill-loader";
+import { type CustomSkillLoader, getCustomSkillLoader } from "./custom-skill-loader";
 
-export function resolveSkillSlashAlias(commandName: string): string | null {
+/**
+ * Resolve a slash command to a skill id. Tasks pass their workspace view of the loader so
+ * the workspace's own skills resolve too.
+ */
+export function resolveSkillSlashAlias(
+  commandName: string,
+  loader: Pick<CustomSkillLoader, "getSkill"> = getCustomSkillLoader(),
+): string | null {
   const name = normalizeSlashCommandName(commandName);
   if (!isValidSlashCommandName(name)) return null;
 
-  const loader = getCustomSkillLoader();
   const registry = PluginRegistry.getInstance();
   for (const plugin of registry.getPluginsByType("pack")) {
     if (plugin.state === "disabled" || !isPackAllowed(plugin.manifest.name)) continue;

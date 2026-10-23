@@ -62,6 +62,27 @@ describe("executor-prompt-sections", () => {
     expect(result.prompt).toContain("CONFIDENTIALITY");
   });
 
+  it("truncates the last eligible section without reordering or changing a protected tail", () => {
+    const sections = [
+      { key: "first", text: "first ".repeat(300), required: true },
+      { key: "last-eligible", text: "eligible ".repeat(300), required: true },
+      { key: "protected", text: "Protected policy must stay whole", preserveWhole: true },
+    ];
+    const original = structuredClone(sections);
+    const result = composePromptSections(sections, 250);
+
+    expect(result.truncatedSections).toEqual(["last-eligible"]);
+    expect(result.droppedSections).toEqual([]);
+    expect(result.sections.map((section) => section.key)).toEqual([
+      "first",
+      "last-eligible",
+      "protected",
+    ]);
+    expect(result.sections[0].text).toBe(sections[0].text.trim());
+    expect(result.sections[2].text).toBe(sections[2].text);
+    expect(sections).toEqual(original);
+  });
+
   it("reuses cached session sections and recomputes turn sections", async () => {
     const sessionResolve = vi.fn(async () => "session text");
     const turnResolve = vi.fn(async () => "turn text");

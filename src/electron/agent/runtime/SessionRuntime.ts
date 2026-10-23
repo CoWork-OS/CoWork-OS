@@ -25,6 +25,7 @@ import type {
   PermissionRule,
   Plan,
   QuotedAssistantMessage,
+  RuntimeToolMetadata,
   SensitiveSourceRef,
   SessionChecklistItem,
   SessionChecklistState,
@@ -61,7 +62,7 @@ import {
   parseContextOverflowTokenCounts,
 } from "../executor-helpers";
 import { requestLLMResponseWithAdaptiveBudget as requestLLMResponseWithAdaptiveBudgetUtil } from "../executor-llm-turn-utils";
-import { filterToolsByPolicy } from "../tool-policy-engine";
+import { filterToolsByPolicy, isUserIntentOnlyTool } from "../tool-policy-engine";
 import { DeferredToolCatalog } from "./DeferredToolCatalog";
 import { ToolSearchService } from "./ToolSearchService";
 import {
@@ -1608,6 +1609,7 @@ export class SessionRuntime {
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
+    textProvenance?: TaskFollowUpInput["textProvenance"],
     notificationKind?: TaskFollowUpInput["notificationKind"],
   ): void {
     this.state.queues.pendingFollowUps.push({
@@ -1625,6 +1627,8 @@ export class SessionRuntime {
       ...(inReplyToMessageId !== undefined ? { inReplyToMessageId } : {}),
       ...(inReplyToTaskId !== undefined ? { inReplyToTaskId } : {}),
       ...(surfaceOrigin !== undefined ? { surfaceOrigin } : {}),
+      // Kept with the queued item so a drain after this turn still knows who wrote it.
+      ...(textProvenance !== undefined ? { textProvenance } : {}),
       ...(notificationKind !== undefined ? { notificationKind } : {}),
     });
     this.saveSnapshot();
@@ -1884,14 +1888,21 @@ export class SessionRuntime {
    * of a follow-up) gets no cache at all. Only the relevance filters are undone
    * here; `eligibleTools` has already passed policy, mode, intent and step gates,
    * and the tool keeps its catalog position so the list stays byte-identical.
+   * Admin-lane tools are the exception: the user's words must ask for them in the
+   * current message (or the task's own prompt), so an injected follow-up never
+   * inherits them from an earlier turn. Dropping one costs that request its cache.
    */
-  private keepExposedTools<T extends { name: string }>(
+  private keepExposedTools<T extends { name: string; runtime?: RuntimeToolMetadata }>(
     eligibleTools: T[],
     selectedTools: T[],
   ): T[] {
     const exposed = this.getExposedToolNames();
     const selected = new Set(selectedTools.map((tool) => tool.name));
-    const kept = eligibleTools.filter((tool) => selected.has(tool.name) || exposed.has(tool.name));
+    const kept = eligibleTools.filter(
+      (tool) =>
+        selected.has(tool.name) ||
+        (exposed.has(tool.name) && !isUserIntentOnlyTool(tool.name, tool.runtime)),
+    );
     for (const tool of kept) exposed.add(tool.name);
     return kept;
   }

@@ -20,7 +20,7 @@ import {
 } from "./responsibility-store";
 import { serviceStatements } from "../database/service-statements";
 import { approvalRequestRevisionHash } from "../agent/approval-revision";
-import { APPROVAL_REQUEST_TIMEOUT_MS } from "../agent/approval-timeouts";
+import { APPROVAL_REQUEST_TIMEOUT_MS, approvalGrantUsable } from "../agent/approval-timeouts";
 import { assertApprovalDraftsCurrent } from "../database/approval-drafts";
 import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../shared/approval-draft-presentation";
 
@@ -426,7 +426,7 @@ export function claimResponsibilityActionReviewInUnit(
 
   const row = db
     .prepare(
-      "SELECT id, task_id, type, description, details, status, requested_at FROM approvals WHERE id = ?",
+      "SELECT id, task_id, type, description, details, status, requested_at, resolved_at FROM approvals WHERE id = ?",
     )
     .get(approvalId) as
     | {
@@ -437,14 +437,12 @@ export function claimResponsibilityActionReviewInUnit(
         details: string;
         status: string;
         requested_at: number;
+        resolved_at: number | null;
       }
     | undefined;
   if (!row || row.task_id !== taskId || row.type !== "workspace_write" || row.status !== "approved")
     throw new Error("Responsibility action review approval is unavailable");
-  if (
-    !Number.isSafeInteger(row.requested_at) ||
-    Date.now() >= row.requested_at + APPROVAL_REQUEST_TIMEOUT_MS
-  )
+  if (!approvalGrantUsable(row.requested_at, row.resolved_at))
     throw new Error("Responsibility action review approval expired");
   let details: Record<string, unknown>;
   try {
@@ -568,7 +566,7 @@ export function findReusableResponsibilityActionReviewInUnit(
   const rows = db
     .prepare(
       `SELECT a.id, a.task_id, a.type, a.description, a.details, a.status, a.requested_at,
-              d.action, d.request_revision_hash,
+              a.resolved_at, d.action, d.request_revision_hash,
               l.task_id AS linked_task_id, l.revision_hash AS linked_revision_hash,
               i.status AS input_status, i.questions, i.answers
        FROM approvals a
@@ -588,8 +586,7 @@ export function findReusableResponsibilityActionReviewInUnit(
       row.task_id !== taskId ||
       row.linked_task_id !== taskId ||
       row.input_status !== "submitted" ||
-      !Number.isSafeInteger(row.requested_at) ||
-      Date.now() >= (row.requested_at as number) + APPROVAL_REQUEST_TIMEOUT_MS ||
+      !approvalGrantUsable(row.requested_at, row.resolved_at) ||
       typeof row.id !== "string" ||
       typeof row.description !== "string" ||
       typeof row.details !== "string" ||

@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
 import { WorkSessionProtocolReader } from "../database/repository-facades";
+import { redactWorkSessionValue } from "../database/WorkSessionProtocolRepository";
 import {
   evaluateIsolatedReplay,
   type WorkSessionReplayAssertions,
@@ -141,6 +142,23 @@ export function registerWorkSessionMethods(input: {
     const sessionId = id(value.sessionId, "sessionId");
     const projection = optionalId(value.projection, "projection", 128) || "work-session-vnext";
     return { cursor: reliability.projections.getCursor(sessionId, projection) || null };
+  });
+
+  // The task's contract requirements and open waits, as `cowork drill interrupt` prints them.
+  server.registerMethod(Methods.WORK_SESSION_CONTRACT_GET, async (client, params) => {
+    requireScope(client, "read");
+    const taskId = id(record(params).taskId, "taskId");
+    const result = await agentDaemon.getWorkSessionContractService().getForTask(taskId);
+    const requirements = (result?.contract?.requirements ?? []).map((requirement) => ({
+      id: requirement.id,
+      description: requirement.description,
+      status: requirement.status,
+      required: requirement.required,
+    }));
+    const pendingWaits = (result?.aggregate.waitStates ?? [])
+      .filter((wait) => wait.status === "pending")
+      .map((wait) => ({ kind: wait.kind, reason: wait.reason }));
+    return redactWorkSessionValue({ taskId, requirements, pendingWaits });
   });
 
   server.registerMethod(Methods.WORK_SESSION_REPLAY_EVALUATE, async (client, params) => {

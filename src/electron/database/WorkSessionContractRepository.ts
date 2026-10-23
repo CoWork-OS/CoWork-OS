@@ -9,6 +9,7 @@ import type {
   ConstraintLedgerEntryStatus,
   EvidenceManifest,
   EvidenceManifestEntry,
+  EvidenceBasis,
   EvidenceManifestEntryStatus,
   EvidenceManifestSourceType,
   OutcomeContract,
@@ -203,6 +204,11 @@ function normalizeEvidenceStatus(value: unknown): EvidenceManifestEntryStatus {
     : "supporting";
 }
 
+/** Older rows and producers that do not say how a claim was established have no basis. */
+function normalizeEvidenceBasis(value: unknown): EvidenceBasis | undefined {
+  return value === "observed" || value === "inferred" || value === "unknown" ? value : undefined;
+}
+
 function normalizeArtifactStatus(value: unknown): ArtifactRevisionStatus {
   const status = typeof value === "string" ? value : "";
   return ARTIFACT_STATUSES.has(status as ArtifactRevisionStatus)
@@ -290,6 +296,8 @@ export interface EvidenceManifestEntryInput {
   itemId?: string;
   artifactRevisionId?: string;
   idempotencyKey?: string;
+  basis?: EvidenceBasis;
+  dataAsOf?: number;
 }
 
 export interface ArtifactRevisionInput {
@@ -575,6 +583,11 @@ export class WorkSessionContractRepository {
       freshnessExpiresAt !== undefined && freshnessExpiresAt <= this.now()
         ? "stale"
         : requestedStatus;
+    const basis = normalizeEvidenceBasis(input.basis);
+    const dataAsOf =
+      input.dataAsOf === undefined
+        ? undefined
+        : Math.max(0, Math.floor(boundedNumber(input.dataAsOf, capturedAt)));
     const id = randomUUID();
     try {
       this.db
@@ -583,8 +596,8 @@ export class WorkSessionContractRepository {
             INSERT INTO work_session_evidence (
               id, session_id, contract_id, claim, source_type, source_ref, snippet,
               captured_at, freshness_expires_at, confidence, status, contradiction_group,
-              item_id, artifact_revision_id, idempotency_key, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              item_id, artifact_revision_id, idempotency_key, basis, data_as_of, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
         )
         .run(
@@ -603,6 +616,8 @@ export class WorkSessionContractRepository {
           optionalId(input.itemId) || null,
           optionalId(input.artifactRevisionId) || null,
           idempotencyKey || null,
+          basis ?? null,
+          dataAsOf ?? null,
           this.now(),
         );
     } catch (error) {
@@ -1297,6 +1312,10 @@ export class WorkSessionContractRepository {
         : {}),
       ...(row.item_id ? { itemId: String(row.item_id) } : {}),
       ...(row.artifact_revision_id ? { artifactRevisionId: String(row.artifact_revision_id) } : {}),
+      ...(normalizeEvidenceBasis(row.basis) ? { basis: normalizeEvidenceBasis(row.basis) } : {}),
+      ...(row.data_as_of !== null && row.data_as_of !== undefined
+        ? { dataAsOf: Math.max(0, Math.floor(boundedNumber(row.data_as_of))) }
+        : {}),
       createdAt: Math.max(0, Math.floor(boundedNumber(row.created_at))),
     };
   }

@@ -43,7 +43,6 @@ export type OnboardingState =
   | "confirm_memory_trust"
   | "transition_setup"
   | "import_offer"
-  | "ollama_detected"
   | "llm_setup"
   | "llm_api_key"
   | "llm_testing"
@@ -113,8 +112,6 @@ const SCRIPT = {
   transition_setup: "Now connect the AI access you want to use.",
   import_offer: (names: string) =>
     `I found ${names} on this Mac. Want to bring its persona, memory and skills along?`,
-  ollama_detected: (modelName: string) =>
-    `I found ${modelName} running locally on your machine via Ollama. Want to use it?`,
   llm_intro: "Connect AI access to run your task.",
   llm_selected: (provider: string) => {
     const responses: Record<string, string> = {
@@ -282,10 +279,6 @@ const getFallbackTextForState = (
       return SCRIPT.transition_setup;
     case "import_offer":
       return SCRIPT.import_offer("another agent");
-    case "ollama_detected":
-      return data.detectedOllamaModel
-        ? SCRIPT.ollama_detected(data.detectedOllamaModel)
-        : "I found a local AI model. Want to use it?";
     case "llm_setup":
       return SCRIPT.llm_intro;
     case "llm_api_key":
@@ -311,7 +304,6 @@ const getRequiredUiForState = (state: OnboardingState) => ({
   showApiInput: state === "llm_api_key",
   showPersonaOptions: false,
   showVoiceOptions: state === "ask_voice",
-  showOllamaDetection: state === "ollama_detected",
 });
 
 /**
@@ -435,7 +427,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   const [showStyleImplications, setShowStyleImplications] = useState(false);
   const [showPersonaOptions, setShowPersonaOptions] = useState(false);
   const [showVoiceOptions, setShowVoiceOptions] = useState(false);
-  const [showOllamaDetection, setShowOllamaDetection] = useState(false);
   const [showIntroContinue, setShowIntroContinue] = useState(false);
   const [styleCountdown, setStyleCountdown] = useState(0);
   const [testResult, setTestResult] = useState<{
@@ -528,7 +519,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setShowStyleImplications(false);
     setShowPersonaOptions(false);
     setShowVoiceOptions(false);
-    setShowOllamaDetection(false);
     setShowIntroContinue(false);
     setStyleCountdown(0);
     setTestResult(null);
@@ -718,10 +708,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
             setTimeout(() => settle(null), 3000);
           }, 1500);
         }
-        break;
-
-      case "ollama_detected":
-        // User must explicitly accept or decline — no auto-transition
         break;
 
       case "llm_confirmed":
@@ -1117,7 +1103,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     "ask_work_style",
     "reflect_style",
     "ask_memory_trust",
-    "ollama_detected",
     "llm_setup",
     "llm_api_key",
     "recap",
@@ -1213,12 +1198,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         setState("ask_work_style");
         setCurrentText(SCRIPT.ask_work_style);
         setShowInput(true);
-        return;
-
-      case "ollama_detected":
-        setShowOllamaDetection(false);
-        setState("transition_setup");
-        setCurrentText(SCRIPT.transition_setup);
         return;
 
       case "llm_setup":
@@ -1701,11 +1680,10 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     ],
   );
 
-  // Accept auto-detected Ollama provider
+  // Use the local Ollama model found by the provider-step probe
   const acceptOllamaDetection = useCallback(async () => {
     clearPendingTransition();
     const mutationToken = beginAsyncMutation();
-    setShowOllamaDetection(false);
     setShowProviders(false);
     const modelName = data.detectedOllamaModel || "llama3.2";
     setData((d) => ({ ...d, selectedProvider: "ollama" }));
@@ -1744,16 +1722,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     loadExistingLlmSettings,
     stageLlmSettings,
   ]);
-
-  // Decline auto-detected Ollama — show normal provider picker
-  const declineOllamaDetection = useCallback(() => {
-    clearPendingTransition();
-    invalidateAsyncMutations();
-    setShowOllamaDetection(false);
-    setState("llm_setup");
-    setCurrentText(SCRIPT.llm_intro);
-    setShowProviders(true);
-  }, [clearPendingTransition, invalidateAsyncMutations]);
 
   // Skip LLM setup means explore-only unless a previously configured provider exists.
   const skipLLMSetup = useCallback(async () => {
@@ -2004,9 +1972,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     if (requiredUi.showVoiceOptions && !showVoiceOptions) {
       setShowVoiceOptions(true);
     }
-    if (requiredUi.showOllamaDetection && !showOllamaDetection) {
-      setShowOllamaDetection(true);
-    }
   }, [
     state,
     firstResultMode,
@@ -2018,7 +1983,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     showApiInput,
     showPersonaOptions,
     showVoiceOptions,
-    showOllamaDetection,
   ]);
 
   return {
@@ -2034,7 +1998,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     showStyleImplications,
     showPersonaOptions,
     showVoiceOptions,
-    showOllamaDetection,
     showIntroContinue,
     styleCountdown,
     testResult,
@@ -2074,7 +2037,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     signInWithAccount,
     skipLLMSetup,
     acceptOllamaDetection,
-    declineOllamaDetection,
 
     // Update functions
     setApiKey: (key: string) => setData((d) => ({ ...d, apiKey: key })),

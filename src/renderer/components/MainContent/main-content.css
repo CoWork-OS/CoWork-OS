@@ -4161,158 +4161,6 @@ button.collab-timeline-thought-agent:hover {
   line-height: 1.6;
 }
 
-/* Dispatched Agents Panel - reuses collaborative thoughts styling */
-.dispatched-agents-panel {
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 12px;
-  gap: 8px;
-}
-
-.collaborative-thoughts-main .dispatched-agents-panel {
-  max-height: none;
-  padding: 16px 20px;
-}
-
-.dispatched-agent-status {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-muted, #888);
-  text-transform: capitalize;
-}
-
-.dispatched-agent-status.status-executing,
-.dispatched-agent-status.status-planning,
-.dispatched-agent-status.status-interrupted {
-  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
-  color: var(--color-accent);
-}
-
-.dispatched-agent-status.status-completed {
-  background: var(--color-success-subtle, rgba(34, 197, 94, 0.15));
-  color: var(--color-success, #4ade80);
-}
-
-.dispatched-agent-status.status-failed {
-  background: color-mix(in srgb, #ef4444 20%, transparent);
-  color: #ef4444;
-}
-
-.dispatched-agent-status.status-cancelled {
-  background: color-mix(in srgb, #9ca3af 20%, transparent);
-  color: #9ca3af;
-}
-
-.dispatched-agents-panel .step-event {
-  font-size: 12px;
-  color: var(--color-text-secondary, #999);
-  font-style: italic;
-  margin: 0;
-}
-
-.dispatched-agents-panel .step-event.step-completed {
-  color: var(--color-success, #4ade80);
-}
-
-.dispatched-agents-panel .step-event.step-failed {
-  color: #ef4444;
-}
-
-.dispatched-agents-panel .step-event.step-progress {
-  color: var(--color-text-secondary, #999);
-  font-style: italic;
-}
-
-.dispatched-agents-panel .step-icon {
-  display: inline-block;
-  vertical-align: middle;
-  margin-right: 4px;
-  position: relative;
-  top: -1px;
-}
-
-.dispatched-agents-panel .step-icon-progress {
-  color: var(--color-text-muted, #888);
-}
-
-.dispatched-agents-panel .step-icon-completed {
-  color: var(--color-success, #4ade80);
-}
-
-.dispatched-agents-panel .step-icon-failed {
-  color: #ef4444;
-}
-
-.dispatched-agents-panel .step-icon-started {
-  color: var(--color-text-secondary, #999);
-}
-
-.dispatched-agents-panel .stream-thought.stream-thought-compact {
-  padding: 4px 10px;
-  margin-bottom: 2px;
-}
-
-.dispatched-agents-panel .thought-bubble.thought-bubble-compact-event {
-  padding: 0;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.dispatched-agents-panel .stream-event-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 10px;
-}
-
-.dispatched-agents-panel .stream-event-main {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.dispatched-agents-panel .stream-event-main .step-icon {
-  flex-shrink: 0;
-  margin-right: 0;
-  top: 1px;
-}
-
-.dispatched-agents-panel .stream-event-main .step-event {
-  min-width: 0;
-  margin: 0;
-  line-height: 1.35;
-  word-break: break-word;
-}
-
-.dispatched-agents-panel .stream-event-time {
-  white-space: nowrap;
-  align-self: flex-start;
-  margin-top: 1px;
-}
-
-@media (max-width: 640px) {
-  .dispatched-agents-panel .stream-thought.stream-thought-compact {
-    padding: 3px 8px;
-    margin-left: 2px;
-  }
-
-  .dispatched-agents-panel .stream-event-row {
-    gap: 8px;
-  }
-
-  .dispatched-agents-panel .stream-event-main .step-event {
-    font-size: 11.5px;
-  }
-
-  .dispatched-agents-panel .stream-event-time {
-    font-size: 9px;
-  }
-}
-
 /* ============================================
    CLI Agent Frame — Perplexity Computer-style
    per-agent dedicated cards
@@ -8886,6 +8734,36 @@ button.collab-timeline-thought-agent:hover {
   color: var(--color-text-muted, #888);
   font-size: 0.9em;
   margin-left: 4px;
+}
+
+/* Undo for a change made at a place the user pointed to */
+.annotation-undo-btn {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.annotation-undo-btn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.annotation-undo-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.annotation-undo-status,
+.annotation-undo-error {
+  margin-left: 8px;
+  color: var(--color-text-muted, #888);
+  font-size: 0.85em;
 }
 
 /* File References */

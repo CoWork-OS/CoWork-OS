@@ -311,6 +311,7 @@ export const Methods = {
   WORK_SESSION_LEASES_LIST: "workSession.leases.list",
   WORK_SESSION_PROJECTION_GET: "workSession.projection.get",
   WORK_SESSION_REPLAY_EVALUATE: "workSession.replay.evaluate",
+  WORK_SESSION_CONTRACT_GET: "workSession.contract.get",
   TASK_CANCEL: "task.cancel",
   TASK_SEND_MESSAGE: "task.sendMessage",
   MANAGED_AGENT_LIST: "managedAgent.list",
@@ -332,6 +333,8 @@ export const Methods = {
   MANAGED_SESSION_RESUME: "managedSession.resume",
   MANAGED_SESSION_SEND_EVENT: "managedSession.sendEvent",
   MANAGED_SESSION_EVENTS_LIST: "managedSession.events.list",
+  MANAGED_SESSION_EXPORT_HANDOFF: "managedSession.exportHandoff",
+  MANAGED_SESSION_IMPORT_HANDOFF: "managedSession.importHandoff",
 
   // Agent operations
   AGENT_WAKE: "agent.wake",

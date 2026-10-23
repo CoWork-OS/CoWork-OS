@@ -26,7 +26,8 @@
     "src/shared/global-any.d.ts",
     "src/electron/database/fts-worker.ts",
     "src/electron/database/async/database-worker.ts",
-    "src/electron/database/schema-bootstrap-worker.ts"
+    "src/electron/database/schema-bootstrap-worker.ts",
+    "src/electron/agent/tools/file-discovery-worker.ts"
   ],
   "exclude": ["node_modules", "dist", "**/__tests__/**", "**/*.test.ts"]
 }

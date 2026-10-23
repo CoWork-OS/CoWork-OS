@@ -107,6 +107,7 @@ import {
   resolveOpenAIReasoningEffort,
   resolveOpenAITextVerbosity,
   resolveClaudeAuthMethod,
+  resolveOpenRouterSignIn,
   selectClaudeModelKey,
 } from "./settings-llm-helpers";
 import "./settings.css";
@@ -396,6 +397,8 @@ interface SettingsProps {
   autoOpenTurnOutput: boolean;
   onAutoOpenTurnOutputChange: (enabled: boolean) => void;
   initialTab?: SettingsTab;
+  /** A connector (registry id) to open on the Connectors tab, e.g. from a sidebar notice. */
+  initialConnector?: string;
   /** Bumped to open the Memory tab's Review view (also when Settings is already open). */
   memoryReviewRequest?: number;
   focusAutomation?: { owner: AutomationOwner; id: string } | null;
@@ -1403,6 +1406,7 @@ export function Settings({
   autoOpenTurnOutput,
   onAutoOpenTurnOutputChange,
   initialTab = "appearance",
+  initialConnector,
   memoryReviewRequest = 0,
   focusAutomation,
   onShowOnboarding,
@@ -1438,7 +1442,17 @@ export function Settings({
   useEffect(() => {
     if (memoryReviewRequest > 0) setActiveTab("memory");
   }, [memoryReviewRequest]);
-  const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(null);
+  const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(() =>
+    initialConnector
+      ? {
+          id: `connector:${initialConnector}`,
+          name: initialConnector,
+          kind: "native",
+          source: "notice",
+          targetId: initialConnector,
+        }
+      : null,
+  );
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
     initialTab === "skillhub" || !hasHostMethods("listCustomSkills", "getCustomSkillSettings")
@@ -1590,6 +1604,9 @@ export function Settings({
   const [openrouterBaseUrl, setOpenrouterBaseUrl] = useState("");
   const [openrouterModel, setOpenrouterModel] = useState(OPENROUTER_DEFAULT_MODEL_ID);
   const [openrouterParetoMinCodingScore, setOpenrouterParetoMinCodingScore] = useState("");
+  const [openrouterSignIn, setOpenrouterSignIn] = useState<"idle" | "waiting" | "signed_in">(
+    "idle",
+  );
   const [openrouterModels, setOpenrouterModels] = useState<
     Array<{ id: string; name: string; context_length: number }>
   >([]);
@@ -3757,6 +3774,35 @@ export function Settings({
       console.error("OpenAI OAuth logout error:", error);
     } finally {
       setOpenaiOAuthLoading(false);
+    }
+  };
+
+  // The key is created and stored in main; the form then shows it like a pasted key.
+  const handleOpenRouterSignIn = async () => {
+    try {
+      setOpenrouterSignIn("waiting");
+      setTestResult(null);
+      const result = await window.electronAPI.openrouterOAuthStart();
+      if (!result.success) {
+        setOpenrouterSignIn("idle");
+        setTestResult({ success: false, error: result.error || "OpenRouter sign-in failed" });
+        return;
+      }
+      const latest = await window.electronAPI.getLLMSettings();
+      const { apiKey, model } = resolveOpenRouterSignIn(result, latest);
+      setOpenrouterApiKey(apiKey);
+      setOpenrouterModel(model);
+      setSettings((prev) => ({
+        ...prev,
+        providerType: "openrouter",
+        modelKey: model,
+        openrouter: { ...prev.openrouter, ...latest?.openrouter, model },
+      }));
+      setOpenrouterSignIn("signed_in");
+      onSettingsChanged?.();
+    } catch (error: Any) {
+      setOpenrouterSignIn("idle");
+      setTestResult({ success: false, error: error?.message || "OpenRouter sign-in failed" });
     }
   };
 
@@ -6256,6 +6302,44 @@ export function Settings({
 
         {settings.providerType === "openrouter" && (
           <>
+            <div className="settings-section">
+              <h3>OpenRouter Account</h3>
+              <p className="settings-description">
+                Sign in through OpenRouter in your browser and CoWork OS saves a key for your
+                account. No key to copy. A first sign-in starts on free models.
+              </p>
+              <button
+                className="button-primary oauth-login-btn"
+                onClick={handleOpenRouterSignIn}
+                disabled={openrouterSignIn === "waiting" || !hasHostMethods("openrouterOAuthStart")}
+                title={
+                  !hasHostMethods("openrouterOAuthStart")
+                    ? "OAuth sign-in is available in the desktop app."
+                    : undefined
+                }
+              >
+                {openrouterSignIn === "waiting"
+                  ? "Waiting for OpenRouter..."
+                  : openrouterApiKey
+                    ? "Sign in again with OpenRouter"
+                    : "Sign in with OpenRouter"}
+              </button>
+              {openrouterSignIn === "signed_in" ? (
+                <p className="settings-hint" role="status">
+                  Signed in. The key below was created for CoWork OS; manage it at{" "}
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
+                    openrouter.ai/keys
+                  </a>
+                  .
+                </p>
+              ) : window.coworkBrowserHost === true && !hasHostMethods("openrouterOAuthStart") ? (
+                <p className="settings-hint" role="status">
+                  OAuth sign-in is available in the desktop app. You can enter an API key below
+                  instead.
+                </p>
+              ) : null}
+            </div>
+
             <div className="settings-section">
               <h3>OpenRouter API Key</h3>
               <p className="settings-description">

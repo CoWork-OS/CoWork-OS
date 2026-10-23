@@ -30,3 +30,5 @@
 {"prompt":"Build me a motion-design editor app with a keyframe timeline and MP4 export.","expectedSkillIds":["motion-editor"],"forbiddenSkillIds":["motion-film","manim-video"]}
 {"prompt":"Create an After Effects-lite animation editor I can run locally.","expectedSkillIds":["motion-editor"],"forbiddenSkillIds":["motion-film"]}
 {"prompt":"Turn this research PDF into an illustrated, animated storybook I can scroll through.","expectedSkillIds":["pdf-storybook"],"forbiddenSkillIds":["summarize"]}
+{"prompt":"Security audit this codebase and write a findings report.","expectedSkillIds":["security-audit"],"forbiddenSkillIds":["dependency-check","weather"]}
+{"prompt":"Is this file upload handler vulnerable to path traversal?","expectedSkillIds":["security-audit"],"forbiddenSkillIds":["youtube"]}

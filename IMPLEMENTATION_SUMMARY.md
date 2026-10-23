@@ -1,5 +1,9 @@
 # CoWork OS Implementation Summary
 
+For maintained architecture and security boundaries, use the [Architecture](docs/architecture.md)
+and [Access Profiles](docs/access-profiles.md) guides. Package versions come from
+`package.json`; test and runtime acceptance results require a fresh run.
+
 ## What You Have Now
 
 A **fully functional macOS desktop application** for agentic task automation with:
@@ -611,26 +615,25 @@ npm run type-check       # Check TypeScript types
 | Idle Session Cleanup      | Production | Gateway auto-prunes idle sessions older than 7 days                    |
 | Workspace Cascade Delete  | Production | Transactional deletion of workspace + all related data                 |
 
-### Planned
+### Execution Boundaries
 
-| Feature                 | Status      | Complexity |
-| ----------------------- | ----------- | ---------- |
-| VM sandbox              | Not started | High       |
-| Sub-agent coordination  | Not started | High       |
-| Network egress controls | Not started | Medium     |
+Command sandboxing, delegated-task coordination, and network policy are implemented.
+Their availability depends on the selected profile and backend prerequisites; see
+[Access Profiles](docs/access-profiles.md) and the
+[Harness Runtime Route Map](docs/harness-runtime-route-map.md). A dedicated local
+Virtualization.framework VM backend remains separate future work.
 
 ## Technology Stack
 
 ### Frontend
 
 - React 19
-- TypeScript 5.7
-- Vite 7
+- TypeScript and Vite (versions in `package.json`)
 
 ### Backend
 
-- Electron 40
-- Node.js 20+
+- Electron (version in `package.json`)
+- Node.js 24 or later
 - better-sqlite3
 
 ### Document Libraries
@@ -657,7 +660,7 @@ npm run type-check       # Check TypeScript types
 
 ### Current Security Features
 
-1. **Path Isolation**: All operations constrained to workspace folder
+1. **Path Isolation**: Task access profiles constrain workspace access and approved roots
 2. **Permission Checks**: Every operation validates permissions
 3. **Approval Flow**: Destructive ops require user confirmation
 4. **Audit Trail**: Every action logged in database
@@ -668,9 +671,9 @@ npm run type-check       # Check TypeScript types
 
 ### Security Limitations
 
-1. **No VM Sandbox**: Code runs in main process (not isolated)
-2. **No Network Controls**: Can make API calls freely
-3. **No Resource Limits**: Can consume unlimited memory/CPU
+1. **Backend-dependent isolation**: Restricted command execution requires an available backend that can enforce the task's profile; unsupported boundaries fail closed.
+2. **Network policy**: Access profiles, administrator rules, and export approvals govern network operations. Arbitrary-process egress requires backend enforcement.
+3. **Resource limits**: Task token, cost, and iteration guardrails are separate from operating-system CPU and memory limits. Runtime-specific limits require their own verification.
 
 ## Comparison to Original Cowork Concept
 
@@ -695,8 +698,8 @@ npm run type-check       # Check TypeScript types
 | MCP connectors          | Yes    | Yes (Client, Host, Registry)             | Complete |
 | Parallel task queue     | Yes    | Yes                                      | Complete |
 | Personality System      | Yes    | Yes (6 personalities, 9 personas)        | Complete |
-| VM sandbox              | Yes    | No                                       | Planned  |
-| Sub-agents              | Yes    | No                                       | Planned  |
+| Execution isolation     | Yes    | Backend- and profile-dependent           | Available with prerequisites |
+| Sub-agents              | Yes    | Orchestration graph and scoped workers   | Implemented |
 
 **Overall Implementation**: ~95%
 

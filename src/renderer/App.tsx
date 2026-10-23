@@ -84,7 +84,7 @@ import {
 } from "./components/BrowserWorkbench/BrowserApprovalCard";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
 
-import type { RecentBuild } from "./components/calm/BuildPanel";
+import type { BuildCheckoutOptions, RecentBuild } from "./components/calm/BuildPanel";
 import { isBuildPrompt, isBuildTask } from "./components/calm/build-task";
 import {
   prepareTaskAttachments,
@@ -257,6 +257,7 @@ import {
 } from "./utils/selected-task-restoration";
 import { resolveComposerDraftOwnerContext } from "./utils/composer-draft-owner";
 import { taskSurfaceStore } from "./state/task-surface-store";
+import { composerDraftStore } from "./state/composer-draft-store";
 import { prefetchWhenIdle } from "./utils/idle-prefetch";
 import { preloadableLazy } from "./utils/preloadable-lazy";
 import {
@@ -935,6 +936,8 @@ type SelectedTaskWorkspaceViewProps = {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
+      verbatim?: boolean;
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -1140,6 +1143,7 @@ const SelectedTaskWorkspaceView = memo(
     } | null>(null);
     // The sidebar element the docked browser workbench is positioned over.
     const [browserWorkbenchSlot, setBrowserWorkbenchSlot] = useState<HTMLDivElement | null>(null);
+    const [artifactWorkbenchSlot, setArtifactWorkbenchSlot] = useState<HTMLDivElement | null>(null);
     const visibleBrowserWorkbench = canUseInteractiveBrowser ? browserWorkbench : null;
     const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
       taskId: string;
@@ -1349,11 +1353,15 @@ const SelectedTaskWorkspaceView = memo(
       });
     }, [openBrowserWorkbenchSidebar]);
     const sendSpreadsheetFullscreenMessage = useCallback(
-      async (message: string, images?: ImageAttachment[]) => {
+      async (
+        message: string,
+        images?: ImageAttachment[],
+        options?: { verbatim?: boolean; surfaceOrigin?: MessageSurfaceOrigin },
+      ) => {
         const startedAt = Date.now();
         setSpreadsheetTurnStartedAt(startedAt);
         setSpreadsheetOptimisticWorkingStartedAt(startedAt);
-        await onSendMessage(message, images);
+        await onSendMessage(message, images, undefined, options);
       },
       [onSendMessage],
     );
@@ -1682,110 +1690,73 @@ const SelectedTaskWorkspaceView = memo(
         </BrowserWorkbenchDock>
       ) : null;
 
-    if (visibleBrowserWorkbench?.mode === "fullscreen" && task) {
+    // Keep the artifact editor in the same React position in both modes. Moving
+    // between separate sidebar/fullscreen branches used to discard unsaved edits.
+    const artifactViewerProps =
+      spreadsheetArtifact && workspace?.path
+        ? {
+            filePath: spreadsheetArtifact.path,
+            workspacePath: workspace.path,
+            mode: spreadsheetArtifact.mode,
+            onClose: closeSpreadsheetArtifact,
+            onFullscreen: showSpreadsheetFullscreen,
+            onExitFullscreen: showSpreadsheetSidebar,
+            onSendMessage: sendSpreadsheetFullscreenMessage,
+            selectedModelLabel:
+              availableModels.find((model) => model.key === selectedModel)?.displayName ||
+              selectedModel,
+            selectedModel,
+            selectedProvider,
+            selectedReasoningEffort,
+            availableModels,
+            availableProviders,
+            workspaceId: workspace.id,
+            onModelChange,
+            onOpenSettings,
+            turnContext: spreadsheetTurnContext,
+          }
+        : null;
+    const artifactWorkbenchDock =
+      spreadsheetArtifact &&
+      artifactViewerProps &&
+      (spreadsheetArtifact.mode === "fullscreen" || !remoteTaskView) ? (
+        <BrowserWorkbenchDock
+          key={`artifact-workbench:${spreadsheetArtifact.kind}:${workspace?.path}:${spreadsheetArtifact.path}`}
+          mode={spreadsheetArtifact.mode}
+          slot={artifactWorkbenchSlot}
+        >
+          <Suspense fallback={<ArtifactSidebarFallback />}>
+            {spreadsheetArtifact.kind === "document" ? (
+              <DocumentArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
+            ) : spreadsheetArtifact.kind === "presentation" ? (
+              <PresentationArtifactViewer
+                {...artifactViewerProps}
+                refreshKey={artifactRefreshKey}
+              />
+            ) : spreadsheetArtifact.kind === "webpage" ? (
+              <WebArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
+            ) : (
+              <SpreadsheetArtifactViewer {...artifactViewerProps} taskId={task?.id} />
+            )}
+          </Suspense>
+        </BrowserWorkbenchDock>
+      ) : null;
+    const workbenchDocks = (
+      <>
+        {browserWorkbenchDock}
+        {artifactWorkbenchDock}
+      </>
+    );
+
+    if (
+      (visibleBrowserWorkbench?.mode === "fullscreen" && task) ||
+      (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path)
+    ) {
       return (
         <>
-          {browserWorkbenchDock}
+          {workbenchDocks}
           {null}
         </>
-      );
-    }
-
-    if (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path) {
-      const selectedModelLabel =
-        availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
-      if (spreadsheetArtifact.kind === "document") {
-        return (
-          <DocumentArtifactViewer
-            filePath={spreadsheetArtifact.path}
-            workspacePath={workspace.path}
-            mode="fullscreen"
-            onClose={closeSpreadsheetArtifact}
-            onFullscreen={showSpreadsheetFullscreen}
-            onExitFullscreen={showSpreadsheetSidebar}
-            onSendMessage={sendSpreadsheetFullscreenMessage}
-            selectedModelLabel={selectedModelLabel}
-            selectedModel={selectedModel}
-            selectedProvider={selectedProvider}
-            selectedReasoningEffort={selectedReasoningEffort}
-            availableModels={availableModels}
-            availableProviders={availableProviders}
-            workspaceId={workspace.id}
-            onModelChange={onModelChange}
-            onOpenSettings={onOpenSettings}
-            turnContext={spreadsheetTurnContext}
-            refreshKey={artifactRefreshKey}
-          />
-        );
-      }
-      if (spreadsheetArtifact.kind === "presentation") {
-        return (
-          <PresentationArtifactViewer
-            filePath={spreadsheetArtifact.path}
-            workspacePath={workspace.path}
-            mode="fullscreen"
-            onClose={closeSpreadsheetArtifact}
-            onFullscreen={showSpreadsheetFullscreen}
-            onExitFullscreen={showSpreadsheetSidebar}
-            onSendMessage={sendSpreadsheetFullscreenMessage}
-            selectedModelLabel={selectedModelLabel}
-            selectedModel={selectedModel}
-            selectedProvider={selectedProvider}
-            selectedReasoningEffort={selectedReasoningEffort}
-            availableModels={availableModels}
-            availableProviders={availableProviders}
-            workspaceId={workspace.id}
-            onModelChange={onModelChange}
-            onOpenSettings={onOpenSettings}
-            turnContext={spreadsheetTurnContext}
-            refreshKey={artifactRefreshKey}
-          />
-        );
-      }
-      if (spreadsheetArtifact.kind === "webpage") {
-        return (
-          <WebArtifactViewer
-            filePath={spreadsheetArtifact.path}
-            workspacePath={workspace.path}
-            mode="fullscreen"
-            onClose={closeSpreadsheetArtifact}
-            onFullscreen={showSpreadsheetFullscreen}
-            onExitFullscreen={showSpreadsheetSidebar}
-            onSendMessage={sendSpreadsheetFullscreenMessage}
-            selectedModelLabel={selectedModelLabel}
-            selectedModel={selectedModel}
-            selectedProvider={selectedProvider}
-            selectedReasoningEffort={selectedReasoningEffort}
-            availableModels={availableModels}
-            availableProviders={availableProviders}
-            workspaceId={workspace.id}
-            onModelChange={onModelChange}
-            onOpenSettings={onOpenSettings}
-            turnContext={spreadsheetTurnContext}
-            refreshKey={artifactRefreshKey}
-          />
-        );
-      }
-      return (
-        <SpreadsheetArtifactViewer
-          filePath={spreadsheetArtifact.path}
-          workspacePath={workspace.path}
-          mode="fullscreen"
-          onClose={closeSpreadsheetArtifact}
-          onFullscreen={showSpreadsheetFullscreen}
-          onExitFullscreen={showSpreadsheetSidebar}
-          onSendMessage={sendSpreadsheetFullscreenMessage}
-          selectedModelLabel={selectedModelLabel}
-          selectedModel={selectedModel}
-          selectedProvider={selectedProvider}
-          selectedReasoningEffort={selectedReasoningEffort}
-          availableModels={availableModels}
-          availableProviders={availableProviders}
-          workspaceId={workspace.id}
-          onModelChange={onModelChange}
-          onOpenSettings={onOpenSettings}
-          turnContext={spreadsheetTurnContext}
-        />
       );
     }
 
@@ -1796,7 +1767,7 @@ const SelectedTaskWorkspaceView = memo(
     );
     return (
       <>
-        {browserWorkbenchDock}
+        {workbenchDocks}
         <div
           ref={splitLayoutRef}
           className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
@@ -1980,45 +1951,8 @@ const SelectedTaskWorkspaceView = memo(
                       />
                     ) : visibleBrowserWorkbench && task ? (
                       <div className="browser-workbench-slot" ref={setBrowserWorkbenchSlot} />
-                    ) : spreadsheetArtifact?.kind === "document" ? (
-                      <DocumentArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                        refreshKey={artifactRefreshKey}
-                      />
-                    ) : spreadsheetArtifact?.kind === "presentation" ? (
-                      <PresentationArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                        refreshKey={artifactRefreshKey}
-                      />
-                    ) : spreadsheetArtifact?.kind === "webpage" ? (
-                      <WebArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                        refreshKey={artifactRefreshKey}
-                      />
                     ) : spreadsheetArtifact ? (
-                      <SpreadsheetArtifactViewer
-                        filePath={spreadsheetArtifact.path}
-                        workspacePath={workspace.path}
-                        mode="sidebar"
-                        onClose={closeSpreadsheetArtifact}
-                        onFullscreen={showSpreadsheetFullscreen}
-                        onExitFullscreen={showSpreadsheetSidebar}
-                      />
+                      <div className="artifact-workbench-slot" ref={setArtifactWorkbenchSlot} />
                     ) : null}
                   </Suspense>
                 </div>
@@ -2400,6 +2334,8 @@ export function App() {
   const [sideChat, setSideChat] = useState<SideChatState | null>(null);
   // Bumped to open Settings > Memory > Review (a dream review notification was clicked).
   const [memoryReviewRequest, setMemoryReviewRequest] = useState(0);
+  // A connector a sidebar notice asked Settings to open (registry id).
+  const [settingsConnector, setSettingsConnector] = useState<string | undefined>(undefined);
   const [settingsTab, setSettingsTab] = useState<
     | "memory"
     | "appearance"
@@ -3670,8 +3606,17 @@ export function App() {
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
-      setSettingsTab(tab === "appearance" ? "appearance" : "llm");
+      const detail = (event as CustomEvent<{ tab?: string; connector?: string }>).detail;
+      const tab = detail?.tab;
+      setSettingsConnector(
+        tab === "connectors" && typeof detail?.connector === "string"
+          ? detail.connector
+          : undefined,
+      );
+      // "connectors" opens Integrations, whose first sub-tab is Connectors.
+      setSettingsTab(
+        tab === "appearance" ? "appearance" : tab === "connectors" ? "integrations" : "llm",
+      );
       setCurrentView("settings");
     };
     window.addEventListener("open-settings", handler as EventListener);
@@ -6255,6 +6200,18 @@ export function App() {
         }
       }
 
+      // An unsent new-session draft follows the folder. Left behind, it would
+      // reappear in the old (often scratch) workspace, e.g. on next launch.
+      const previousWorkspaceId = (currentWorkspaceRef.current ?? currentWorkspace)?.id;
+      if (!selectedTaskId && !remoteTaskView && previousWorkspaceId) {
+        await composerDraftStore
+          .carry(
+            { scope: "local", workspaceId: previousWorkspaceId, taskId: null, surface: "main" },
+            { scope: "local", workspaceId: workspace.id, taskId: null, surface: "main" },
+          )
+          .catch(() => false);
+      }
+
       // Restoring a folder's last task is for app startup. Choosing a folder
       // from the composer keeps the current view: a new session stays new and
       // a moved task stays selected, and that folder's pointer tracks it.
@@ -6262,7 +6219,7 @@ export function App() {
       selectionRestorationSettledWorkspaceRef.current = workspace.id;
       setCurrentWorkspace(workspace);
     },
-    [addToast, remoteTaskView, selectedTaskId],
+    [addToast, currentWorkspace, remoteTaskView, selectedTaskId],
   );
 
   // Opens the folder dialog and returns the matching (or newly created)
@@ -7056,6 +7013,8 @@ export function App() {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
       /** Send exactly this text (an approved answer action), never a rewritten reply. */
       verbatim?: boolean;
       /** Where an approved answer action came from; shown to the model and in the timeline. */
@@ -7226,10 +7185,7 @@ export function App() {
   const handleCreateTaskFromPrompt = async (
     prompt: string,
     attachments: PendingAttachment[] = [],
-    taskOptions?: { accessProfileId?: AccessProfileId } & Pick<
-      AgentConfig,
-      "worktreeMode" | "worktreeBaseBranch"
-    >,
+    taskOptions?: { accessProfileId?: AccessProfileId } & BuildCheckoutOptions,
   ): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
@@ -7275,6 +7231,14 @@ export function App() {
                 taskOrigin: "build" as const,
                 worktreeMode: taskOptions?.worktreeMode,
                 worktreeBaseBranch: taskOptions?.worktreeBaseBranch,
+                ...(taskOptions?.compareGroupId
+                  ? {
+                      worktreeBaseCommit: taskOptions.worktreeBaseCommit,
+                      compareGroupId: taskOptions.compareGroupId,
+                      compareVariant: taskOptions.compareVariant,
+                      compareCheckCommand: taskOptions.compareCheckCommand,
+                    }
+                  : {}),
               },
             }
           : {}),
@@ -9224,6 +9188,7 @@ export function App() {
               autoOpenTurnOutput={autoOpenTurnOutput}
               onAutoOpenTurnOutputChange={handleAutoOpenTurnOutputChange}
               initialTab={settingsTab}
+              initialConnector={settingsConnector}
               memoryReviewRequest={memoryReviewRequest}
               focusAutomation={focusAutomationOwner}
               onShowOnboarding={handleShowOnboarding}

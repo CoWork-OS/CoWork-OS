@@ -210,5 +210,5 @@ DerivedData/
 venv/
 
 # Locally generated research and reports (never committed)
-reports/
+/reports/
 research_notes/

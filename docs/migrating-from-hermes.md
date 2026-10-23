@@ -26,19 +26,30 @@ Quit the desktop app before importing scheduled jobs from the terminal, or impor
 
 ## What comes over
 
-| Hermes                                            | CoWork                                                     | Notes                                                                                                                                                                          |
-| ------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SOUL.md`                                         | Persona (Settings > Personality)                           | Skipped when it is still Hermes' default text, or when CoWork already has a custom persona.                                                                                    |
-| `memories/USER.md`                                | `me.md` in your memory folder                              | One fact per entry.                                                                                                                                                            |
-| `memories/MEMORY.md`                              | The workspace's notes, or `lessons.md` without a workspace | One note per entry.                                                                                                                                                            |
-| `skills/`                                         | Installed skills (Settings > Skills)                       | Every skill goes through CoWork's security scan; a skill that fails it is quarantined, not installed. Skills that ship with Hermes are left behind because CoWork has its own. |
-| Provider keys in `.env`                           | Model settings, encrypted                                  | Only with `--with-secrets` (or the checkbox in Settings). OpenRouter, Anthropic, OpenAI, Gemini, DeepSeek, Groq, xAI and Kimi.                                                 |
-| `model` in `config.yaml`                          | Default model                                              | Only when CoWork has no working model yet and a key for that provider exists.                                                                                                  |
-| Telegram, Discord, Slack tokens and allowed users | Channels, switched off                                     | Only with secrets. Allowed users become the channel's allowlist; without one, people pair first. Turn the channel on in Settings > Channels after testing it.                  |
-| `command_allowlist`                               | Not imported                                               | Hermes approves whole categories of risky commands. CoWork asks per command, so you approve them as they come up.                                                              |
-| `cron/jobs.json`                                  | Scheduled tasks, paused                                    | Cron, interval and future one-time jobs. Jobs that run a script, or whose time has passed, are skipped.                                                                        |
+| Hermes                                            | CoWork                                                     | Notes                                                                                                                                                                                                                       |
+| ------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SOUL.md`                                         | Persona (Settings > Personality)                           | Skipped when it is still Hermes' default text, or when CoWork already has a custom persona.                                                                                                                                 |
+| `memories/USER.md`                                | `me.md` in your memory folder                              | One fact per entry.                                                                                                                                                                                                         |
+| `memories/MEMORY.md`                              | The workspace's notes, or `lessons.md` without a workspace | One note per entry.                                                                                                                                                                                                         |
+| `skills/`                                         | Installed skills (Settings > Skills)                       | Every skill goes through CoWork's security scan; a skill that fails it is quarantined, not installed. Skills that ship with Hermes are left behind because CoWork has its own.                                              |
+| Provider keys in `.env`                           | Model settings, encrypted                                  | Only with `--with-secrets` (or the checkbox in Settings). OpenRouter, Anthropic, OpenAI, Gemini, DeepSeek, Groq, xAI and Kimi.                                                                                              |
+| `model` in `config.yaml`                          | Default model                                              | Only when CoWork has no working model yet and a key for that provider exists. A local Ollama, LM Studio, vLLM or llama.cpp server needs no key and keeps its address; Ollama Cloud and remote custom endpoints are skipped. |
+| Telegram, Discord, Slack tokens and allowed users | Channels, switched off                                     | Only with secrets. Allowed users become the channel's allowlist; without one, people pair first. Turn the channel on in Settings > Channels after testing it.                                                               |
+| `command_allowlist`                               | Not imported                                               | Hermes approves whole categories of risky commands. CoWork asks per command, so you approve them as they come up.                                                                                                           |
+| `cron/jobs.json`                                  | Scheduled tasks, paused                                    | Cron, interval and future one-time jobs. Jobs that run a script, or whose time has passed, are skipped.                                                                                                                     |
 
 Other credentials in `.env` (search, voice, tool keys) and other chat platforms are listed as skipped so nothing disappears silently.
+
+## Hermes plugins
+
+Hermes plugins are not imported. CoWork has its own versions of the most popular ones built in:
+
+- **Meshy (3D models)**: install the Meshy connector in **Settings → Connectors** and paste your key. The importer doesn't copy `MESHY_API_KEY` from Hermes' `.env`. You get the same Meshy MCP server and workflow rules, with these CoWork-native parts:
+  - 3D cards in chat;
+  - a 3D gallery;
+  - credit costs on every approval card.
+
+  See [3D Models with Meshy](meshy-3d.md).
 
 ## Where CoWork looks
 

@@ -34,6 +34,11 @@ import {
 import * as fs from "fs/promises";
 import * as path from "path";
 import { createLogger } from "../utils/logger";
+import {
+  MemorySourceRecheckService,
+  SOURCE_CHANGED_NOTE,
+  type MemorySourceFlag,
+} from "./MemorySourceRecheckService";
 import { extractFtsTerms, foldForMatch, isFtsStopword, termCoverage } from "../database/fts-query";
 import type { Memory, MemorySearchResult } from "../database/repositories";
 import type {
@@ -103,6 +108,18 @@ const IMPORTED_ARCHIVE_FACTOR = 0.5;
 /** Lines of a memory repo file returned around an entry by `detail: "full"`. */
 export const MEMORY_REPO_FULL_LINES = 80;
 const UNREVIEWED_PREFIX = "[unreviewed] ";
+/** A memory whose file or connector record changed after it was saved (WP15). */
+const SOURCE_CHANGED_PREFIX = `[${SOURCE_CHANGED_NOTE}] `;
+
+function sourceChangedProvenance(flag: MemorySourceFlag): Record<string, unknown> {
+  return {
+    sourceChanged: {
+      source: flag.sourceKey,
+      kind: flag.sourceKind,
+      changedAt: new Date(flag.changedAt).toISOString().slice(0, 10),
+    },
+  };
+}
 const teamPrefix = (name: string) => `[team ${name}] `;
 
 /** Lowest trust admitted by default: everything but `third_party`. */
@@ -530,11 +547,13 @@ export class MemoryRecallService implements MemoryRecall {
   }
 
   private itemCandidate(item: MemoryItem): LaneCandidate {
+    const sourceChanged = MemorySourceRecheckService.getDefault().flagForItem(item.id);
+    const content = `${sourceChanged ? SOURCE_CHANGED_PREFIX : ""}${item.content}`;
     return {
       lane: "memory",
       ref: `memory:${item.id}`,
-      title: titleOf(item.content),
-      content: item.content,
+      title: titleOf(content),
+      content,
       source: item.source,
       createdAt: item.updatedAt || item.createdAt,
       kind: item.kind,
@@ -548,6 +567,7 @@ export class MemoryRecallService implements MemoryRecall {
           ? { subject: item.subjectKey }
           : {}),
         ...(typeof item.sourceRef.store === "string" ? { store: item.sourceRef.store } : {}),
+        ...(sourceChanged ? sourceChangedProvenance(sourceChanged) : {}),
       },
     };
   }
@@ -651,8 +671,12 @@ export class MemoryRecallService implements MemoryRecall {
   private repoCandidate(file: string, entry: MemoryRepoEntry, content: string): LaneCandidate {
     const unreviewed = file === MEMORY_REPO_INBOX_FILE;
     const added = entry.metadata.added ? Date.parse(entry.metadata.added) : NaN;
+    const sourceChanged = MemorySourceRecheckService.getDefault().flagForRepoEntry(
+      file,
+      entry.hash,
+    );
     // Hand-written secrets are not redacted on disk (the user's file); recall never shows them.
-    const text = `${unreviewed ? UNREVIEWED_PREFIX : ""}${redactSensitiveMarkdownContent(content)}`;
+    const text = `${unreviewed ? UNREVIEWED_PREFIX : ""}${sourceChanged ? SOURCE_CHANGED_PREFIX : ""}${redactSensitiveMarkdownContent(content)}`;
     return {
       lane: "repo",
       ref: memoryRepoRef(file, entry.line),
@@ -670,6 +694,7 @@ export class MemoryRecallService implements MemoryRecall {
         ...(entry.metadata.added ? { added: entry.metadata.added } : {}),
         ...(entry.metadata.workspace ? { workspace: entry.metadata.workspace } : {}),
         ...(unreviewed ? { unreviewed: true } : {}),
+        ...(sourceChanged ? sourceChangedProvenance(sourceChanged) : {}),
       },
     };
   }

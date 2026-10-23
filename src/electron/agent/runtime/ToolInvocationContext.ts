@@ -15,6 +15,11 @@ export interface ToolInvocationContext {
     generation: number;
     phase: "prepare" | "execute" | "observe" | "verify" | "cancel";
   };
+  /**
+   * The recorded attempt of a call that can change something. Added only by the executor from
+   * its attempt record, never by model tool arguments; MCP calls forward it in `_meta`.
+   */
+  toolAttempt?: { idempotencyKey: string; attemptId: string };
   taskId: string;
   stepId?: string;
   phase: "step" | "follow_up";

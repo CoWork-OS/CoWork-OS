@@ -5,6 +5,7 @@ import {
   PromptComposerInput,
   applyComposerTextReplacement,
   formatPastedWebLinkAsMarkdown,
+  getComposerDeletionRange,
   getPastedText,
   isKeyboardEditEcho,
   keyboardEditEchoForKey,
@@ -78,6 +79,15 @@ describe("PromptComposerInput", () => {
       formatPastedWebLinkAsMarkdown("see https://github.com/nousresearch/hermes-agent"),
     ).toBeNull();
   });
+
+  it.each(["https://example.com/reports/100%", "https://example.com/reports/%E0%A4%A"])(
+    "keeps a valid URL paste when its path has undecodable escapes: %s",
+    (url) => {
+      expect(formatPastedWebLinkAsMarkdown(url)).toBe(
+        `[example.com/${new URL(url).pathname.slice(1)}](${url})`,
+      );
+    },
+  );
 
   it("reads plain text from native paste data", () => {
     const clipboardData = {
@@ -172,6 +182,36 @@ function replayComposerInput(events: ComposerInputEvent[]): string {
 }
 
 describe("PromptComposerInput edit sequencing", () => {
+  it.each(["😀", "👍🏽", "👨‍👩‍👧‍👦", "e\u0301"])(
+    "deletes the complete visible character with Backspace: %s",
+    (character) => {
+      const value = `Review ${character}`;
+      const range = getComposerDeletionRange(value, value.length, value.length, "backward");
+      const next = applyComposerTextReplacement(value, [], range.start, range.end, "");
+
+      expect(next.value).toBe("Review ");
+      expect(next.cursor).toBe(7);
+    },
+  );
+
+  it.each(["😀", "👍🏽", "👨‍👩‍👧‍👦", "e\u0301"])(
+    "deletes the complete visible character with Delete: %s",
+    (character) => {
+      const value = `Review ${character} now`;
+      const range = getComposerDeletionRange(value, 7, 7, "forward");
+      const next = applyComposerTextReplacement(value, [], range.start, range.end, "");
+
+      expect(next.value).toBe("Review  now");
+      expect(next.cursor).toBe(7);
+    },
+  );
+
+  it("keeps an explicit deletion selection and respects the text boundaries", () => {
+    expect(getComposerDeletionRange("hello", 1, 4, "backward")).toEqual({ start: 1, end: 4 });
+    expect(getComposerDeletionRange("hello", 0, 0, "backward")).toEqual({ start: 0, end: 0 });
+    expect(getComposerDeletionRange("hello", 5, 5, "forward")).toEqual({ start: 5, end: 5 });
+  });
+
   it("keeps every paragraph of a single multi-paragraph text insertion", () => {
     expect(
       replayComposerInput([

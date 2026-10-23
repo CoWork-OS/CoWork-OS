@@ -176,8 +176,12 @@ describe("MacOSSandbox", () => {
     expect(profile).not.toContain(`(subpath "${home}")`);
     const secretDeny = `(deny file-read* file-write* (subpath "${path.join(home, ".ssh")}"))`;
     expect(profile).toContain(secretDeny);
-    // User-configured workspace grants come later and keep the final say.
+    // Denied after the toolchain grants, and again after the workspace grant,
+    // so a workspace that contains the home folder does not reopen it.
     expect(profile.indexOf(secretDeny)).toBeLessThan(profile.indexOf("; Allow reading workspace"));
+    expect(profile.lastIndexOf(secretDeny)).toBeGreaterThan(
+      profile.indexOf("; Allow writing to workspace"),
+    );
     expect(options.env.PATH.split(":").slice(-4)).toEqual([
       "/usr/bin",
       "/bin",

@@ -283,6 +283,15 @@ export class SearchTools {
 
       return {
         ...filteredResponse,
+        // Results the domain policy removed were never shown; say so instead of only logging it.
+        ...(domainPolicy.filteredOutCount > 0
+          ? {
+              metadata: {
+                ...filteredResponse.metadata,
+                filteredOutCount: domainPolicy.filteredOutCount,
+              },
+            }
+          : {}),
         success: true,
       };
     } catch (error: Any) {

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { BrowserTabHandle, BrowserFindResult } from "./BrowserTabView";
 import type { BrowserTab } from "./browser-tabs-model";
 import { readZoomLevel, writeZoomLevel } from "./browser-zoom";
+import { afterBrowserPaint, captureBrowserTabFreeze } from "./browser-native-freeze";
 
 /** How the renderer covers the page: not at all, fully (view hidden), or with a still image. */
 export type NativeTabCover = "none" | "hide" | "freeze";
@@ -72,7 +73,12 @@ export function BrowserTabNativeView({
   const tabRef = useRef(tab);
   const activeRef = useRef(active);
   const lastBoundsRef = useRef<Bounds | null>(null);
-  const [frozenImage, setFrozenImage] = useState<string | null>(null);
+  const [frozenImage, setFrozenImage] = useState<{ src: string; generation: number } | null>(null);
+  const freezeGenerationRef = useRef(0);
+  const pendingFrozenImageRef = useRef<{
+    generation: number;
+    resolve: (loaded: boolean) => void;
+  } | null>(null);
   const coverRef = useRef(cover);
   coverRef.current = cover;
   const [reopenSeq, setReopenSeq] = useState(0);
@@ -312,6 +318,7 @@ export function BrowserTabNativeView({
   const showing = active && cover === "none";
   useEffect(() => {
     if (!showing) return;
+    let cancelled = false;
     let frame = 0;
     let lastSentAt = 0;
     const send = (bounds: Bounds | null) => {
@@ -323,6 +330,15 @@ export function BrowserTabNativeView({
       lastBoundsRef.current = bounds;
       void window.electronAPI
         .layoutBrowserTabView?.({ ...keyRef.current, bounds })
+        .then(async () => {
+          if (!bounds) return;
+          // Retain the still while IPC restores the native page. Removing it in
+          // the cover effect would expose another blank frame when menus close.
+          await afterBrowserPaint();
+          if (!cancelled && activeRef.current && coverRef.current === "none") {
+            setFrozenImage(null);
+          }
+        })
         .catch(() => undefined);
     };
     const measure = () => {
@@ -349,6 +365,7 @@ export function BrowserTabNativeView({
     lastBoundsRef.current = null;
     measure();
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(frame);
       lastBoundsRef.current = null;
       // Freezing captures the live page first and hides the view after that.
@@ -359,22 +376,28 @@ export function BrowserTabNativeView({
 
   // Covered by a menu or annotation: a still image of the page replaces the view.
   useEffect(() => {
+    const generation = ++freezeGenerationRef.current;
     if (!active || cover !== "freeze") {
-      setFrozenImage(null);
+      if (!active || cover === "hide") setFrozenImage(null);
       return;
     }
     let cancelled = false;
-    void window.electronAPI
-      .captureBrowserTabView?.(keyRef.current)
-      .then((image) => {
-        if (!cancelled) setFrozenImage(image || null);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) hide();
-      });
+    void captureBrowserTabFreeze({
+      capture: async () => window.electronAPI.captureBrowserTabView?.(keyRef.current),
+      displayImage: (src) =>
+        new Promise<boolean>((resolve) => {
+          pendingFrozenImageRef.current = { generation, resolve };
+          setFrozenImage({ src, generation });
+        }),
+      isCurrent: () => !cancelled && activeRef.current && coverRef.current === "freeze",
+      hide,
+    });
     return () => {
       cancelled = true;
+      if (pendingFrozenImageRef.current?.generation === generation) {
+        pendingFrozenImageRef.current.resolve(false);
+        pendingFrozenImageRef.current = null;
+      }
     };
   }, [active, cover, freezeNonce]);
 
@@ -395,7 +418,23 @@ export function BrowserTabNativeView({
       data-tab-id={tab.id}
     >
       {frozenImage && (
-        <img className="browser-workbench-tab-freeze" src={frozenImage} alt="" draggable={false} />
+        <img
+          key={frozenImage.generation}
+          className="browser-workbench-tab-freeze"
+          src={frozenImage.src}
+          alt=""
+          draggable={false}
+          onLoad={() => {
+            if (pendingFrozenImageRef.current?.generation !== frozenImage.generation) return;
+            pendingFrozenImageRef.current.resolve(true);
+            pendingFrozenImageRef.current = null;
+          }}
+          onError={() => {
+            if (pendingFrozenImageRef.current?.generation !== frozenImage.generation) return;
+            pendingFrozenImageRef.current.resolve(false);
+            pendingFrozenImageRef.current = null;
+          }}
+        />
       )}
       {children}
     </div>

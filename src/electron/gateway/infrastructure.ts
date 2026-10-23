@@ -504,7 +504,7 @@ export class GatewayInfrastructure {
     await this.rateLimitRepo.update(channelType, userId, { messageCount: newCount });
 
     // Check if now over limit
-    if (newCount >= effectiveLimit) {
+    if (newCount > effectiveLimit) {
       const limitExpiresAt = record.windowStart + this.config.rateLimitWindow;
       await this.rateLimitRepo.update(channelType, userId, {
         isLimited: true,

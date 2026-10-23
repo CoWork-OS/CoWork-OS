@@ -27,9 +27,15 @@ import {
   isLongOsascriptCommandText,
 } from "../AssistantMessageContent";
 import { useFileActionMenu } from "../FileActionMenu";
+import { AnnotationUndoButton } from "./AnnotationUndoButton";
 import { InlineDocumentPreview } from "../InlineDocumentPreview";
 import { InlineImagePreview } from "../InlineImagePreview";
 import { InlineVideoPreview } from "../InlineVideoPreview";
+
+// three.js is large: load the 3D card only when a step saved a model.
+const LazyModelCard = React.lazy(() =>
+  import("../Model3D/ModelCard").then((module) => ({ default: module.ModelCard })),
+);
 import { JsonlPreview, parseJsonlPreview } from "../JsonlPreview";
 import { LatexArtifactWorkbench } from "../LatexArtifactWorkbench";
 import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
@@ -731,8 +737,16 @@ export function renderEventTitle(
       return "Started a follow-up";
     case "agent_interrupt_requested":
       return "Interruption requested";
-    case "agent_interrupt_confirmed":
-      return "Interruption confirmed";
+    case "agent_interrupt_confirmed": {
+      const inFlight = Array.isArray(event.payload?.inFlight) ? event.payload.inFlight : [];
+      const unverified = inFlight.filter(
+        (call: unknown) => (call as { outcome?: unknown } | null)?.outcome === "unknown",
+      ).length;
+      if (unverified === 0) return "Interruption confirmed";
+      return unverified === 1
+        ? "Stopped. 1 call was in flight; its result was not verified"
+        : `Stopped. ${unverified} calls were in flight; their results were not verified`;
+    }
     case "agent_completed":
       return "Closed an agent";
     case "agent_failed":
@@ -952,6 +966,30 @@ export function renderEventTitle(
     }
     case "file_deleted":
       return `Removed: ${event.payload.path}`;
+    case "annotation_addressed": {
+      const aap = event.payload || {};
+      const anchor =
+        typeof aap.anchor === "string" && aap.anchor ? aap.anchor : "the place you pointed to";
+      return (
+        <span>
+          {aap.changed ? "Changed" : "Addressed"} <span className="event-title-meta">{anchor}</span>
+          {typeof aap.annotationId === "string" && typeof aap.undoToken === "string" ? (
+            <AnnotationUndoButton annotationId={aap.annotationId} undoToken={aap.undoToken} />
+          ) : null}
+        </span>
+      );
+    }
+    case "annotation_change_undone": {
+      const anchor =
+        typeof event.payload?.anchor === "string" && event.payload.anchor
+          ? event.payload.anchor
+          : "the file";
+      return (
+        <span>
+          Undid the change to <span className="event-title-meta">{anchor}</span>
+        </span>
+      );
+    }
     case "artifact_created": {
       const acp = event.payload || {};
       const acPath = typeof acp.path === "string" ? acp.path : "";
@@ -1676,6 +1714,18 @@ export function renderEventDetails(
               workspacePath={workspacePath}
               onOpenViewer={onOpenViewer}
             />
+          </div>
+        );
+      }
+
+      if (fcPreviewKind === "model" && fcPath && workspacePath) {
+        return (
+          <div className="event-details event-details-file-preview">
+            <React.Suspense
+              fallback={<div className="model-card model-card-line">Loading 3D viewer…</div>}
+            >
+              <LazyModelCard path={fcPath} workspacePath={workspacePath} />
+            </React.Suspense>
           </div>
         );
       }

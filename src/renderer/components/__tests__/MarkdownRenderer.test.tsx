@@ -20,6 +20,48 @@ function renderLink(href: string) {
   );
 }
 
+describe("MarkdownRenderer inline citations", () => {
+  const citationComponents = buildMarkdownComponents({
+    citations: [
+      {
+        index: 1,
+        url: "https://example.com/source",
+        title: "Research source",
+        snippet: "Source excerpt",
+        domain: "example.com",
+        accessedAt: 1,
+        sourceTool: "web_search",
+      },
+    ],
+  });
+
+  it("renders known references as inline source badges in paragraphs and lists", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(MarkdownRenderer, {
+        children: "The answer cites [1].\n\n- Supporting evidence [1].",
+        components: citationComponents,
+      }),
+    );
+
+    expect(markup.match(/title="Research source — example.com"/g)).toHaveLength(2);
+    expect(markup.match(/vertical-align:super/g)).toHaveLength(2);
+    expect(markup).toContain("The answer cites");
+    expect(markup).toContain("Supporting evidence");
+  });
+
+  it("leaves unknown references visible alongside resolved sources", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(MarkdownRenderer, {
+        children: "Compare [1] with [2].",
+        components: citationComponents,
+      }),
+    );
+
+    expect(markup).toContain('title="Research source — example.com"');
+    expect(markup).toContain("with [2].");
+  });
+});
+
 describe("MarkdownRenderer file links", () => {
   it("routes sandbox file links through the existing file preview component", () => {
     const markup = renderLink("sandbox:/private/tmp/qa/result.txt");

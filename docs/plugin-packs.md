@@ -722,7 +722,7 @@ For each cowork.plugin.json found:
     │
     ├── Validate manifest (required fields, semver, platform)
     ├── Register inline skills → Custom Skill Loader
-    ├── Register skillDirectories → Custom Skill Loader
+    ├── Register skillDirectories → Custom Skill Loader (+ read-only pack grant)
     ├── Register agent roles → Agent Role Repository
     ├── Register connectors → Tools Map
     └── Set plugin.state = "registered"
@@ -783,6 +783,21 @@ now being registered by "qa-testing". The later registration will take precedenc
 ```
 
 This helps pack authors avoid accidental ID collisions. The later-registered skill wins, but both packs continue to load normally.
+
+### Skill Files Under Access Profiles
+
+Packs live outside the workspace (bundled packs under `resources/plugin-packs/`, personal packs under `~/Library/Application Support/cowork-os/extensions/`), so a directory-backed skill's own `references/`, `scripts/`, and `assets/` would normally stop at the workspace boundary of a named access profile (Ask for approval, Approve for me, or a custom profile).
+
+When a task applies a directory-backed skill — by slash command (`/unity:implement-in-app-purchases`) or when the model invokes the `Skill` tool — the task may **read** that skill's plugin pack folder with the file tools (`read_file`, `list_directory`, `glob`, `grep`, and the other read tools), by absolute path, without an approval prompt:
+
+- **Read-only.** The grant never covers writes or deletes. A write into the pack is evaluated exactly as before: denied, or an ordinary external-file approval where the profile allows one.
+- **Only the applied skill's pack.** Other packs, the extensions folder itself, and every other path stay behind the boundary. A pack's grant does not reach a sibling pack.
+- **Only packs the registry loaded.** The grant is registered when `PluginRegistry` loads the pack's `skillDirectories` and is bound to the exact `SKILL.md` it built the skill from. Disabled, policy-blocked, failed, and quarantined packs (and a skill shadowed by a workspace skill with the same ID) get nothing. Disabling or uninstalling a pack revokes the grant immediately, even for a running task.
+- **No symlink escapes.** The pack root is canonicalized when the pack loads. Both the requested path and its real target must be inside it, so a symlink in the pack that points elsewhere is denied.
+- **Profile deny rules still win**, as does a workspace with reading turned off. Add a `deny` rule for the extensions folder to a custom profile to opt out.
+- **Ends with the task.** The grant is held per tool call from the task's applied skills, so it never carries over to another task, sub-agent, or background service.
+
+Shell commands are not covered: the command sandbox's read rules do not include pack folders, so a skill that runs a bundled script still needs an access profile that lets the command reach it. See [Access Profiles](access-profiles.md#filesystem-behavior).
 
 ### Update Detection
 
@@ -1219,9 +1234,57 @@ window.electronAPI.scaffoldPluginPack({
 - Use `skillDirectories` when a skill needs a full folder, such as `SKILL.md`, `references/`, `scripts/`, `assets/`, or `agents/`.
 - `path` must be relative to the plugin pack root. Absolute paths and parent traversal are rejected.
 - Each directory must contain `SKILL.md`.
+- Tell the agent which files to read relative to `SKILL.md`; while the skill is applied the whole pack folder is readable (read-only) under every access profile. See [Skill Files Under Access Profiles](#skill-files-under-access-profiles).
 - Display metadata resolves in this order: manifest field, `SKILL.md` frontmatter, generated title from skill ID.
 - Per-skill enable/disable state is persisted for both inline `skills` and directory-backed `skillDirectories`.
 - Packaged builds include `resources/plugin-packs/**`, so future non-reference files under a bundled pack are preserved.
+
+#### Routing Hints for Directory-Backed Skills
+
+Without routing hints, the skill router only sees a directory skill's ID, name, and description, so plain-language requests that use different words can rank another skill first (for example "make enemies chase the player" losing to `spotify-player` on the word "player"). Add an optional `routing` object to the `skillDirectories` entry, or a `routing:` block to the `SKILL.md` frontmatter:
+
+```json
+{
+  "id": "unity:initialize-ai-navigation",
+  "path": "skills/initialize-ai-navigation",
+  "routing": {
+    "useWhen": "Characters need to find paths, patrol, or avoid obstacles in a 3D level.",
+    "dontUseWhen": "The request is about 2D tile maps or physics collisions.",
+    "examples": {
+      "positive": [
+        "bake a navmesh so my NPCs can walk around the level",
+        "make guards patrol between waypoints and avoid walls"
+      ],
+      "negative": ["paint a level with rule tiles"]
+    }
+  }
+}
+```
+
+```yaml
+---
+name: initialize-ai-navigation
+description: Sets up NavMesh surfaces, agents, obstacles, and links.
+routing:
+  useWhen: Characters need to find paths, patrol, or avoid obstacles in a 3D level.
+  examples:
+    positive:
+      - bake a navmesh so my NPCs can walk around the level
+---
+```
+
+| Field                | Effect                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `useWhen`            | Replaces the description as the "Use when" hint shown to the model and used for ranking. Defaults to the description.         |
+| `dontUseWhen`        | "Don't use when" hint; requests that resemble it are penalized.                                                               |
+| `examples.positive`  | Example requests the skill handles. Raises the skill's ranking for similar requests; a close paraphrase also admits it.        |
+| `examples.negative`  | Example requests the skill must not handle. An exact match excludes the skill; similar requests are penalized.                 |
+| `keywords`           | **Hard gate.** When set, the skill is hidden from plain-language requests that mention none of the keywords (and don't closely match a positive example). Explicit invocation (`/command`, "use the X skill") still works. |
+
+- Prefer `examples` over `keywords`: examples raise ranking without hiding the skill, while keywords hide it from every request that phrases the task differently. Use `keywords` only for skills that should stay out of the way unless named.
+- The manifest wins field by field over `SKILL.md`; `"keywords": []` in the manifest clears frontmatter keywords. `examples.positive` and `examples.negative` are merged separately.
+- Only the `routing:` block is read from frontmatter. Top-level `keywords:` or `tags:` in upstream `SKILL.md` files are ignored, so they never gate a skill by accident.
+- The `routing:` block needs valid YAML frontmatter; files that only parse with the lenient line parser get no routing hints from frontmatter.
 
 ---
 
@@ -1322,6 +1385,17 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 - Check that the pack is toggled ON (enabled)
 - Verify skill parameters match the `{{placeholder}}` names in the prompt
 - Check the `"enabled": true` flag on each skill
+
+### Plain-language requests don't pick a pack skill
+
+Before planning, CoWork ranks every model-invocable skill against the request and adds a skill hint to the planning prompt only when one skill clearly leads (`selectSkillPlanningHints` in `src/shared/skill-routing/index.ts`):
+
+- The top skill must score at least 0.5, and no other skill may come within 0.1 of it. Close runners-up from the same pack count too: below 0.7 they made off-domain requests that only share the pack's vocabulary look like a lead.
+- A clear lead below 0.7 gets a **tentative** hint ("Possibly relevant skills… may not apply"): the planner adds a Skill step only if the request is really about that skill. Lexical scores in this range can't tell a right lead from an off-domain one that shares a rare word, such as "voice chat app for remote teams" and a game voice-chat skill.
+- A top skill at 0.7 or more gets a **strong** hint ("Relevant skills for this task" with an example Skill step), listing its close runners-up (up to three) whatever pack they come from.
+- When a skill was hinted (strong or tentative), any plan step that mentions a skill can use the `Skill` tool, even if the step paraphrases the skill ("Apply the Unity in-app purchases skill") instead of naming its ID.
+
+Each task logs `[skill-routing] planning hints: <reason>` with the hint strength and the top three scores. `clear_lead` and `strong_lead` mean a hint was added. `below_floor` and `contested` mean no hint was added, and the model picks skills from the shortlist on its own. To get a pack skill over the bar, add routing examples that use the words people actually type. `npm run skills:eval-routing` reports hint coverage for the bundled skills against `resources/skills/_evals/hint-cases.jsonl`.
 
 ### Toggle doesn't persist after restart
 

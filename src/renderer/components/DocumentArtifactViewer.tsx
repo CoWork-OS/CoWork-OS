@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { requestArtifactClose } from "./utils/artifact-close";
 import {
   AlignLeft,
   ArrowUp,
@@ -36,6 +37,7 @@ import type {
   EditableDocumentRun,
 } from "../../shared/document-preview";
 import { getDocumentFormatLabel } from "../../shared/document-formats";
+import { ATTACHED_FILES_LIST_HEADER } from "../../shared/attachment-summary";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
@@ -499,7 +501,7 @@ export function DocumentArtifactViewer({
         sizeBytes: attachment.size,
       }));
       return {
-        message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
+        message: `${base}\n\n${ATTACHED_FILES_LIST_HEADER}\n${attachmentLines.join("\n")}`,
         images: images.length > 0 ? images : undefined,
       };
     },
@@ -602,7 +604,10 @@ export function DocumentArtifactViewer({
         <button
           type="button"
           className="document-viewer-close"
-          onClick={onClose}
+          disabled={saving}
+          onClick={() =>
+            requestArtifactClose({ fileName, hasUnsavedChanges: dirty, saving, onClose })
+          }
           title="Close document"
         >
           <X size={17} />

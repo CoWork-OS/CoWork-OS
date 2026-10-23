@@ -7,6 +7,7 @@ import type {
   Workspace,
   AgentConfig,
   Task,
+  EvidenceBasis,
 } from "./types";
 const id = z.string().trim().min(1).max(128);
 export const botWorkResultRequestSchema = z
@@ -48,6 +49,10 @@ export interface BotWorkResult {
     sourceType: string;
     capturedAt: number;
     status: string;
+    /** How the claim was established, when the producer recorded it. */
+    basis?: EvidenceBasis;
+    /** When the source data was last updated, separate from `capturedAt`. */
+    dataAsOf?: number;
   }>;
   truncated: boolean;
   issues: string[];
@@ -89,6 +94,8 @@ export interface BotWorkResultManifest {
     expiresAt?: number;
     status: string;
     artifactRevisionId?: string;
+    basis?: EvidenceBasis;
+    dataAsOf?: number;
   }>;
   truncated: boolean;
   issues: string[];

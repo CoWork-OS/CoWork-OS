@@ -1366,7 +1366,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                         ),
                       )
                       .join("||")}`
-                  : `${item.event.id}:${getEffectiveTaskEventType(item.event)}:${
+                  : `${item.event.id}:${getEffectiveTaskEventType(item.event)}:${item.event.payload?.queuedEditRevision ?? 0}:${
                       toolCallPairing.completions.get(item.event.id)?.id ?? "none"
                     }:${getCommandOutputSessionsRevision(
                       commandOutputSessionsByInsertIndex.get(item.eventIndex),

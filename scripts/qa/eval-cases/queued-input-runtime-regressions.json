@@ -1,0 +1,39 @@
+{
+  "id": "queued-input-runtime-regressions-2026-10-18",
+  "title": "Editable queued inputs and complete recovery",
+  "source": {
+    "audit": "runtime-review-2026-10-18"
+  },
+  "categories": [
+    {
+      "id": "queued-edit-provider-and-transcript",
+      "prompt": "Hold an active Chat turn at a loopback provider. Queue a follow-up, edit it from Desktop, then release the turn. Also edit an initial task waiting behind it.",
+      "assertions": {
+        "onlyEditedTextReachesProvider": true,
+        "sameMessageIdentityAndAttachmentsPreserved": true,
+        "transcriptReflectsQueuedEdit": true,
+        "staleRevisionRefused": true,
+        "executableTest": "src/electron/agent/__tests__/queued-task-input.test.ts",
+        "executableCommand": "node scripts/qa/queued-input-runtime-acceptance.mjs"
+      }
+    },
+    {
+      "id": "chat-acceptance-before-dispatch",
+      "prompt": "Drain a durable queued Chat follow-up. Persist its transcript and accepted receipt before recording provider dispatch. Fail snapshot persistence and verify no dispatch starts.",
+      "assertions": {
+        "acceptancePrecedesDispatch": true,
+        "failedSnapshotDoesNotDispatch": true,
+        "executableTest": "src/electron/agent/__tests__/executor-chat-mode.test.ts"
+      }
+    },
+    {
+      "id": "complete-prompt-recovery",
+      "prompt": "Queue an 80,016-character human follow-up, persist its full checkpoint and shortened timeline receipt, then restore. Repeat with a truncated edited receipt.",
+      "assertions": {
+        "fullCheckpointTextPreserved": true,
+        "completeExplicitEditWinsOlderSnapshot": true,
+        "executableTest": "src/electron/agent/runtime/__tests__/SessionRuntime.test.ts"
+      }
+    }
+  ]
+}

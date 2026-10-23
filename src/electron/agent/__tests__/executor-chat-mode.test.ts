@@ -491,14 +491,28 @@ describe("TaskExecutor chat mode", () => {
         expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
         if (fails) throw new Error("snapshot unavailable");
       });
-      const turn = executor.respondInChatMode("Queued chat", undefined, undefined, onIncorporated);
+      const onDispatchStarted = vi.fn(async () => {
+        expect(onIncorporated).toHaveBeenCalledTimes(1);
+        expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
+      });
+      const turn = executor.respondInChatMode(
+        "Queued chat",
+        undefined,
+        undefined,
+        onIncorporated,
+        undefined,
+        false,
+        onDispatchStarted,
+      );
       if (fails) {
         await expect(turn).rejects.toThrow("snapshot unavailable");
         expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
+        expect(onDispatchStarted).not.toHaveBeenCalled();
         expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
       } else {
         await turn;
         expect(executor.runTextTurnKernel).toHaveBeenCalledTimes(1);
+        expect(onDispatchStarted).toHaveBeenCalledTimes(1);
       }
       expect(onIncorporated).toHaveBeenCalledTimes(1);
     },

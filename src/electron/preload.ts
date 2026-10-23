@@ -3464,6 +3464,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
       TaskTraceRunDetail | undefined
     >,
 
+  getQueuedTaskInputs: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_QUEUED_INPUTS, taskId) as Promise<
+      import("../shared/queued-task-input").QueuedTaskInput[]
+    >,
+  editQueuedTaskInput: (input: import("../shared/queued-task-input").EditQueuedTaskInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_EDIT_QUEUED_INPUT, input) as Promise<
+      import("../shared/queued-task-input").QueuedTaskInput
+    >,
+
   // Send follow-up message to a task (optionally with image attachments)
   sendMessage: (
     taskId: string,
@@ -7355,6 +7364,12 @@ export interface ElectronAPI {
   /** Normalized semantic timeline projection for a task */
   getSemanticTimeline: (taskId: string) => Promise<UiTimelineEvent[]>;
   getTaskLearningProgress: (taskId: string) => Promise<TaskLearningProgress[]>;
+  getQueuedTaskInputs: (
+    taskId: string,
+  ) => Promise<import("../shared/queued-task-input").QueuedTaskInput[]>;
+  editQueuedTaskInput: (
+    input: import("../shared/queued-task-input").EditQueuedTaskInput,
+  ) => Promise<import("../shared/queued-task-input").QueuedTaskInput>;
   sendMessage: (
     taskId: string,
     message: string,

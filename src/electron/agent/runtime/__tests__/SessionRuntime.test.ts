@@ -23,6 +23,7 @@ import {
   type SessionRuntimeSnapshotV2,
   type SessionRuntimeState,
 } from "../SessionRuntime";
+import { sanitizeTimelinePayloadForStorage } from "../../timeline-payload-sanitizer";
 import { QueuedAttachmentStore } from "../queued-attachment-store";
 import { PINNED_CONTEXT_TAGS } from "../../pinned-context-blocks";
 
@@ -1001,6 +1002,94 @@ describe("SessionRuntime", () => {
       }
     },
   );
+
+  it.each([false, true])(
+    "preserves a complete checkpoint when a receipt preview is truncated (edited=%s)",
+    (edited) => {
+      const fullMessage = "x".repeat(80_000) + " FINAL DIRECTIVE";
+      const first = createHarness();
+      first.runtime.queueFollowUp(
+        fullMessage,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "user",
+        "long-message",
+        undefined,
+        undefined,
+        "follow_up",
+      );
+      const checkpoint = first.emittedEvents
+        .filter((e) => e.type === "conversation_snapshot")
+        .at(-1)!.payload;
+      const restored = createHarness();
+      restored.setCheckpointPayload(JSON.parse(JSON.stringify(checkpoint)));
+      restored.runtime.restoreFromEvents([
+        {
+          id: "receipt",
+          taskId: "task-1",
+          timestamp: 1,
+          type: "user_message",
+          payload: sanitizeTimelinePayloadForStorage({
+            message: fullMessage,
+            messageId: "long-message",
+            deliveryMode: "follow_up",
+            deliveryStatus: "queued",
+            ...(edited ? { queuedEditRevision: 1 } : {}),
+          }),
+        } as Any,
+      ]);
+      expect(restored.runtime.state.queues.pendingFollowUps[0].message).toBe(fullMessage);
+    },
+  );
+
+  it("restores edited queued text from its receipt when the older snapshot won the crash race", () => {
+    const first = createHarness();
+    first.runtime.queueFollowUp(
+      "old",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "user",
+      "edit-message",
+      undefined,
+      undefined,
+      "follow_up",
+    );
+    first.runtime.saveSnapshot();
+    const snapshot = first.emittedEvents
+      .filter((event) => event.type === "conversation_snapshot")
+      .at(-1)!.payload;
+    const restored = createHarness();
+    restored.runtime.restoreFromEvents([
+      {
+        id: "receipt",
+        taskId: "task-1",
+        timestamp: 1,
+        type: "user_message",
+        payload: {
+          message: "edited",
+          messageId: "edit-message",
+          deliveryMode: "follow_up",
+          deliveryStatus: "queued",
+          queuedEditRevision: 1,
+        },
+      } as Any,
+      {
+        id: "snapshot",
+        taskId: "task-1",
+        timestamp: 2,
+        type: "conversation_snapshot",
+        payload: JSON.parse(JSON.stringify(snapshot)),
+      } as Any,
+    ]);
+    expect(restored.runtime.state.queues.pendingFollowUps).toHaveLength(1);
+    expect(restored.runtime.state.queues.pendingFollowUps[0].message).toBe("edited");
+  });
 
   it("recovers provider dispatch when the transcript snapshot wins the receipt update race", () => {
     const root = mkdtempSync(path.join(tmpdir(), "cowork-runtime-follow-up-receipt-race-"));

@@ -1,0 +1,53 @@
+.queued-messages-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.queued-messages-hint {
+  opacity: 0.7;
+}
+.queued-messages-row {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+}
+.queued-messages-row > span {
+  flex: 1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 100px;
+  overflow-y: auto;
+}
+.queued-messages-panel button {
+  padding: 4px 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.queued-messages-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.queued-message-edit textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 80px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 8px;
+  resize: vertical;
+}
+.queued-message-edit > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}

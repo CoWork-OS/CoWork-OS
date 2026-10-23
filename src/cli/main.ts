@@ -39,6 +39,7 @@ import {
   type TaskLike,
   type WorkspaceLike,
 } from "./format";
+import { buildRemoteRunModelPin } from "./run-model-pin";
 import { discoverLocalControlPlane } from "./local-control-plane-discovery";
 import { loadDrillFixture, replayInterruptDrill, runLiveInterruptDrill } from "./drill";
 import {
@@ -753,6 +754,10 @@ async function runTask(ctx: CommandContext): Promise<number> {
     }
     return runDirectTaskProcess(ctx, prompt);
   }
+  const modelPin = buildRemoteRunModelPin({
+    provider: getFlag(ctx.parsed, "--provider"),
+    model: getFlag(ctx.parsed, "--model"),
+  });
   const client = await connectedClient(ctx);
   try {
     const cwd = path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd());
@@ -769,6 +774,7 @@ async function runTask(ctx: CommandContext): Promise<number> {
       ...(getFlag(ctx.parsed, "--permission-mode")
         ? { permissionMode: getFlag(ctx.parsed, "--permission-mode") }
         : {}),
+      ...(modelPin ? { agentConfig: modelPin } : {}),
     };
     const created = await client.request(METHODS.TASK_CREATE, params, 30000);
     const task = ((created as Payload).task || {}) as TaskLike;
@@ -794,14 +800,14 @@ async function runTask(ctx: CommandContext): Promise<number> {
 }
 
 function runDirectTaskProcess(ctx: CommandContext, prompt: string): Promise<number> {
-  return runDirectCommandProcess(ctx, buildDirectTaskArgs(ctx, prompt));
+  return runDirectCommandProcess(ctx, buildDirectTaskArgs(ctx.parsed, prompt));
 }
 
 async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string): Promise<number> {
   const runtime = resolveDirectRuntime();
   const readyFile = path.join(os.tmpdir(), `cowork-cli-detached-${randomUUID()}.json`);
   const directRunArgs = [
-    ...buildDirectTaskArgs(ctx, prompt),
+    ...buildDirectTaskArgs(ctx.parsed, prompt),
     "--detached-worker",
     "--ready-file",
     readyFile,
@@ -832,25 +838,29 @@ async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string)
   return 0;
 }
 
-function buildDirectTaskArgs(ctx: CommandContext, prompt: string): string[] {
+/** Arguments for the local direct runner (`direct-run.ts`) behind `cowork run`. */
+export function buildDirectTaskArgs(parsed: ParsedArgs, prompt: string): string[] {
   return [
     "--prompt",
     prompt,
     "--cwd",
-    path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd()),
-    ...(getFlag(ctx.parsed, "--title") ? ["--title", getFlag(ctx.parsed, "--title")!] : []),
-    ...(getFlag(ctx.parsed, "--workspace-id")
-      ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!]
+    path.resolve(getFlag(parsed, "--cwd") || process.cwd()),
+    ...(getFlag(parsed, "--title") ? ["--title", getFlag(parsed, "--title")!] : []),
+    ...(getFlag(parsed, "--workspace-id")
+      ? ["--workspace-id", getFlag(parsed, "--workspace-id")!]
       : []),
-    ...(hasFlag(ctx.parsed, "--shell") ? ["--shell"] : []),
-    ...(getFlag(ctx.parsed, "--access-profile")
-      ? ["--access-profile", getFlag(ctx.parsed, "--access-profile")!]
+    ...(hasFlag(parsed, "--shell") ? ["--shell"] : []),
+    ...(getFlag(parsed, "--access-profile")
+      ? ["--access-profile", getFlag(parsed, "--access-profile")!]
       : []),
-    ...(getFlag(ctx.parsed, "--permission-mode")
-      ? ["--permission-mode", getFlag(ctx.parsed, "--permission-mode")!]
+    ...(getFlag(parsed, "--permission-mode")
+      ? ["--permission-mode", getFlag(parsed, "--permission-mode")!]
       : []),
+    // Pins this run's model on the task; the global default model stays as it is.
+    ...(getFlag(parsed, "--provider") ? ["--provider", getFlag(parsed, "--provider")!] : []),
+    ...(getFlag(parsed, "--model") ? ["--model", getFlag(parsed, "--model")!] : []),
     // Stop with exit code 3 when a person must act (e.g. a PACT sign-in) instead of waiting.
-    ...(hasFlag(ctx.parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
+    ...(hasFlag(parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
   ];
 }
 
@@ -2367,8 +2377,8 @@ function usage(): void {
       "  cowork daemon start [--background]",
       "  cowork workspace list",
       "  cowork workspace create [path]",
-      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force] [--exit-on-input]',
-      '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>]',
+      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--provider <type>] [--model <id>] [--detach] [--force] [--exit-on-input]',
+      '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>] [--provider <type>] [--model <id>]',
       "  cowork tail <taskId>",
       "  cowork tasks list [--active] [--cli]",
       "  cowork tasks cancel <taskId>",

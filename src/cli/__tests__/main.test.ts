@@ -4,7 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { ControlPlaneClient } from "../control-plane-client";
-import { main, parseArgs, parseInteractiveCommand, waitForDaemonReady } from "../main";
+import {
+  buildDirectTaskArgs,
+  main,
+  parseArgs,
+  parseInteractiveCommand,
+  waitForDaemonReady,
+} from "../main";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -195,6 +201,108 @@ describe("remote run session naming", () => {
       );
     },
   );
+});
+
+describe("run model pin", () => {
+  it("forwards --provider and --model to the local direct runner", () => {
+    const args = buildDirectTaskArgs(
+      parseArgs([
+        "run",
+        "make the deck",
+        "--cwd",
+        "/tmp/project",
+        "--provider",
+        "openrouter",
+        "--model",
+        "moonshotai/kimi-k3",
+      ]),
+      "make the deck",
+    );
+
+    expect(args).toEqual([
+      "--prompt",
+      "make the deck",
+      "--cwd",
+      "/tmp/project",
+      "--provider",
+      "openrouter",
+      "--model",
+      "moonshotai/kimi-k3",
+    ]);
+  });
+
+  it("leaves the model out when no flag is passed", () => {
+    const args = buildDirectTaskArgs(parseArgs(["run", "hi", "--cwd", "/tmp/project"]), "hi");
+
+    expect(args).not.toContain("--provider");
+    expect(args).not.toContain("--model");
+  });
+
+  it("sends the pin in agentConfig for --remote runs", async () => {
+    vi.spyOn(ControlPlaneClient.prototype, "connect").mockResolvedValue();
+    const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
+      taskId: "task-1",
+      task: { id: "task-1", title: "Placeholder" },
+    });
+    vi.spyOn(ControlPlaneClient.prototype, "close").mockImplementation(() => {});
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    expect(
+      await main([
+        "run",
+        "make the deck",
+        "--remote",
+        "--workspace-id",
+        "ws-1",
+        "--token",
+        "test-token",
+        "--json",
+        "--access-profile",
+        "full_access",
+        "--provider",
+        "openai_compatible",
+        "--model",
+        "local-27b",
+      ]),
+    ).toBe(0);
+    expect(request).toHaveBeenCalledWith(
+      "task.create",
+      expect.objectContaining({
+        accessProfileId: "full_access",
+        agentConfig: {
+          providerType: "openai-compatible",
+          modelKey: "local-27b",
+          modelPinned: true,
+        },
+      }),
+      30000,
+    );
+  });
+
+  it("refuses --remote --provider without --model before connecting", async () => {
+    const connect = vi.spyOn(ControlPlaneClient.prototype, "connect").mockResolvedValue();
+    let stderr = "";
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr += String(chunk);
+      return true;
+    });
+
+    const code = await main([
+      "run",
+      "make the deck",
+      "--remote",
+      "--workspace-id",
+      "ws-1",
+      "--token",
+      "test-token",
+      "--provider",
+      "openrouter",
+    ]);
+
+    expect(code).toBe(1);
+    expect(stderr).toContain("With --remote, pass --model too");
+    expect(connect).not.toHaveBeenCalled();
+  });
 });
 
 describe("CLI displayed approval revisions", () => {

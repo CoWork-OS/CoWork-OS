@@ -6,6 +6,7 @@ import ts from "typescript";
 import { LLM_PROVIDER_TYPES, type LLMProviderType } from "../src/shared/types";
 import { MCPSettingsSchema } from "../src/electron/utils/validation";
 import { DEFAULT_MCP_SETTINGS, type MCPSettings } from "../src/electron/mcp/types";
+import { normalizeProviderType, resolveSupportedProviderType } from "../src/cli/run-model-pin";
 
 interface SettingsFunctions {
   resolveSupportedProviderType(provider: string): LLMProviderType;
@@ -29,8 +30,6 @@ function settingsFunctions(bindings: Record<string, unknown> = {}): SettingsFunc
   const names = [
     "isPayload",
     "payloadRecord",
-    "normalizeProviderType",
-    "resolveSupportedProviderType",
     "configureLocalProvider",
     "providerFallbackCommand",
     "restoreBackup",
@@ -59,6 +58,9 @@ function settingsFunctions(bindings: Record<string, unknown> = {}): SettingsFunc
     `${javascript}\n({resolveSupportedProviderType, configureLocalProvider, providerFallbackCommand, restoreBackup, disableRestoredMcpServers})`,
     {
       LLM_PROVIDER_TYPES,
+      // Shared with `cowork run --provider`, so they live in run-model-pin.ts.
+      normalizeProviderType,
+      resolveSupportedProviderType,
       MCPSettingsSchema,
       DEFAULT_MCP_SETTINGS,
       path,

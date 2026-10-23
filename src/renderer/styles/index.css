@@ -17950,38 +17950,6 @@ a,
   letter-spacing: 0.02em;
 }
 
-/* Ollama auto-detection card */
-.onboarding-ollama-detection {
-  width: 100%;
-  max-width: 480px;
-  border: 1px solid rgba(255, 248, 245, 0.16);
-  background: rgba(255, 248, 245, 0.04);
-  border-radius: 18px;
-  padding: 24px 20px;
-  text-align: center;
-  animation: onboarding-fade-in 0.45s ease;
-}
-
-.onboarding-ollama-detection-icon {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 12px;
-  color: var(--onboarding-coral);
-}
-
-.onboarding-ollama-detection-model {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--onboarding-warm-white);
-  margin: 0 0 4px;
-}
-
-.onboarding-ollama-detection-note {
-  font-size: 0.88rem;
-  color: rgba(255, 248, 245, 0.6);
-  margin: 0;
-}
-
 .onboarding-recap {
   width: 100%;
   max-width: 760px;
@@ -18631,7 +18599,6 @@ a,
 
 .theme-light .onboarding-step-panel,
 .theme-light .onboarding-memory-trust,
-.theme-light .onboarding-ollama-detection,
 .theme-light .onboarding-recap,
 .theme-light .onboarding-final-try {
   border-color: rgba(26, 24, 23, 0.14);
@@ -18642,8 +18609,7 @@ a,
   box-shadow: 0 18px 42px rgba(68, 51, 39, 0.08);
 }
 
-.theme-light .onboarding-form-label,
-.theme-light .onboarding-ollama-detection-model {
+.theme-light .onboarding-form-label {
   color: #1a1817;
 }
 
@@ -18697,10 +18663,6 @@ a,
   border-color: rgba(26, 24, 23, 0.18);
 }
 
-.theme-light .onboarding-ollama-detection-note {
-  color: rgba(26, 24, 23, 0.55);
-}
-
 .theme-light .onboarding-selection-card-title,
 .theme-light .onboarding-selection-card-desc,
 .theme-light .onboarding-memory-trust-copy,
@@ -18719,8 +18681,7 @@ a,
 
 .theme-light .onboarding-selection-card-desc,
 .theme-light .onboarding-recap-card-copy p,
-.theme-light .onboarding-final-try-prompt,
-.theme-light .onboarding-ollama-detection-note {
+.theme-light .onboarding-final-try-prompt {
   color: rgba(26, 24, 23, 0.56);
 }
 
@@ -18785,7 +18746,6 @@ a,
 
   .onboarding-step-panel,
   .onboarding-memory-trust,
-  .onboarding-ollama-detection,
   .onboarding-recap,
   .onboarding-final-try {
     padding: 18px 16px;
@@ -18835,7 +18795,6 @@ a,
 
   .onboarding-step-panel,
   .onboarding-memory-trust,
-  .onboarding-ollama-detection,
   .onboarding-recap,
   .onboarding-final-try {
     padding: 16px;

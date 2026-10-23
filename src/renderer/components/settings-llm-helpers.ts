@@ -1,3 +1,4 @@
+import { OPENROUTER_FREE_MODEL_ID } from "../../shared/llm-provider-catalog";
 import type { LLMSettingsData, OpenAIReasoningEffort, LLMTextVerbosity } from "../../shared/types";
 
 export interface ClaudeCredentialInput {
@@ -75,4 +76,18 @@ export function resolveOpenAITextVerbosity(
 ): LLMTextVerbosity {
   const value = openai?.textVerbosity;
   return value === "low" || value === "medium" || value === "high" ? value : "medium";
+}
+
+/**
+ * The OpenRouter form after a browser sign-in. Main created and saved the key; the form shows
+ * the stored key and the model main chose (the free router on a first sign-in).
+ */
+export function resolveOpenRouterSignIn(
+  result: { model?: string },
+  saved?: Pick<LLMSettingsData, "openrouter"> | null,
+): { apiKey: string; model: string } {
+  return {
+    apiKey: saved?.openrouter?.apiKey || "",
+    model: result.model || saved?.openrouter?.model || OPENROUTER_FREE_MODEL_ID,
+  };
 }

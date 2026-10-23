@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pick the model for one `cowork run`**: `--provider` and `--model` now pin that run's task to the model, like the model picker in an open conversation, without changing the global default, so runs on different models can go side by side. Before, `cowork run` accepted both flags and ignored them. An unknown or unconfigured provider stops the run before the task is created, and the resolved model is printed (`task_model` with `--json`). With `--remote`, `--model` is required. See [Choosing the model for one run](docs/cli.md#choosing-the-model-for-one-run).
 - **Computer use in a Cua Space**: the computer-use tools (`screenshot`, `click`, `type_text`, `keypress`, `scroll`, `drag`) can drive a Cua Space instead of this computer. Turn it on in **Settings > Tools > Computer use** with the Space URL and token; **Test connection** checks that the Space answers and accepts the token. The token is stored encrypted and never reaches the renderer, is dropped when the Space address changes, and plain `http://` is allowed only for this computer and private network addresses. An unreachable Space fails the action instead of falling back to your own desktop. See [Run computer use in a Cua Space](docs/computer-use.md#run-computer-use-in-a-cua-space).
 
 ### Security

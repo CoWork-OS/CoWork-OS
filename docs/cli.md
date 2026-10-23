@@ -74,6 +74,7 @@ cowork run "inspect this repo and list the riskiest files" --workspace /path/to/
 cowork run "inspect this repo" --access-profile ask_for_approval
 cowork run "run the trusted local build" --access-profile full_access
 cowork run "return a compact status report" --json
+cowork run "draft the board deck" --provider openrouter --model moonshotai/kimi-k3
 cowork providers list
 cowork providers configure openai --model gpt-5.5
 cowork providers fallback list
@@ -118,6 +119,20 @@ Interactive mode accepts free-text tasks and slash commands:
 - `/workspace list` shows known local workspaces.
 - `/workspace use <path>` sets the working workspace for the session.
 - `/exit` leaves the CLI.
+
+### Choosing the model for one run
+
+`cowork run` uses the global default model unless you pick one for that run:
+
+```bash
+cowork run "draft the board deck" --provider openrouter --model moonshotai/kimi-k3
+cowork run "draft the board deck" --model claude-opus-5-5
+cowork run "draft the board deck" --provider ollama
+```
+
+The choice is pinned to that task only, the same way the model picker in an open conversation pins it, so the global default stays unchanged and several runs can use different models at the same time. `--model` alone uses the current provider; `--provider` alone uses the model saved for that provider. The run stops before the task is created if the provider is unknown, not configured, or would not accept the model, instead of quietly running on the global model. The resolved model is printed as `Model for this run: <provider>/<model>` (a `task_model` event with `--json`).
+
+With `--remote`, `--model` is required and the remote node resolves the pin against its own settings. If that provider is not configured on the node, the task runs on the node's global model and logs a warning.
 
 ### Access Profiles
 

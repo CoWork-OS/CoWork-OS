@@ -9,7 +9,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { load as loadYaml } from "js-yaml";
+import { load as loadYaml, YAML11_SCHEMA } from "js-yaml";
 import {
   IMPORT_PROVIDER_LABELS,
   modelProviderLabel,
@@ -337,7 +337,9 @@ export function readHermesHome(home: string, options: ReadSourceOptions): Import
   const configText = readTextIfExists(path.join(home, "config.yaml"));
   if (configText !== null) {
     try {
-      config = asRecord(loadYaml(configText));
+      // Hermes writes config.yaml with PyYAML (YAML 1.1); js-yaml 5 defaults to YAML 1.2,
+      // which leaves `<<` merge keys unexpanded.
+      config = asRecord(loadYaml(configText, { schema: YAML11_SCHEMA }));
     } catch {
       items.push(
         skippedItem(

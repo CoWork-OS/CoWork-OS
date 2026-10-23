@@ -223,6 +223,19 @@ describe("Hermes reader", () => {
     expect(splitHermesEntries("a § inline\n§\nb\n\n§\n")).toEqual(["a § inline", "b"]);
   });
 
+  it("expands YAML 1.1 merge keys in config.yaml, as PyYAML writes them", () => {
+    fs.writeFileSync(
+      path.join(hermesHome, "config.yaml"),
+      "defaults: &defaults\n  provider: openrouter\nmodel:\n  <<: *defaults\n  default: anthropic/claude-sonnet-4\n",
+    );
+    const plan = readHermesHome(hermesHome, { withSecrets: false, nowMs: NOW });
+    expect(byId(plan, "model").payload).toMatchObject({
+      kind: "model",
+      provider: "openrouter",
+      model: "anthropic/claude-sonnet-4",
+    });
+  });
+
   it("returns an empty plan for a missing home", () => {
     const plan = readHermesHome(path.join(base, "missing"), { withSecrets: false });
     expect(plan).toMatchObject({ found: false, items: [] });

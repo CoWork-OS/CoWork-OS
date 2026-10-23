@@ -505,6 +505,9 @@ export function SpreadsheetArtifactViewer({
       return { start, end: position };
     });
     setEditingCell(null);
+    // Cell mouse-down prevents native focus to protect pending edits. Restore
+    // focus explicitly so arrows, typing and clipboard shortcuts reach the grid.
+    gridRef.current?.focus();
   };
 
   const selectRange = (range: CellRange, active: CellPosition = range.start) => {

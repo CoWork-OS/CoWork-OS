@@ -1610,6 +1610,7 @@ export class SessionRuntime {
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
     textProvenance?: TaskFollowUpInput["textProvenance"],
+    notificationKind?: TaskFollowUpInput["notificationKind"],
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1628,6 +1629,7 @@ export class SessionRuntime {
       ...(surfaceOrigin !== undefined ? { surfaceOrigin } : {}),
       // Kept with the queued item so a drain after this turn still knows who wrote it.
       ...(textProvenance !== undefined ? { textProvenance } : {}),
+      ...(notificationKind !== undefined ? { notificationKind } : {}),
     });
     this.saveSnapshot();
   }
@@ -4609,6 +4611,9 @@ export class SessionRuntime {
       const interactionMode = payload.interactionMode;
       pending.push({
         message: payload.message,
+        ...(payload.notificationKind === "background_process"
+          ? { notificationKind: "background_process" as const }
+          : {}),
         deliveryMode: payload.deliveryMode === "follow_up" ? "follow_up" : "message",
         ...(recoveredImages ? { images: recoveredImages } : {}),
         messageSource:

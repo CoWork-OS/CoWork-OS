@@ -1,4 +1,5 @@
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
+import { trailingBackgroundCommand } from "./trailing-background-command";
 import { isReadOnlyHttpRequestInput } from "../security/http-permission-context";
 import { mcpConfigurationCurrent } from "../../mcp/configuration-authority";
 import { MCPEventService } from "../../mcp/events/MCPEventService";
@@ -1430,7 +1431,11 @@ export class ToolRegistry {
 
   private async runShellCommand(input: Any, runtime?: Record<string, unknown>): Promise<Any> {
     const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
-    if (input?.background === true || input?.background === "true") {
+    if (
+      input?.background === true ||
+      input?.background === "true" ||
+      (process.platform !== "win32" && trailingBackgroundCommand(input?.command) !== undefined)
+    ) {
       return this.shellTools.startBackgroundCommand(input.command, {
         cwd: input.cwd,
         env: input.env,
@@ -10514,7 +10519,7 @@ ${skillDescriptions}`;
             background: {
               type: "boolean",
               description:
-                "Start a long-running command (dev server, file server, watcher) and return once it is ready or after a short startup window, leaving it running. The result has process_id, pid, status, startup_output and any localhost urls it printed. At most 5 per task; they stop when the task is cancelled, after 30 minutes without process_output, or when the app quits.",
+                "Start a long-running command (dev server, file server, watcher) and return once it is ready or after a short startup window, leaving it running. The result has process_id, pid, status, startup_output and any localhost urls it printed. At most 5 per task; they stop when the task is cancelled, after 30 minutes without process_output (4 hours once completion delivery is armed), or when the app quits.",
             },
             startup_wait_ms: {
               type: "number",
@@ -10533,7 +10538,7 @@ ${skillDescriptions}`;
       {
         name: "process_output",
         description:
-          "Read new output and the status (running, exit code) of a background process started with run_command background: true. Use it to wait for a dev server to become ready, to find the URL or port it printed, or to check its logs after an action. Each call returns output since the previous call; pass since_offset (from next_offset) to page, since_offset: 0 to reread what is still buffered, or tail_lines for just the end. Call it without process_id to list this task's background processes.",
+          "Read new output and the status (running, exit code) of a background process started with run_command background: true. Use it to wait for a dev server to become ready, to find the URL or port it printed, or to check its logs after an action. Each call returns output since the previous call; pass since_offset (from next_offset) to page, since_offset: 0 to reread what is still buffered, or tail_lines for just the end. In an interactive native Desktop session, two empty reads enable completion delivery: when notify_on_complete is true, stop polling and continue other work or end the turn; final output will arrive automatically. Call it without process_id to list this task's background processes.",
         input_schema: {
           type: "object",
           properties: {

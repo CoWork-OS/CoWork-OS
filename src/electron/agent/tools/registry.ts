@@ -12,9 +12,9 @@ import {
   type BotWorksOn,
 } from "../../../shared/bot-computer";
 import {
-  BOT_CONTAINED_DENIED_TOOL_NAMES,
-  BOT_DESKTOP_HOST_SHELL_TOOL_NAMES,
-} from "../../../shared/bot-containment";
+  isToolBoundaryAllowedForContainedRun,
+  toolBoundaryClass,
+} from "../../../shared/tool-boundaries";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -1499,27 +1499,74 @@ export class ToolRegistry {
     return isComputerToolBlocked(worksOn, kind);
   }
 
-  /** A run in a bot's own folder; fails closed if the task cannot be read. */
+  private botContainedCache: { value: boolean } | null = null;
+
+  /**
+   * A run in a bot's own folder; fails closed if the task cannot be read. Every tool the
+   * registry lists is checked against it, so the answer is cached: "contained" for good (a
+   * task never leaves its bot's folder), "not contained" only until the current synchronous
+   * pass ends, since the daemon can contain a running task at any time. A task that could not
+   * be read counts as contained for that pass only.
+   */
   private isBotContainedTask(): boolean {
+    if (this.botContainedCache) return this.botContainedCache.value;
+    let value: boolean;
+    let readContained = false;
     try {
-      return this.daemon.getTask?.(this.taskId)?.agentConfig?.botContained === true;
+      value = this.daemon.getTask?.(this.taskId)?.agentConfig?.botContained === true;
+      readContained = value;
+    } catch {
+      value = true;
+    }
+    const cache = { value };
+    this.botContainedCache = cache;
+    if (!readContained) {
+      queueMicrotask(() => {
+        if (this.botContainedCache === cache) this.botContainedCache = null;
+      });
+    }
+    return value;
+  }
+
+  /**
+   * Whether an MCP tool's connector runs as a program on this computer (stdio) rather than as
+   * a remote service. Fails closed: a tool whose server cannot be found counts as local.
+   */
+  private isLocalConnectorTool(toolName: string, prefix: string): boolean {
+    try {
+      const rawName = toolName.slice(prefix.length);
+      const id = MCPClientManager.getInstance().getServerIdForTool(rawName);
+      const server = MCPSettingsManager.loadSettings().servers?.find((entry) => entry.id === id);
+      return !server || server.transport === "stdio";
     } catch {
       return true;
     }
+  }
+
+  /**
+   * The boundary of a run in a bot's own folder, by the tool's class (shared/tool-boundaries):
+   * a tool nobody classified, or one that reaches past the bot's folder, is refused.
+   */
+  private isBlockedByBotContainment(toolName: string): boolean {
+    if (!this.isBotContainedTask()) return false;
+    let prefix = "mcp_";
+    try {
+      prefix = MCPSettingsManager.loadSettings().toolNamePrefix || prefix;
+    } catch {
+      // Settings unavailable: the default prefix still classifies connector tools.
+    }
+    const boundary = toolBoundaryClass(toolName, { mcpToolNamePrefix: prefix });
+    return !isToolBoundaryAllowedForContainedRun(boundary, {
+      worksOn: this.currentBotWorksOn(),
+      localConnector: boundary === "connector" && this.isLocalConnectorTool(toolName, prefix),
+    });
   }
 
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
     if (this.isBlockedByBotWorksOn(toolName)) return true;
-    if (BOT_CONTAINED_DENIED_TOOL_NAMES.has(toolName) && this.isBotContainedTask()) return true;
-    if (
-      BOT_DESKTOP_HOST_SHELL_TOOL_NAMES.has(toolName) &&
-      this.currentBotWorksOn() === "own_desktop" &&
-      this.isBotContainedTask()
-    ) {
-      return true;
-    }
+    if (this.isBlockedByBotContainment(toolName)) return true;
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;

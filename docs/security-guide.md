@@ -244,7 +244,11 @@ workspace lists. A run there:
   unchanged);
 - cannot switch to another workspace (`switch_workspace` and the automatic
   switch are refused);
-- loses `get_env` and the macOS process and login-item tools;
+- gets tools by boundary class (below): no unclassified tool, nothing that
+  reads this computer's environment or acts on its processes and login items
+  (`get_env` and the macOS process and launch-agent tools), no QA browser that
+  can open this computer's local servers, no connected phone, and no MCP
+  connector that runs as a program on this computer (stdio);
 - passes all of this to the tasks it starts.
 
 For a bot set to **Its own desktop**, its own folder is the folder its desktop
@@ -254,6 +258,17 @@ desktop work on the same files. Its contained runs lose the host's
 desktop container with `desktop_run`. A desktop on a server, or on a Linux host
 whose uid the container cannot write as, keeps its files in a volume, so the
 bot's own folder stays a separate folder on this computer.
+
+**Tool boundary classes.** Every built-in tool has a class in
+`src/shared/tool-boundaries.ts`: app state, workspace files, web, integration,
+host shell, host computer, host info, host system, host device, local web,
+browser, bot desktop, handoff, or connector (any MCP tool). A run in a bot's own
+folder is decided by class (`isToolBoundaryAllowedForContainedRun`, enforced in
+the tool registry's task restrictions), so a tool nobody classified is refused
+there rather than allowed. `tool-boundaries.test.ts` scans every tool the main
+process defines and every tool the registry offers and fails when one has no
+class: adding a tool means choosing its class. An MCP tool counts as local when
+its server uses stdio, or when its server cannot be found.
 
 An own desktop's network is limited right after it starts, before anything runs
 in it. A short-lived helper container shares the desktop's network namespace,

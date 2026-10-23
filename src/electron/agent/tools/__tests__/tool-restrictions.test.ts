@@ -184,4 +184,32 @@ describe("ToolRegistry tool restrictions", () => {
     (registry as Any).botContainedCache = null;
     expect((registry as Any).isDeniedByTaskRestrictions("get_env")).toBe(true);
   });
+
+  it("does not offer a contained run the tools its boundary refuses", () => {
+    const workspace: Any = {
+      id: "__bot_workspace__:bot-1",
+      name: "Scout (own folder)",
+      path: "/mock/bot-folder",
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+      createdAt: Date.now(),
+    };
+    let task: Any = { id: "test-task", agentConfig: { botContained: true } };
+    const daemon: Any = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      getTask: vi.fn(() => task),
+    };
+    const registry = new ToolRegistry(workspace, daemon, "test-task", "private", []);
+    const refused = ["android_phone_devices", "get_env", "qa_run"];
+
+    for (const name of refused) expect(registry.isToolAllowed(name)).toBe(false);
+    expect(registry.isToolAllowed("read_file")).toBe(true);
+    const offered = registry.getTools().map((tool) => tool.name);
+    expect(offered).toContain("read_file");
+    expect(offered.filter((name) => name.startsWith("android_phone_"))).toEqual([]);
+
+    task = { id: "test-task", agentConfig: {} };
+    (registry as Any).botContainedCache = null; // the contained flag is cached briefly
+    expect(registry.isToolAllowed("android_phone_devices")).toBe(true);
+  });
 });

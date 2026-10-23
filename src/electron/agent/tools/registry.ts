@@ -1613,6 +1613,11 @@ export class ToolRegistry {
     if (this.isBlockedByBotWorksOn(toolName)) {
       return false;
     }
+    // A contained run refuses these when called (isDeniedByTaskRestrictions); offering them
+    // would only spend the model's turns on calls that cannot succeed.
+    if (this.isBlockedByBotContainment(toolName)) {
+      return false;
+    }
     return isToolAllowedQuick(toolName, this.workspace, this.gatewayContext);
   }
 

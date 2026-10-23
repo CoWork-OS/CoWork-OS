@@ -36,12 +36,15 @@ Nothing else opens this lane:
 
 The executor builds the user's words (`ToolAvailabilityContext.userText`) from two parts:
 
-- **The task's title and prompt**, captured when the task starts, only if the task is marked `promptProvenance: "user_typed"` (`src/electron/agent/task-prompt-provenance.ts`). Later changes to `task.prompt` are ignored, because resumed follow-ups are appended there whoever sent them.
+- **The task's prompt**, captured when the task starts, only if the task is marked `promptProvenance: "user_typed"` (`src/electron/agent/task-prompt-provenance.ts`). Later changes to `task.prompt` are ignored, because resumed follow-ups are appended there whoever sent them. The title never counts: a model rewrites it from the whole prompt, attached files included.
 - **The latest follow-up the user typed**, only if the follow-up is marked `textProvenance: "user_typed"` (`src/electron/agent/follow-up-provenance.ts`).
 
 Both markers are positive provenance: an unmarked task or message never counts. They are set by main-process creation and send paths only, and never copied from renderer or remote-client input.
 
-**Attached files never count.** Even in a typed prompt or follow-up, only the text before the attached-files block counts (`textBeforeAttachedFiles` in `src/shared/attachment-summary.ts`). That block is the file list and extracted file contents that the composer, the artifact viewers, browser annotations and the gateway append. The cut never resumes after an end marker, so a document can't close the block early with a fake marker. A request typed above the attachments still counts; a file that says "add a behavioral rule" doesn't.
+**Attached files and reply quotes never count.** Even in a typed prompt or follow-up, two kinds of embedded text are dropped (`userTypedWords` in `src/electron/agent/user-typed-words.ts`):
+
+- **Reply quotes.** A channel reply quote is the "In reply to …" header and the `> ` lines under it that WhatsApp puts in front of a reply (`src/shared/channel-reply-context.ts`). The quote is someone else's message or the agent's own earlier reply. Every quoted line starts with `>`, so quoted text can't end the block early. An email's quoted history (the `> ` lines under "On … wrote:") and a reply's `Re:` subject are marked the same way by the email adapter.
+- **Attached files.** Only the text before the attached-files block counts (`textBeforeAttachedFiles` in `src/shared/attachment-summary.ts`). That block is the file list and extracted file contents that the composer, the artifact viewers, browser annotations and the gateway append. The cut never resumes after an end marker, so a document can't close the block early with a fake marker. A request typed above the attachments still counts; a file that says "add a behavioral rule" doesn't.
 
 **Task prompts count** when a person typed them into a composer the owner signed in to:
 

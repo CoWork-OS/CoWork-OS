@@ -39,11 +39,11 @@ export interface ToolExposureMetadata {
 export interface ToolAvailabilityContext extends ToolPolicyContext {
   taskText?: string;
   /**
-   * Only words the user wrote: the title and prompt they gave the task and their latest
-   * message. Never agent output, plan steps, tool results, or another agent's message. The
-   * admin lane reads this alone, so the agent cannot write its way into its own persona tools.
-   * Attached files' text that a composer appends to a typed message is cut off as well
-   * (shared/attachment-summary.ts): a document the user attached did not ask for anything.
+   * Only words the user wrote: the prompt they gave the task and their latest message. Never
+   * agent output, plan steps, tool results, another agent's message, or the task title (a model
+   * rewrites it). The admin lane reads this alone, so the agent cannot write its way into its
+   * own persona tools. Attached files' text and a channel's quote of the message being answered
+   * are left out as well (user-typed-words.ts): neither is the user asking for anything.
    */
   userText?: string;
   recentlyUsedTools?: Iterable<string>;

@@ -140,7 +140,6 @@ function withSurfaceOriginNote(
 import { hasAnswerSurfaceBlock } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
-import { textBeforeAttachedFiles } from "../../shared/attachment-summary";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -461,6 +460,7 @@ import {
   normalizeTaskDomain,
 } from "./tool-policy-engine";
 import { userTypedFollowUpText } from "./follow-up-provenance";
+import { userTypedWords } from "./user-typed-words";
 import { isTaskPromptFromUser } from "./task-prompt-provenance";
 
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
@@ -1275,10 +1275,10 @@ export class TaskExecutor {
    */
   private lastUserTypedText = "";
   /**
-   * The task's title and prompt as the user wrote them, captured when the executor starts, or
-   * "" when they are not marked as typed by the user (Task.promptProvenance). Not read from
-   * task.prompt later: a follow-up that resumes a paused task is appended there as
-   * "USER UPDATE", whoever sent it.
+   * The task's prompt as the user wrote it, captured when the executor starts, or "" when it
+   * is not marked as typed by the user (Task.promptProvenance). Not read from task.prompt
+   * later: a follow-up that resumes a paused task is appended there as "USER UPDATE", whoever
+   * sent it. The title is left out: a model rewrites it (task-title-generator.ts).
    */
   private userAuthoredTaskText = "";
   /**
@@ -18883,13 +18883,12 @@ ${transcript}
     // workflow steps and remote agents create "manual"/"api" tasks from text the user did not
     // write, so excluding known automation sources let them through. Tasks created before the
     // marker existed are unmarked and do not count; the user's next typed message still does.
-    // The composer appends the text of attached files to a typed prompt; a document's words are
-    // not the user's, so everything from the attachment block on is dropped.
+    // The title does not count: the title generator replaces it with a model's summary of the
+    // whole prompt, attached files included, and an executor started after a restart reads that
+    // title from the store. Attached files' text and a channel's reply quote inside the prompt
+    // are not the user's words either (user-typed-words.ts).
     this.userAuthoredTaskText = isTaskPromptFromUser(this.task)
-      ? [this.task.title, this.getContractPrompt()]
-          .map((part) => textBeforeAttachedFiles(String(part || "")).trim())
-          .filter(Boolean)
-          .join("\n")
+      ? userTypedWords(this.getContractPrompt()).trim()
       : "";
   }
 

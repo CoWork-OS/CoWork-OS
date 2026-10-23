@@ -8,8 +8,8 @@
  * agents, page code. The text alone cannot say who wrote it, so each send path that a person
  * types into marks its message "user_typed", and anything unmarked counts as injected.
  */
-import { textBeforeAttachedFiles } from "../../shared/attachment-summary";
 import type { MessageSurfaceOrigin, TaskFollowUpInput } from "../../shared/types";
+import { userTypedWords } from "./user-typed-words";
 
 export const USER_TYPED_FOLLOW_UP = { textProvenance: "user_typed" } as const satisfies Pick<
   TaskFollowUpInput,
@@ -31,9 +31,9 @@ export function composerFollowUpProvenance(
 /**
  * The user's own words in a follow-up, or "" when it was injected. Besides "user_typed",
  * the message must not be another agent's message or an answer-surface action, so a path
- * that marks too much still cannot pass those off as typed text. The composer appends the
- * text of attached files after what the user typed; a document's words are not theirs, so
- * everything from the attachment block on is dropped (attachment-summary.ts).
+ * that marks too much still cannot pass those off as typed text. Attached files' text and a
+ * channel's quote of the message being answered are not the user's words and are left out
+ * (user-typed-words.ts).
  */
 export function userTypedFollowUpText(
   message: string,
@@ -46,5 +46,5 @@ export function userTypedFollowUpText(
   ) {
     return "";
   }
-  return textBeforeAttachedFiles(String(message || ""));
+  return userTypedWords(String(message || ""));
 }

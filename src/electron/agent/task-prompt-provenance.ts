@@ -1,5 +1,5 @@
 /**
- * Who wrote a task's title and prompt (Task.promptProvenance).
+ * Who wrote a task's prompt (Task.promptProvenance).
  *
  * The admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup)
  * save into the system prompt of every later task, so only the user's own words may expose
@@ -33,7 +33,7 @@ export function forkedTaskPromptProvenance(
 }
 
 /**
- * Whether the user wrote this task's title and prompt. Requires the "user_typed" marker; a
+ * Whether the user wrote this task's prompt. Requires the "user_typed" marker; a
  * task another agent spawned or a channel sender other than the verified owner started never
  * counts, even if a marker was copied onto it.
  */

@@ -488,7 +488,7 @@ CoWork OS supports external skill installation through the desktop GUI, not just
 - **Quarantine & report UX**: blocked imported skills move to a dedicated quarantine area with stored reports, retry scan, and removal actions
 - **Optional external directories**: Add one or more absolute read-only skill folders in Settings so shared team skills can load without being copied into CoWork
 - **Warning-only local discovery**: optional external skill directories are not auto-quarantined in v1, but CoWork can still surface unscanned or warning-state badges and reports for those bundles
-- **Clear precedence**: Workspace skills override managed installs, managed installs override external directories, and external directories override bundled defaults
+- **Clear precedence**: Workspace skills (per task, from the task's own workspace) override managed installs, managed installs override external directories, and external directories override bundled defaults; an unmodified managed copy of an older bundled version no longer hides the bundled update
 - **Cross-ecosystem support**: Other external skill stores are supported when they expose Git repos, raw manifests, or raw `SKILL.md` bundle entry points
 - **Shared runtime contract**: Once loaded, external skills follow the same additive execution model as bundled skills. They can add context and scoped directives, but they cannot replace the canonical task prompt.
 

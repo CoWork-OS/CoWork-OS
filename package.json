@@ -204,7 +204,8 @@
     "test:node": "node --test --test-concurrency=4 \"scripts/**/*.test.{cjs,mjs}\" \"tests/**/*.test.{cjs,mjs}\"",
     "test:watch": "vitest",
     "test:coverage": "npm run skills:check && npm run test:node && vitest run --coverage",
-    "skills:build-react-guide": "node scripts/qa/build-react-best-practices-guide.mjs"
+    "skills:build-react-guide": "node scripts/qa/build-react-best-practices-guide.mjs",
+    "skills:lineage": "node scripts/qa/build-bundled-skill-lineage.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

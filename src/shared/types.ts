@@ -11590,6 +11590,21 @@ export interface SkillStatusEntry extends CustomSkill {
   securityReport?: CapabilitySecurityReport;
 }
 
+/**
+ * A skill copy the loader did not use because another copy with the same id won.
+ * - `stale_bundled_copy`: a managed copy that matches a bundled version shipped earlier;
+ *   the current bundled skill is used instead.
+ * - `overridden_by_managed`: a bundled skill the user's own managed skill overrides.
+ */
+export interface ShadowedSkillCopy {
+  id: string;
+  name: string;
+  filePath: string;
+  source: SkillSource;
+  reason: "stale_bundled_copy" | "overridden_by_managed";
+  activeSource: SkillSource;
+}
+
 // Status report for all skills
 export interface SkillStatusReport {
   workspaceDir: string;
@@ -11597,6 +11612,7 @@ export interface SkillStatusReport {
   bundledSkillsDir: string;
   externalSkillDirs: string[];
   skills: SkillStatusEntry[];
+  shadowedSkills?: ShadowedSkillCopy[];
   summary: {
     total: number;
     eligible: number;

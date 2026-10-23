@@ -10,6 +10,9 @@ vi.mock("electron", () => ({
 
 vi.mock("../custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
+    forWorkspace() {
+      return this;
+    },
     getEnabledGuidelinesPrompt: () => "",
   }),
 }));

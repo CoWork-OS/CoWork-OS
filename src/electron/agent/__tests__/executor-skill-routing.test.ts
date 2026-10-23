@@ -6,6 +6,9 @@ const getSkill = vi.fn();
 
 vi.mock("../custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
+    forWorkspace() {
+      return this;
+    },
     rankModelInvocableSkillsForQuery,
     listSkills,
     getSkill,

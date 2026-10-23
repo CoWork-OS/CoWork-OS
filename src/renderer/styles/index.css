@@ -5904,6 +5904,10 @@ a,
   gap: 4px;
 }
 
+.skillhub-shadowed {
+  margin-bottom: 12px;
+}
+
 .skillhub-group {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);

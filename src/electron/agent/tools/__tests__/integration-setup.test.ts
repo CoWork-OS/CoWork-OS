@@ -127,8 +127,11 @@ const mocks = vi.hoisted(() => {
     skills: {},
   };
 
-  const setWorkspaceSkillsDir = vi.fn((workspacePath: string) => {
+  const setWorkspaceSkillsDir = vi.fn();
+  // The task reads skills through a workspace view; the shared loader is never switched.
+  const forWorkspace = vi.fn(function (this: unknown, workspacePath: string) {
     skillState.workspaceDir = path.join(workspacePath, "skills");
+    return this;
   });
 
   const getSkill = vi.fn((skillId: string) => skillState.skills[skillId] || null);
@@ -162,6 +165,7 @@ const mocks = vi.hoisted(() => {
     startConnectorOAuth,
     skillState,
     setWorkspaceSkillsDir,
+    forWorkspace,
     getSkill,
     createWorkspaceSkill,
     updateSkill,
@@ -250,6 +254,7 @@ vi.mock("../../../settings/personality-manager", () => ({
 vi.mock("../../custom-skill-loader", () => ({
   getCustomSkillLoader: vi.fn().mockReturnValue({
     setWorkspaceSkillsDir: mocks.setWorkspaceSkillsDir,
+    forWorkspace: mocks.forWorkspace,
     getWorkspaceSkillsDir: vi.fn(() => mocks.skillState.workspaceDir || null),
     getManagedSkillsDir: vi.fn(() => "/tmp/cowork-managed-skills"),
     getSkill: mocks.getSkill,
@@ -509,10 +514,15 @@ describe("skill_proposal tool", () => {
         noStandingApproval: true,
       }),
     );
-    // The loader is pointed at the workspace skill folder only once the user said yes.
-    expect(mocks.setWorkspaceSkillsDir.mock.invocationCallOrder[0]).toBeGreaterThan(
+    // The skill is saved only once the user said yes, into this task's workspace folder,
+    // without pointing the shared loader (and so every other task) at that workspace.
+    expect(mocks.createWorkspaceSkill.mock.invocationCallOrder[0]).toBeGreaterThan(
       requestApproval.mock.invocationCallOrder[0],
     );
+    expect(approved.skill.filePath).toBe(
+      path.join(mocks.skillState.workspaceDir, "jira-triage-playbook.json"),
+    );
+    expect(mocks.setWorkspaceSkillsDir).not.toHaveBeenCalled();
   });
 
   it("a declined approval saves nothing and leaves the proposal pending", async () => {

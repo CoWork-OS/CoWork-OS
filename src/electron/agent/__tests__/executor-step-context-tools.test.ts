@@ -24,6 +24,9 @@ vi.mock("../../memory/MemoryService", () => ({
 
 vi.mock("../custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
+    forWorkspace() {
+      return this;
+    },
     getEnabledGuidelinesPrompt: () => "",
     listModelInvocableSkills: () => [
       { id: "novelist", name: "Novelist", type: "task", enabled: true },

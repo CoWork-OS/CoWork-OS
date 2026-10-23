@@ -181,6 +181,18 @@ afterEach(() => {
 });
 
 describe("spreadsheet cell editing", () => {
+  it("focuses the grid after a cell click so keyboard navigation reaches the selection", async () => {
+    const nodes = await loadViewer();
+    cell(nodes).props.onMouseDown(mouseDown());
+    expect(gridFocus).toHaveBeenCalledOnce();
+    const selected = render();
+    selected
+      .find((node) => node.props.className === "spreadsheet-viewer-grid-wrap")!
+      .props.onKeyDown({ key: "ArrowRight", shiftKey: false, preventDefault: vi.fn() });
+    expect(cell(render(), 1).props.className).toContain("selected");
+    expect(save(render()).props.disabled).toBe(true);
+  });
+
   it("closes a clean workbook without prompting", async () => {
     const nodes = await loadViewer();
     nodes.find((node) => node.props.title === "Close spreadsheet")!.props.onClick();

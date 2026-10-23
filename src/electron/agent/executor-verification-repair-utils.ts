@@ -279,10 +279,24 @@ const RESEARCH_REQUEST_PATTERN =
   /\b(?:look(?:ing)?\s+up|research|compare|comparison|versus|vs\.?|documentation|docs|official|investigate|survey|latest|pricing|licen[cs]ing)\b/i;
 
 function requestsFilenameSources(prompt: string): boolean {
+  // Links to saved deliverables do not change the requested citation format.
+  // Keep other link requests intact, particularly links to input/source files.
+  const sourceFormatPrompt = prompt
+    .replace(
+      /\b(?:saved|created|generated|produced|output)\s+files?\s+and\s+link\s+(?:them|it|both)\b/gi,
+      "",
+    )
+    .replace(
+      /\b(?:download\s+)?links?\s+(?:to|for)\s+(?:the\s+)?(?:saved|created|generated|produced|output)\s+files?\b/gi,
+      "",
+    );
   return (
     /\b(?:cit(?:e|ing)|include|including|provide|list)\s+(?:(?:the|source|local|supporting|input|original)\s+)*file\s*names?\b/i.test(
       prompt,
-    ) && !/\b(?:links?|urls?|hyperlinks?|numbered\s+(?:citations?|references?))\b/i.test(prompt)
+    ) &&
+    !/\b(?:links?|urls?|hyperlinks?|numbered\s+(?:citations?|references?))\b/i.test(
+      sourceFormatPrompt,
+    )
   );
 }
 

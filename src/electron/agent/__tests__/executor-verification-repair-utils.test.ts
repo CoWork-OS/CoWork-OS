@@ -160,6 +160,34 @@ describe("verification severity guidance", () => {
     expect(buildVerificationSeverityGuidance({ prompt })).toContain("needs a direct link");
   });
 
+  it.each([
+    "Verify the saved files and link them.",
+    "Provide links to the generated files.",
+    "Give download links for the output files.",
+  ])("does not turn deliverable links into source-link requirements: %s", (delivery) => {
+    const prompt = `Create action-register.md and workshop-update.docx. Cite the source filename. ${delivery}`;
+    expect(requestsSourceLinks(prompt)).toBe(false);
+    expect(buildVerificationSeverityGuidance({ prompt })).toContain(
+      "Named source filenames satisfy that format",
+    );
+  });
+
+  it("still requires source links when deliverable links are also requested", () => {
+    const prompt =
+      "Create action-register.md and workshop-update.docx. Cite the source filename. " +
+      "Verify the saved files and link them. Include direct links to the sources.";
+    expect(requestsSourceLinks(prompt)).toBe(true);
+    expect(buildVerificationSeverityGuidance({ prompt })).toContain("needs a direct link");
+  });
+
+  it.each(["Provide links to the source files.", "Provide links to the input files."])(
+    "does not treat input links as deliverable-only links: %s",
+    (sources) => {
+      const prompt = `Create workshop-update.docx. Cite the source filename. ${sources}`;
+      expect(requestsSourceLinks(prompt)).toBe(true);
+    },
+  );
+
   it("honors source filenames requested in presentation speaker notes", () => {
     const prompt =
       "Review notes.md and create deck.pptx. Include source filenames and limitations in speaker notes.";

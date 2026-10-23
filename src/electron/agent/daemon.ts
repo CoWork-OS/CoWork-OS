@@ -244,7 +244,7 @@ import {
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
-import { findUnfinishedBotUserTurn } from "../agents/bot-turn-recovery";
+import { findUnfinishedBotUserTurn, findUnfinishedUserFollowUp } from "../agents/bot-turn-recovery";
 import {
   getCurrentBotHandoffScope,
   getOutstandingBotHandoffReply,
@@ -531,6 +531,25 @@ export function shouldRestartInterruptedTask(input: {
     !input.hasRecoveredBotHandoff &&
     !input.hasQueuedUserFollowUp
   );
+}
+
+/**
+ * What startup does with a task a crash left planning or executing. With saved state it
+ * resumes (or is skipped, for background and system work). Without any, running it again
+ * would repeat whatever it already did, so a request the person typed in the app waits,
+ * paused, for their Resume; anything else fails as before.
+ */
+export function orphanedTaskRecovery(input: {
+  hasSavedState: boolean;
+  resumesOnStartup: boolean;
+  task: Pick<Task, "promptProvenance" | "agentConfig">;
+}): "resume" | "skip" | "await_user" | "fail" {
+  if (input.hasSavedState) return input.resumesOnStartup ? "resume" : "skip";
+  const typedInApp =
+    input.task.promptProvenance === "user_typed" &&
+    input.task.agentConfig?.gatewayContext === undefined &&
+    input.task.agentConfig?.originChannel === undefined;
+  return input.resumesOnStartup && typedInApp ? "await_user" : "fail";
 }
 
 /** Where a user update on a collaborative root went while its team run was working. */
@@ -2993,20 +3012,28 @@ export class AgentDaemon extends EventEmitter {
             ) && Boolean(event.payload?.plan),
         );
 
-        const unfinishedBotUserTurn =
-          task.agentConfig?.botConversation === true
-            ? findUnfinishedBotUserTurn(
+        // Without a snapshot or plan, an unanswered user turn is the only state to resume from.
+        const unfinishedUserTurn =
+          hasSnapshot || hasPlan
+            ? undefined
+            : (task.agentConfig?.botConversation === true
+                ? findUnfinishedBotUserTurn
+                : findUnfinishedUserFollowUp)(
                 this.getTaskEventsForReplay(task.id).map((event) => ({
                   ...event,
                   type: this.resolveLegacyEventType(event) as TaskEvent["type"],
                 })),
-              )
-            : undefined;
-        if (hasSnapshot || hasPlan || unfinishedBotUserTurn) {
-          if (!this.shouldResumeTaskOnStartup(task)) {
-            this.skipStartupResume(task);
-            continue;
-          }
+              );
+        const recovery = orphanedTaskRecovery({
+          hasSavedState: Boolean(hasSnapshot || hasPlan || unfinishedUserTurn),
+          resumesOnStartup: this.shouldResumeTaskOnStartup(task),
+          task,
+        });
+        if (recovery === "skip") {
+          this.skipStartupResume(task);
+          continue;
+        }
+        if (recovery === "resume") {
           // Recoverable: mark as interrupted and add to the resume list
           console.log(
             `[AgentDaemon] Orphaned task ${task.id} has saved state — scheduling for resume`,
@@ -3020,6 +3047,20 @@ export class AgentDaemon extends EventEmitter {
             message: "Task interrupted by unexpected application exit. Will resume on restart.",
           });
           tasksToResume.push({ ...task, status: "interrupted" as TaskStatus });
+        } else if (recovery === "await_user") {
+          // The session recovery card offers Resume, which runs the request from the start.
+          console.log(
+            `[AgentDaemon] Orphaned task ${task.id} has no saved state — paused until the user resumes it`,
+          );
+          this.taskRepo.update(task.id, {
+            status: "paused" as TaskStatus,
+            error:
+              "The app closed before this turn saved any progress. Resume runs your request again from the start.",
+          });
+          this.logEvent(task.id, "task_paused", {
+            message: "The app closed before this turn saved any progress.",
+            reason: "crashed_before_progress",
+          });
         } else {
           // No saved state — unrecoverable
           console.log(
@@ -4028,6 +4069,8 @@ export class AgentDaemon extends EventEmitter {
       "allow";
     const checkpoint = TranscriptStore.loadCheckpointSync(workspace.path, task.id, readGuard);
     const events = this.getTaskEventsForResume(task.id, workspace.path, readGuard);
+    // The turn replayed instead of the task's first prompt: a bot's unfinished user turn or
+    // delivered teammate handoff, or in any other task the person's unanswered follow-up.
     const recoveredBotHandoff =
       task.agentConfig?.botConversation === true
         ? findUnfinishedBotUserTurn(
@@ -4036,7 +4079,12 @@ export class AgentDaemon extends EventEmitter {
               type: this.resolveLegacyEventType(event) as TaskEvent["type"],
             })),
           ) || this.findRecoverableBotHandoff(task, this.getTaskEventsForReplay(task.id))
-        : undefined;
+        : findUnfinishedUserFollowUp(
+            this.getTaskEventsForReplay(task.id).map((event) => ({
+              ...event,
+              type: this.resolveLegacyEventType(event) as TaskEvent["type"],
+            })),
+          );
 
     // Check if we have meaningful state to restore from
     const hasSnapshot =

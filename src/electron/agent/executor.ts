@@ -352,6 +352,7 @@ import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { InputSanitizer, OutputFilter } from "./security";
 import { buildFreshBotHandoffPrompt } from "../../shared/bot-handoff";
 import { buildRolePersonaPrompt } from "../agents/role-persona";
+import { unfinishedTurnContainsMessage } from "../agents/bot-turn-recovery";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { getAwarenessService } from "../awareness/AwarenessService";
 import { describeSchedule, parseIntervalToMs } from "../cron/types";
@@ -40154,18 +40155,27 @@ Return ONLY a JSON object:
           // receiver still needs one fresh execution turn after restart. Do
           // not rebuild the persona's initial conversation; replay the exact
           // handoff through the normal agent-message path instead.
-          logger.info(
-            `${this.logTag} Replaying the latest delivered teammate handoff after restart`,
-          );
+          // Outside a bot conversation, the replayed turn is the person's unanswered
+          // follow-up (findUnfinishedUserFollowUp): it runs on the restored history
+          // instead of executing the task's first prompt again.
+          const botConversation = this.task.agentConfig?.botConversation === true;
+          const recovery =
+            recoveredBotHandoff.messageSource !== "user"
+              ? "bot_handoff"
+              : botConversation
+                ? "bot_user_turn"
+                : "user_follow_up";
+          logger.info(`${this.logTag} Replaying the unfinished turn after restart (${recovery})`);
           this.emitEvent("log", {
             message:
-              recoveredBotHandoff.messageSource === "user"
-                ? "Resuming the latest unfinished bot user turn after restart."
-                : "Replaying the latest delivered teammate handoff after restart.",
+              recovery === "bot_handoff"
+                ? "Replaying the latest delivered teammate handoff after restart."
+                : recovery === "bot_user_turn"
+                  ? "Resuming the latest unfinished bot user turn after restart."
+                  : "Resuming your unanswered follow-up after restart.",
             messageId: recoveredBotHandoff.messageId,
             senderTaskId: recoveredBotHandoff.senderTaskId,
-            recovery:
-              recoveredBotHandoff.messageSource === "user" ? "bot_user_turn" : "bot_handoff",
+            recovery,
           });
           await this.sendMessageUnlocked(recoveredBotHandoff.message, undefined, undefined, {
             messageSource: recoveredBotHandoff.messageSource,
@@ -40177,17 +40187,7 @@ Return ONLY a JSON object:
             suppressUserMessageEvent: true,
             transcriptAlreadyContainsMessage:
               recoveredBotHandoff.messageSource === "user" &&
-              this.conversationHistory.some((entry) => {
-                if (entry.role !== "user") return false;
-                const text =
-                  typeof entry.content === "string"
-                    ? entry.content
-                    : entry.content
-                        .filter((block) => block.type === "text")
-                        .map((block) => (block as { text: string }).text)
-                        .join("\n");
-                return text.includes(recoveredBotHandoff.message);
-              }),
+              unfinishedTurnContainsMessage(this.conversationHistory, recoveredBotHandoff.message),
           });
           return;
         }

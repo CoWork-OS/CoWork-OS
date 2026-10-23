@@ -68,3 +68,83 @@ describe("interrupted bot execution", () => {
     expect(e.executeUnlocked).not.toHaveBeenCalled();
   });
 });
+
+describe("interrupted follow-up in an ordinary task", () => {
+  function taskExecutor(conversationHistory: unknown[]) {
+    const e = executor();
+    e.task = { id: "chat", prompt: "Summarize the report", agentConfig: {} };
+    e.conversationHistory = conversationHistory;
+    return e;
+  }
+  const firstTurn = [
+    { role: "user", content: "Summarize the report" },
+    { role: "assistant", content: [{ type: "text", text: "Here is the summary." }] },
+  ];
+
+  it("answers the unanswered follow-up on the restored history instead of rerunning the first prompt", async () => {
+    const e = taskExecutor(firstTurn);
+    await e.resumeAfterInterruptionUnlocked({
+      message: "Now list the risks",
+      messageSource: "user",
+      messageId: "follow-up",
+    });
+    expect(e.sendMessageUnlocked).toHaveBeenCalledWith(
+      "Now list the risks",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        messageId: "follow-up",
+        suppressUserMessageEvent: true,
+        transcriptAlreadyContainsMessage: false,
+      }),
+    );
+    expect(e.executeUnlocked).not.toHaveBeenCalled();
+    expect(e.emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({ recovery: "user_follow_up" }),
+    );
+  });
+
+  it("does not take an earlier turn with the same words for the unanswered one", async () => {
+    const e = taskExecutor([
+      { role: "user", content: "continue" },
+      { role: "assistant", content: [{ type: "text", text: "Done." }] },
+    ]);
+    await e.resumeAfterInterruptionUnlocked({ message: "continue", messageSource: "user" });
+    expect(e.sendMessageUnlocked).toHaveBeenCalledWith(
+      "continue",
+      undefined,
+      undefined,
+      expect.objectContaining({ transcriptAlreadyContainsMessage: false }),
+    );
+  });
+
+  it("continues a follow-up the checkpoint caught mid tool call", async () => {
+    const e = taskExecutor([
+      ...firstTurn,
+      { role: "user", content: "Now list the risks" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+      },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "risks" }] },
+    ]);
+    await e.resumeAfterInterruptionUnlocked({
+      message: "Now list the risks",
+      messageSource: "user",
+    });
+    expect(e.sendMessageUnlocked).toHaveBeenCalledWith(
+      "Now list the risks",
+      undefined,
+      undefined,
+      expect.objectContaining({ transcriptAlreadyContainsMessage: true }),
+    );
+  });
+
+  it("still runs a task without an unanswered follow-up from its prompt", async () => {
+    const e = taskExecutor(firstTurn);
+    await e.resumeAfterInterruptionUnlocked();
+    expect(e.executeUnlocked).toHaveBeenCalledOnce();
+    expect(e.sendMessageUnlocked).not.toHaveBeenCalled();
+  });
+});

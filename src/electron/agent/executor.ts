@@ -2525,6 +2525,10 @@ export class TaskExecutor {
     const hasDirectSourceReference =
       /\.(?:docx|pdf|md|txt)\b/i.test(`${taskTitle}\n${rawTaskPrompt}`) ||
       (taskTitle.match(/_/g) || []).length >= 2;
+    // This pipeline extracts one source. Multi-file comparisons need the
+    // regular tools so a complete review does not silently omit other inputs.
+    const sourceReferences = new Set(normalized.match(/[\w./~-]+\.(?:docx|pdf|md|txt)\b/g) || []);
+    if (sourceReferences.size > 1) return false;
     const hasDocumentScope =
       /\.(?:docx|pdf|md|txt)\b/.test(normalized) ||
       /(?:book|manuscript|document|chapter|character|kitap|metin|belge|doküman|bölüm|karakter)/.test(
@@ -2538,6 +2542,10 @@ export class TaskExecutor {
         normalized,
       );
     const requestsFileMutation =
+      // Use the same artifact contract as completion validation. Source-review
+      // language must not divert a requested deck/workbook/site into the
+      // tool-free review pipeline, which cannot create the required output.
+      inferRequiredArtifactExtensionsUtil(taskTitle, rawTaskPrompt).length > 0 ||
       /(?:write|edit|create|save|export|convert|update|modify|replace|rewrite).{0,80}\.(?:docx|pdf|md|txt)\b/.test(
         normalized,
       ) ||

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
+import { requestArtifactClose } from "./utils/artifact-close";
 import {
   ArrowUp,
   ChevronDown,
@@ -1025,7 +1026,15 @@ export function SpreadsheetArtifactViewer({
         <button
           type="button"
           className="spreadsheet-viewer-close"
-          onClick={onClose}
+          disabled={saving}
+          onClick={() =>
+            requestArtifactClose({
+              fileName,
+              hasUnsavedChanges: dirty || editingDraftRef.current !== null,
+              saving,
+              onClose,
+            })
+          }
           title="Close spreadsheet"
         >
           <X size={17} />

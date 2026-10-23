@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { requestArtifactClose } from "./utils/artifact-close";
 import {
   AlignLeft,
   ArrowUp,
@@ -603,7 +604,10 @@ export function DocumentArtifactViewer({
         <button
           type="button"
           className="document-viewer-close"
-          onClick={onClose}
+          disabled={saving}
+          onClick={() =>
+            requestArtifactClose({ fileName, hasUnsavedChanges: dirty, saving, onClose })
+          }
           title="Close document"
         >
           <X size={17} />

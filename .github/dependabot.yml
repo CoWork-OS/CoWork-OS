@@ -12,10 +12,6 @@ updates:
       - "npm"
     commit-message:
       prefix: "deps"
-    ignore:
-      # src/electron/sandbox/monty-engine.ts uses the in-process API of 0.0.4 (new Monty,
-      # runMontyAsync); 0.0.5+ replaced it with a worker pool. Remove once the engine is ported.
-      - dependency-name: "@pydantic/monty"
     groups:
       # Group minor and patch updates together
       minor-and-patch:

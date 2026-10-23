@@ -126,7 +126,7 @@ Interactive mode accepts free-text tasks and slash commands:
 
 ```bash
 cowork run "draft the board deck" --provider openrouter --model moonshotai/kimi-k3
-cowork run "draft the board deck" --model claude-opus-5-5
+cowork run "draft the board deck" --model gpt-6-sol
 cowork run "draft the board deck" --provider ollama
 ```
 

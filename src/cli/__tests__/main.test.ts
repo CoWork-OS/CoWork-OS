@@ -260,16 +260,20 @@ describe("run model pin", () => {
         "--access-profile",
         "full_access",
         "--provider",
-        "claude",
+        "openai_compatible",
         "--model",
-        "claude-opus-5-5",
+        "local-27b",
       ]),
     ).toBe(0);
     expect(request).toHaveBeenCalledWith(
       "task.create",
       expect.objectContaining({
         accessProfileId: "full_access",
-        agentConfig: { providerType: "anthropic", modelKey: "claude-opus-5-5", modelPinned: true },
+        agentConfig: {
+          providerType: "openai-compatible",
+          modelKey: "local-27b",
+          modelPinned: true,
+        },
       }),
       30000,
     );

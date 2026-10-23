@@ -105,11 +105,11 @@ describe("resolveRunModelPin", () => {
 
   it("accepts the CLI's provider aliases", () => {
     const pin = resolveRunModelPin(
-      { provider: "claude", model: "claude-opus-5-5" },
-      deps({ currentProvider: "openai", configured: ["openai", "anthropic"] }),
+      { provider: "openai_compatible", model: "local-27b" },
+      deps({ currentProvider: "openai", configured: ["openai", "openai-compatible"] }),
     );
 
-    expect(pin?.agentConfig.providerType).toBe("anthropic");
+    expect(pin?.agentConfig.providerType).toBe("openai-compatible");
   });
 
   it("refuses an unknown provider", () => {
@@ -139,8 +139,8 @@ describe("resolveRunModelPin", () => {
     const d = deps({
       selection: () => ({
         providerType: "anthropic",
-        modelKey: "claude-sonnet-5-5",
-        modelId: "claude-sonnet-5-5",
+        modelKey: "global-model",
+        modelId: "global-model",
         modelSource: "provider_default",
         warnings: ["[LLMProviderFactory] Thread model anthropic/x is not available."],
       }),

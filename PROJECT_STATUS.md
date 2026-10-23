@@ -21,7 +21,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 
 #### Database Layer
 
-- [x] SQLite schema with 6 tables (workspaces, tasks, events, artifacts, approvals, skills)
+- [x] SQLite schema for tasks, sessions, workspaces, artifacts, approvals, skills, and related runtime state
 - [x] Repository pattern for data access
 - [x] Type-safe database operations
 - [x] Located: `src/electron/database/`
@@ -42,7 +42,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Anthropic (Claude models)
 - [x] Google Gemini
 - [x] OpenRouter (multi-model access)
-- [x] OpenAI (API Key: GPT-4o, o1 models)
+- [x] OpenAI (API key and supported ChatGPT sign-in routes; selectable models)
 - [x] OpenAI (ChatGPT OAuth: Use your ChatGPT subscription)
 - [x] AWS Bedrock
 - [x] Ollama (local/free)
@@ -452,26 +452,10 @@ Operations Requiring Approval:
 └── External service calls
 ```
 
-## What's NOT Implemented (Planned)
+## Execution Isolation and Delegation
 
-### VM Sandbox
-
-- **Status**: Stub implementation
-- **File**: `src/electron/agent/sandbox/runner.ts`
-- **What's needed**:
-  - macOS Virtualization.framework integration
-  - Linux VM image
-  - Workspace mount
-  - Network egress controls
-
-### Sub-Agents
-
-- **Status**: Not started
-- **What's needed**:
-  - Agent pool management
-  - Task splitting logic
-  - Result merging
-  - Resource allocation
+- **Isolation**: Command execution selects a supported sandbox backend for the task's access profile. Restricted boundaries fail closed when the backend cannot enforce them. See [Access Profiles](docs/access-profiles.md) for supported policies and prerequisites.
+- **Delegated work**: The orchestration graph engine runs delegated tasks with scoped worker roles and durable dependency/dispatch state. See the [Harness Runtime Route Map](docs/harness-runtime-route-map.md) for current entrypoints and validation boundaries.
 
 ## Ready to Use
 
@@ -503,11 +487,12 @@ Operations Requiring Approval:
 24. Create persistent agent teams that survive across sessions
 25. Adjust UI complexity (focused, standard, power) to match your experience level
 
-### You Cannot (Yet):
+### Runtime Prerequisites
 
-1. Execute arbitrary code in a VM sandbox
-2. Run tasks with coordinated sub-agents
-3. Apply network egress controls
+Sandbox availability depends on the host and configured backend. Delegated work and
+network rules are implemented; their supported policies and verification boundaries
+are documented in [Access Profiles](docs/access-profiles.md) and the
+[Harness Runtime Route Map](docs/harness-runtime-route-map.md).
 
 ## Dependencies
 
@@ -526,13 +511,11 @@ Operations Requiring Approval:
 - `docx` - Word document creation
 - `pdfkit` - PDF creation
 - `pptxgenjs` - PowerPoint creation
-- `e2b` - Cloud sandbox VMs
-- `ethers` - Crypto wallet and EIP-712 signing
+- `electron` - Desktop framework
 - `electron-updater` - Auto-updates
 
 ### Development
 
-- `electron` - Desktop framework
 - `vite` - Build tool
 - `typescript` - Type safety
 - `electron-builder` - App packaging
@@ -541,8 +524,8 @@ Operations Requiring Approval:
 
 Before first run, verify:
 
-- [ ] Node.js 18+ installed
-- [ ] `npm install` completed successfully
+- [ ] Node.js 24 or later installed
+- [ ] `npm run setup` completed successfully
 - [ ] On macOS or Windows (required for Electron desktop features)
 
 Then run:
@@ -587,7 +570,7 @@ Expected behavior:
 
 ### Core Strengths
 
-- **Security**: 17,018 automated tests across 1,515 test files, configurable guardrails, approval workflows, brute-force protection
+- **Security**: Automated regression suites, configurable guardrails, approval workflows, and brute-force protection; current test counts come from the run output
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: 35 LLM provider options and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter, Ollama, and Grok
 - **GUI-first Agents**: Agents Hub, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents
@@ -608,15 +591,17 @@ Expected behavior:
 - Usage Insights dashboard with cost/activity analytics
 - AI Playbook with auto-captured success patterns
 - Persistent agent teams and adaptive UI complexity
-- Native infrastructure: cloud sandboxes, domain registration, wallet, x402 payments
+- Backend-enforced command and code-execution boundaries
 
 ### Planned
 
-- VM sandbox using macOS Virtualization.framework
-- Network egress controls with proxy
+- Dedicated local VM backend using macOS Virtualization.framework
 - Linux desktop support
-- Web Browser Mode (`--serve`) — full app accessible from any browser via HTTP/WebSocket
+
+Browser access through the Node daemon is available with a documented capability
+boundary; see [Self-hosting](docs/self-hosting.md) and the
+[Web Capability Matrix](docs/web-capability-matrix.md).
 
 The architecture is extensible. All future features can be added without refactoring core systems.
 
-Ready to run with: `npm install && npm run dev`
+Ready to run with: `npm run setup && npm run dev`

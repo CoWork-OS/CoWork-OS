@@ -41,6 +41,10 @@ import {
   normalizeEmailProtocol,
 } from "../../utils/loom";
 import { getUnsupportedManualEmailSetupMessage } from "../../../shared/email-provider-support";
+import {
+  CHANNEL_REPLY_CONTEXT_PREFIX,
+  markEmailReplyQuotes,
+} from "../../../shared/channel-reply-context";
 import { createLogger } from "../../utils/logger";
 
 const logger = createLogger("Email");
@@ -543,7 +547,9 @@ export class EmailAdapter implements ChannelAdapter {
       userId: email.from.address,
       userName: email.from.name || email.from.address,
       chatId,
-      text: `[${email.subject}]\n\n${text}`,
+      // A reply's subject and quoted history are the earlier message, not the sender's words
+      // (shared/channel-reply-context.ts).
+      text: `${/^\s*(re|fwd?):/i.test(email.subject) ? CHANNEL_REPLY_CONTEXT_PREFIX : ""}[${email.subject}]\n\n${markEmailReplyQuotes(text)}`,
       timestamp: email.date,
       raw: email,
     };

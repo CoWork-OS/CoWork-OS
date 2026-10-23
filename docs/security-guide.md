@@ -145,30 +145,30 @@ result.
 
 CoWork OS includes configurable guardrails in **Settings > System & Security > Safety Limits** to limit what the agent can do:
 
-| Guardrail              | Description                                                        | Default            |
-| ---------------------- | ------------------------------------------------------------------ | ------------------ |
+| Guardrail              | Description                                                                                                                                                                     | Default             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
 | **Token Budget**       | Max tokens (input + output) per user turn (each follow-up message starts a new count); a task's own budget counts the whole task, always applies, and can only lower this limit | 2,000,000 (enabled) |
-| **Cost Budget**        | Max estimated cost (USD) per task; a task's own budget always applies but can only lower this limit | $10.00 (enabled)   |
-| **Iteration Limit**    | Max LLM calls per continuation window; reaching it auto-continues within the continuation caps | 500 (enabled)      |
-| **Dangerous Commands** | Block dangerous command-tool commands matching patterns            | Enabled            |
-| **File Size Limit**    | Max file size the agent can write                                  | 50 MB (enabled)    |
-| **Domain Rules**       | Profile- and administrator-controlled destination allow/deny rules | Profile-controlled |
+| **Cost Budget**        | Max estimated cost (USD) per task; a task's own budget always applies but can only lower this limit                                                                             | $10.00 (enabled)    |
+| **Iteration Limit**    | Max LLM calls per continuation window; reaching it auto-continues within the continuation caps                                                                                  | 500 (enabled)       |
+| **Dangerous Commands** | Block dangerous command-tool commands matching patterns                                                                                                                         | Enabled             |
+| **File Size Limit**    | Max file size the agent can write                                                                                                                                               | 50 MB (enabled)     |
+| **Domain Rules**       | Profile- and administrator-controlled destination allow/deny rules                                                                                                              | Profile-controlled  |
 
 #### Dangerous Command Blocking
 
 The following command patterns are blocked by default:
 
-| Pattern                  | Risk                  |
+| Pattern | Risk |
 | ------------------------ | --------------------- | ---------------- |
-| `sudo`                   | Elevated privileges   |
-| `rm -rf /` or `rm -rf ~` | Mass deletion         |
-| `mkfs`                   | Filesystem formatting |
-| `dd if=`                 | Direct disk writes    |
-| Fork bombs               | Process exhaustion    |
+| `sudo` | Elevated privileges |
+| `rm -rf /` or `rm -rf ~` | Mass deletion |
+| `mkfs` | Filesystem formatting |
+| `dd if=` | Direct disk writes |
+| Fork bombs | Process exhaustion |
 | `curl\|bash`, `wget\|sh` | Remote code execution |
-| `chmod 777`              | Overly permissive     |
-| `> /dev/sd`              | Direct device writes  |
-| `:(){ :                  | :& };:`               | Fork bomb syntax |
+| `chmod 777` | Overly permissive |
+| `> /dev/sd` | Direct device writes |
+| `:(){ :                  | :& };:` | Fork bomb syntax |
 
 Commands are blocked **before** reaching the approval dialog. You can add custom patterns in Settings.
 
@@ -220,6 +220,85 @@ The rationale is that the policy files decide whether a tool call is allowed, an
 git hooks execute on the next commit outside the tool sandbox, so a tool able to
 write either could rewrite the rules that govern it. Reads are unaffected.
 
+**Credential stores.** File tools never read or write the home folder's
+credential and personal-data stores (`~/.ssh`, `~/.gnupg`, `~/.aws`,
+`~/.config/gcloud`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, Keychains,
+browser profiles, Mail, Messages; the list is `HOME_CREDENTIAL_STORE_PATHS` in
+`src/electron/security/credential-store-paths.ts`). This holds when the workspace
+is the home folder, under Full access, and after a one-shot external approval;
+the evaluator denies with reason `credential_store` and never offers a prompt. The
+only way in is a grant made on the store itself or a folder inside it: a
+workspace there, an extra workspace root, or a profile filesystem rule (a read
+rule opens reads only). The check follows symlinks, including a store that is
+itself a link into a dotfiles folder.
+
+**Bots work in their own folder.** A bot run that nobody started by hand
+(heartbeat, Slack and other channels, schedules, hooks, routines, bot-to-bot work
+outside a chat) moves into the bot's own folder,
+`<userData>/bots/<bot id>/work`, before it starts. That includes a message from
+the owner through a channel. The folder's workspace row never appears in
+workspace lists. A run there:
+
+- works under a limit that caps the sandbox at workspace-write, so shell commands
+  and code stay sandboxed even under Full access (approvals and network are
+  unchanged);
+- cannot switch to another workspace (`switch_workspace` and the automatic
+  switch are refused);
+- gets tools by boundary class (below): no unclassified tool, nothing that
+  reads this computer's environment or acts on its processes and login items
+  (`get_env` and the macOS process and launch-agent tools), no QA browser that
+  can open this computer's local servers, no connected phone, and no MCP
+  connector that runs as a program on this computer (stdio);
+- passes all of this to the tasks it starts.
+
+For a bot set to **Its own desktop**, its own folder is the folder its desktop
+sees as `~/work` (bots sharing a desktop share it), so file tools and the
+desktop work on the same files. Its contained runs lose the host's
+`run_command`, `execute_code`, process and git tools; commands run in the
+desktop container with `desktop_run`. A desktop on a server, or on a Linux host
+whose uid the container cannot write as, keeps its files in a volume, so the
+bot's own folder stays a separate folder on this computer.
+
+**Tool boundary classes.** Every built-in tool has a class in
+`src/shared/tool-boundaries.ts`: app state, workspace files, web, integration,
+host shell, host computer, host info, host system, host device, local web,
+browser, bot desktop, handoff, or connector (any MCP tool). A run in a bot's own
+folder is decided by class (`isToolBoundaryAllowedForContainedRun`, enforced in
+the tool registry's task restrictions), so a tool nobody classified is refused
+there rather than allowed. `tool-boundaries.test.ts` scans every tool the main
+process defines and every tool the registry offers and fails when one has no
+class: adding a tool means choosing its class. An MCP tool counts as local when
+its server uses stdio, or when its server cannot be found.
+
+An own desktop's network is limited right after it starts, before anything runs
+in it. A short-lived helper container shares the desktop's network namespace,
+holds the only `NET_ADMIN` capability, applies `iptables` rules
+(`resources/bot-desktop/cowork-network.sh`) and exits; the desktop itself keeps
+`--cap-drop ALL`. The bot's **Network** setting picks the rules:
+
+- **Internet only** (default): public addresses only. This computer
+  (`host.docker.internal`), the local network, carrier-grade NAT, link-local and
+  cloud-metadata addresses and reserved ranges are rejected, DNS goes only to the
+  desktop's own IPv4 resolvers, and IPv6 is closed, so a page the bot opens
+  cannot reach apps listening on your Mac or devices on your network.
+- **No network**: only loopback and replies to the viewer connection.
+
+A shared desktop uses the narrowest setting of its bots, and a desktop restarts
+when its setting changes. If the rules cannot be applied, the desktop is
+removed rather than started without them.
+
+Runs a person starts in the app keep the workspace they were started in: a bot
+chat, a team peer, or a task typed and assigned in a project, including the
+tasks those start. A bot's **Files** setting can be changed to **Your
+workspace**, which turns containment off for that bot. The decision is
+`shouldContainBotRun` in `src/shared/bot-containment.ts`; the move is
+`AgentDaemon.containBotTask`.
+
+**Bots and outside files.** When a bot runs a task, directly or through a task it
+delegated, reaching a file outside the workspace always waits for a person's
+answer: allow rules, the auto-reviewer and session-wide auto-approve do not
+answer `external_file_access` for it. A bot task nobody can answer is denied.
+
 Relatedly, `copy_file` strips the executable bit from its destination, so copying
 an executable file cannot be used to create a new one.
 
@@ -246,13 +325,13 @@ especially for tasks using a broad access profile.
 
 When command tools are exposed by the active access profile:
 
-| Aspect                | Implementation                                                |
-| --------------------- | ------------------------------------------------------------- |
-| Working directory     | Restricted to the active workspace and profile-approved roots |
+| Aspect                | Implementation                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Working directory     | Restricted to the active workspace and profile-approved roots                                                                                               |
 | Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR) plus toolchain configuration (proxies without credentials, CA bundles, relocated toolchain homes) |
-| API keys              | **Never passed** to subprocesses                              |
-| Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget |
-| Output limit          | 100KB (truncated if exceeded)                                 |
+| API keys              | **Never passed** to subprocesses                                                                                                                            |
+| Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget                   |
+| Output limit          | 100KB (truncated if exceeded)                                                                                                                               |
 
 **Security note**: Your API keys and secrets are never exposed to shell commands. The app creates a minimal, safe environment for each command.
 
@@ -274,13 +353,13 @@ requires network permission. Code runs for up to 300 seconds (30 by default).
 
 The app includes Playwright for web automation:
 
-| Capability         | Details                         |
-| ------------------ | ------------------------------- |
+| Capability         | Details                                                       |
+| ------------------ | ------------------------------------------------------------- |
 | Navigate to URLs   | Destinations allowed by task and administrator network policy |
-| Fill forms         | As directed by task             |
-| Take screenshots   | Saved to workspace              |
-| Execute JavaScript | Within page context only        |
-| Mode               | Headless by default             |
+| Fill forms         | As directed by task                                           |
+| Take screenshots   | Saved to workspace                                            |
+| Execute JavaScript | Within page context only                                      |
+| Mode               | Headless by default                                           |
 
 **User agent**: `CoWork OS Browser Automation`
 
@@ -475,6 +554,60 @@ for credentials and backup handling.
 Task state and application data are persisted locally by default. Prompts, selected memory snippets, files, credentials, and tool payloads leave the machine only when needed for a provider, gateway, connector, channel, browser target, or other external service that you configure or approve. Each service applies its own retention, privacy, and billing terms.
 
 ---
+
+## How CoWork Identifies Itself to Websites
+
+By default, requests CoWork makes for you (`web_fetch`, `http_request` and pages it opens in the
+in-app browser) use a browser-compatible user agent, as before.
+
+**Settings > Browser > Agent identity** turns on declared agent identity (opt-in):
+
+- `web_fetch` and `http_request` send `CoWork-OS/<version> (+https://coworkosapp.com/agent)`
+  instead of a browser user agent. Domains you list keep the browser-compatible one (for sites
+  that block agents).
+- When you set a **key directory origin** (a public https origin: not localhost or an IP
+  address), every such request over https also carries an HTTP Message Signature (RFC 9421) in
+  the Web Bot Auth format of `draft-ietf-webbotauth-httpsig-protocol-00`:
+  `Signature-Agent: sig="<origin>"`, and a signature over `@authority` and that header with
+  `created`, `expires` (60 seconds), `keyid`, `alg="ed25519"`, a random `nonce` and
+  `tag="web-bot-auth"`. Sites can check it against the public key at
+  `<origin>/.well-known/http-message-signatures-directory`. Plain-http requests are never signed.
+- The signature covers only the host, so anyone who sees it could replay it to that host until
+  it expires; that is why the window is one minute. It is recomputed on every redirect, so it is
+  never forwarded to another site. With identity on, a `Signature`, `Signature-Input`,
+  `Signature-Agent` or `Host` header supplied to `http_request` is dropped, and a protected
+  credential cannot be placed in one of them.
+- Pages CoWork opens in the in-app browser carry the same signature on the navigation request
+  and each redirect hop, added by the browser partition's request hook only while that
+  navigation loads. Nothing is stored on the history entry, so reloads, back/forward and pages
+  you open or click yourself are never signed, and a page cannot set these headers on a
+  navigation. The browser keeps its Chrome-compatible user agent, because sign-in pages refuse
+  unknown ones.
+
+Keys and the directory:
+
+- CoWork creates one Ed25519 key per profile on first use. The private key is stored only in the
+  encrypted settings store (safeStorage) and never leaves the main process.
+- `keyid` is the key's RFC 7638 thumbprint. Settings shows the public JWK Set to host, and
+  **Replace key** rotates it after a native confirmation (the draft has no revocation; rotation
+  is how a key is retired). The replaced public key stays in the directory for 7 days, so sites
+  that cached the old directory keep verifying until they fetch the new one.
+- If the stored key cannot be read (for example after a keychain change), CoWork does not
+  create a new one silently, which would break every published directory: requests go out
+  unsigned and Settings says so, until you choose **Replace key**. A profile export carries the
+  key encrypted for this machine's keychain; if a copied profile cannot read it (for example on
+  another machine), replace the key there and publish the new directory.
+- A self-hosted coworkd with a public address serves the directory itself, signed with
+  `tag="http-message-signatures-directory"`, while declared identity is on, and only to requests
+  for the configured directory origin's host (other hosts get 404), with `Vary: Host`.
+  Otherwise host the JSON from Settings at that path with content type
+  `application/http-message-signatures-directory+json`. CoWork does not run a directory service.
+
+Each signed `web_fetch` or `http_request` hop adds a local `agent_identity_signed` task event
+(`keyid`, `expires`, host), and each response an `agent_identity_response` event (host, status,
+user-agent mode); a browser navigation reports the signed hosts in its tool result. Block
+rates (403/429) can then be compared between the honest and the browser user agent. Nothing about
+this is sent to CoWork.
 
 ## Data Storage
 
@@ -995,7 +1128,9 @@ download and build caches (`~/.npm`, `~/Library/Caches/{go-build,pip,uv,...}`,
 and PATH comes from the user's PATH plus known toolchain locations. Credential
 stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gcloud`, `~/.docker`,
 `~/.netrc`, `~/.kube`, `~/.npmrc`, Keychains, browser profiles, Mail and
-Messages) are denied after those grants. npm sees a copy of `~/.npmrc` with
+Messages) are denied after those grants, and again after the workspace and
+profile grants, so a workspace at the home folder does not reopen them; only a
+grant on a store itself or a folder inside it does. npm sees a copy of `~/.npmrc` with
 auth lines removed, so registry and script settings apply but tokens never
 enter the sandbox; installs from registries that require authentication must
 run outside it. Writable caches deny Git and policy names (except uv's empty

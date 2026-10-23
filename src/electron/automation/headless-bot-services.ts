@@ -1,6 +1,7 @@
 import { setHeartbeatSignalEmitter } from "../agents/heartbeat-signal-bus";
 import { createHash } from "crypto";
 import { connectorTriggerEvents, connectorTriggerSubscription } from "./connector-trigger-events";
+import { MemorySourceRecheckService } from "../memory/MemorySourceRecheckService";
 import type { MCPConnectorEvent } from "../mcp/client/MCPServerConnection";
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
@@ -150,9 +151,12 @@ export function createHeadlessBotAutomation(input: {
       getActiveTaskCount: () => agentDaemon.getQueueStatus().runningTaskIds.length,
       log: input.log,
       onTriggerFired: (payload) => routines.recordEventTriggerFire(payload).catch(input.log),
+      onEventWaitFired: (params) => agentDaemon.resumeAfterEventWait(params),
     },
     db,
   );
+  // wait_for_event parks tasks on temporary triggers in this engine.
+  agentDaemon.setEventWaitRegistry?.(triggers);
   const mcpEvents = input.mcpClientManager
     ? new MCPEventService(db, input.mcpClientManager, triggers)
     : null;
@@ -249,6 +253,12 @@ export function createHeadlessBotAutomation(input: {
     if (!listening) return;
     for (const triggerEvent of connectorTriggerEvents(event))
       void triggers.evaluateEvent(triggerEvent).catch(input.log);
+    // A connector record changed: memories saved from it are flagged (WP15).
+    if (event.type === "resource_updated" && event.resourceUri) {
+      void MemorySourceRecheckService.getDefault()
+        .onConnectorRecordChanged(event.resourceUri)
+        .catch(input.log);
+    }
   };
   return {
     heartbeat,

@@ -5,6 +5,7 @@ import { MemoryWriter, type MemoryCandidate } from "../MemoryWriter";
 import {
   MemoryContextBuilderService,
   dedupeEntries,
+  renderEntryLine,
   type MemoryContextEntry,
 } from "../MemoryContextBuilder";
 import { resolveMemoryInjection } from "../MemoryInjectionPolicy";
@@ -352,5 +353,25 @@ describe("dedupeEntries", () => {
       entry({ ref: "b", contentHash: "same", kind: "preference", source: "inferred", trust: 0.5 }),
     ]);
     expect(out.map((value) => value.ref)).toEqual(["a"]);
+  });
+});
+
+describe("renderEntryLine", () => {
+  it("tags a memory whose source changed", () => {
+    const entry: MemoryContextEntry = {
+      ref: "memory:item-1",
+      itemId: "item-1",
+      kind: "project_fact",
+      subjectKey: null,
+      contentHash: "h",
+      content: "Pro plan costs $20",
+      source: "inferred",
+      trust: 0.7,
+      pinned: false,
+      confidence: 0.7,
+      updatedAt: 1,
+      sourceChanged: true,
+    };
+    expect(renderEntryLine(entry)).toBe("- Pro plan costs $20 (inferred, source may have changed)");
   });
 });

@@ -413,6 +413,49 @@ function collectPackagesFromText(text: string): PackageCandidate[] {
   return packages;
 }
 
+// Exfiltration needs a secret and a way out in the same piece of code. Matching
+// them anywhere in a file flagged security docs that say "search for api_key" in
+// one section and "webhooks" in another, so both sides must look like code and
+// sit within a few lines of each other.
+const EXFIL_WINDOW_LINES = 6;
+// Reads of the host's secrets: environment, SSH keys, cloud credential files.
+const SECRET_READ_PATTERN =
+  /(?:process\.env|os\.environ|getenv\(|id_rsa|\.aws\/credentials|openai_api_key|aws_secret_access_key)/i;
+// Any reference to a credential, including header and key names.
+const SECRET_REFERENCE_PATTERN = new RegExp(
+  `${SECRET_READ_PATTERN.source}|authorization:\\s*bearer|api[-_ ]?key`,
+  "i",
+);
+// Outbound calls with a real argument; `fetch(` named in prose has none.
+const OUTBOUND_CALL_PATTERN =
+  /(?:\bfetch\(\s*(?:[^\s)`]|$)|\baxios(?:\.(?:get|post|put|request))?\(\s*(?:[^\s)`]|$)|\brequests\.(?:get|post|put)\(\s*(?:[^\s)`]|$)|\burllib\.request\b|\bhttps?\.request\(|\bInvoke-(?:WebRequest|RestMethod)\b[^\n]*https?:\/\/|\b(?:curl|wget)\b[^\n]*https?:\/\/)/i;
+// Endpoints that only make sense as a drop for stolen data: chat-bot and webhook
+// URLs, paste sites, tunnels. Prose like "webhooks" or "Slack" is not a host.
+const EXFIL_CHANNEL_PATTERN =
+  /(?:discord(?:app)?\.com\/api\/webhooks|api\.telegram\.org\/bot|hooks\.slack\.com\/|\bngrok(?:-free)?\.(?:io|app|dev)\b|\bpastebin\.com\b|\btransfer\.sh\b|\bwebhook\.site\b)/i;
+
+function hasCredentialExfiltration(text: string): boolean {
+  // Literal "\n" too, so a prompt inside a JSON manifest splits into its lines.
+  const lines = text.split(/\r?\n|\\n/);
+  const lineIndexes = (pattern: RegExp) =>
+    lines.flatMap((line, index) => (pattern.test(line) ? [index] : []));
+  const near = (left: number[], right: number[]) =>
+    left.some((a) => right.some((b) => Math.abs(a - b) <= EXFIL_WINDOW_LINES));
+
+  const secretReads = lineIndexes(SECRET_READ_PATTERN);
+  const secretReferences = lineIndexes(SECRET_REFERENCE_PATTERN);
+  const outboundCalls = lineIndexes(OUTBOUND_CALL_PATTERN);
+  const exfilChannels = lineIndexes(EXFIL_CHANNEL_PATTERN);
+
+  return (
+    near(secretReads, outboundCalls) ||
+    near(secretReferences, exfilChannels) ||
+    // A drop endpoint has no legitimate use, so pair it with a real secret read
+    // anywhere in the file.
+    (secretReads.length > 0 && exfilChannels.length > 0)
+  );
+}
+
 function scanTextContent(
   filePath: string,
   text: string,
@@ -447,15 +490,7 @@ function scanTextContent(
       code: "credential-exfiltration",
       severity: "critical",
       message: "Bundle appears to collect secrets and transmit them remotely.",
-      test: (value, lower) =>
-        (/(process\.env|os\.environ|getenv\(|id_rsa|openai_api_key|aws_secret_access_key)/i.test(
-          value,
-        ) &&
-          /(fetch\(|axios\.|requests\.(?:get|post)|curl\s+https?:\/\/|wget\s+https?:\/\/)/i.test(
-            value,
-          )) ||
-        (/(authorization: bearer|api[-_ ]?key)/i.test(value) &&
-          /(discord|telegram|slack|webhook|ngrok|pastebin|transfer\.sh)/i.test(lower)),
+      test: (value) => hasCredentialExfiltration(value),
     },
     {
       code: "destructive-filesystem",

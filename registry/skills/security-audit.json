@@ -1,43 +1,74 @@
 {
   "id": "security-audit",
   "name": "Security Audit",
-  "description": "Check code for common security vulnerabilities",
+  "description": "Answer security questions about code, review a file or change for vulnerabilities, or run a full multi-agent audit with a coverage ledger and independently verified findings.",
   "icon": "🔒",
   "category": "Development",
-  "prompt": "Please perform a security audit on {{path}}.\n\nCheck for:\n- SQL injection vulnerabilities\n- XSS (Cross-Site Scripting) risks\n- Command injection possibilities\n- Insecure data handling\n- Hardcoded secrets or credentials\n- Insecure dependencies\n- Authentication/authorization issues\n- Input validation problems\n- Sensitive data exposure\n\nFor each issue found:\n1. Describe the vulnerability\n2. Explain the potential impact\n3. Provide a fix with code example\n4. Rate severity (Critical/High/Medium/Low)",
+  "prompt": "# Security Audit\n\nUse this skill for security questions about code, a focused vulnerability review of a file, function or change, or a full audit of a codebase.\n\nTarget: {{path}}\nDepth for a full audit: {{depth}}\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` first. `{baseDir}` is this skill's folder and `{artifactDir}` is this task's output folder.\n2. Choose the mode. Advise mode is the default: answer in the conversation, cite `file:line`, label each issue confirmed or needs validation, and write no files. Run a full audit only when the user explicitly asks for an audit, a pen test, a full or comprehensive security review, or audit artifacts. If the request could be either, ask one short question first.\n3. In a full audit, follow the six phases in `{baseDir}/SKILL.md`, reading each phase reference when you reach it: `{baseDir}/references/recon.md`, `{baseDir}/references/hunting.md`, `{baseDir}/references/attack-classes.md`, `{baseDir}/references/verification-and-report.md` and `{baseDir}/references/record-formats.md`.\n4. Delegate with `orchestrate_agents` / `spawn_agent`: mapping agents, hunters and coverage reviewers as `worker_role: \"researcher\"`, challengers and re-checkers as `worker_role: \"verifier\"`. A finding is never verified by the agent that found it.\n5. You are the only writer. Write `{artifactDir}/run.json`, `{artifactDir}/architecture.md`, `{artifactDir}/coverage-ledger.json`, `{artifactDir}/findings.json` and `{artifactDir}/REPORT.md`, and never write audit files into the audited repository.\n6. After every ledger or findings write, run `node {baseDir}/scripts/check-ledger.mjs` and `node {baseDir}/scripts/check-findings.mjs` as SKILL.md shows, and fix every error.\n7. Do not run the target's code, install packages or contact any network service unless the user agrees for this run. Never probe deployed systems. Never copy a full secret into any output.\n\nSuccess criteria:\n- Advise mode: every issue has a `file:line` trace and a confirmed or needs-validation label; refuted ideas are dropped.\n- Full audit: every ledger unit is resolved, every candidate has a verdict from an independent verifier, both checkers pass, and the run is marked complete or incomplete with the reason.\n- The final answer gives counts by verdict and severity, the confirmed findings with fixes, what needs validation, and the output folder.",
   "parameters": [
     {
       "name": "path",
       "type": "string",
-      "description": "Path to file or folder to audit",
-      "required": true,
+      "description": "File, folder or repository to review",
+      "required": false,
       "default": "."
+    },
+    {
+      "name": "depth",
+      "type": "select",
+      "description": "Depth for a full audit (ignored in advise mode)",
+      "required": false,
+      "default": "standard",
+      "options": ["quick", "standard", "deep"]
     }
   ],
   "enabled": true,
   "metadata": {
+    "version": "2.0.0",
+    "author": "CoWork OS Contributors",
+    "tags": ["security", "audit", "vulnerabilities", "pentest", "appsec", "code-review"],
     "routing": {
-      "useWhen": "Use when the user asks to check code for common security vulnerabilities.",
-      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
-      "outputs": "Outcome from Security Audit: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "keywords": [
+        "security audit",
+        "security review",
+        "pen test",
+        "pentest",
+        "penetration test",
+        "vulnerability",
+        "vulnerabilities",
+        "vulnerable",
+        "exploit",
+        "owasp",
+        "injection",
+        "xss",
+        "ssrf",
+        "csrf",
+        "idor",
+        "attack surface",
+        "hardcoded secrets"
+      ],
+      "useWhen": "Use when the user asks whether code is secure, asks to find vulnerabilities in a file, function, change or codebase, or asks for a security audit, pen-test-style review or security findings report.",
+      "dontUseWhen": "Do not use for listing known-vulnerable dependency versions (use dependency-check), general PR review without a security focus (use code-review), CoWork's own app security settings, or design documents and threat models with no code to inspect.",
+      "outputs": "Advise mode: issues in the conversation with file:line traces, confirmed or needs-validation labels and fixes. Full audit: run.json, architecture.md, coverage-ledger.json, findings.json and REPORT.md in the task's artifact folder.",
+      "successCriteria": "Every reported issue has a traced path from attacker input to sink in code that was read; full audits resolve every ledger unit, verify every candidate with an independent agent, and pass both checkers.",
+      "expectedArtifacts": ["coverage-ledger.json", "findings.json", "REPORT.md"],
       "examples": {
         "positive": [
-          "Use the security-audit skill for this request.",
-          "Help me with security audit.",
-          "Use when the user asks to check code for common security vulnerabilities.",
-          "Security Audit: provide an actionable result."
+          "Security audit this codebase.",
+          "Run a full security review of the API server and give me a findings report.",
+          "Is this file upload handler vulnerable to path traversal?",
+          "Check src/auth for injection and access control bugs."
         ],
         "negative": [
-          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
-          "Do not use security-audit for unrelated requests.",
-          "This request is outside security audit scope.",
-          "This is conceptual discussion only; no tool workflow is needed."
+          "Which of my npm dependencies have known CVEs?",
+          "Review this pull request for readability and naming.",
+          "Turn on two-factor authentication for my CoWork account.",
+          "Write a high-level security strategy for our company."
         ]
       }
     },
     "authoring": {
-      "complexity": "low"
+      "complexity": "high"
     }
   }
 }

@@ -1,3 +1,4 @@
+import { ResourceClaimStore } from "../database/resource-claims-sql";
 import Database from "better-sqlite3";
 import type {
   HeartbeatEvent,
@@ -190,6 +191,7 @@ export class MissionControlIntelligenceStore {
 
   refresh(scope: MissionControlScopeRequest = {}): MissionControlBrief {
     this.refreshTasks(scope);
+    this.refreshResourceOverlaps(scope);
     this.refreshMentions(scope);
     this.refreshActivities(scope);
     this.refreshHeartbeatRuns(scope);
@@ -387,6 +389,55 @@ export class MissionControlIntelligenceStore {
         },
       ]);
     }
+  }
+
+  /**
+   * Files two or more task trees are changing at once (shared-change coordination, WP11). In
+   * the same folder that needs attention now, since the later task's writes are refused; in
+   * separate worktrees it is a review to do before merging.
+   */
+  private refreshResourceOverlaps(scope: MissionControlScopeRequest): void {
+    const workspaceId = normalizeScopeId(scope.workspaceId);
+    const overlaps = new ResourceClaimStore(this.db).listOverlaps(
+      workspaceId ? { workspaceId } : {},
+    );
+    const fingerprints: string[] = [];
+    for (const overlap of overlaps) {
+      const fingerprint = `resource_overlap:${overlap.workspaceId}:${overlap.resourceKey}`;
+      fingerprints.push(fingerprint);
+      const sameFolder = overlap.holders.filter((holder) => !holder.isolated).length > 1;
+      const titles = overlap.holders.map((holder) => `"${holder.title}"`).join(", ");
+      const item = this.repo.upsertItem({
+        fingerprint,
+        category: sameFolder ? "attention" : "reviews",
+        severity: sameFolder ? "action_needed" : "monitor_only",
+        title: sameFolder
+          ? `Two tasks are editing ${overlap.label} in the same folder`
+          : `${overlap.holders.length} tasks change ${overlap.label}`,
+        summary: `Changed by ${titles}`,
+        decision: sameFolder
+          ? "The later task's writes to this file are refused until the other finishes."
+          : "Each change is in its own worktree; they meet when merged.",
+        nextStep: sameFolder
+          ? "Let one task finish first, or run the other in a worktree."
+          : "Review them together in Build > Merge review before merging either.",
+        workspaceId: overlap.workspaceId,
+        taskId: overlap.holders[0]?.taskId,
+        timestamp: Date.now(),
+      });
+      this.repo.replaceEvidence(
+        item.id,
+        overlap.holders.map((holder) => ({
+          sourceType: "task",
+          sourceId: holder.taskId,
+          title: holder.title,
+          summary: `${holder.isolated ? "In a worktree" : "In the shared folder"} · ${humanize(holder.status)}`,
+          payload: { path: overlap.label, ...holder } as unknown as Record<string, unknown>,
+          timestamp: Date.now(),
+        })),
+      );
+    }
+    this.repo.deleteItemsByPrefixNotIn("resource_overlap:", fingerprints, workspaceId);
   }
 
   private refreshMentions(scope: MissionControlScopeRequest): void {

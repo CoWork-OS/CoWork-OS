@@ -22,6 +22,7 @@ import { InputSanitizer } from "../agent/security/input-sanitizer";
 import { MEMORY_L0_TOKENS, MEMORY_L1_ITEMS_TOKENS } from "../agent/content/prompt-budgets";
 import { MemoryWriter } from "./MemoryWriter";
 import { getHotMemoryVersion } from "./hot-memory-version";
+import { MemorySourceRecheckService, SOURCE_CHANGED_NOTE } from "./MemorySourceRecheckService";
 import {
   resolveMemoryInjection,
   memoryItemAllowed,
@@ -84,6 +85,8 @@ export interface MemoryContextEntry {
   dueAt?: number;
   /** Inferred by the agent itself through memory_remember, without the user asking. */
   agentInferred?: boolean;
+  /** The file or connector record it was saved from changed since (WP15). */
+  sourceChanged?: boolean;
 }
 
 export interface MemoryContextLayersRequest {
@@ -145,6 +148,9 @@ export function entryFromItem(item: MemoryItem): MemoryContextEntry {
     ...(dueAt ? { dueAt } : {}),
     ...(item.source === "inferred" && item.sourceRef?.store === "agent_tool"
       ? { agentInferred: true }
+      : {}),
+    ...(MemorySourceRecheckService.getDefault().flagForItem(item.id)
+      ? { sourceChanged: true }
       : {}),
   };
 }
@@ -242,6 +248,7 @@ export function renderEntryLine(entry: MemoryContextEntry, withKind = false): st
   const trustTag = TRUST_TAGS[entry.source];
   if (trustTag) tags.push(trustTag);
   if (entry.dueAt) tags.push(`due ${new Date(entry.dueAt).toISOString().slice(0, 10)}`);
+  if (entry.sourceChanged) tags.push(SOURCE_CHANGED_NOTE);
   const kind = withKind ? `[${entry.kind.replace(/_/g, " ")}] ` : "";
   return `- ${kind}${text}${tags.length ? ` (${tags.join(", ")})` : ""}`;
 }
@@ -351,6 +358,8 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
       source,
       request.workspaceId ?? "",
       version,
+      // A changed source adds a tag to its memory's line.
+      MemorySourceRecheckService.getDefault().version(),
       decision.allowPrivateItems ? "p" : "-",
       decision.allowCuratedItems ? "c" : "-",
       [...omit].sort().join(","),

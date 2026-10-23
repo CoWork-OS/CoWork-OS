@@ -2,17 +2,17 @@
   "version": 1,
   "description": "Explicit, reviewed replacements for stale routing expectations. Every original prompt remains checked. These contracts are independent of live eligibility and fail if invocation policy or corpus coverage drifts. No generic eligibility-based skips. Historical positive domain examples remain untouched because human invocation and guideline application are separate supported surfaces.",
   "corpus": {
-    "positiveExamples": 629,
-    "negativeExamples": 613,
-    "datasetRows": 32,
+    "positiveExamples": 633,
+    "negativeExamples": 617,
+    "datasetRows": 34,
     "contractsByKind": {
       "manual_only": 8,
       "guideline": 6,
       "explicit_only": 2,
       "installed_pack": 1
     },
-    "datasetExpectedCases": 32,
-    "datasetForbiddenCases": 32
+    "datasetExpectedCases": 34,
+    "datasetForbiddenCases": 34
   },
   "cases": [
     {

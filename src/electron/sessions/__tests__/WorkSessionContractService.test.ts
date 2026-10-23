@@ -122,6 +122,76 @@ describeWithSqlite("WorkSessionContractService", () => {
     );
   });
 
+  it("records how evidence was established and when its source was read and updated", () => {
+    const task = createTask();
+    service.recordTaskEvent(
+      task.id,
+      addEvent(task.id, "event-citations", "citations_collected", {
+        citations: [
+          {
+            url: "https://example.test/prices",
+            title: "Price list",
+            accessedAt: 1_700_000_000_000,
+            publishedDate: "2026-09-01T00:00:00Z",
+          },
+        ],
+      }),
+    );
+    service.recordTaskEvent(
+      task.id,
+      addEvent(task.id, "event-refs", "timeline_evidence_attached", {
+        evidenceRefs: [
+          {
+            evidenceId: "ref-1",
+            sourceType: "file",
+            sourceUrlOrPath: "notes/source.md",
+            snippet: "Q3 figures",
+            capturedAt: 1_700_000_100_000,
+          },
+        ],
+      }),
+    );
+
+    const evidence = service.getForTask(task.id)!.aggregate.evidence;
+    expect(evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceRef: "https://example.test/prices",
+          basis: "observed",
+          capturedAt: 1_700_000_000_000,
+          dataAsOf: Date.parse("2026-09-01T00:00:00Z"),
+        }),
+        expect.objectContaining({
+          sourceRef: "notes/source.md",
+          basis: "observed",
+          capturedAt: 1_700_000_100_000,
+        }),
+      ]),
+    );
+  });
+
+  it("reads evidence rows written before basis existed", () => {
+    const task = createTask();
+    const { session } = service.ensureForTask(task);
+    const legacy = service.getRepository().appendEvidence({
+      sessionId: session.id,
+      claim: "Older evidence",
+      sourceType: "url",
+      sourceRef: "https://example.test/old",
+    });
+    expect(legacy.basis).toBeUndefined();
+    expect(legacy.dataAsOf).toBeUndefined();
+    expect(
+      service.getRepository().appendEvidence({
+        sessionId: session.id,
+        claim: "Model reading",
+        sourceType: "task_event",
+        sourceRef: "task:x",
+        basis: "inferred",
+      }).basis,
+    ).toBe("inferred");
+  });
+
   it("turns approval and evidence events into durable waits and evidence", () => {
     const task = createTask();
     const approval = addEvent(task.id, "event-approval", "approval_requested", {
@@ -510,6 +580,41 @@ describeWithSqlite("WorkSessionContractService", () => {
     expect(terminal.contract).toMatchObject({ status: "pending" });
     expect(terminal.contract?.requirements[0]).toMatchObject({
       verifier: "shell_command",
+      status: "pending",
+    });
+  });
+
+  it("ends wait_for_event and refused-write conflict waits with their task, and leaves other waits alone", () => {
+    const task = createTask();
+    service.ensureForTask(task);
+    service.beginWait(task.id, {
+      kind: "external",
+      requestId: "event_wait:trigger-1",
+      reason: "the export file",
+    });
+    service.beginWait(task.id, {
+      kind: "external",
+      requestId: "resource_conflict:file:src/app.ts",
+      reason: 'src/app.ts is being changed by "Fix totals" in the same folder',
+      payload: { conflict: true },
+    });
+    service.beginWait(task.id, {
+      kind: "external",
+      requestId: "application_completion:op-1",
+      reason: "application_operations",
+    });
+    taskRepo.update(task.id, { status: "cancelled" });
+
+    const terminal = service.recordTaskTerminal(task.id);
+    const waits = service.getForTask(task.id)!.aggregate.waitStates;
+    expect(terminal).toBeDefined();
+    expect(waits.find((wait) => wait.requestId === "event_wait:trigger-1")).toMatchObject({
+      status: "cancelled",
+    });
+    expect(waits.find((wait) => wait.requestId?.startsWith("resource_conflict:"))).toMatchObject({
+      status: "cancelled",
+    });
+    expect(waits.find((wait) => wait.requestId === "application_completion:op-1")).toMatchObject({
       status: "pending",
     });
   });

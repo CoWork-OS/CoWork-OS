@@ -426,3 +426,41 @@ describe("Playbook relevance gate fixtures", () => {
     expect(scorePlaybookRelevance(query, candidate).passes).toBe(expected);
   });
 });
+
+describe("Playbook recall and lifecycle (WP9)", () => {
+  function createLifecycleTable() {
+    db.exec(`CREATE TABLE IF NOT EXISTS lifecycle_meta (
+      kind TEXT NOT NULL, item_id TEXT NOT NULL, owner TEXT, created_by_task TEXT,
+      last_used_at INTEGER, use_count INTEGER NOT NULL DEFAULT 0, depends_on_json TEXT,
+      protects TEXT, evidence TEXT, retired_at INTEGER, kept_at INTEGER,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (kind, item_id))`);
+  }
+
+  it("counts a recall of each entry and skips entries retired in Hygiene", async () => {
+    createLifecycleTable();
+    const captured = await success("task-1", "Reconcile invoices");
+    const entryId = captured.status === "recorded" ? captured.entryId : "";
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toContain(
+      "Reconcile invoices",
+    );
+    await vi.waitFor(() =>
+      expect(
+        db
+          .prepare("SELECT use_count FROM lifecycle_meta WHERE kind = 'playbook' AND item_id = ?")
+          .get(entryId),
+      ).toEqual({ use_count: 1 }),
+    );
+
+    db.prepare(
+      "UPDATE lifecycle_meta SET retired_at = 1 WHERE kind = 'playbook' AND item_id = ?",
+    ).run(entryId);
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+  });
+
+  it("recalls as before when lifecycle metadata cannot be read", async () => {
+    await success("task-2", "Reconcile invoices");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toContain(
+      "Reconcile invoices",
+    );
+  });
+});

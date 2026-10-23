@@ -25,7 +25,20 @@ import {
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
-import { buildModelHandoffNote, type ModelHandoff } from "./model-handoff-note";
+import {
+  buildModelHandoffNote,
+  summarizeContractForHandoff,
+  type HandoffContractSummary,
+  type ModelHandoff,
+} from "./model-handoff-note";
+import {
+  isToolOutcomeUnknownError,
+  ToolAttemptTracker,
+  type ToolAttemptPersistence,
+} from "./runtime/tool-attempts";
+import { resolveToolEffect } from "./runtime/tool-effect";
+import { deriveToolCoverage } from "./runtime/tool-outcome";
+import { NotCheckedLedger } from "./not-checked-ledger";
 import { effectiveTaskModelConfig } from "./task-model-config";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
@@ -136,7 +149,10 @@ import { createHash, randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { AgentDaemon } from "./daemon";
-import { APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS } from "./approval-timeouts";
+import {
+  APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS,
+  APPROVAL_WAIT_MAX_PAUSE_MS,
+} from "./approval-timeouts";
 import {
   RUN_COMMAND_DEFAULT_TIMEOUT_MS,
   RUN_COMMAND_HEAVY_TIMEOUT_MS,
@@ -207,6 +223,7 @@ import {
   LLMImageContent,
   LLMImageMimeType,
   LLMSystemBlock,
+  LLMTextContent,
   PromptCacheProviderFamily,
   StreamProgressCallback,
 } from "./llm";
@@ -258,9 +275,15 @@ import {
   upsertPinnedContextBlock,
 } from "./pinned-context-blocks";
 import { getCustomSkillLoader } from "./custom-skill-loader";
+import { selectSkillPlanningHints } from "../../shared/skill-routing";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { runWithMemoryRepoAccess } from "../security/memory-repo-access";
+import {
+  resolveSkillPackReadGrant,
+  runWithSkillPackReadAccess,
+  type SkillPackReadGrant,
+} from "../security/skill-pack-read-access";
 import { DurableContextService } from "../memory/DurableContextService";
 import { PlaybookService, type PlaybookCaptureResult } from "../memory/PlaybookService";
 import { SessionRecallService } from "../memory/SessionRecallService";
@@ -433,9 +456,13 @@ import {
   hasPdfVisualIntent,
   hasNativeDesktopGuiIntent,
   isMcpComputerUseRuntime,
+  isUserIntentOnlyTool,
   normalizeExecutionMode,
   normalizeTaskDomain,
 } from "./tool-policy-engine";
+import { userTypedFollowUpText } from "./follow-up-provenance";
+import { userTypedWords } from "./user-typed-words";
+import { isTaskPromptFromUser } from "./task-prompt-provenance";
 
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
 const VALID_LLM_PROVIDER_TYPES = new Set<string>(LLM_PROVIDER_TYPES as readonly string[]);
@@ -457,7 +484,13 @@ type TaskExecutorFollowUpOptions = Pick<
   | "inReplyToMessageId"
   | "inReplyToTaskId"
   | "surfaceOrigin"
+  | "textProvenance"
 > & {
+  /**
+   * The part of the message the user typed, when the daemon added text they did not type
+   * (open annotations quote the result they point at). Unset: the whole message.
+   */
+  typedText?: string;
   /** Called after transcript and queue state are durably persisted. */
   onAccepted?: () => void | Promise<void>;
   /** Called once the follow-up is admitted and the task has started processing it. */
@@ -603,6 +636,8 @@ import {
   extractArtifactPathAlternativeGroups,
   hasArtifactExtensionMention,
   isReadOnlyConstraintOnlyStep,
+  isReadOnlyInspectionStep,
+  stripNegatedClauses,
   type StepContractEnforcementLevel,
   type StepContractMode,
 } from "./step-contract";
@@ -1047,6 +1082,7 @@ const PARALLEL_TOOL_CALL_EXPLICIT_DENYLIST = new Set<string>([
   "run_command",
   "run_applescript",
   "schedule_task",
+  "wait_for_event",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",
@@ -1232,11 +1268,29 @@ export class TaskExecutor {
   private readonly promptSectionCache = new Map<string, string | null>();
   private lastUserMessage: string;
   /**
+   * The words the user typed in the latest message to this task, or "" when that message was
+   * injected: an automation, heartbeat, trigger or webhook follow-up, another agent's message,
+   * an update forwarded from another task, page code or an answer button. Set from the
+   * message's textProvenance (follow-up-provenance.ts), never from what the text says. Not
+   * saved in snapshots, so after a restart only the task's own words (userAuthoredTaskText)
+   * count until the user writes again. Read by getUserAuthoredToolIntentText.
+   */
+  private lastUserTypedText = "";
+  /**
+   * The task's prompt as the user wrote it, captured when the executor starts, or "" when it
+   * is not marked as typed by the user (Task.promptProvenance). Not read from task.prompt
+   * later: a follow-up that resumes a paused task is appended there as "USER UPDATE", whoever
+   * sent it. The title is left out: a model rewrites it (task-title-generator.ts).
+   */
+  private userAuthoredTaskText = "";
+  /**
    * The task's swarm while its `swarm` layer is on and it is not a verifier (phase 5 §2):
    * swarm_note is offered and may cross the plan gate. Updated with every policy decision.
    */
   private swarmForTools: ResolvedSwarm | null = null;
   private appliedSkills: SkillApplication[] = [];
+  // Skill ids named in the planning hint; null until planning (or a resumed step) computes them.
+  private planningHintedSkillIds: string[] | null = null;
   private taskContextNotes: string[] = [];
   private recoveryRequestActive: boolean = false;
   private capabilityUpgradeRequested: boolean = false;
@@ -2473,6 +2527,10 @@ export class TaskExecutor {
     const hasDirectSourceReference =
       /\.(?:docx|pdf|md|txt)\b/i.test(`${taskTitle}\n${rawTaskPrompt}`) ||
       (taskTitle.match(/_/g) || []).length >= 2;
+    // This pipeline extracts one source. Multi-file comparisons need the
+    // regular tools so a complete review does not silently omit other inputs.
+    const sourceReferences = new Set(normalized.match(/[\w./~-]+\.(?:docx|pdf|md|txt)\b/g) || []);
+    if (sourceReferences.size > 1) return false;
     const hasDocumentScope =
       /\.(?:docx|pdf|md|txt)\b/.test(normalized) ||
       /(?:book|manuscript|document|chapter|character|kitap|metin|belge|doküman|bölüm|karakter)/.test(
@@ -2486,6 +2544,10 @@ export class TaskExecutor {
         normalized,
       );
     const requestsFileMutation =
+      // Use the same artifact contract as completion validation. Source-review
+      // language must not divert a requested deck/workbook/site into the
+      // tool-free review pipeline, which cannot create the required output.
+      inferRequiredArtifactExtensionsUtil(taskTitle, rawTaskPrompt).length > 0 ||
       /(?:write|edit|create|save|export|convert|update|modify|replace|rewrite).{0,80}\.(?:docx|pdf|md|txt)\b/.test(
         normalized,
       ) ||
@@ -5469,6 +5531,8 @@ export class TaskExecutor {
   /**
    * Replace embedded image blocks in conversation history with compact placeholders.
    * This preserves conversational context while dropping base64 payloads from in-memory history.
+   * Screenshots attached to tool results (`companion_user_content`) are compacted too, since
+   * some providers re-send them from the tool result on every turn.
    */
   private sanitizeConversationMessages(messages: LLMMessage[]): LLMMessage[] {
     return messages.map((message) => {
@@ -5476,34 +5540,50 @@ export class TaskExecutor {
         return message;
       }
 
-      const compactedContent = (message.content as Array<LLMContent>).map((block) => {
-        if (!isLLMImageContent(block)) {
-          return block;
-        }
+      const compactedContent = (message.content as Array<LLMContent | LLMToolResult>).map(
+        (block) => {
+          if (block.type === "tool_result") {
+            if (!Array.isArray(block.companion_user_content)) {
+              return block;
+            }
+            return {
+              ...block,
+              companion_user_content: block.companion_user_content.map((companion) =>
+                isLLMImageContent(companion) ? this.compactImageBlock(companion) : companion,
+              ),
+            };
+          }
 
-        const mimeType =
-          typeof block.mimeType === "string" && block.mimeType.length > 0
-            ? block.mimeType
-            : "unknown";
-        const approxSizeBytes =
-          typeof block.originalSizeBytes === "number" && Number.isFinite(block.originalSizeBytes)
-            ? block.originalSizeBytes
-            : typeof block.data === "string" && block.data.length > 0
-              ? Math.ceil((block.data.length * 3) / 4)
-              : null;
-        const sizeText = approxSizeBytes ? ` (~${Math.ceil(approxSizeBytes / 1024)}KB)` : "";
+          if (!isLLMImageContent(block)) {
+            return block;
+          }
 
-        return {
-          type: "text" as const,
-          text: `[Image attachment removed from conversation memory: ${mimeType}${sizeText}]`,
-        };
-      });
+          return this.compactImageBlock(block);
+        },
+      );
 
       return {
         ...message,
         content: compactedContent as LLMContent[],
       };
     });
+  }
+
+  private compactImageBlock(block: LLMImageContent): LLMTextContent {
+    const mimeType =
+      typeof block.mimeType === "string" && block.mimeType.length > 0 ? block.mimeType : "unknown";
+    const approxSizeBytes =
+      typeof block.originalSizeBytes === "number" && Number.isFinite(block.originalSizeBytes)
+        ? block.originalSizeBytes
+        : typeof block.data === "string" && block.data.length > 0
+          ? Math.ceil((block.data.length * 3) / 4)
+          : null;
+    const sizeText = approxSizeBytes ? ` (~${Math.ceil(approxSizeBytes / 1024)}KB)` : "";
+
+    return {
+      type: "text" as const,
+      text: `[Image attachment removed from conversation memory: ${mimeType}${sizeText}]`,
+    };
   }
 
   private sanitizeConversationHistoryForRuntime(messages: LLMMessage[]): LLMMessage[] {
@@ -7092,6 +7172,8 @@ ${transcript}
   private providerFailoverPreserveUntil = 0;
   /** Set when a thread moves to another provider; noted once on the next user message. */
   private pendingModelHandoff: ModelHandoff | null = null;
+  private toolAttemptTracker?: ToolAttemptTracker;
+  private notCheckedLedgerState?: NotCheckedLedger;
   private providerFailoverRequiresImageInput = false;
   private toolBatchExecutor?: ToolBatchExecutor;
 
@@ -7127,6 +7209,11 @@ ${transcript}
   /** Return the live workspace view used by this executor, including a task worktree path. */
   getWorkspace(): Workspace {
     return this.workspace;
+  }
+
+  /** Skills as this task sees them: shared skills plus this workspace's `skills/` folder. */
+  private getSkillLoader() {
+    return getCustomSkillLoader().forWorkspace(this.workspace?.path);
   }
 
   get runtime(): SessionRuntime {
@@ -7187,9 +7274,15 @@ ${transcript}
     registry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
       this.requestPlanRevision(newSteps, reason, clearRemaining);
     });
-    registry.setWorkspaceSwitchHandler(async (newWorkspace) => {
-      await this.handleWorkspaceSwitch(newWorkspace);
-    });
+    registry.setWorkspaceSwitchHandler(
+      async (newWorkspace) => {
+        await this.handleWorkspaceSwitch(newWorkspace);
+      },
+      () =>
+        this.task.agentConfig?.botContained === true
+          ? "This bot works in its own folder for this run and cannot switch workspaces. To work in a project, start the chat there or set the bot's Files to Your workspace."
+          : undefined,
+    );
     return registry;
   }
 
@@ -8615,6 +8708,7 @@ ${transcript}
     this.guardrailPhaseBEnabled = isFeatureEnabled("COWORK_GUARDRAIL_PHASE_B", true);
     const canonicalPrompt = this.getContractPrompt();
     this.lastUserMessage = canonicalPrompt;
+    this.captureUserAuthoredTaskText();
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(this.lastUserMessage));
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${canonicalPrompt}`);
@@ -8834,27 +8928,31 @@ ${transcript}
   }
 
   /**
-   * Detect high-confidence skill matches for the given query and return explicit
+   * Detect clear skill matches for the given query and return explicit
    * planning hints so even weaker models route to the correct skill via Skill.
-   * Returns empty string when no skill scores above the threshold.
+   * Returns empty string when no skill clearly leads the ranking.
    */
   private getHighConfidenceSkillHints(query: string): string {
-    // Lower bar than maybeHandleHighConfidenceSkillRouting: hints are informational
-    // (injected into the planning prompt) so a slightly weaker match is acceptable.
-    // The LLM still decides whether to act on them.
-    const HIGH_CONFIDENCE_THRESHOLD = 0.7;
+    // Hints are informational (injected into the planning prompt); the LLM still
+    // decides whether to act on them. See selectSkillPlanningHints for the rule.
     try {
-      const skillLoader = getCustomSkillLoader();
+      const skillLoader = this.getSkillLoader();
       const availableToolNames = this.buildAvailableToolNameSet(this.getAvailableTools());
       if (!availableToolNames.has("Skill")) return "";
 
-      const scored = skillLoader
-        .rankModelInvocableSkillsForQuery(query, {
-          availableToolNames,
-          includePrereqBlockedSkills: true,
-          limit: 3,
-        })
-        .filter((entry) => entry.score >= HIGH_CONFIDENCE_THRESHOLD);
+      const ranked = skillLoader.rankModelInvocableSkillsForQuery(query, {
+        availableToolNames,
+        includePrereqBlockedSkills: true,
+      });
+      const { hints: scored, reason, strength } = selectSkillPlanningHints(ranked);
+      this.planningHintedSkillIds = scored.map(({ skill }) => skill.id);
+      this.emitEvent("log", {
+        message: `[skill-routing] planning hints: ${reason}`,
+        strength,
+        queryHash: createHash("sha1").update(query).digest("hex").slice(0, 12),
+        candidates: ranked.slice(0, 3).map(({ skill, score }) => ({ skillId: skill.id, score })),
+        hintedSkillIds: scored.map(({ skill }) => skill.id),
+      });
 
       if (scored.length === 0) return "";
 
@@ -8862,6 +8960,17 @@ ${transcript}
         (entry) =>
           `- Skill "${entry.skill.id}" (${entry.skill.name}): ${entry.skill.description || ""}`,
       );
+      if (strength === "tentative") {
+        // A tentative lead may share only vocabulary with the request, so the planner
+        // must be free to drop it without a primed example step.
+        return [
+          `Possibly relevant skills (matched on wording only, so they may not apply):`,
+          ...hints,
+          ``,
+          `Add a plan step to invoke one with Skill only if the request is actually about what its description covers. Otherwise ignore this list and plan normally.`,
+          `Treat these as additive helpers. Do not rewrite or replace the original task.`,
+        ].join("\n");
+      }
       return [
         `Relevant skills for this task:`,
         ...hints,
@@ -11778,6 +11887,29 @@ ${transcript}
     );
   }
 
+  /** Durable attempts for write and unknown-effect calls; a no-op without a store. */
+  private get toolAttempts(): ToolAttemptTracker {
+    if (!this.toolAttemptTracker) {
+      let store: ToolAttemptPersistence | undefined;
+      try {
+        store = this.daemon.getToolAttemptRepository?.();
+      } catch (error) {
+        logger.debug(`${this.logTag} Tool attempts are not recorded:`, error);
+      }
+      this.toolAttemptTracker = new ToolAttemptTracker(store, this.task.id, () =>
+        this.daemon.noteToolOutcomeUnknown?.(this.task.id),
+      );
+    }
+    return this.toolAttemptTracker;
+  }
+
+  /** Correlation for a tool_error whose call may have had its effect. */
+  private toolErrorOutcomeFields(error: unknown): Record<string, unknown> {
+    return isToolOutcomeUnknownError(error)
+      ? { outcome: "unknown", idempotencyKey: error.idempotencyKey, attemptId: error.attemptId }
+      : {};
+  }
+
   private async runToolWithHeartbeat(
     toolName: string,
     input: unknown,
@@ -11819,10 +11951,25 @@ ${transcript}
             ?.botFile(this.task.assignedAgentRoleId)
             .catch(() => null)
         : null;
+    // File tools read an applied directory-backed skill's own plugin pack, read-only.
+    const skillPackReadGrants = this.getAppliedSkillPackReadGrants();
+    const runInToolFileScopes = <T>(fn: () => T): T =>
+      runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
+        runWithSkillPackReadAccess(skillPackReadGrants, fn),
+      );
 
+    // Written before dispatch, so a timeout, lost transport, stop or crash leaves a record of a
+    // call whose effect is unknown instead of nothing.
+    const effect = resolveToolEffect(toolName);
+    const attempt = await this.toolAttempts.begin(
+      toolName,
+      input,
+      effect,
+      this.currentStepId || undefined,
+    );
     try {
       const coordinated = await withTimeout(
-        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
+        runInToolFileScopes(() =>
           this.toolExecutionCoordinator.executeTool(
             toolName,
             input as Any,
@@ -11832,6 +11979,14 @@ ${transcript}
               phase: "step",
               targetPaths: undefined,
               followUp: false,
+              ...(attempt
+                ? {
+                    toolAttempt: {
+                      idempotencyKey: attempt.attempt.idempotencyKey,
+                      attemptId: attempt.attempt.id,
+                    },
+                  }
+                : {}),
               toolPolicyContext: this.getToolPolicyContext(),
               signal: toolAbort.signal,
               emitEvent: (type, payload) => this.emitEvent(type, payload),
@@ -11858,15 +12013,22 @@ ${transcript}
         {
           // A tool can reach an approval prompt that its static approval type does
           // not predict (the permission engine asks for canvas tools, for example).
-          // Time a person spends on that prompt does not count against the tool.
+          // Time a person spends on that prompt does not count against the tool,
+          // for as long as the request stays answerable.
           isPaused: () => this.hasPendingUserDecisionForTask(),
-          maxPauseMs: TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS,
+          maxPauseMs: APPROVAL_WAIT_MAX_PAUSE_MS,
         },
       );
       if (coordinated.error) {
         throw coordinated.error;
       }
+      const succeeded = coordinated.result?.success !== false;
+      if (attempt) await this.toolAttempts.completed(attempt, succeeded);
+      else if (effect === "read" && succeeded) await this.toolAttempts.readBack(toolName, input);
       return coordinated;
+    } catch (error) {
+      // A dispatched write that timed out or lost its transport may have had its effect.
+      throw await this.toolAttempts.failed(attempt, error, toolAbort.signal.aborted);
     } finally {
       parentSignal.removeEventListener("abort", onParentAbort);
     }
@@ -14441,17 +14603,24 @@ ${transcript}
       isReadOnlyConstraintOnlyStep(descriptionRaw) ||
       this.promptHasReadOnlyConstraint(`${this.task?.title || ""}\n${this.getContractPrompt()}`);
     const artifactPreparationDeferred = this.isArtifactPreparationDeferredToLaterWrite(step);
+    // "Read X", "Inspect A, B, and C": the files a read-only step names are its
+    // inputs. Forcing a write there made the model touch them or bootstrap a stub.
+    // A tool the step names explicitly (`edit_file`) still applies.
+    const readOnlyInspectionStep =
+      !verificationStep &&
+      isReadOnlyInspectionStep(descriptionRaw) &&
+      !this.isSinglePlanStepForTaskArtifactOutput(step);
+    if (readOnlyInspectionStep) {
+      for (const name of ["write_file", "edit_file", "create_directory"])
+        if (!new RegExp(`\\b${name}\\b`).test(description)) requiredTools.delete(name);
+    }
     // Mutation constraints such as "Do not create or modify the target before
     // the wait" describe when a write must happen, not a separate edit action.
     // Keep those negated clauses out of the direct-edit tool inference so a
     // shell write is not followed by a spurious required edit_file call.
-    const positiveMutationDescription = description.replace(
-      // Continue through dots inside filenames ("package.json") so the
-      // extension of a protected file does not leak into the positive text.
-      /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b(?:[^,.;!?\n]|\.(?=[A-Za-z0-9_/-]))*/gi,
-      " ",
-    );
+    const positiveMutationDescription = stripNegatedClauses(description);
     const applicationWriteIntent =
+      !readOnlyInspectionStep &&
       !nativePresentation &&
       !nativeUiOperation &&
       hasNativeApplicationOutputIntent(this.getContractPrompt()) &&
@@ -14471,7 +14640,7 @@ ${transcript}
       }
     }
     const requiresArtifactEvidence =
-      hasReadOnlyConstraint || nativeUiOperation
+      hasReadOnlyConstraint || nativeUiOperation || readOnlyInspectionStep
         ? false
         : artifactPreparationDeferred
           ? false
@@ -14482,8 +14651,9 @@ ${transcript}
     const artifactWriteRequired = artifactContractMode === "artifact_write_required";
     const softwareArtifactExtensionMentioned = hasArtifactExtensionMention(description);
     const scaffoldIntent = descriptionHasScaffoldIntent(description);
-    const hasWriteIntent = descriptionHasWriteIntent(description);
+    const hasWriteIntent = !readOnlyInspectionStep && descriptionHasWriteIntent(description);
     const directFileMutationIntent =
+      !readOnlyInspectionStep &&
       !nativePresentation &&
       !nativeUiOperation &&
       !applicationWriteIntent &&
@@ -14715,6 +14885,7 @@ ${transcript}
     const inferredCues = {
       hasWriteIntent: descriptionHasWriteIntent(description),
       hasReadOnlyIntent: descriptionHasReadOnlyIntent(description),
+      readOnlyInspection: isReadOnlyInspectionStep(description),
       hasSummaryCue: descriptionHasSummaryCue(description),
       scaffoldIntent: descriptionHasScaffoldIntent(description),
       hasArtifactCue: descriptionHasArtifactCue(description),
@@ -15862,6 +16033,25 @@ ${transcript}
     return sections.filter((section) => String(section || "").trim().length > 0).join("\n\n");
   }
 
+  /**
+   * Read grants for the plugin packs of this task's applied directory-backed skills. Resolved
+   * against the skill loader on every tool call, so a pack disabled or shadowed since the
+   * skill was applied no longer grants anything.
+   */
+  private getAppliedSkillPackReadGrants(): SkillPackReadGrant[] {
+    const appliedSkills = Array.isArray(this.appliedSkills) ? this.appliedSkills : [];
+    if (appliedSkills.length === 0) return [];
+    try {
+      const loader = this.getSkillLoader();
+      return appliedSkills
+        .map((application) => resolveSkillPackReadGrant(loader.getSkill(application.skillId)))
+        .filter((grant): grant is SkillPackReadGrant => grant !== null);
+    } catch {
+      // No loader, no grant: the pack stays behind the ordinary boundary.
+      return [];
+    }
+  }
+
   private getAppliedSkillApplication(skillId: string): SkillApplication | null {
     const appliedSkills = Array.isArray(this.appliedSkills) ? this.appliedSkills : [];
     for (let index = appliedSkills.length - 1; index >= 0; index -= 1) {
@@ -16103,6 +16293,7 @@ ${transcript}
     this.availableToolsCacheKey = null;
     this.availableToolsCache = null;
 
+    this.daemon?.recordLifecycleUse?.("skill", normalizedApplication.skillId);
     this.emitEvent("skill_applied", {
       skillId: normalizedApplication.skillId,
       skillName: normalizedApplication.skillName,
@@ -17316,6 +17507,7 @@ ${transcript}
       notesFirst ? completionNotes : summary,
       notesFirst ? summary : completionNotes,
       this.buildUnresolvedTestCommandNote(),
+      this.notCheckedLedger.render(),
       this.fileMutationVerifier?.buildAdvisoryFooter(),
     ]
       .map((part) => String(part || "").trim())
@@ -18691,11 +18883,51 @@ ${transcript}
     });
   }
 
+  /** Sets userAuthoredTaskText from the task as it is now; the constructor calls it once. */
+  private captureUserAuthoredTaskText(): void {
+    // Positive provenance only (task-prompt-provenance.ts): the task must be marked as typed by
+    // the user where it was created. Mail commitments, planner issues, orchestration and
+    // workflow steps and remote agents create "manual"/"api" tasks from text the user did not
+    // write, so excluding known automation sources let them through. Tasks created before the
+    // marker existed are unmarked and do not count; the user's next typed message still does.
+    // The title does not count: the title generator replaces it with a model's summary of the
+    // whole prompt, attached files included, and an executor started after a restart reads that
+    // title from the store. Attached files' text and a channel's reply quote inside the prompt
+    // are not the user's words either (user-typed-words.ts).
+    this.userAuthoredTaskText = isTaskPromptFromUser(this.task)
+      ? userTypedWords(this.getContractPrompt()).trim()
+      : "";
+  }
+
+  /**
+   * The user's own words for this task, for the tool lanes only the user may open (the admin
+   * lane: persona, behavioral rules, heartbeat, integration setup). Unlike the task text the
+   * adaptive filter reads, it leaves out the agent's last output, the current plan step, and
+   * every follow-up the user did not type (lastUserTypedText).
+   */
+  private getUserAuthoredToolIntentText(): string {
+    return [this.userAuthoredTaskText, this.lastUserTypedText]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+
   private applyAdaptiveToolAvailabilityFilter<
     T extends { name: string; runtime?: RuntimeToolMetadata },
   >(tools: T[]): T[] {
     if (tools.length === 0) return tools;
-    if (this.hasTaskToolAllowlistConfigured()) return tools;
+    if (this.hasTaskToolAllowlistConfigured()) {
+      // An allowlist (the caller's, or one a skill supplies) says which tools the task may use,
+      // not that the user asked for the admin lane: its admin tools still need the user's words.
+      const userText = this.getUserAuthoredToolIntentText();
+      const policyContext = this.getToolPolicyContext();
+      return tools.filter(
+        (tool) =>
+          !isUserIntentOnlyTool(tool.name, tool.runtime) ||
+          evaluateToolAvailability(tool.name, { ...policyContext, userText }, tool.runtime)
+            .decision === "allow",
+      );
+    }
 
     const currentStep =
       this.currentStepId && this.plan?.steps
@@ -18713,7 +18945,11 @@ ${transcript}
       .join("\n")
       .trim();
 
-    if (!taskText) return tools;
+    // Both fallbacks below keep tools the filter did not pick, but never the admin lane: with
+    // no user text there is nothing that could have asked for it.
+    const withoutUserIntentOnlyTools = () =>
+      tools.filter((tool) => !isUserIntentOnlyTool(tool.name, tool.runtime));
+    if (!taskText) return withoutUserIntentOnlyTools();
 
     const usageCounts =
       this.toolUsageCounts instanceof Map ? this.toolUsageCounts : new Map<string, number>();
@@ -18721,6 +18957,7 @@ ${transcript}
       .filter(([, count]) => count > 0)
       .map(([name]) => name);
     const requiredTools = stepContract ? Array.from(stepContract.requiredTools.values()) : [];
+    const userText = this.getUserAuthoredToolIntentText();
     const policyContext = this.getToolPolicyContext();
     let deferredCount = 0;
     const filtered = tools.filter((tool) => {
@@ -18732,6 +18969,7 @@ ${transcript}
         {
           ...policyContext,
           taskText,
+          userText,
           recentlyUsedTools,
           requiredTools,
         },
@@ -18750,7 +18988,7 @@ ${transcript}
       });
     }
 
-    return filtered.length > 0 ? filtered : tools;
+    return filtered.length > 0 ? filtered : withoutUserIntentOnlyTools();
   }
 
   private getEffectiveExecutionModeSource(): ExecutionModeSource {
@@ -20615,7 +20853,10 @@ ${transcript}
     if (hasWebPageInteractionIntent(stepText || "")) {
       for (const toolName of WEB_PAGE_INTERACTION_TOOLS) base.add(toolName);
     }
-    if (this.stepTextInvokesSkill(stepText || "")) {
+    if (
+      this.stepTextInvokesSkill(stepText || "") ||
+      this.stepTextRefersToHintedSkill(stepText || "")
+    ) {
       base.add("Skill");
     }
     if (REPO_STATUS_INTENT_PATTERN.test(String(stepText || ""))) {
@@ -20625,12 +20866,39 @@ ${transcript}
     return base;
   }
 
+  /**
+   * True when the step talks about a skill and planning hinted one. Planners paraphrase
+   * a hinted skill ("Apply the Unity in-app purchases skill"), which the exact id/name
+   * match in stepTextInvokesSkill misses, and the step then has no way to call it.
+   */
+  private stepTextRefersToHintedSkill(stepText: string): boolean {
+    if (!/\bskills?\b/i.test(stepText)) return false;
+    return this.getPlanningHintedSkillIds().length > 0;
+  }
+
+  private getPlanningHintedSkillIds(): string[] {
+    if (this.planningHintedSkillIds) return this.planningHintedSkillIds;
+    // A task resumed after a restart skips planning; rebuild the hint from the same query.
+    try {
+      const ranked = this.getSkillLoader().rankModelInvocableSkillsForQuery(
+        this.getSkillRoutingQuery(),
+        { includePrereqBlockedSkills: true },
+      );
+      this.planningHintedSkillIds = selectSkillPlanningHints(ranked).hints.map(
+        ({ skill }) => skill.id,
+      );
+    } catch {
+      this.planningHintedSkillIds = [];
+    }
+    return this.planningHintedSkillIds;
+  }
+
   /** True when the text explicitly asks to use a model-invocable skill by id or name. */
   private stepTextInvokesSkill(stepText: string): boolean {
     const normalizedText = this.normalizeSkillInvocationQuery(stepText);
     if (!normalizedText) return false;
     try {
-      const skillLoader = getCustomSkillLoader() as Any;
+      const skillLoader = this.getSkillLoader() as Any;
       if (typeof skillLoader?.listModelInvocableSkills !== "function") return false;
       const skills: Any[] = skillLoader.listModelInvocableSkills();
       return skills.some((skill) =>
@@ -21390,9 +21658,16 @@ You are continuing a previous conversation. The context from the previous conver
     }
     // Queued overrides must not grant the orchestrator-only team lane marker.
     agentConfigOverride = stripTeamWorkItemLaneOverride(agentConfigOverride);
-    // Nor drop the "Works on" limit inherited from a delegating bot.
-    if (Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn")) {
-      const { inheritedBotWorksOn: _inherited, ...rest } = agentConfigOverride;
+    // Nor drop the "Works on" limit inherited from a delegating bot, or the bot's-own-folder limit.
+    if (
+      Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn") ||
+      Object.prototype.hasOwnProperty.call(agentConfigOverride, "botContained")
+    ) {
+      const {
+        inheritedBotWorksOn: _inherited,
+        botContained: _contained,
+        ...rest
+      } = agentConfigOverride;
       agentConfigOverride = rest;
     }
     const persistedAgentConfig =
@@ -22874,7 +23149,9 @@ You are continuing a previous conversation. The context from the previous conver
       const resolved = path.isAbsolute(entry.candidate)
         ? path.resolve(entry.candidate)
         : path.resolve(this.workspace.path, entry.candidate);
-      if (path.isAbsolute(entry.candidate) && !this.isPathInsideWorkspace(resolved)) {
+      // Never write a stub outside the workspace, whether the path is absolute
+      // or escapes it ("../notes.md").
+      if (!this.isPathInsideWorkspace(resolved)) {
         continue;
       }
       const likelyDirectory = this.isLikelyDirectoryMutationCandidate(entry.candidate);
@@ -24206,6 +24483,8 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private tryAutoSwitchToPreferredWorkspaceForAmbiguousTask(reason: string): boolean {
+    // A bot's own folder is where this run belongs, not an ambiguous scratch workspace.
+    if (this.task.agentConfig?.botContained === true) return false;
     return tryAutoSwitchToPreferredWorkspaceForAmbiguousTaskUtil({
       reason,
       currentWorkspace: this.workspace,
@@ -24827,7 +25106,14 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
+  /** Checks that did not cover their scope, for the summary's "Not checked" block. */
+  private get notCheckedLedger(): NotCheckedLedger {
+    this.notCheckedLedgerState ??= new NotCheckedLedger();
+    return this.notCheckedLedgerState;
+  }
+
   private recordToolResult(toolName: string, result: Any, input?: Any): void {
+    this.notCheckedLedger.recordCoverage(toolName, input, deriveToolCoverage(toolName, result));
     const evidence = collectCrossStepEvidence(toolName, result);
     if (evidence.length) {
       if (!(this.crossStepEvidence instanceof Map)) this.crossStepEvidence = new Map();
@@ -29572,7 +29858,7 @@ You are continuing a previous conversation. The context from the previous conver
   private startNaturalLlmWikiObjectiveCollection(
     parsed: ReturnType<typeof parseNaturalLlmWikiPrompt>,
   ): void {
-    const skill = getCustomSkillLoader().getSkill("llm-wiki");
+    const skill = this.getSkillLoader().getSkill("llm-wiki");
     const parameters: Record<string, unknown> = {};
 
     if (parsed.mode && parsed.mode !== "auto") {
@@ -29674,7 +29960,7 @@ You are continuing a previous conversation. The context from the previous conver
   private getPendingSkillParameterDefinition(
     pending: PendingSkillParameterCollection,
   ): { skill: CustomSkill; parameter: SkillParameter } | null {
-    const skill = getCustomSkillLoader().getSkill(pending.skillId);
+    const skill = this.getSkillLoader().getSkill(pending.skillId);
     if (!skill) return null;
     const parameterName = pending.requiredParameterNames[pending.currentParameterIndex];
     if (!parameterName) return null;
@@ -29920,11 +30206,11 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private resolveSkillSlashCommandName(commandName: string): string | null {
-    return resolveSkillSlashAlias(commandName);
+    return resolveSkillSlashAlias(commandName, this.getSkillLoader());
   }
 
   private getSkillForSlashCommand(skillId: string): CustomSkill | undefined {
-    return getCustomSkillLoader().getSkill(skillId);
+    return this.getSkillLoader().getSkill(skillId);
   }
 
   private escapeSkillInvocationPattern(text: string): string {
@@ -30117,7 +30403,7 @@ You are continuing a previous conversation. The context from the previous conver
       return null;
     }
 
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const candidates = skillLoader
       .listSkills()
       .filter((skill) => skill.type !== "guideline")
@@ -30222,7 +30508,7 @@ You are continuing a previous conversation. The context from the previous conver
     const normalizedSkillId = String(skillId || "").trim();
     if (!normalizedSkillId) return null;
 
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const currentSkill = skillLoader.getSkill(normalizedSkillId);
     if (!currentSkill) {
       return {
@@ -30248,7 +30534,7 @@ You are continuing a previous conversation. The context from the previous conver
     if (!rawQuery) return false;
 
     try {
-      const skillLoader = getCustomSkillLoader();
+      const skillLoader = this.getSkillLoader();
       const ranked = skillLoader.rankModelInvocableSkillsForQuery(rawQuery, {
         availableToolNames: new Set(this.getAvailableTools().map((tool) => tool.name)),
         includePrereqBlockedSkills: true,
@@ -32137,7 +32423,7 @@ You are continuing a previous conversation. The context from the previous conver
     });
 
     // Get enabled guidelines from custom skills
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const contextMode = detectContextMode(
@@ -34284,7 +34570,7 @@ Return ONLY a JSON object:
     }
 
     // Get enabled guidelines from custom skills
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
 
     // Get personality and identity prompts
@@ -36822,6 +37108,7 @@ Return ONLY a JSON object:
                     if (webSearchBudgetCheck.blocked) {
                       const reason =
                         webSearchBudgetCheck.reason || "web_search blocked by web search policy.";
+                      this.notCheckedLedger.recordBlocked("web_search", content.input, reason);
                       hadToolError = true;
                       allToolErrorsInputDependent = false;
                       toolErrors.add(content.name);
@@ -37282,6 +37569,7 @@ Return ONLY a JSON object:
                                 error: failureMessage,
                                 disabled: failureTracking.shouldDisable,
                                 disabledScope,
+                                ...this.toolErrorOutcomeFields(rawOutcome.error),
                               },
                               effectiveCorrelation,
                             ),
@@ -41051,6 +41339,7 @@ Return ONLY a JSON object:
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
+    textProvenance?: TaskFollowUpInput["textProvenance"],
     notificationKind?: TaskFollowUpInput["notificationKind"],
   ): void {
     if (this.shutdownRequested) {
@@ -41071,6 +41360,7 @@ Return ONLY a JSON object:
       inReplyToMessageId,
       inReplyToTaskId,
       surfaceOrigin,
+      textProvenance,
       notificationKind,
     );
     logger.info(
@@ -41212,7 +41502,17 @@ Return ONLY a JSON object:
     const handoff = this.pendingModelHandoff;
     if (!handoff) return null;
     this.pendingModelHandoff = null;
-    return buildModelHandoffNote(handoff, this.conversationHistory);
+    let contract: HandoffContractSummary | undefined;
+    try {
+      const aggregate = this.daemon
+        .getWorkSessionContractService?.()
+        ?.getForTask(this.task.id)?.aggregate;
+      if (aggregate) contract = summarizeContractForHandoff(aggregate, Date.now());
+    } catch (error) {
+      // The note is a courtesy; a missing or failing contract record never blocks the turn.
+      logger.debug(`${this.logTag} Handoff note without session contract:`, error);
+    }
+    return buildModelHandoffNote(handoff, this.conversationHistory, contract);
   }
 
   /**
@@ -41822,7 +42122,9 @@ Return ONLY a JSON object:
         | "inReplyToMessageId"
         | "inReplyToTaskId"
         | "surfaceOrigin"
-      >;
+        | "textProvenance"
+      > &
+        Pick<TaskExecutorFollowUpOptions, "typedText">;
       onAccepted?: () => void | Promise<void>;
       onExecutionAccepted?: () => void | Promise<void>;
       onProviderDispatchStarted?: () => void | Promise<void>;
@@ -41937,6 +42239,13 @@ Return ONLY a JSON object:
     this.waitingForUserInput = false;
     this.paused = false;
     this.lastUserMessage = message;
+    // Every follow-up arrives here looking like a user message: automation and heartbeat
+    // prompts, another agent's handoff, answer buttons and page code included. Only a message
+    // its send path marked "user_typed" counts as the user's words for the admin lane.
+    this.lastUserTypedText = userTypedFollowUpText(
+      opts?.messageContext?.typedText ?? message,
+      opts?.messageContext,
+    );
     // Resuming a paused plan continues the same turn, so per-turn budgets such
     // as "use write_file exactly once" must survive the user's reply.
     if (!recoveredFromTurnLimit && !shouldResumeAfterFollowup) {
@@ -42207,7 +42516,7 @@ Return ONLY a JSON object:
     }
 
     // Get enabled guidelines from custom skills
-    const skillLoader = getCustomSkillLoader();
+    const skillLoader = this.getSkillLoader();
     const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
 
     // Get personality and identity prompts
@@ -43706,6 +44015,7 @@ Return ONLY a JSON object:
                                 error: failureMessage,
                                 disabled: failureTracking.shouldDisable,
                                 disabledScope,
+                                ...this.toolErrorOutcomeFields(rawOutcome.error),
                               },
                               effectiveCorrelation,
                             ),

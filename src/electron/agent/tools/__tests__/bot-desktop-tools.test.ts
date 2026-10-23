@@ -50,6 +50,7 @@ describe("BotDesktopTools", () => {
           return out(running.has(args[args.length - 1]) ? "true" : "false");
         if (args[0] === "exec") {
           const program = args.slice(args.indexOf("DISPLAY=:1") + 2);
+          if (program.includes("/etc/resolv.conf")) return out("nameserver 192.168.65.7\n");
           execs.push(program);
           if (options?.input !== undefined) inputs.push(options.input);
           if (args.join(" ").includes("scrot")) return { stdout: fakePng(), stderr: "" };

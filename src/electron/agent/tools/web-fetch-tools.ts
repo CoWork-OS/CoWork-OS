@@ -1,4 +1,13 @@
 import { Workspace } from "../../../shared/types";
+import type { DeclaredAgentSettings } from "../../../shared/browser-settings";
+import { getCoworkVersion } from "../../gateway/router-helpers";
+import { getAgentSigningKey } from "../../identity/agent-signing-keys";
+import {
+  agentRequestIdentity,
+  isAgentIdentityHeader,
+  type AgentRequestIdentity,
+} from "../../security/agent-request-identity";
+import { BrowserSettingsManager } from "../../settings/browser-settings-manager";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import type { NetworkPolicyDecision } from "../../security/network-policy";
@@ -119,6 +128,19 @@ function redactSecret(value: string, secret?: string): string {
  * Converts HTML to readable markdown format.
  * Also includes curl-like http_request tool for raw HTTP requests.
  */
+/** Signature headers and Host: set by CoWork on a request it signs, never by the caller. */
+function isIdentityOwnedHeader(name: string): boolean {
+  return isAgentIdentityHeader(name) || name.toLowerCase() === "host";
+}
+
+function withoutIdentityOwnedHeaders(headers: RequestInit["headers"]): Record<string, string> {
+  const kept: Record<string, string> = {};
+  new Headers(headers).forEach((value, name) => {
+    if (!isIdentityOwnedHeader(name)) kept[name] = value;
+  });
+  return kept;
+}
+
 export class WebFetchTools {
   constructor(
     private workspace: Workspace,
@@ -162,11 +184,76 @@ export class WebFetchTools {
     toolName: string,
     followRedirects = true,
   ): Promise<Response> {
-    const { response } = await fetchWithPolicyCheckedRedirects(url, init, {
-      ...this.networkPolicyOptions(toolName),
-      followRedirects,
-    });
+    const identity = this.declaredIdentitySource();
+    let lastIdentity: AgentRequestIdentity | undefined;
+    const signedHops: AgentRequestIdentity[] = [];
+    // With declared identity on, CoWork owns the signature headers and the authority they cover:
+    // a caller's Signature, Signature-Input, Signature-Agent or Host header is dropped.
+    const requestInit = identity
+      ? { ...init, headers: withoutIdentityOwnedHeaders(init.headers) }
+      : init;
+    let result: Awaited<ReturnType<typeof fetchWithPolicyCheckedRedirects>>;
+    try {
+      result = await fetchWithPolicyCheckedRedirects(url, requestInit, {
+        ...this.networkPolicyOptions(toolName),
+        followRedirects,
+        ...(identity
+          ? {
+              hopHeaders: (hopUrl: URL) => {
+                lastIdentity = agentRequestIdentity(hopUrl, identity);
+                if (lastIdentity?.signature) signedHops.push(lastIdentity);
+                return lastIdentity?.headers;
+              },
+            }
+          : {}),
+      });
+    } finally {
+      // Audit what was signed, never the request itself, once the hops have gone out.
+      for (const hop of signedHops) {
+        this.daemon.logEvent(this.taskId, "log", {
+          metric: "agent_identity_signed",
+          tool: toolName,
+          ...hop.signature,
+          userAgentMode: hop.userAgentMode,
+        });
+      }
+    }
+    const { response, finalUrl } = result;
+    if (identity) {
+      // Status by user-agent mode, so the default can later be decided from block rates.
+      this.daemon.logEvent(this.taskId, "log", {
+        metric: "agent_identity_response",
+        tool: toolName,
+        authority: new URL(finalUrl).host,
+        status: response.status,
+        userAgentMode: lastIdentity?.userAgentMode ?? "declared",
+        signed: Boolean(lastIdentity?.signature),
+      });
+    }
     return response;
+  }
+
+  /** Declared agent identity settings and key, or undefined when it is off (the default). */
+  private declaredIdentitySource() {
+    let settings: DeclaredAgentSettings;
+    try {
+      settings = BrowserSettingsManager.loadSettings().declaredAgent;
+    } catch {
+      return undefined;
+    }
+    if (!settings.enabled) return undefined;
+    return {
+      settings,
+      version: getCoworkVersion(),
+      getKey: () => {
+        try {
+          return getAgentSigningKey();
+        } catch {
+          // Without a key the request still goes out, honestly labelled but unsigned.
+          return undefined;
+        }
+      },
+    };
   }
 
   private resolveProtectedCredential(
@@ -188,6 +275,9 @@ export class WebFetchTools {
     const headerName = credentialHeader === undefined ? "Authorization" : credentialHeader;
     if (typeof headerName !== "string" || !HTTP_HEADER_NAME_PATTERN.test(headerName.trim())) {
       throw new Error("credentialHeader must be a valid HTTP header name.");
+    }
+    if (isIdentityOwnedHeader(headerName.trim())) {
+      throw new Error("credentialHeader cannot be Host or a request signature header.");
     }
     const prefix = credentialPrefix === undefined ? "Bearer " : credentialPrefix;
     if (

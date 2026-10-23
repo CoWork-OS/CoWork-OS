@@ -143,6 +143,8 @@ export type SettingsCategory =
   // Reply drafts on Today: whether it's on, and which drafts it prepared.
   | "mail-reply-drafts"
   | "improvement-loop"
+  // Ed25519 key CoWork signs its own web requests with when declared agent identity is on.
+  | "agent-identity"
   | "improvement-owner"
   | "improvement-history"
   | "worktree"
@@ -156,6 +158,8 @@ export type SettingsCategory =
   | "browser-vault"
   // Settings > Browser (search engine, downloads, agent permissions, developer mode).
   | "browser"
+  // Computer Use backend that drives a Cua Space; holds its bearer token.
+  | "cua-space"
   | "adaptive-style-engine"
   | "routine-workflow-secrets"
   | "acp-remote-agent-secrets"

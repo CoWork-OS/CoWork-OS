@@ -1,0 +1,172 @@
+# Dependency and reference audit — 2026-10-20
+
+This is a dated audit receipt for the deep test, legacy-code, dependency and
+reference cleanup based on commit `ff2e8e457e843b3d1e809b6405cc19e44423c4f1`.
+It records local source and test evidence, not release or production certification.
+
+## Removal decisions
+
+| Removed material | Evidence and retained coverage |
+| --- | --- |
+| Per-app risk-profile and permission-manager implementations and nine tests | Commit `a6dccdb7a` explicitly removed the runtime flow. Tracked-inclusive caller scans found only the retired pair and their tests. Current access-profile, session and tool protections remain covered. |
+| Notification-overlay diagnostic script | Commit `69362a86f` retired the production overlay. The hardcoded diagnostic had no active entry point. Current notification-center tests remain. |
+| Dispatched-agents CSS and orphan snapshot | Commit `7d2fd551b` removed the component and its test. The remaining selectors and snapshot had no consumer. |
+| Unused `CitationPanel` component body and two file-type regex exports | Caller scans found no consumers. The live `CitationBadge` and shared format helpers remain; citation rendering has regression coverage. |
+| Root `qrcode-terminal`, `vite-plugin-electron`, `@types/pdf-parse` declarations | No active source, script, configuration or packaging consumer. QR rendering uses `qrcode`; Vite/Electron startup has its own maintained scripts; `pdf-parse` v2 ships its own types. Lockfile entries exclusive to these dependencies were removed. |
+| Test-local gateway and canvas implementations | Tests now exercise the actual services and stores. The behavioral coverage mapping is preserved in the local QA evidence; these replacements exposed and fixed the gateway limit boundary bug. |
+
+A missing direct caller alone was insufficient proof of retirement. Dormant gateway
+and Build Mode orchestration, reflective daemon entry points, migration fixtures,
+and unique historical human-battery scenarios remain. The unsafe legacy battery
+entry point now fails before database changes, approvals or network hooks and
+points to the maintained runner.
+
+## Dependency ownership and bug fixes
+
+All 24 npm manifests were inventoried, along with the checked-in lockfiles,
+production/test imports, dynamic module references, configuration, build scripts,
+CLI entry points, peers, overrides and native packaging paths. Python imports and
+bootstrap/optional-dependency guards were reviewed across the tracked Python files.
+All four lock graphs have no missing required edges or unreachable entries. The
+1,162 installed root-lock nodes match their locked versions; 137 optional platform
+nodes are absent on this host. Nested manifests without locks do not establish a
+reproducible transitive version set, so they have no independent vulnerability verdict.
+
+The audit corrected undeclared direct ownership of the AWS INI credential provider,
+`form-data`, `undici`, `@electron/asar` and the ESLint preset `@eslint/js`. Existing
+locked versions were retained; the previously absent ESLint preset was installed.
+The finance-data, maps and home-assistant connector manifests now declare the Node
+types required to compile independently of the root checkout.
+
+`react-is` remains a Recharts peer, Twilio remains an independent test oracle, and
+`node-fetch` remains an active alias with compatibility overrides. Native modules,
+Electron, parser build tools and optional Python features retain their dependencies.
+The pinned libsignal tarball is an intentional package alias; npm's installed-tree
+name warning is recorded rather than resolved by substituting a crypto library.
+
+The catalog authoring script now runs on the supported Node runtime without an
+undeclared TypeScript runner. Container manifest-install layers explicitly disable
+lifecycle scripts until source files exist; native addon preparation is explicit
+for the Node or Electron ABI. A typo in `.dockerignore` was corrected so host
+`node_modules`, including nested installs, cannot overwrite image dependencies.
+Offline regression fixtures exercise the actual install and Node rebuild commands;
+they do not replace a full image build.
+
+## Documentation and reference coverage
+
+The audit enumerated tracked files, including files hidden by broad ignore rules.
+It checked 711 Markdown files, 1,985 local links, 255 section-link candidates,
+literal code-path references,
+relative source imports, bundled skill resources, script entry points and npm
+commands. Moved MainContent paths, obsolete memory-store claims, stale security and
+navigation descriptions, missing key-generation instructions, and two broken
+section links were corrected. The generated browser capability matrix was refreshed.
+
+Skill-creator guidance no longer invokes unshipped initialization/packaging helpers.
+Unbroker distinguishes its unbundled upstream suite from four local hermetic CLI
+smoke tests. Those tests verify consent gating, opaque isolated subject records and
+ledger transitions using temporary synthetic data, without contacting brokers or
+sending email. Source tests are excluded from installed skill packages.
+
+Historical plans, changelogs, benchmark fixtures, illustrative paths and product
+terminal URI fragments are retained with appropriate context. VitePress configuration
+is retained as docs-site scaffolding; app CI dispatches website updates to a separate
+repository, whose build environment is outside this checkout. External URL uptime
+and every natural-language product claim were not certified by static link checks.
+
+## Validation and remaining boundaries
+
+The complete application build, type check, lint, formatting, documentation version
+and generated-reference checks pass. The four dependency ownership tests, four
+Unbroker CLI tests and strict TypeScript checks for the new test fixtures pass.
+The Docker lifecycle/catalog/discovery focused run passes seven tests in three files.
+The final `npm test` run passes 121 Node tests and 17,787 Vitest tests across 1,579
+files, with zero failures and ten integration skips. The skips are one live Android,
+four PACT reference-provider and five Docker filesystem cases. Android and PACT
+passed separately in the earlier controlled runs; the final default run does not
+recreate those external services. Docker remains unavailable for fresh verification.
+The earlier audit also exercised the running Electron task-read/answer-state flow,
+Numbat, a disposable Android emulator and the pinned PACT reference services.
+
+Registry advisory results are an inventory, not proof of exploitability. Before
+the subsequent security remediation, the root lock reported 43 package entries:
+two critical, 17 high, 20 moderate and four low.
+All three connector locks report zero. The critical entries belong to `protobufjs`
+(Baileys/libsignal and the PI AI/Google SDK path) and `proxy-addr` (Slack Bolt/Express).
+Dependency ownership does not establish that the advisory trigger is reachable.
+Unresolved advisories and their owning paths remain explicit in the local QA reports;
+no blanket audit-fix, major upgrade or crypto-library substitution was used to suppress them.
+
+The follow-up remediation reduces the root inventory to 11 entries (one high,
+ten moderate, zero critical). Patched dependency versions cover both protobuf
+consumers; Baileys' older generated decoders additionally receive a shared nesting
+limit before socket creation. The libsignal pin advances to an upstream manifest
+change with identical cryptographic runtime source. A scoped `image-size`
+override preserves the owning document workflow.
+
+Remaining entries are `http-cache-semantics` through the build downloader,
+`sprintf-js` and its inherited Electron build dependencies, plus `argparse` and
+`mammoth` through Mammoth's CLI formatter dependency.
+The cache advisory has no confirmed upstream fix; a scanner-range-only update
+does not establish corrected cache behavior. Mammoth's library conversion path
+does not load that CLI formatter. Neither an unsafe downloader migration nor a
+Mammoth downgrade is justified merely to clear these entries. An attempted scoped
+`global-agent` 4.1.3 upgrade was reverted after a local HTTPS CONNECT test proved
+it drops per-request custom CA options that version 3 forwards. This legitimate
+enterprise proxy workflow must remain intact before clearing its formatter chain.
+New regression tests exercise malicious inputs and legitimate crypto, transport, document and
+proxy behavior; no meaningful coverage was removed.
+
+The follow-up full run passes all 121 Node tests and 17,817 Vitest tests, with
+three timeout failures and 12 skips. The failures are live LuaLaTeX, the Pi SDK
+import and the npm sandbox fixture; their default timeout budgets and assertions
+remain unchanged. All 35 new dependency tests pass, as do the complete build,
+type check, lint, formatting and clean-install/packed-consumer checks. Focused
+reruns of all three failed cases pass with unchanged assertions and default
+timeouts after contention subsides; the full run is not claimed as green.
+
+The residual-advisory continuation rejected two additional candidates based on
+execution evidence. Scoping Roarr 3.3.0 beneath `global-agent` 3 removes seven
+registry entries, but its replacement `fast-printf` formatter still throws the
+same out-of-range precision errors (`%.101f` and `%.1000000f`); this is not a
+complete security fix. Argparse 2 supports Mammoth's legacy API aliases but
+introduces deprecation warnings: a normal DOCX CLI conversion that succeeds with
+the current dependency fails with `--throw-deprecation` after substitution.
+Both candidates were reverted. The original 11 entries remain explicit.
+
+The HTTP cache maintainer also disputes the advisory's premise and closed the
+[upstream report](https://github.com/kornelski/http-cache-semantics/issues/56)
+without a patch. The product's default downloader leaves Got's HTTP cache
+disabled; explicitly enabling shared caching remains a separate configuration
+boundary. Updating outside the registry range alone is not proof of a fix.
+
+Additional proxy tests retain disabled logging, enabled structured diagnostics,
+transport errors and response headers containing format-like text. That text
+remains context data, not an attacker-controlled format string. Local HTTPS
+CONNECT acceptance retains custom CA handling and rejects untrusted certificates
+and proxy denial.
+
+A fresh build and type check found existing collection and test-promise APIs
+outside the declared ES2022 compiler libraries. Equivalent reverse search, array
+filtering and deferred test promises compile under the existing settings. Tests
+preserve newest-user-turn selection, timeline order, the latest follow-up plan
+boundary, prompt section order, protected policy text and attachment rekey/rollback
+races; no compiler strictness, assertions or timeout budgets were relaxed.
+
+The completed rerun passes all 121 Node tests and 17,826 Vitest tests across
+1,581 passing files, with 12 existing skips in three files and zero failures.
+It uses the unchanged four-worker configuration and default timeout budgets.
+A process-tree monitor waits for other build/test work to finish and records no
+competing workload during this run. Build, type check, lint, formatting and
+documentation checks pass on the corrected source. A local control through the
+actual Electron build downloader also makes two fresh origin requests despite
+large `max-stale` headers and synthetic `Set-Cookie` responses, confirming that
+the default path does not enable the disputed shared HTTP cache behavior.
+
+Docker-dependent filesystem tests, full container-image acceptance and Harbor runtime
+acceptance require an available Docker daemon. The earlier passing Docker cases do
+not substitute for a fresh image or Harbor runtime result.
+
+This work does not establish application-wide authorization: bot/global queries,
+managed-session/work-context reads, input requests, live event broadcasts and other
+transport identity scopes remain separate review boundaries.

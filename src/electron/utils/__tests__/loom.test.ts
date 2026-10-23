@@ -15,23 +15,25 @@ describe("isLocalhostHost", () => {
     expect(new URL("http://[::1]:8787").hostname).toBe("[::1]");
   });
 
-  it("accepts IPv4 loopback and localhost in any case or with a root dot", () => {
-    for (const host of ["localhost", "LOCALHOST", "localhost.", "127.0.0.1"]) {
+  it("accepts IPv4 loopback and localhost in any case", () => {
+    for (const host of ["localhost", "LOCALHOST", "127.0.0.1"]) {
       expect(isLocalhostHost(host)).toBe(true);
     }
   });
 
-  it("agrees with the shared loopback classifier on 127/8, mapped and .localhost", () => {
-    for (const host of ["127.0.0.2", "[::ffff:7f00:1]", "foo.localhost"]) {
-      expect(isLocalhostHost(host)).toBe(true);
-    }
-    expect(isSecureOrLocalLoomUrl("http://[::ffff:127.0.0.1]:8787")).toBe(true);
-  });
-
-  it("rejects remote hosts and empty input", () => {
-    for (const host of ["example.com", "::2", "10.0.0.1", ""]) {
+  it("rejects remote hosts, empty input and the root-dot form", () => {
+    // `localhost.` is resolved by the system resolver, not guaranteed loopback.
+    for (const host of ["example.com", "::2", "10.0.0.1", "", "localhost."]) {
       expect(isLocalhostHost(host)).toBe(false);
     }
+  });
+
+  it("keeps plain HTTP to the three names the error message lists", () => {
+    // Wider loopback spellings stay HTTPS-only for the LOOM token.
+    for (const host of ["127.0.0.2", "[::ffff:7f00:1]", "foo.localhost"]) {
+      expect(isLocalhostHost(host)).toBe(false);
+    }
+    expect(isSecureOrLocalLoomUrl("http://[::ffff:127.0.0.1]:8787")).toBe(false);
   });
 });
 
@@ -52,6 +54,16 @@ describe("isSecureOrLocalLoomUrl", () => {
     expect(isSecureOrLocalLoomUrl("http://example.com")).toBe(false);
     expect(isSecureOrLocalLoomUrl("not a url")).toBe(false);
     expect(isSecureOrLocalLoomUrl("")).toBe(false);
+  });
+
+  it("rejects plain http to the root-dot localhost", () => {
+    expect(isSecureOrLocalLoomUrl("http://localhost.:8787")).toBe(false);
+  });
+
+  it("rejects non-http schemes even on loopback", () => {
+    for (const url of ["ws://localhost:8787", "ftp://127.0.0.1/", "wss://[::1]:8787"]) {
+      expect(isSecureOrLocalLoomUrl(url)).toBe(false);
+    }
   });
 });
 

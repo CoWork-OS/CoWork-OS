@@ -499,7 +499,8 @@ Access multiple AI providers through one API.
 
 ### Sign in with OpenRouter (no key)
 
-Onboarding's first option is **Continue with OpenRouter (free models, no key)**. It uses
+Onboarding's first option is **Continue with OpenRouter (free models, no key)**. After setup, use
+**Sign in with OpenRouter** under **Settings > AI & Models > Model Access > OpenRouter**. Both use
 OpenRouter's [OAuth PKCE flow](https://openrouter.ai/docs/use-cases/oauth-pkce):
 
 1. CoWork opens `https://openrouter.ai/auth` in your browser with a one-time S256 code
@@ -508,11 +509,13 @@ OpenRouter's [OAuth PKCE flow](https://openrouter.ai/docs/use-cases/oauth-pkce):
 2. Sign in to OpenRouter or create an account, then approve the request. OpenRouter redirects
    back with an authorization code.
 3. CoWork exchanges the code and its verifier at `POST https://openrouter.ai/api/v1/auth/keys`
-   for an API key scoped to your OpenRouter account, labelled "CoWork OS". The key is stored in
-   the encrypted settings store (Electron `safeStorage`) like any other credential and is never
-   sent to the app window.
+   for an API key scoped to your OpenRouter account, labelled "CoWork OS". The main process
+   stores the key in the encrypted settings store (Electron `safeStorage`) like any other
+   credential; the sign-in never passes it through the app window. Settings then shows it in the
+   masked OpenRouter API key field, as it does a pasted key.
 
-The sign-in itself proves the key, so onboarding skips the connection test. A first sign-in
+The sign-in itself proves the key, so onboarding skips the connection test. Onboarding offers a
+detected local Ollama model beside the ChatGPT and Grok sign-ins on the same step. A first sign-in
 selects `openrouter/free`, OpenRouter's free-models router: it picks a free model that supports
 the request's needs (tools, images, structured output), so a new account with no credits can run
 a task. Free models are slower and less capable than paid ones and have their own rate limits.

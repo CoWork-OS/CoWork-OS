@@ -73,7 +73,7 @@ Please include as much of the following information as possible:
 
 - Network access follows the selected access profile, administrator policy, and domain rules
 - Export-sensitive requests remain a separate approval class even for high-autonomy profiles
-- All API calls use HTTPS
+- Provider and integration requests use their configured endpoints; local model services and explicitly configured internal endpoints may use HTTP
 
 ### Local Data Storage
 

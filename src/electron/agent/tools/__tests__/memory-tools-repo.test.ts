@@ -33,6 +33,11 @@ vi.mock("../../../memory/MemoryWriteGate", () => ({
 import { MemoryTools, TEAM_MEMORY_READ_ONLY_ERROR } from "../memory-tools";
 import { MemoryWriter } from "../../../memory/MemoryWriter";
 import { MemoryRepoService } from "../../../memory/repo/MemoryRepoService";
+import {
+  MemorySourceRecheckService,
+  repoEntrySourceRef,
+} from "../../../memory/MemorySourceRecheckService";
+import { hashMemoryItemContent } from "../../../memory/memory-items-types";
 import { runWithMemoryRepoAccess } from "../../../security/memory-repo-access";
 import {
   configureTeamMemoryRepos,
@@ -108,6 +113,60 @@ describeWithGit("memory tools with the memory repo", () => {
     MemoryWriter.setInstance(null);
     fs.rmSync(base, { recursive: true, force: true });
   });
+
+  it("links a fact to the file and connector record it was read from", () =>
+    inScope(async () => {
+      const trackFile = vi.fn(async () => ({ sourceKey: "docs/vpn.md" }));
+      const trackConnector = vi.fn(async () => undefined);
+      MemorySourceRecheckService.setDefault({ trackFile, trackConnector } as Any);
+      try {
+        const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
+        const result = await tools.remember({
+          content: "Deploys need the VPN",
+          kind: "rule",
+          source: "docs/vpn.md",
+        });
+        expect(result).toMatchObject({ success: true, sourceFile: "docs/vpn.md" });
+        expect(trackFile).toHaveBeenCalledWith({
+          workspaceId: "ws-1",
+          workspaceRoot: "/tmp/ws-1",
+          file: "docs/vpn.md",
+          memoryRef: repoEntrySourceRef(
+            "workspaces/billing-service.md",
+            hashMemoryItemContent("Deploys need the VPN"),
+          ),
+        });
+
+        const fromRecord = await tools.remember({
+          content: "The on-call rota is in OPS-1",
+          kind: "project_fact",
+          source: "jira://issue/OPS-1",
+        });
+        expect(fromRecord).toMatchObject({ success: true, sourceUri: "jira://issue/OPS-1" });
+        expect(trackConnector).toHaveBeenCalledWith({
+          resourceUri: "jira://issue/OPS-1",
+          memoryRef: repoEntrySourceRef(
+            "workspaces/billing-service.md",
+            hashMemoryItemContent("The on-call rota is in OPS-1"),
+          ),
+        });
+
+        // A source that cannot be linked never fails the save.
+        trackFile.mockResolvedValueOnce(undefined as never);
+        const unlinked = await tools.remember({
+          content: "Releases happen on Tuesdays",
+          kind: "rule",
+          source: "../elsewhere.md",
+        });
+        expect(unlinked).toMatchObject({
+          success: true,
+          sourceNote:
+            "Source not linked: ../elsewhere.md is not an existing file in this workspace.",
+        });
+      } finally {
+        MemorySourceRecheckService.setDefault(null);
+      }
+    }));
 
   it("saves a fact the agent learned into the workspace file", () =>
     inScope(async () => {

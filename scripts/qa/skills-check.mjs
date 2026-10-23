@@ -32,6 +32,7 @@ if (bypass && /^hotfix\//.test(branch)) {
 
 console.log(`[skills-check] phase=${phase} branch=${branch}`);
 run("node", ["scripts/qa/build-react-best-practices-guide.mjs", "--check"]);
+run("node", ["scripts/qa/build-bundled-skill-lineage.mjs", "--check"]);
 run("node", ["scripts/qa/validate-skills-routing.mjs"]);
 run("node", [
   "scripts/qa/validate-skills-content.mjs",
@@ -39,6 +40,7 @@ run("node", [
   ...(phase >= 3 ? ["--strict-warnings"] : []),
 ]);
 run("node", ["scripts/qa/skills-audit-report.mjs"]);
+run("node", ["scripts/qa/validate-skills-registry.mjs"]);
 run("node", ["scripts/qa/eval-skills-routing.mjs", ...(phase >= 3 ? ["--strict"] : [])]);
 
 console.log("[skills-check] complete");

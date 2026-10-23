@@ -102,3 +102,15 @@ describe("plain text for logic-backed answers", () => {
     expect(text).not.toContain("—");
   });
 });
+
+describe("3D model embeds in plain text", () => {
+  it("names the model file, or says where a Meshy task can be viewed", () => {
+    expect(
+      richEmbedsToPlainText(
+        '::model{path="/work/models/chest.glb" title="Chest"}\n::model{task="0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"}',
+      ),
+    ).toBe(
+      "3D model: Chest (/work/models/chest.glb)\n3D model: Meshy task 0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b (open this answer in CoWork to view it)",
+    );
+  });
+});

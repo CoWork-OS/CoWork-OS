@@ -10,6 +10,8 @@ import {
   getTeamMemoryRepoRoots,
   isMemoryRepoReadAllowed,
 } from "./memory-repo-access";
+import { HOME_CREDENTIAL_STORE_PATHS } from "./credential-store-paths";
+import { isSkillPackReadAllowed } from "./skill-pack-read-access";
 
 export type AccessFilesystemOperation = "read" | "write" | "delete";
 export type AccessFilesystemDecision = "allow" | "deny" | "unmatched";
@@ -486,6 +488,69 @@ export function isProtectedWorkspacePath(
 }
 
 /**
+ * Workspace locations whose contents decide what the agent does in later tasks. A write or
+ * delete there needs the user's explicit approval (PermissionEngine asks, even in modes that
+ * allow ordinary edits, and an allow rule cannot answer for the user).
+ *
+ * They are deliberately not `PROTECTED_WORKSPACE_SEGMENTS`: the user may ask the agent to
+ * edit, fix or clean up skills, and a hard `protected_path` would refuse that outright,
+ * while an approval lets the user say yes to the edit they asked for.
+ *
+ * - `.cowork/skills`, at any depth: the skill proposals (`proposals/`) and eval reports
+ *   (`evals/`) the user reviews before a proposal becomes a skill. Writing them directly
+ *   could change the draft or forge the evidence behind it. The skill_proposal tool writes
+ *   these records itself, through SkillProposalService, without a file path.
+ * - `skills/` at the workspace root and the `.json` files in it: the workspace skill folder
+ *   CustomSkillLoader reads (setWorkspaceSkillsDir), where approved proposals are saved.
+ *   Other files in that folder are not loaded as skills and stay ordinary workspace files.
+ */
+const APPROVAL_REQUIRED_WORKSPACE_SEGMENTS: string[][] = [[".cowork", "skills"]];
+const WORKSPACE_SKILLS_FOLDER = "skills";
+
+/**
+ * Return true when `absolutePath` is a workspace location that holds skills or the skill
+ * proposals they come from (see `APPROVAL_REQUIRED_WORKSPACE_SEGMENTS`). Both the path as
+ * written and its canonical form are checked, so a symlink or the macOS /var alias cannot
+ * move a write out of the folder. Paths outside the workspace return false.
+ */
+export function isApprovalRequiredWorkspacePath(
+  workspacePath: string,
+  absolutePath: string,
+): boolean {
+  const roots = new Set<string>([nodePath.resolve(workspacePath)]);
+  try {
+    roots.add(canonicalizeAccessPath(workspacePath));
+  } catch {
+    // Workspace root may not exist yet; the lexical root still applies.
+  }
+  const targets = new Set<string>([nodePath.resolve(absolutePath)]);
+  try {
+    targets.add(canonicalizeAccessPath(absolutePath));
+  } catch {
+    // An unreadable prefix leaves the lexical target, which is still checked.
+  }
+
+  for (const root of roots) {
+    for (const target of targets) {
+      const relative = nodePath.relative(root, target);
+      if (!relative || relative.startsWith("..") || nodePath.isAbsolute(relative)) continue;
+      const segments = relative.split(/[\\/]/).map((segment) => segment.toLowerCase());
+      const inSkillRecords = APPROVAL_REQUIRED_WORKSPACE_SEGMENTS.some((required) =>
+        segments.some((_, index) =>
+          required.every((expected, offset) => segments[index + offset] === expected),
+        ),
+      );
+      if (inSkillRecords) return true;
+      if (segments[0] !== WORKSPACE_SKILLS_FOLDER) continue;
+      // The folder itself (create, rename, delete) or a skill file directly inside it.
+      if (segments.length === 1) return true;
+      if (segments.length === 2 && segments[1].endsWith(".json")) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Where a path sits relative to the memory repo roots (design §6.4): the personal memory
  * folder and every team memory repo (docs/memory-repo-phase4-design.md §2, read-only under
  * the same rule). Outside, inside, or inside a root's `.git`. Both the lexical and the
@@ -578,6 +643,85 @@ function resolveWorkspacePolicyPath(workspacePath: string, value: string): strin
   value = expandHomeShortcutPath(value);
   return canonicalizeAccessPath(
     nodePath.isAbsolute(value) ? value : nodePath.resolve(workspacePath, value),
+  );
+}
+
+interface CredentialStoreLocation {
+  lexical: string;
+  canonical: string;
+}
+
+const CREDENTIAL_STORE_CACHE_MS = 5_000;
+let credentialStoreCache:
+  | { home: string; at: number; stores: readonly CredentialStoreLocation[] }
+  | undefined;
+
+/**
+ * The home folder's credential stores, both as spelled and canonicalized (a
+ * dotfiles manager may make ~/.ssh a link). Cached briefly because the
+ * evaluator runs for every path a search tool visits.
+ */
+function credentialStoreLocations(): readonly CredentialStoreLocation[] {
+  const home = nodePath.resolve(nodeOs.homedir());
+  const now = Date.now();
+  if (
+    credentialStoreCache &&
+    credentialStoreCache.home === home &&
+    now - credentialStoreCache.at < CREDENTIAL_STORE_CACHE_MS
+  ) {
+    return credentialStoreCache.stores;
+  }
+  const stores = HOME_CREDENTIAL_STORE_PATHS.map((relative) => {
+    const lexical = nodePath.join(home, relative);
+    return { lexical, canonical: canonicalizeAccessPath(lexical) };
+  });
+  credentialStoreCache = { home, at: now, stores };
+  return stores;
+}
+
+/** Plain containment on already-resolved paths, case-insensitive where the filesystem usually is. */
+function isResolvedPathWithin(parentPath: string, candidatePath: string): boolean {
+  const fold = (value: string) => (process.platform === "linux" ? value : value.toLowerCase());
+  const relative = nodePath.relative(fold(parentPath), fold(candidatePath));
+  return (
+    relative === "" ||
+    (relative !== ".." &&
+      !relative.startsWith(`..${nodePath.sep}`) &&
+      !nodePath.isAbsolute(relative))
+  );
+}
+
+/**
+ * The credential store (~/.ssh, ~/.aws, Keychains, browser profiles, ...)
+ * holding a path, checked on both its spelling and its canonical target.
+ */
+export function findCredentialStore(
+  requestedPath: string,
+  resolvedPath: string,
+): string | undefined {
+  for (const store of credentialStoreLocations()) {
+    if (
+      isResolvedPathWithin(store.canonical, resolvedPath) ||
+      isResolvedPathWithin(store.lexical, requestedPath)
+    ) {
+      return store.canonical;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A credential store opens only to a grant made on the store itself or on a
+ * folder inside it, and only for paths under that grant. A grant that merely
+ * contains the store, such as a workspace at the home folder, does not count.
+ */
+function isCredentialPathExplicitlyGranted(
+  store: string,
+  resolvedPath: string,
+  grants: readonly string[],
+): boolean {
+  return grants.some(
+    (grant) => isAccessPathWithin(store, grant) && isAccessPathWithin(grant, resolvedPath),
   );
 }
 
@@ -725,6 +869,27 @@ export function evaluateWorkspaceFilesystemAccess(
     };
   }
 
+  // Credential stores are a hard boundary too: a workspace at the home folder,
+  // Full access, a broad profile rule or a one-shot external approval does not
+  // open ~/.ssh or a keychain. Only a grant on the store itself does.
+  const credentialStore = findCredentialStore(requestedPath, resolvedPath);
+  if (credentialStore) {
+    const grants = [
+      workspace.path,
+      ...(permissions.accessWorkspaceRoots || []),
+      ...(filesystemScoped ? [] : permissions.allowedPaths || []),
+      // A read rule on the store opens it for reads only.
+      ...rules
+        .filter(
+          (rule) => rule.access === "write" || (rule.access === "read" && operation === "read"),
+        )
+        .map((rule) => rule.path),
+    ].map((grant) => resolveWorkspacePolicyPath(workspace.path, grant));
+    if (!isCredentialPathExplicitlyGranted(credentialStore, resolvedPath, grants)) {
+      return { decision: "deny", path: operationPath, reason: "credential_store" };
+    }
+  }
+
   if (ruleDecision === "allow") {
     return { decision: "allow", path: operationPath, reason: "profile_filesystem_allow" };
   }
@@ -758,6 +923,13 @@ export function evaluateWorkspaceFilesystemAccess(
   ].map((root) => resolveWorkspacePolicyPath(workspace.path, root));
   if (explicitlyAllowedRoots.some((root) => isAccessPathWithin(root, resolvedPath))) {
     return { decision: "allow", path: operationPath, reason: "explicit_file_root" };
+  }
+
+  // A directory-backed skill the task applied may read its own plugin pack (references,
+  // scripts, assets next to its SKILL.md). Read-only and app-loaded packs only; profile deny
+  // rules and a disabled read capability were checked above and still win.
+  if (operation === "read" && isSkillPackReadAllowed(requestedPath, resolvedPath)) {
+    return { decision: "allow", path: operationPath, reason: "applied_skill_pack_read" };
   }
 
   // A named profile with a finite filesystem boundary must not fall through

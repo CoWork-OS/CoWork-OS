@@ -50,6 +50,7 @@ async function createHost(
     handleWorkspaceFileMedia?: WebApplicationOptions["handleWorkspaceFileMedia"];
     handleArtifactDownload?: WebApplicationOptions["handleArtifactDownload"];
     onSessionRevoked?: WebApplicationOptions["onSessionRevoked"];
+    getSignatureDirectory?: WebApplicationOptions["getSignatureDirectory"];
   } = {},
 ): Promise<TestHost> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-web-app-"));
@@ -95,6 +96,7 @@ async function createHost(
     handleWorkspaceFileMedia: options.handleWorkspaceFileMedia,
     handleArtifactDownload: options.handleArtifactDownload,
     onSessionRevoked: options.onSessionRevoked,
+    getSignatureDirectory: options.getSignatureDirectory,
     pairingTtlMs: options.pairingTtlMs,
     requestBodyTimeoutMs: options.requestBodyTimeoutMs,
     sessionIdleTtlMs: options.sessionIdleTtlMs,
@@ -303,6 +305,47 @@ async function pair(
 }
 
 describe("WebApplication host core", () => {
+  it("serves the public key directory without a session, and only when identity is on", async () => {
+    const directory = vi.fn((authority: string) =>
+      authority.startsWith("127.0.0.1")
+        ? {
+            body: '{"keys":[]}',
+            headers: { "Content-Type": "application/http-message-signatures-directory+json" },
+          }
+        : null,
+    );
+    const host = await createHost({ getSignatureDirectory: directory });
+    const served = await request(host, {
+      path: "/.well-known/http-message-signatures-directory",
+    });
+    expect(served.status).toBe(200);
+    expect(served.headers["content-type"]).toBe(
+      "application/http-message-signatures-directory+json",
+    );
+    expect(served.body).toBe('{"keys":[]}');
+    expect(directory).toHaveBeenCalledWith(`127.0.0.1:${host.port}`);
+    const posted = await request(host, {
+      path: "/.well-known/http-message-signatures-directory",
+      method: "POST",
+    });
+    expect(posted.status).toBe(405);
+
+    const off = await createHost({ getSignatureDirectory: () => null });
+    expect(
+      (await request(off, { path: "/.well-known/http-message-signatures-directory" })).status,
+    ).toBe(404);
+
+    const unreadableKey = await createHost({
+      getSignatureDirectory: () => {
+        throw new Error("The agent identity key could not be read");
+      },
+    });
+    expect(
+      (await request(unreadableKey, { path: "/.well-known/http-message-signatures-directory" }))
+        .status,
+    ).toBe(404);
+  });
+
   it("admits raw uploads only after same-origin session and CSRF checks", async () => {
     const upload = vi.fn(async (_context, _req, res: http.ServerResponse) => {
       res.writeHead(201, { "Content-Type": "application/json" });

@@ -40,7 +40,14 @@ describeWithSqlite("AnnotationStore", () => {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         resolved_at INTEGER,
-        resolved_by_event_id TEXT
+        resolved_by_event_id TEXT,
+        intent TEXT,
+        before_json TEXT,
+        after_json TEXT,
+        output_path TEXT,
+        artifact_revision_id TEXT,
+        result_revision_id TEXT,
+        undo_token TEXT
       );
     `);
     repo = new AnnotationStore(db);
@@ -151,5 +158,64 @@ describeWithSqlite("AnnotationStore", () => {
 
     expect(updated?.stylePatch).toBeUndefined();
     expect(raw.style_patch_json).toBeNull();
+  });
+
+  it("keeps a pointed-at change: intent, bounded values, revisions and the undo token", () => {
+    const manyCells = Object.fromEntries(
+      Array.from({ length: 60 }, (_, index) => [`A${index + 1}`, String(index)]),
+    );
+    const annotation = repo.create({
+      taskId: "task-1",
+      surfaceType: "artifact",
+      body: "Use net figures",
+      targetRef: {
+        surfaceType: "artifact",
+        filePath: "/ws/report.xlsx",
+        sheetName: "Q3",
+        cellRange: "B2:B61",
+      },
+      intent: "change",
+      before: { ...manyCells, long: "x".repeat(3_000), number: 5 as unknown as string },
+      after: { B2: "1200" },
+      outputPath: " /ws/report-v2.xlsx ",
+    });
+
+    expect(annotation.intent).toBe("change");
+    expect(Object.keys(annotation.before!)).toHaveLength(50);
+    expect(annotation.before).not.toHaveProperty("number");
+    expect(annotation.outputPath).toBe("/ws/report-v2.xlsx");
+
+    repo.setBaseRevision(annotation.id, "rev-1");
+    // Only an annotation being addressed takes a result.
+    expect(repo.recordResult(annotation.id, { resultRevisionId: "rev-2" })?.status).toBe("open");
+    repo.markAddressing("task-1", [annotation.id]);
+    const addressed = repo.recordResult(annotation.id, {
+      resultRevisionId: "rev-2",
+      undoToken: "token-1",
+    });
+    expect(addressed).toMatchObject({
+      status: "addressed",
+      intent: "change",
+      after: { B2: "1200" },
+      artifactRevisionId: "rev-1",
+      resultRevisionId: "rev-2",
+      undoToken: "token-1",
+    });
+
+    const undone = repo.clearUndo(annotation.id);
+    expect(undone?.status).toBe("dismissed");
+    expect(undone?.undoToken).toBeUndefined();
+    expect(undone?.resolvedAt).toBeTypeOf("number");
+  });
+
+  it("ignores an unknown intent", () => {
+    const annotation = repo.create({
+      taskId: "task-1",
+      surfaceType: "browser",
+      body: "x",
+      targetRef: { surfaceType: "browser", url: "http://localhost" },
+      intent: "delete-everything" as never,
+    });
+    expect(repo.findById(annotation.id)?.intent).toBeUndefined();
   });
 });

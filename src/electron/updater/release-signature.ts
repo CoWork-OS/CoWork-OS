@@ -15,8 +15,8 @@
  * external signing tool to install.
  *
  * Enforcement is conditional on a public key being configured: see
- * RELEASE_SIGNING_PUBLIC_KEY. Until a key is generated (scripts/release/
- * generate-signing-key.mjs) this is inert and the updater behaves as before,
+ * RELEASE_SIGNING_PUBLIC_KEY. Until a key is generated and embedded (see
+ * docs/release-signing.md) this is inert and the updater behaves as before,
  * logging a warning. Once the key is set, an artifact whose signature is
  * missing or invalid is refused.
  */

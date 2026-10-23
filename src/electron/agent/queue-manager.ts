@@ -18,6 +18,7 @@ import {
   MIN_QUEUE_TASK_TIMEOUT_MINUTES,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+import { APPROVAL_WAIT_MAX_PAUSE_MS } from "./approval-timeouts";
 import { getUserDataDir } from "../utils/user-data-dir";
 
 const LEGACY_SETTINGS_FILE = "queue-settings.json";
@@ -45,6 +46,8 @@ type DaemonCallbacks = {
   getTaskById: (taskId: string) => Task | undefined;
   updateTaskStatus: (taskId: string, status: TaskStatus) => void;
   onTaskTimeout: (taskId: string) => Promise<void>; // Called when a task times out
+  /** True while the task is paused on a person's decision; that time does not count. */
+  isWaitingForUser?: (taskId: string) => boolean;
 };
 
 export class TaskQueueManager {
@@ -56,6 +59,9 @@ export class TaskQueueManager {
   private callbacks: DaemonCallbacks;
   private initialized: boolean = false;
   private timeoutCheckInterval?: ReturnType<typeof setInterval>;
+  private lastTimeoutCheckAt?: number;
+  /** Waiting time already excused per task, capped at the approval answer window. */
+  private waitCreditMs: Map<string, number> = new Map();
   private static migrationCompleted = false;
 
   constructor(callbacks: DaemonCallbacks) {
@@ -285,6 +291,7 @@ export class TaskQueueManager {
     // Remove from running set and clear start time
     this.runningTaskIds.delete(taskId);
     this.taskStartTimes.delete(taskId);
+    this.waitCreditMs.delete(taskId);
 
     // Process next task in queue
     await this.processQueue();
@@ -338,6 +345,7 @@ export class TaskQueueManager {
     // Clear running tasks and their start times
     this.runningTaskIds.clear();
     this.taskStartTimes.clear();
+    this.waitCreditMs.clear();
 
     // Clear queued tasks
     this.queuedTaskIds = [];
@@ -449,6 +457,7 @@ export class TaskQueueManager {
       console.error(`[TaskQueueManager] Failed to start task ${task.id}:`, error);
       this.runningTaskIds.delete(task.id);
       this.taskStartTimes.delete(task.id);
+      this.waitCreditMs.delete(task.id);
       this.emitQueueUpdate();
     }
   }
@@ -467,9 +476,28 @@ export class TaskQueueManager {
     const now = Date.now();
     const timeoutMs = this.settings.taskTimeoutMinutes * 60 * 1000;
     const timedOutTasks: string[] = [];
+    const sinceLastCheck =
+      this.lastTimeoutCheckAt === undefined ? 0 : now - this.lastTimeoutCheckAt;
+    this.lastTimeoutCheckAt = now;
 
     // Find tasks that have exceeded the timeout
     for (const [taskId, startTime] of this.taskStartTimes) {
+      let waiting = false;
+      try {
+        waiting = this.callbacks.isWaitingForUser?.(taskId) === true;
+      } catch {
+        waiting = false;
+      }
+      const credited = this.waitCreditMs.get(taskId) ?? 0;
+      if (waiting && credited < APPROVAL_WAIT_MAX_PAUSE_MS) {
+        // A task waiting on a person is not stuck: move its start forward by the waited
+        // time, up to the approval answer window, so a never-answered card still frees
+        // its slot eventually.
+        const credit = Math.min(sinceLastCheck, APPROVAL_WAIT_MAX_PAUSE_MS - credited);
+        this.waitCreditMs.set(taskId, credited + credit);
+        this.taskStartTimes.set(taskId, startTime + credit);
+        continue;
+      }
       const elapsed = now - startTime;
       if (elapsed > timeoutMs) {
         const elapsedMinutes = Math.round(elapsed / 60000);
@@ -489,11 +517,13 @@ export class TaskQueueManager {
         // Remove from tracking (daemon will call onTaskFinished which also removes, but do it here just in case)
         this.runningTaskIds.delete(taskId);
         this.taskStartTimes.delete(taskId);
+        this.waitCreditMs.delete(taskId);
       } catch (error) {
         console.error(`[TaskQueueManager] Error handling timeout for task ${taskId}:`, error);
         // Force remove from tracking even if daemon callback fails
         this.runningTaskIds.delete(taskId);
         this.taskStartTimes.delete(taskId);
+        this.waitCreditMs.delete(taskId);
       }
     }
 

@@ -121,6 +121,25 @@ Domain names are normalized to lowercase hostnames. Path scopes are normalized t
 Command prefixes are whitespace-normalized before comparison. MCP server names are normalized for
 stable matching.
 
+## Skill Storage Approval
+
+Skills and skill proposals decide what the agent does in later tasks, so changing them is the
+user's call each time. A write or delete to these workspace locations needs approval
+(`isApprovalRequiredWorkspacePath` in `src/electron/security/access-profile-paths.ts`):
+
+- `.cowork/skills/**` at any depth (proposal records and eval reports)
+- the workspace skill folder `skills/` and the `.json` skill files directly in it
+
+The rule:
+
+- **An allow becomes an ask.** A request that the mode, access profile or an allow rule would allow silently asks instead. The prompt offers only once-only answers, because a saved "always allow" rule would not answer the next request.
+- **Denials stand.** Plan mode, deny rules and hard boundaries still refuse it, and a profile with `approval: "never"` denies it, as it does any other explicit consent.
+- **Every target path is checked.** For a call that writes or deletes, every target path argument is checked, not just the first one found.
+- **The skill management tools are covered.** `skill_create`, `skill_update`, `skill_duplicate` and `skill_delete` pass the workspace skill file they change as the request path.
+
+This is not a `protected_path`: a skill edit the user asks for still goes through after one
+approval. See [Agent Self-Modification Gates](security/self-modification-gates.md).
+
 ## Location Access
 
 `get_current_location` uses a dedicated `location_access` approval type that is separate from

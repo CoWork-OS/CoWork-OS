@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { browserPartitionForTask } from "../../shared/browser-profile";
+import { ATTACHED_FILES_LIST_HEADER } from "../../shared/attachment-summary";
 import type {
   ApprovalRequest,
   ApprovalResponseAction,
@@ -68,8 +69,17 @@ import { SavedLoginsMenu } from "./BrowserWorkbench/SavedLoginsMenu";
 import { ToolbarMenu } from "./BrowserWorkbench/ToolbarMenu";
 import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
 import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
-import { type AdjustChanges, describeAdjustChanges } from "./BrowserWorkbench/adjust-changes";
+import {
+  type AdjustChanges,
+  adjustChangesToAnnotationValues,
+  describeAdjustChanges,
+} from "./BrowserWorkbench/adjust-changes";
 import { ProfileMenu } from "./BrowserWorkbench/ProfileMenu";
+import {
+  BROWSER_PAGE_SEND,
+  type BrowserSendOptions,
+  buildBrowserAskMessage,
+} from "./BrowserWorkbench/browser-page-send";
 import { useBrowserSettings } from "../hooks/useBrowserSettings";
 import "./artifact-viewers.css";
 
@@ -135,7 +145,12 @@ type BrowserWorkbenchViewProps = {
   onFullscreen: () => void;
   onExitFullscreen: () => void;
   onStatusChange?: (status: { url?: string; title?: string }) => void;
-  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void>;
+  /** Pass BROWSER_PAGE_SEND when the message carries page content the user did not type. */
+  onSendMessage?: (
+    message: string,
+    images?: ImageAttachment[],
+    options?: BrowserSendOptions,
+  ) => Promise<void>;
   onOpenSettings?: (tab?: BrowserSettingsTab) => void;
   /** The task's pending browser approval, answered over the tab instead of in a dialog. */
   pendingApproval?: ApprovalRequest | null;
@@ -1270,11 +1285,12 @@ export function BrowserWorkbenchView({
         if (!saved) throw new Error("Annotation could not be saved.");
         const fullPath = `${workspacePath.replace(/\/$/, "")}/${saved.relativePath}`;
         if (sendToAgent && onSendMessage) {
+          const typedNote = annotationMessage.trim();
           const note =
-            annotationMessage.trim() ||
+            typedNote ||
             `Please inspect this annotated browser screenshot from ${activeUrlRef.current || activeUrl || "the current page"}.`;
           await onSendMessage(
-            `${note}\n\nAttached files:\n- ${saved.fileName} (${saved.relativePath})`,
+            `${note}\n\n${ATTACHED_FILES_LIST_HEADER}\n- ${saved.fileName} (${saved.relativePath})`,
             [
               {
                 filePath: fullPath,
@@ -1283,6 +1299,8 @@ export function BrowserWorkbenchView({
                 sizeBytes: saved.size,
               },
             ],
+            // Without a typed note, the message is the page's URL, which the page controls.
+            typedNote ? undefined : BROWSER_PAGE_SEND,
           );
         }
         setAnnotationDraft(null);
@@ -1673,6 +1691,9 @@ export function BrowserWorkbenchView({
                 ...(afterPath ? { notes: `After screenshot: ${afterPath}` } : {}),
               }
             : undefined;
+        // The adjustment is the change asked for: the element's values before and after.
+        const adjustedValues =
+          adjusted && adjustChanges ? adjustChangesToAnnotationValues(adjustChanges) : undefined;
         const created = await window.electronAPI.createAnnotation({
           taskId,
           workspaceId,
@@ -1681,6 +1702,7 @@ export function BrowserWorkbenchView({
           body: fullBody,
           targetRef: liveAnnotationTarget,
           screenshotPath,
+          ...(adjustedValues ? { intent: "change" as const, ...adjustedValues } : {}),
           ...(stylePatch ? { stylePatch } : {}),
         });
         await loadBrowserAnnotations();
@@ -1689,6 +1711,9 @@ export function BrowserWorkbenchView({
         if (sendToAgent && onSendMessage) {
           await onSendMessage(
             `Address annotation ${created.id}: ${body}${changeList ? `\n${changeList}` : ""}`,
+            undefined,
+            // The change list quotes the element's current text and styles from the page.
+            changeList ? BROWSER_PAGE_SEND : undefined,
           );
         }
       } catch (error) {
@@ -1769,11 +1794,12 @@ export function BrowserWorkbenchView({
     if (action.kind === "search") {
       openTab({ url: buildSearchUrl(action.text, searchEngine), afterTabId: event.tabId });
     } else if (action.kind === "ask") {
-      const prompt = `About this text from ${action.url || "the page"}:\n\n> ${action.text
-        .split("\n")
-        .join("\n> ")}\n\n`;
       if (onSendMessage) {
-        void onSendMessage(`${prompt}Explain this and tell me what matters here.`);
+        void onSendMessage(
+          buildBrowserAskMessage(action.text, action.url),
+          undefined,
+          BROWSER_PAGE_SEND,
+        );
       }
     } else if (action.kind === "screenshot") {
       void captureScreenshot("screenshot");
@@ -1841,7 +1867,12 @@ export function BrowserWorkbenchView({
       .slice(0, 6)
       .map((source) => `- ${formatYouTubeTimestamp(source.startMs)} ${source.url}`)
       .join("\n");
-    await onSendMessage(`${youtubeAskResult.answer}${sources ? `\n\nSources:\n${sources}` : ""}`);
+    // The answer is model output drawn from the video's transcript, not the user's words.
+    await onSendMessage(
+      `${youtubeAskResult.answer}${sources ? `\n\nSources:\n${sources}` : ""}`,
+      undefined,
+      BROWSER_PAGE_SEND,
+    );
   }, [onSendMessage, youtubeAskResult]);
 
   return (
@@ -2010,7 +2041,14 @@ export function BrowserWorkbenchView({
             <span>Annotate</span>
           </button>
           <ToolbarMenu
+            nativeMenu={nativeEngine}
             hasPage={Boolean(activeUrl)}
+            colorScheme={browserSettings.colorScheme}
+            onColorScheme={(colorScheme) => {
+              void saveBrowserSettings({ colorScheme }).catch(() =>
+                setToolbarNotice("Could not save browser appearance"),
+              );
+            }}
             viewports={VIEWPORT_PRESETS}
             activeViewport={
               controlledViewport
@@ -2522,7 +2560,12 @@ export function BrowserWorkbenchView({
           taskId={taskId}
           sessionId={sessionId}
           tabId={activeTabId}
-          onSendToAgent={onSendMessage ? (message) => void onSendMessage(message) : undefined}
+          onSendToAgent={
+            // Console errors are text the page logged.
+            onSendMessage
+              ? (message) => void onSendMessage(message, undefined, BROWSER_PAGE_SEND)
+              : undefined
+          }
         />
       )}
       {annotationDraft && (

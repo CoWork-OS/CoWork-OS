@@ -5,6 +5,7 @@ import {
   keyEventFromModalDialog,
   responsibilityActionReviewDecisionAllowed,
   responsibilityActionReviewOptionDisabled,
+  splitApprovalQuestion,
   StructuredInputPromptCard,
 } from "../StructuredInputPromptCard";
 import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../../../shared/approval-draft-presentation";
@@ -110,5 +111,67 @@ describe("StructuredInputPromptCard approval preview", () => {
     expect(html).toContain("AppleScript");
     expect(html).toContain("count of pages of front document\nend tell");
     expect(html).toContain("1,200 more characters are not");
+  });
+});
+
+describe("StructuredInputPromptCard compact approval", () => {
+  const shellQuestion =
+    'Approve this shell command and its potential network access for this invocation. Shell scripts can access the network even when the command text does not show it. Scope: commands starting with "wc -l notes.txt" (ordinary). Do you want CoWork to continue?';
+
+  it("splits an approval into title, detail and scope without losing any of it", () => {
+    expect(splitApprovalQuestion(shellQuestion)).toEqual({
+      title: "Approve this shell command and its potential network access for this invocation.",
+      detail: "Shell scripts can access the network even when the command text does not show it.",
+      scope: 'commands starting with "wc -l notes.txt" (ordinary)',
+    });
+    expect(
+      splitApprovalQuestion(
+        "Export the report. Scope: domain api.example.com. Consent covers exports until this task ends. Do you want CoWork to continue?",
+      ),
+    ).toEqual({
+      title: "Export the report.",
+      detail: "Consent covers exports until this task ends.",
+      scope: "domain api.example.com",
+    });
+    expect(splitApprovalQuestion("Continue?")).toEqual({
+      title: "Continue?",
+      detail: "",
+      scope: "",
+    });
+  });
+
+  it("leads with the exact command and keeps Deny first", () => {
+    const approval = request("approval_decision", ["Deny", "Allow once"]);
+    approval.questions[0].question = shellQuestion;
+    approval.questions[0].preview = { label: "Command", text: "wc -l notes.txt && echo done" };
+    const html = renderToStaticMarkup(
+      createElement(StructuredInputPromptCard, {
+        request: approval,
+        onSubmit: vi.fn(),
+        onDismiss: vi.fn(),
+      }),
+    );
+    expect(html).toContain("input-request-card-approval");
+    expect(html).toContain("<code>wc -l notes.txt &amp;&amp; echo done</code>");
+    expect(html).toContain("Shell command · may use the network");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Do you want CoWork to continue?");
+    expect(html).not.toContain('role="radio"');
+    expect(html.indexOf(">Deny<")).toBeLessThan(html.indexOf(">Allow once<"));
+  });
+
+  it("falls back to the approval sentence when there is no command", () => {
+    const approval = request("approval_decision", ["Deny", "Allow once"]);
+    approval.questions[0].question =
+      "Export the report. It goes to api.example.com. Do you want CoWork to continue?";
+    const html = renderToStaticMarkup(
+      createElement(StructuredInputPromptCard, {
+        request: approval,
+        onSubmit: vi.fn(),
+        onDismiss: vi.fn(),
+      }),
+    );
+    expect(html).toContain('<div class="input-request-approval-title">Export the report.</div>');
+    expect(html).toContain("It goes to api.example.com.");
   });
 });

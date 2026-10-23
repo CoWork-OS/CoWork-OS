@@ -55,8 +55,8 @@ export function ChannelDecisionSettings({ channel, onSaved }: Props) {
       <h4>Decision Cards</h4>
       <p className="settings-description">
         Review requests from tasks you started in this channel. Your configured account can approve
-        the displayed request once or deny it. Requests expire after five minutes; changed requests
-        or files need a fresh review in CoWork.
+        the displayed request once or deny it. Requests expire after 24 hours; changed requests or
+        files need a fresh review in CoWork.
       </p>
       <label className="settings-checkbox" htmlFor={`decision-cards-${channel.id}`}>
         <input

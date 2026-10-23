@@ -1,7 +1,8 @@
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
-import type { BotWorksOn } from "./bot-computer";
+import type { BotDesktopNetwork, BotWorksOn } from "./bot-computer";
+import type { BotFileAccess } from "./bot-containment";
 
 // Core types shared between main and renderer processes
 
@@ -673,6 +674,7 @@ export type EventType =
   | "annotation_updated"
   | "annotation_addressing_started"
   | "annotation_addressed"
+  | "annotation_change_undone" // The change that addressed an annotation was reverted
   | "annotation_resolved"
   | "annotation_dismissed"
   | "command_output"
@@ -715,6 +717,7 @@ export type EventType =
   | "worktree_merge_start" // Merge to base branch started
   | "worktree_merged" // Successfully merged to base branch
   | "worktree_conflict" // Merge conflict detected
+  | "resource_conflict" // Another task in the same folder is changing this file (write refused)
   | "worktree_cleaned" // Worktree removed after completion
   // Collaborative Thoughts events (team multi-agent thinking)
   | "agent_thought" // Agent sharing analysis/reasoning with team
@@ -1325,11 +1328,135 @@ export type ToolResultEnvelopeStatus =
   | "cancelled"
   | "discarded";
 
+/** Whether a tool call can change something outside the conversation. */
+export type ToolAttemptEffect = "read" | "write" | "unknown";
+
+/**
+ * How a durable tool attempt ended. `unknown`: dispatched, then a timeout, lost transport or
+ * stop left its effect unknown. `checked`: an unknown attempt whose target was read back.
+ */
+export type ToolAttemptStatus =
+  | "started"
+  | "completed"
+  | "failed"
+  | "unknown"
+  | "cancelled"
+  | "checked";
+
+/** One dispatched call of a tool that writes or whose effect is unknown. */
+export interface ToolAttempt {
+  id: string;
+  taskId: string;
+  stepId?: string;
+  toolName: string;
+  argsHash: string;
+  /** Stable across retries and restarts: derived from task, step, tool and canonical args. */
+  idempotencyKey: string;
+  effect: Exclude<ToolAttemptEffect, "read">;
+  /** File, path or URL the call acts on, when its input names one. */
+  target?: string;
+  status: ToolAttemptStatus;
+  reason?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+/**
+ * Generated software whose use, ownership and dependencies are tracked (agent-first roadmap WP9):
+ * user and agent skills, playbook entries, scheduled automations, event triggers and curated rules.
+ */
+export type LifecycleKind = "skill" | "playbook" | "automation" | "trigger" | "rule";
+
+/** Something an item depends on: another tracked item, or the workspace it runs in. */
+export interface LifecycleRef {
+  kind: LifecycleKind | "workspace";
+  id: string;
+}
+
+/** The `lifecycle_meta` row of one item. Usage the item's own store already keeps is not copied. */
+export interface LifecycleMeta {
+  kind: LifecycleKind;
+  id: string;
+  owner?: string;
+  createdByTask?: string;
+  lastUsedAt?: number;
+  useCount: number;
+  dependsOn: LifecycleRef[];
+  /** Rules: the decision the rule protects (a constraint ledger entry id or free text). */
+  protects?: string;
+  /** Rules: the eval case, fixture or task id of the failure the rule prevents. */
+  evidence?: string;
+  retiredAt?: number;
+  /** Set by "Keep": the idle timer counts from here. */
+  keptAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Why an item is listed in Hygiene. `unused_60` / `unused_90`: no use for that many days (an
+ * automation with a next scheduled run never is); `rule_without_evidence`: a rule unused for
+ * 90 days that names no failure it prevents.
+ */
+export type HygieneFlag =
+  | "unused_60"
+  | "unused_90"
+  | "ownerless"
+  | "broken_dependency"
+  | "rule_without_evidence";
+
+export interface HygieneItem {
+  kind: LifecycleKind;
+  id: string;
+  name: string;
+  workspaceId?: string;
+  owner?: string;
+  lastUsedAt?: number;
+  useCount: number;
+  nextRunAt?: number;
+  idleDays?: number;
+  dependsOn: LifecycleRef[];
+  brokenDependencies: LifecycleRef[];
+  protects?: string;
+  evidence?: string;
+  flags: HygieneFlag[];
+}
+
+export interface HygieneReport {
+  generatedAt: number;
+  items: HygieneItem[];
+  /** Items checked, listed or not. */
+  checked: number;
+}
+
+/** A call that was running when a task was stopped (`agent_interrupt_confirmed.inFlight`). */
+export interface InterruptInFlightCall {
+  toolName: string;
+  attemptId: string;
+  idempotencyKey: string;
+  effect: Exclude<ToolAttemptEffect, "read">;
+  outcome: "unknown" | "completed" | "cancelled";
+  target?: string;
+}
+
 export interface ToolResultEvidence {
   type: "file" | "command" | "url" | "artifact" | "runtime_log";
   label: string;
   value: string;
   extra?: Record<string, unknown>;
+}
+
+/**
+ * How much of the asked-for scope a search, list or query result covers. `partial`: some of it
+ * was not checked (a limit, a time budget, a filter, another page), so "nothing found" does not
+ * mean "absent". Absent when the tool does not say.
+ */
+export type ToolCoverageStatus = "complete" | "partial" | "unknown";
+
+export interface ToolCoverage {
+  status: ToolCoverageStatus;
+  reason?: string;
+  window?: { from?: number; to?: number };
 }
 
 export interface ToolResultEnvelope {
@@ -1345,6 +1472,11 @@ export interface ToolResultEnvelope {
   contextMutation?: Record<string, unknown> | null;
   uiHints?: Record<string, unknown>;
   telemetry?: Record<string, unknown>;
+  coverage?: ToolCoverage;
+  /** When the underlying data was last updated, when the tool knows it (not the query time). */
+  dataAsOf?: number;
+  /** When the tool ran the query. */
+  queriedAt?: number;
 }
 
 export interface EvidenceRef {
@@ -2372,6 +2504,17 @@ export interface AgentConfig {
   /** Existing local branch to base a new isolated checkout on; omit for HEAD. */
   worktreeBaseBranch?: string;
   /**
+   * Exact commit (40-hex SHA) to start the isolated checkout from. Build Compare pins every
+   * variant to the same commit so they differ only in what each task did.
+   */
+  worktreeBaseCommit?: string;
+  /** Build Compare: the variants of one request share this id. */
+  compareGroupId?: string;
+  /** Build Compare: this variant's number, from 1. */
+  compareVariant?: number;
+  /** Build Compare: the check every variant runs before it finishes (a shell command). */
+  compareCheckCommand?: string;
+  /**
    * Optional allow-list of approval types that may be auto-approved when
    * autonomousMode is enabled. Omit to preserve legacy "approve all" behavior.
    */
@@ -2440,6 +2583,12 @@ export interface AgentConfig {
    * every one of them narrows the task's profile.
    */
   inheritedAccessCeilingProfileIds?: AccessProfileId[];
+  /**
+   * Set by the daemon when it moves a bot's run into the bot's own folder, and kept for as
+   * long as the task works there: adds the bot's-own-folder access limit (sandboxed shell) and
+   * blocks switching the task to another workspace. Child tasks inherit the limit.
+   */
+  botContained?: boolean;
   /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
@@ -2638,6 +2787,19 @@ export interface Task {
   branchFromEventId?: string; // Specific event to branch from when forking a session
   branchLabel?: string; // Human label for the branch shown in UI/debug surfaces
   resumeStrategy?: "snapshot" | "checkpoint" | "transcript"; // Preferred resume source
+  /**
+   * "user_typed" only when a person typed this task's title and prompt into a composer the
+   * owner signed in to: the desktop app (task create, tray quick task), a remote device's view
+   * or another admin client over the control plane, Web Access, or a channel message from the
+   * verified owner. A fork or side chat keeps its source task's value when it reuses that
+   * task's prompt. Unset for everything else, whatever `source` says: automations, mail, the
+   * strategic planner, orchestration and workflow steps, remote agents, other agents, and
+   * every task created before this field existed. Only "user_typed" prompts can expose the
+   * admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup).
+   * Set by main-process creation paths at create time and never updated; never copied from
+   * renderer or remote-client input.
+   */
+  promptProvenance?: TaskPromptProvenance;
   // Origin source for distinguishing how the task was created
   source?:
     | "manual"
@@ -2801,6 +2963,60 @@ export interface WorktreeInfo {
   lastCommitSha?: string; // SHA of the last auto-commit
   lastCommitMessage?: string;
   mergeResult?: MergeResult;
+}
+
+/** One task holding a claim on a resource it is changing (shared-change coordination, WP11). */
+export interface ResourceClaimHolder {
+  taskId: string;
+  title: string;
+  /** The task works in its own worktree, so its change meets others only at merge. */
+  isolated: boolean;
+  status: string;
+}
+
+/** A resource two or more tasks are changing. */
+export interface ResourceOverlap {
+  workspaceId: string;
+  resourceKey: string;
+  /** Workspace-relative path for files. */
+  label: string;
+  holders: ResourceClaimHolder[];
+}
+
+export interface MergeReviewTask {
+  taskId: string;
+  title: string;
+  branch: string;
+  status: string;
+  worktreeStatus?: string;
+  /** Build Compare variant number, from 1. */
+  variant?: number;
+  /** The latest result of the task's check command, when it has one. */
+  check?: { passed: boolean; message?: string };
+  diff: { files: number; additions: number; deletions: number };
+  changedFiles: string[];
+}
+
+/** Tasks that want the same thing: one Compare request, or tasks with the same title. */
+export interface MergeReviewGroup {
+  intent: string;
+  compareGroupId?: string;
+  tasks: MergeReviewTask[];
+}
+
+/**
+ * Worktree changes waiting to merge into one workspace, grouped by intent, with checks on
+ * the combined state: files changed by more than one group, and pairs that would conflict.
+ */
+export interface MergeReview {
+  workspaceId: string;
+  groups: MergeReviewGroup[];
+  checks: {
+    overlaps: Array<{ path: string; taskIds: string[] }>;
+    conflicts: Array<{ taskIds: [string, string]; files: string[] }>;
+    /** False when git could not compute merges (git older than 2.38). */
+    conflictCheckAvailable: boolean;
+  };
 }
 
 export interface MergeResult {
@@ -3273,11 +3489,24 @@ export interface QuotedAssistantMessage {
 
 /** Follow-up payload sent to an existing task. */
 /** Where a user message came from when the desktop app sent it on the user's behalf. */
-export type MessageSurfaceOrigin = "answer" | "page" | "code_block";
+export const MESSAGE_SURFACE_ORIGINS = ["answer", "page", "code_block", "browser_page"] as const;
+export type MessageSurfaceOrigin = (typeof MESSAGE_SURFACE_ORIGINS)[number];
 
 export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceOrigin {
-  return value === "answer" || value === "page" || value === "code_block";
+  return (MESSAGE_SURFACE_ORIGINS as readonly unknown[]).includes(value);
 }
+
+/**
+ * Who wrote a follow-up's text. "user_typed": a person typed it into this task's own
+ * conversation. There is no other value: unset means CoWork or someone else put the text there.
+ */
+export type FollowUpTextProvenance = "user_typed";
+
+/**
+ * Who wrote a task's prompt (Task.promptProvenance). "user_typed": a person typed it. There
+ * is no other value: unset means CoWork or someone else wrote it.
+ */
+export type TaskPromptProvenance = "user_typed";
 
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
@@ -3319,9 +3548,23 @@ export interface TaskFollowUpInput {
    * The user sent this exact text by approving an action in an interactive answer: a
    * button the model wrote ("answer") or a request from page code in an HTML frame
    * ("page"), or the output of a shell code block the user ran from an answer
-   * ("code_block"). Set only by the desktop app's own send path.
+   * ("code_block"). "browser_page": the user sent it from the in-app browser and it carries
+   * web page content they did not type (a selection, console output, element values, an
+   * answer drawn from a video). Set only by the desktop app's own send path.
    */
   surfaceOrigin?: MessageSurfaceOrigin;
+  /**
+   * "user_typed" only when a person typed `message` into this task's own conversation: the
+   * desktop composer (local, or a remote device's view over the control plane), Web Access,
+   * a side chat's first message, a typed reply on this task's approval card, or a channel
+   * message from the verified owner (gateway-sender-identity.ts). Unset for everything else:
+   * automations, heartbeats, triggers, routines, webhooks, other agents, updates forwarded
+   * from another task, page code, answer buttons and in-app browser page content. Only
+   * "user_typed" text can expose the admin-lane tools (persona, behavioral rules, expertise,
+   * heartbeat, integration setup).
+   * Set by main-process send paths; never copied from renderer or remote-client input.
+   */
+  textProvenance?: FollowUpTextProvenance;
 }
 
 export type AgentMessageDeliveryStatus =
@@ -3617,7 +3860,10 @@ export type WorkSessionReplayFixtureKind =
   | "approval"
   | "credential"
   | "policy_revocation"
-  | "child_session";
+  | "child_session"
+  | "unknown_outcome"
+  | "stop_in_flight"
+  | "handoff";
 
 export interface WorkSessionReplayFixture {
   id: string;
@@ -3757,6 +4003,11 @@ export type EvidenceManifestSourceType =
   | "task_event"
   | "child_session";
 export type EvidenceManifestEntryStatus = "supporting" | "contradicting" | "neutral" | "stale";
+/**
+ * How the claim was established: `observed` (read or measured directly from the source),
+ * `inferred` (concluded by a model from other material), `unknown` (not recorded).
+ */
+export type EvidenceBasis = "observed" | "inferred" | "unknown";
 
 export interface EvidenceManifestEntry {
   id: string;
@@ -3773,6 +4024,9 @@ export interface EvidenceManifestEntry {
   contradictionGroup?: string;
   itemId?: string;
   artifactRevisionId?: string;
+  basis?: EvidenceBasis;
+  /** When the source data was last updated, separate from `capturedAt` (when it was read). */
+  dataAsOf?: number;
   createdAt: number;
 }
 
@@ -4817,6 +5071,21 @@ export interface AnnotationStylePatch {
   notes?: string;
 }
 
+/** What the user wants at the place they pointed to. */
+export type AnnotationIntent = "change" | "comment" | "question";
+
+/**
+ * Values at an annotation's anchor, by key: a style property, `text`, or a cell's A1 address.
+ * Bounded when stored (50 keys, 2,000 characters a value).
+ */
+export type AnnotationValues = Record<string, string>;
+
+/**
+ * A user pointing at a result: where (`targetRef`, the anchor), what they want (`intent`,
+ * `body`), the values there and the ones asked for (`before`, `after`), and, for a file, the
+ * revision they pointed at and the revision that addressed it. While `undoToken` is present the
+ * change can be undone by restoring `artifactRevisionId`.
+ */
 export interface Annotation {
   id: string;
   taskId: string;
@@ -4834,6 +5103,17 @@ export interface Annotation {
   updatedAt: number;
   resolvedAt?: number;
   resolvedByEventId?: string;
+  intent?: AnnotationIntent;
+  before?: AnnotationValues;
+  after?: AnnotationValues;
+  /** The file the change is expected in, when it is not the target file (a new version). */
+  outputPath?: string;
+  /** The revision of the target file the user pointed at. */
+  artifactRevisionId?: string;
+  /** The revision that addressed this annotation. */
+  resultRevisionId?: string;
+  /** Present while the change can be undone; required to undo it. */
+  undoToken?: string;
 }
 
 export interface AnnotationCreateInput {
@@ -4847,6 +5127,18 @@ export interface AnnotationCreateInput {
   artifactId?: string;
   screenshotPath?: string;
   createdBy?: Annotation["createdBy"];
+  intent?: AnnotationIntent;
+  before?: AnnotationValues;
+  after?: AnnotationValues;
+  outputPath?: string;
+}
+
+/** The result of undoing the change that addressed an annotation. */
+export interface AnnotationUndoResult {
+  ok: boolean;
+  annotation?: Annotation;
+  /** Why the change could not be undone. */
+  error?: string;
 }
 
 export interface AnnotationListQuery {
@@ -5848,6 +6140,13 @@ export interface AgentRole {
    * with its files, browser and sign-ins. Unset means a desktop of its own.
    */
   desktopGroup?: string;
+  /** For "Its own desktop": what the desktop may reach on the network. Unset means internet only. */
+  desktopNetwork?: BotDesktopNetwork;
+  /**
+   * Which files its runs work on when nobody started them by hand. Unset means its own folder:
+   * bots are contained by default.
+   */
+  fileAccess?: BotFileAccess;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5902,6 +6201,10 @@ export interface CreateAgentRoleRequest {
   desktopHost?: string;
   /** A shared desktop's name; unset means a desktop of its own. */
   desktopGroup?: string;
+  /** What its own desktop may reach on the network; unset means internet only. */
+  desktopNetwork?: BotDesktopNetwork;
+  /** Which files unattended runs work on; unset means its own folder. */
+  fileAccess?: BotFileAccess;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -5953,6 +6256,10 @@ export interface UpdateAgentRoleRequest {
   desktopHost?: string | null;
   /** A shared desktop's name; null means a desktop of its own. */
   desktopGroup?: string | null;
+  /** What its own desktop may reach on the network; null resets it to internet only. */
+  desktopNetwork?: BotDesktopNetwork | null;
+  /** Which files unattended runs work on; null resets it to its own folder. */
+  fileAccess?: BotFileAccess | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;
@@ -6646,6 +6953,29 @@ export interface ManagedSessionCreateInput {
   };
 }
 
+/** Result of exporting a session handoff package (`cowork.session-handoff`). */
+export interface SessionHandoffExportResult {
+  packageId: string;
+  packageDir: string;
+  manifestPath: string;
+  /** Files copied into the package after their checksum still matched the session record. */
+  artifactsCopied: number;
+  warnings: string[];
+}
+
+/** Result of importing a session handoff package into a new managed session. */
+export interface SessionHandoffImportResult {
+  /** Absent for a dry run, which writes nothing and creates no session. */
+  session?: ManagedSession;
+  packageId: string;
+  /** Files restored (or, for a dry run, that would be restored). */
+  restoredPaths: string[];
+  skipped: string[];
+  /** The checksum guards against damage; who exported the package is not verified. */
+  originVerified: false;
+  dryRun?: boolean;
+}
+
 export interface ManagedSessionUserMessageRequest {
   sessionId: string;
   content: ManagedSessionInputContent[];
@@ -6697,7 +7027,9 @@ export type ManagedSessionEventType =
   | "input.requested"
   | "input.received"
   | "session.completed"
-  | "session.failed";
+  | "session.failed"
+  | "handoff.exported"
+  | "handoff.imported";
 
 export interface ManagedSessionEvent {
   id: string;
@@ -8103,6 +8435,8 @@ export const IPC_CHANNELS = {
   BROWSER_WORKBENCH_CLEAR_DATA: "browserWorkbench:clearData",
   BROWSER_SETTINGS_GET: "browserSettings:get",
   BROWSER_SETTINGS_SAVE: "browserSettings:save",
+  AGENT_IDENTITY_DIRECTORY_GET: "agentIdentity:directoryGet",
+  AGENT_IDENTITY_KEY_ROTATE: "agentIdentity:keyRotate",
   BROWSER_SITE_PERMISSIONS_LIST: "browserSettings:sitePermissionsList",
   BROWSER_SITE_PERMISSIONS_RESET: "browserSettings:sitePermissionsReset",
   BROWSER_SITE_PERMISSIONS_SET: "browserSettings:sitePermissionsSet",
@@ -8115,6 +8449,7 @@ export const IPC_CHANNELS = {
   ANNOTATION_UPDATE: "annotation:update",
   ANNOTATION_RESOLVE: "annotation:resolve",
   ANNOTATION_DISMISS: "annotation:dismiss",
+  ANNOTATION_UNDO: "annotation:undo",
   YOUTUBE_INGEST_VIDEO: "youtube:ingestVideo",
   YOUTUBE_ASK_VIDEO: "youtube:askVideo",
   YOUTUBE_SEARCH_SEGMENTS: "youtube:searchSegments",
@@ -8272,6 +8607,11 @@ export const IPC_CHANNELS = {
   MC_COMPANY_LIST: "missionControl:companyList",
   MC_COMPANY_GET: "missionControl:companyGet",
   MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
+  // Lifecycle hygiene (WP9): list candidates, retire, keep, and edit owner/dependencies/evidence
+  LIFECYCLE_HYGIENE_REPORT: "lifecycle:hygieneReport",
+  LIFECYCLE_RETIRE: "lifecycle:retire",
+  LIFECYCLE_KEEP: "lifecycle:keep",
+  LIFECYCLE_SET_META: "lifecycle:setMeta",
   MC_GOAL_LIST: "missionControl:goalList",
   MC_GOAL_GET: "missionControl:goalGet",
   MC_GOAL_CREATE: "missionControl:goalCreate",
@@ -8805,6 +9145,9 @@ export const IPC_CHANNELS = {
   COMPUTER_USE_OPEN_ACCESSIBILITY: "computerUse:openAccessibility",
   COMPUTER_USE_OPEN_SCREEN_RECORDING: "computerUse:openScreenRecording",
   COMPUTER_USE_EVENT: "computerUse:event",
+  COMPUTER_USE_GET_CUA_SPACE_SETTINGS: "computerUse:getCuaSpaceSettings",
+  COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS: "computerUse:saveCuaSpaceSettings",
+  COMPUTER_USE_TEST_CUA_SPACE: "computerUse:testCuaSpace",
   // Live view of a task's computer in the bot's panel, and take-over by the person
   COMPUTER_VIEW_WATCH: "computerView:watch",
   COMPUTER_VIEW_UNWATCH: "computerView:unwatch",
@@ -8919,6 +9262,7 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",
   MANAGED_SESSION_WORKPAPER_GET_IPC: "managedSession:workpaperGetIpc",
   MANAGED_SESSION_GENERATE_AUDIO_SUMMARY: "managedSession:generateAudioSummary",
+  SESSION_HANDOFF_EXPORT_IPC: "sessionHandoff:exportIpc",
   WORK_CONTEXT_LIST_IPC: "workContext:listIpc",
   WORK_CONTEXT_GET_IPC: "workContext:getIpc",
   WORK_CONTEXT_CREATE_IPC: "workContext:createIpc",
@@ -9072,6 +9416,17 @@ export const IPC_CHANNELS = {
   ANSWER_SURFACE_LOGIC_RUNNER: "answerSurfaces:logicRunner",
   ANSWER_SURFACE_LOAD_DATA: "answerSurfaces:loadData",
 
+  // 3D models in chat (::model{} cards) and the Meshy connector's cards and gallery
+  MODEL3D_READ: "model3d:read",
+  MESHY_STATUS: "meshy:status",
+  MESHY_TASK: "meshy:task",
+  MESHY_FORMATS: "meshy:formats",
+  MESHY_SAVE: "meshy:save",
+  MESHY_ACTIONS: "meshy:actions",
+  MESHY_GALLERY: "meshy:gallery",
+  MESHY_IMAGE: "meshy:image",
+  MESHY_REVEAL: "meshy:reveal",
+
   // Memory folder: the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
   MEMORY_REPO_STATUS: "memoryRepo:status",
   MEMORY_REPO_OPEN_FOLDER: "memoryRepo:openFolder",
@@ -9188,6 +9543,8 @@ export const IPC_CHANNELS = {
   WORKTREE_MERGE: "worktree:merge",
   WORKTREE_CLEANUP: "worktree:cleanup",
   WORKTREE_GET_DIFF: "worktree:getDiff",
+  WORKTREE_RESOLVE_BASE_COMMIT: "worktree:resolveBaseCommit",
+  WORKTREE_MERGE_REVIEW: "worktree:mergeReview",
   WORKTREE_GET_SETTINGS: "worktree:getSettings",
   WORKTREE_SAVE_SETTINGS: "worktree:saveSettings",
 
@@ -11236,6 +11593,21 @@ export interface SkillStatusEntry extends CustomSkill {
   securityReport?: CapabilitySecurityReport;
 }
 
+/**
+ * A skill copy the loader did not use because another copy with the same id won.
+ * - `stale_bundled_copy`: a managed copy that matches a bundled version shipped earlier;
+ *   the current bundled skill is used instead.
+ * - `overridden_by_managed`: a bundled skill the user's own managed skill overrides.
+ */
+export interface ShadowedSkillCopy {
+  id: string;
+  name: string;
+  filePath: string;
+  source: SkillSource;
+  reason: "stale_bundled_copy" | "overridden_by_managed";
+  activeSource: SkillSource;
+}
+
 // Status report for all skills
 export interface SkillStatusReport {
   workspaceDir: string;
@@ -11243,6 +11615,7 @@ export interface SkillStatusReport {
   bundledSkillsDir: string;
   externalSkillDirs: string[];
   skills: SkillStatusEntry[];
+  shadowedSkills?: ShadowedSkillCopy[];
   summary: {
     total: number;
     eligible: number;

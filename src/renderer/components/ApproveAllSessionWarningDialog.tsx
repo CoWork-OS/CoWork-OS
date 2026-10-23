@@ -19,18 +19,12 @@ export function ApproveAllSessionWarningDialog({
       aria-labelledby="approve-all-warning-title"
       aria-describedby="approve-all-warning-desc"
     >
-      <div className="session-approval-card session-approval-card--warning">
-        <div className="session-approval-heading">
-          <span className="session-approval-icon" aria-hidden="true">
-            ⚠️
-          </span>
-          <h3 id="approve-all-warning-title" className="session-approval-title">
-            Warning: approve all requests?
-          </h3>
-        </div>
-        <p id="approve-all-warning-desc" className="session-approval-prompt">
-          This will auto-approve every future request in this session. Only enable this if you fully
-          trust the active tasks.
+      <div className="session-approval-card session-approval-card--minimal session-approval-card--warning">
+        <h3 id="approve-all-warning-title" className="session-approval-title">
+          Auto-approve every request in this session?
+        </h3>
+        <p id="approve-all-warning-desc" className="session-approval-meta">
+          Only turn this on if you fully trust the active tasks.
         </p>
 
         <div className="session-approval-actions session-approval-actions--warning">

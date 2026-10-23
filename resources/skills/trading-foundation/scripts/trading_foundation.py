@@ -207,7 +207,11 @@ def _normalize_mode_from_prompt(prompt: str) -> Optional[str]:
 
 def _extract_float(prompt: str, keys: List[str]) -> Optional[float]:
     for key in keys:
-        match = re.search(rf"{re.escape(key)}[^0-9\\-+.]*([-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))", prompt, flags=re.IGNORECASE)
+        match = re.search(
+            rf"{re.escape(key)}[^0-9\-+.]*([-+]?(?:\d+(?:\.\d+)?|\.\d+))",
+            prompt,
+            flags=re.IGNORECASE,
+        )
         if match:
             try:
                 return float(match.group(1))
@@ -224,7 +228,9 @@ def _extract_int(prompt: str, keys: List[str]) -> Optional[int]:
 
 
 def _extract_csv_paths(prompt: str) -> List[str]:
-    matches = re.findall(r"(?:[\"'])([^\"']+\\.csv)|([^\\s]+\\.csv)", prompt, flags=re.IGNORECASE)
+    matches = re.findall(
+        r'''["']([^"']+\.csv)["']|([^\s"']+\.csv)''', prompt, flags=re.IGNORECASE
+    )
     return [match[0] if match[0] else match[1] for match in matches]
 
 
@@ -272,7 +278,7 @@ def _extract_symbol(prompt: str) -> Optional[str]:
 
 
 def _build_human_mode_args(prompt: str) -> Optional[List[str]]:
-    raw = prompt.strip().strip('"\'')
+    raw = prompt.strip()
     if not raw:
         return None
 
@@ -316,8 +322,15 @@ def _build_human_mode_args(prompt: str) -> Optional[List[str]]:
             args.extend(["--statarb-z-exit", str(value)])
         if (value := _extract_float(raw, ["stop z", "z stop", "statarb stop", "statarb z stop"])) is not None:
             args.extend(["--statarb-z-stop", str(value)])
-        if re.search(r"\bstatarb\b", raw, flags=re.IGNORECASE):
+        if re.search(r"\bstat[-\s]?arb\b", raw, flags=re.IGNORECASE):
             args.extend(["--strategy-mode", "stat-arb"])
+            pair_symbol = re.search(
+                r"\bpair[-\s]symbol\s+([A-Za-z0-9]{2,10}/[A-Za-z0-9]{2,10})\b",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if pair_symbol:
+                args.extend(["--pair-symbol", pair_symbol.group(1).upper()])
         elif re.search(r"\bmomentum-only\b|\bonly momentum\b", raw, flags=re.IGNORECASE):
             args.extend(["--strategy-mode", "momentum-only"])
         elif re.search(r"\bmomentum\b", raw, flags=re.IGNORECASE):

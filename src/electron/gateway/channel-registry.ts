@@ -58,6 +58,7 @@ import { createLogger } from "../utils/logger";
 import {
   assertSafeLoomMailboxFolder,
   isSecureOrLocalLoomUrl,
+  LOOM_BASE_URL_SECURITY_MESSAGE,
   normalizeEmailProtocol,
 } from "../utils/loom";
 import { getUnsupportedManualEmailSetupMessage } from "../../shared/email-provider-support";
@@ -1602,7 +1603,7 @@ export class ChannelRegistry extends EventEmitter {
           errors.push("Missing required field: loomBaseUrl");
         }
         if (typeof config.loomBaseUrl === "string" && !isSecureOrLocalLoomUrl(config.loomBaseUrl)) {
-          errors.push("Invalid LOOM base URL: must use HTTPS unless using localhost/127.0.0.1/::1");
+          errors.push(LOOM_BASE_URL_SECURITY_MESSAGE);
         }
         if (!config.loomAccessToken) {
           errors.push("Missing required field: loomAccessToken");

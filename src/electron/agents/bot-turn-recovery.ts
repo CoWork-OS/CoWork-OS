@@ -4,7 +4,8 @@ import type { TaskEvent, TaskFollowUpInput } from "../../shared/types";
 export function findUnfinishedBotUserTurn(
   events: TaskEvent[],
 ): Pick<TaskFollowUpInput, "message" | "messageSource" | "messageId"> | undefined {
-  const index = events.findLastIndex((event) => event.type === "user_message");
+  let index = events.length - 1;
+  while (index >= 0 && events[index].type !== "user_message") index--;
   if (index < 0) return undefined;
   const payload = events[index].payload as Record<string, unknown>;
   const message = typeof payload?.message === "string" ? payload.message.trim() : "";

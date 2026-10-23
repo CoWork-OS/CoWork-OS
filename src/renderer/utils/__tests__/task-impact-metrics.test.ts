@@ -21,6 +21,23 @@ function event(
 }
 
 describe("task impact metrics", () => {
+  it("does not count a write whose outcome is unknown as a change", () => {
+    const metrics = deriveTaskImpactMetrics({
+      events: [
+        event("call", 1, "tool_call", { tool: "write_file", input: { path: "report.md" } }),
+        event("unknown", 2, "tool_error", {
+          tool: "write_file",
+          error: "Outcome unknown: write_file may have completed (Tool write_file timed out)",
+          outcome: "unknown",
+          idempotencyKey: "key-1",
+        }),
+      ],
+      taskStatus: "completed",
+    });
+    expect(metrics.some((metric) => metric.kind === "files_changed")).toBe(false);
+    expect(metrics.some((metric) => metric.kind === "artifacts_created")).toBe(false);
+  });
+
   it("uses typed canonical evidence and never parses prose counts", () => {
     const metrics = deriveTaskImpactMetrics({
       events: [

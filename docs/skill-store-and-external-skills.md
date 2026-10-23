@@ -165,12 +165,16 @@ How it works:
 
 Precedence order:
 
-- workspace skills
+- workspace skills (`<workspace>/skills/*.json`)
 - managed skills
 - external skill directories
 - bundled skills
 
 This means a local workspace override or a managed install can replace a shared external skill with the same ID.
+
+Workspace skills apply per task: a task loads the `skills/` folder of its own workspace on top of the shared skills, and tasks in other workspaces never see them. A skill saved into that folder (for example an approved skill proposal) applies to the task's next skill lookup without a restart. `{baseDir}` in a workspace skill points at `<workspace>/skills/<skill-id>/` when that folder exists.
+
+One exception keeps bundled updates reaching users: a managed skill that is an unmodified copy of a bundled skill version CoWork shipped earlier (older app versions saved such copies when creating sample skills, saving edits or toggles, or installing a bundled ID from SkillHub) does not hide the bundled skill. The current bundled skill is used, the copy's off switch is kept, and the set-aside copy is listed in **Settings → Skills → Status**. A managed skill with any change of its own, or with its own companion folder, keeps overriding the bundled one and is marked "Overrides built-in". The shipped versions are recorded in `src/electron/agent/bundled-skill-lineage.json`; run `npm run skills:lineage` after changing a bundled or registry skill manifest (`npm run skills:check` fails until the current version is recorded).
 
 Default locations:
 

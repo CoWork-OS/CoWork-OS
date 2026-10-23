@@ -14,10 +14,10 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 
 **CoWork OS approach:**
 
-- Native Electron app with workspace boundaries
-- All file operations constrained to selected workspace folder
-- Path traversal protection prevents escape attempts
-- VM sandbox using macOS Virtualization.framework (planned)
+- Native Electron app with task access profiles and protected paths
+- File access constrained by the workspace, approved roots, and profile rules
+- Path traversal and symlink checks at filesystem boundaries
+- Command execution uses an available backend that can enforce the requested profile; unsupported restricted boundaries fail closed. See [Access Profiles](docs/access-profiles.md).
 
 ### 2. How are messaging credentials stored?
 
@@ -32,7 +32,7 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 - OS keychain integration via Electron's `safeStorage`
 - Credentials encrypted using the operating system's secure storage
 - No plain text credential storage
-- API keys never sent to external services (except the configured LLM provider)
+- Credentials are supplied to configured provider and integration destinations when required for authorized operations
 
 ### 3. What protection exists against unauthorized access?
 
@@ -61,8 +61,8 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 
 - **Dangerous command blocking**: Built-in patterns block `sudo`, `rm -rf /`, `mkfs`, fork bombs, etc.
 - **Custom patterns**: Add your own regex patterns to block specific commands
-- **Approval workflows**: Shell commands require explicit user approval before execution
-- **Auto-approve trusted commands**: Optionally skip approval for safe commands (e.g., `npm test`, `git status`)
+- **Approval workflows**: Command access and approval behavior follow the selected task access profile
+- **Boundary exceptions**: Interactive tasks surface eligible policy requests as durable inline approval cards; automated tasks without a human-input channel fail closed. See the [Security Guide](docs/security-guide.md).
 
 ### 5. Are there resource limits to prevent runaway tasks?
 
@@ -104,8 +104,7 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 
 **CoWork OS approach:**
 
-- **135 security unit tests** for access control and policy enforcement
-- **259 WebSocket protocol tests** for API security
+- **Security regression suites** for access control, policy enforcement, and transport boundaries; see [Running Security Tests](SECURITY_GUIDE.md#running-security-tests) for current commands
 - **Monotonic policy precedence**: Deny-wins across all security layers
 - **Open source**: Full codebase available for audit
 - **Responsible disclosure**: Security advisory process for vulnerability reports
@@ -141,7 +140,7 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 | Token/cost budgets         | Cost control         | Configurable       |
 | Iteration limits           | Loop prevention      | Configurable       |
 | Domain allowlist           | Browser safety       | Optional           |
-| Security tests             | Verification         | 160+ tests         |
+| Security tests             | Verification         | Automated suites   |
 | Open source                | Auditability         | MIT license        |
 
 ---

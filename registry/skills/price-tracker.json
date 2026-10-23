@@ -1,10 +1,10 @@
 {
   "id": "price-tracker",
   "name": "Price Tracker",
-  "description": "Track and compare prices across e-commerce websites using stealth scraping.",
+  "description": "Track and compare prices across e-commerce websites using web scraping.",
   "icon": "💰",
   "category": "Data",
-  "prompt": "# Price Tracker\n\nTrack and compare product prices across e-commerce websites.\n\n## Instructions\n\n1. Check Scrapling availability with `scraping_status`\n2. Scrape the product page(s): {{urls}}\n3. Use `stealth` fetcher (e-commerce sites often have anti-bot protection)\n4. Extract:\n   - Product name\n   - Current price\n   - Original price (if on sale)\n   - Availability/stock status\n   - Seller/vendor name\n   - Any ratings or review counts\n5. Use `scrape_extract` with extract_type: 'custom' and selectors targeting price elements\n6. If a single URL, provide detailed product info\n7. If multiple URLs, create a comparison table\n\n## Output Format\n\nPresent findings in a clear markdown table:\n| Product | Price | Original | Savings | In Stock | Source |\n|---------|-------|----------|---------|----------|--------|\n\nInclude any notable deals or recommendations.",
+  "prompt": "# Price Tracker\n\nTrack and compare product prices across e-commerce websites.\n\n## Instructions\n\n1. Check Scrapling availability with `scraping_status`\n2. Scrape the product page(s): {{urls}}\n3. Use the `default` fetcher, or `playwright` for JavaScript-rendered pages. If a site blocks automated access, report it instead of working around it\n4. Extract:\n   - Product name\n   - Current price\n   - Original price (if on sale)\n   - Availability/stock status\n   - Seller/vendor name\n   - Any ratings or review counts\n5. Use `scrape_extract` with extract_type: 'custom' and selectors targeting price elements\n6. If a single URL, provide detailed product info\n7. If multiple URLs, create a comparison table\n\n## Output Format\n\nPresent findings in a clear markdown table:\n| Product | Price | Original | Savings | In Stock | Source |\n|---------|-------|----------|---------|----------|--------|\n\nInclude any notable deals or recommendations.",
   "parameters": [
     {
       "name": "urls",

@@ -71,11 +71,12 @@ CoWork-OSS uses JSON files for skills. Each skill is a `.json` file with the fol
 
 ### Skill Sources
 
-Skills are loaded from three locations (highest precedence wins):
+Skills are loaded from these sources (highest precedence wins):
 
 1. **Workspace** (`workspace/skills/`) - User's project skills
-2. **Managed** (`~/Library/Application Support/cowork-oss/skills/`) - From SkillHub
-3. **Bundled** (`resources/skills/`) - Pre-packaged with app
+2. **Managed** (`~/Library/Application Support/cowork-os/skills/` on macOS) - Installed through CoWork
+3. **External directories** - Optional configured skill directories; managed skills win ID collisions
+4. **Bundled** (`resources/skills/`) - Pre-packaged with app
 
 ---
 
@@ -342,30 +343,16 @@ At this point, it is time to actually create the skill.
 
 Skip this step only if the skill being developed already exists, and iteration or packaging is needed. In this case, continue to the next step.
 
-When creating a new skill from scratch, always run the `init_skill.py` script. The script conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
+Create `skills/<skill-name>.json` in the user's workspace using the CoWork JSON
+format above. For supporting files, create a sibling `skills/<skill-name>/`
+directory with only the `scripts/`, `references/`, and `assets/` content needed
+by the workflow. Use `{baseDir}` in the prompt to reference those bundled files.
+For a Markdown skill imported from another ecosystem, create `SKILL.md` with its
+name, description, and instructions, then use CoWork's external-skill import flow.
 
-Usage:
-
-```bash
-scripts/init_skill.py <skill-name> --path <output-directory> [--resources scripts,references,assets] [--examples]
-```
-
-Examples:
-
-```bash
-scripts/init_skill.py my-skill --path skills/public
-scripts/init_skill.py my-skill --path skills/public --resources scripts,references
-scripts/init_skill.py my-skill --path skills/public --resources scripts --examples
-```
-
-The script:
-
-- Creates the skill directory at the specified path
-- Generates a SKILL.md template with proper frontmatter and TODO placeholders
-- Optionally creates resource directories based on `--resources`
-- Optionally adds example files when `--examples` is set
-
-After initialization, customize the SKILL.md and add resources as needed. If you used `--examples`, replace or delete placeholder files.
+This CoWork port does not bundle the upstream initialization helper. Do not
+instruct the user to run an unavailable generator. Remove template placeholders
+and verify every referenced file exists before loading or sharing the skill.
 
 ### Step 4: Edit the Skill
 
@@ -373,12 +360,10 @@ When editing the (newly-generated or existing) skill, remember that the skill is
 
 #### Learn Proven Design Patterns
 
-Consult these helpful guides based on your skill's needs:
-
-- **Multi-step processes**: See references/workflows.md for sequential workflows and conditional logic
-- **Specific output formats or quality standards**: See references/output-patterns.md for template and example patterns
-
-These files contain established best practices for effective skill design.
+For multi-step processes, put ordered actions, decision points and recovery rules
+in the skill's instructions. For specific output formats, include a concrete
+template or example in the skill's own references. This port does not bundle the
+upstream workflow or output-pattern guide files.
 
 #### Start with Reusable Skill Contents
 
@@ -410,29 +395,15 @@ Write instructions for using the skill and its bundled resources.
 
 ### Step 5: Packaging a Skill
 
-Once development of the skill is complete, it must be packaged into a distributable .skill file that gets shared with the user. The packaging process automatically validates the skill first to ensure it meets all requirements:
+Share a compatible JSON manifest or a Git repository containing the manifest and
+its supporting directory. CoWork's Skill Store can import JSON URLs and compatible
+Git or raw `SKILL.md` sources. This port does not bundle an upstream `.skill` ZIP
+packager; do not claim a ZIP has been generated or validated by CoWork.
 
-```bash
-scripts/package_skill.py <path/to/skill-folder>
-```
-
-Optional output directory specification:
-
-```bash
-scripts/package_skill.py <path/to/skill-folder> ./dist
-```
-
-The packaging script will:
-
-1. **Validate** the skill automatically, checking:
-   - YAML frontmatter format and required fields
-   - Skill naming conventions and directory structure
-   - Description completeness and quality
-   - File organization and resource references
-
-2. **Package** the skill if validation passes, creating a .skill file named after the skill (e.g., `my-skill.skill`) that includes all files and maintains the proper directory structure for distribution. The .skill file is a zip file with a .skill extension.
-
-If validation fails, the script will report the errors and exit without creating a package. Fix any validation errors and run the packaging command again.
+For contributions in the CoWork repository, run `npm run skills:check` from the
+repository root. For a workspace skill, verify it appears in the skill list,
+exercise its intended task and routing boundaries, and test every helper it uses.
+Keep required binaries and environment variables declared in the manifest.
 
 ### Step 6: Iterate
 

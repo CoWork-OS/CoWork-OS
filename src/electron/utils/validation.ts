@@ -5,10 +5,12 @@
 
 import * as path from "path";
 import {
+  BOT_DESKTOP_NETWORK_VALUES,
   BOT_WORKS_ON_VALUES,
   DESKTOP_GROUP_PATTERN,
   DESKTOP_HOST_PATTERN,
 } from "../../shared/bot-computer";
+import { BOT_FILE_ACCESS_VALUES } from "../../shared/bot-containment";
 import { z } from "zod";
 import { isSpaceRelativePath, isSpaceTemplate } from "../../shared/space-sandbox";
 import {
@@ -23,6 +25,7 @@ import {
   CoreTraceKind,
   CoreTraceStatus,
   LLM_PROVIDER_TYPES,
+  MESSAGE_SURFACE_ORIGINS,
   isTempWorkspaceId,
   PersonalityId,
   TaskStatus,
@@ -31,7 +34,11 @@ import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
 import { CHANNEL_TYPES } from "../../shared/gateway-channel-types";
 import { validateGatewayOwnerIds } from "../../shared/gateway-owner-ids";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../shared/guardrail-defaults";
-import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
+import {
+  assertSafeLoomMailboxFolder,
+  isSecureOrLocalLoomUrl,
+  LOOM_BASE_URL_SECURITY_MESSAGE,
+} from "./loom";
 
 // Common validation patterns
 const _MAX_STRING_LENGTH = 10000;
@@ -105,6 +112,10 @@ export const AgentRoleDesktopHostSchema = z
   })
   .transform((value) => value || null)
   .nullable();
+/** Which files a bot's unattended runs work on; null resets it to its own folder. */
+export const AgentRoleFileAccessSchema = z.enum(BOT_FILE_ACCESS_VALUES).nullable();
+/** What a bot's own desktop may reach on the network; null resets it to internet only. */
+export const AgentRoleDesktopNetworkSchema = z.enum(BOT_DESKTOP_NETWORK_VALUES).nullable();
 /** A shared desktop's name; null or empty means a desktop of its own. */
 export const AgentRoleDesktopGroupSchema = z
   .string()
@@ -306,6 +317,16 @@ export const AgentConfigSchema = z
     requireWorktree: z.boolean().optional(),
     worktreeMode: z.enum(["local", "worktree"]).optional(),
     worktreeBaseBranch: z.string().trim().min(1).max(250).optional(),
+    worktreeBaseCommit: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/i)
+      .optional(),
+    compareGroupId: z
+      .string()
+      .regex(/^[A-Za-z0-9-]{8,64}$/)
+      .optional(),
+    compareVariant: z.number().int().min(1).max(8).optional(),
+    compareCheckCommand: z.string().trim().min(1).max(500).optional(),
     autoApproveTypes: z.array(z.string().min(1).max(200)).max(50).optional(),
     allowSharedContextMemory: z.boolean().optional(),
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),
@@ -565,7 +586,7 @@ export const TaskMessageSchema = z
         truncated: z.boolean().optional(),
       })
       .optional(),
-    surfaceOrigin: z.enum(["answer", "page", "code_block"]).optional(),
+    surfaceOrigin: z.enum(MESSAGE_SURFACE_ORIGINS).optional(),
     permissionMode: PermissionModeSchema.optional(),
     shellAccess: z.boolean().optional(),
     accessProfileId: AccessProfileIdSchema.optional(),
@@ -1237,6 +1258,17 @@ export const SearchSettingsSchema = z.object({
     })
     .optional(),
 });
+
+// ============ Cua Space Settings Schema ============
+
+export const CuaSpaceSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    url: z.string().max(2000).optional(),
+    // null clears the stored token; omitted keeps it.
+    token: z.string().max(4000).nullable().optional(),
+  })
+  .strict();
 
 // ============ Notion Settings Schema ============
 
@@ -1957,7 +1989,7 @@ const validateEmailChannelConfigByProtocol = (
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [fieldMap.loomBaseUrl],
-        message: "LOOM base URL must use HTTPS unless it points to localhost/127.0.0.1/::1",
+        message: LOOM_BASE_URL_SECURITY_MESSAGE,
       });
     }
 

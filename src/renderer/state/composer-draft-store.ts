@@ -3,10 +3,12 @@ import {
   createEmptyComposerDraft,
   normalizeComposerDraft,
   type ComposerDraft,
+  type ComposerDraftAttachmentPutRequest,
   type ComposerDraftClearRequest,
   type ComposerDraftGetRequest,
   type ComposerDraftKeyInput,
   type ComposerDraftScope,
+  type DraftAttachmentRef,
 } from "../../shared/composer-drafts";
 
 export interface ComposerDraftTransport {
@@ -16,6 +18,7 @@ export interface ComposerDraftTransport {
     cleared: boolean;
     releasedAttachments: number;
   }>;
+  putAttachment?: (request: ComposerDraftAttachmentPutRequest) => Promise<unknown>;
 }
 
 export type ComposerDraftListener = (draft: ComposerDraft | null) => void;
@@ -236,22 +239,37 @@ export class ComposerDraftStore {
     };
     const key = buildComposerDraftKey(input);
     if (key !== submittedDraft.draftKey) return false;
-    return this.clearAfterAcceptedAtKey(input, key, submittedRevision);
+    return this.clearAfterAcceptedAtKey(input, key, submittedRevision, submittedDraft);
   }
 
   private async clearAfterAcceptedAtKey(
     input: ComposerDraftKeyInput,
     key: string,
     submittedRevision: number,
+    submittedDraft?: ComposerDraft,
   ): Promise<boolean> {
     const pendingClear = this.clearChains.get(key);
     if (pendingClear) {
       await pendingClear.catch(() => false);
-      return this.clearAfterAcceptedAtKey(input, key, submittedRevision);
+      return this.clearAfterAcceptedAtKey(input, key, submittedRevision, submittedDraft);
     }
 
     const current = this.drafts.get(key);
-    if (!current || current.revision !== submittedRevision) return false;
+    if (!current) return false;
+    const submitted =
+      current.revision === submittedRevision
+        ? current
+        : submittedDraft?.revision === submittedRevision
+          ? submittedDraft
+          : null;
+    if (!submitted) return false;
+    // Automatic patches (attachment status, mention cleanup) can land between
+    // the send and this clear. They carry the accepted prompt forward, so they
+    // are not newer user input; only what differs from the submission is kept.
+    if (current.revision !== submittedRevision && this.keepUnsentRemainder(key, submitted)) {
+      return false;
+    }
+    const clearRevision = current.revision;
     const timer = this.timers.get(key);
     if (timer) {
       clearTimeout(timer);
@@ -259,7 +277,7 @@ export class ComposerDraftStore {
     }
 
     const pendingWrite = this.writeChains.get(key);
-    const clear = this.finishAcceptedClear(input, key, submittedRevision, pendingWrite);
+    const clear = this.finishAcceptedClear(input, key, clearRevision, submitted, pendingWrite);
     this.clearChains.set(key, clear);
     try {
       return await clear;
@@ -271,7 +289,8 @@ export class ComposerDraftStore {
   private async finishAcceptedClear(
     input: ComposerDraftKeyInput,
     key: string,
-    submittedRevision: number,
+    clearRevision: number,
+    submitted: ComposerDraft,
     pendingWrite?: Promise<void>,
   ): Promise<boolean> {
     // Any load that started before acceptance must not be allowed to restore
@@ -282,31 +301,123 @@ export class ComposerDraftStore {
     // before deleting the persisted row; otherwise that older upsert can
     // finish after the delete and resurrect the accepted draft.
     if (pendingWrite) await pendingWrite.catch(() => undefined);
-    if (this.drafts.get(key)?.revision !== submittedRevision) return false;
+    if (
+      this.drafts.get(key)?.revision !== clearRevision &&
+      this.keepUnsentRemainder(key, submitted)
+    ) {
+      return false;
+    }
 
     if (this.transport.clear) {
-      const result = await this.transport.clear({
+      // The persisted row may hold any revision up to the local one, all of
+      // which only carry the accepted prompt.
+      await this.transport.clear({
         draftKey: key,
         scope: input.scope,
         workspaceId: input.workspaceId,
         surface: input.surface ?? "main",
         taskId: input.taskId ?? null,
         ...(input.remoteDeviceId ? { remoteDeviceId: input.remoteDeviceId } : {}),
-        revision: submittedRevision,
+        revision: Math.max(clearRevision, this.drafts.get(key)?.revision ?? 0),
       });
       // A draft can be accepted before its debounce timer has reached the
-      // database. In that case the main process has nothing to delete, but the
-      // renderer must still discard the accepted in-memory revision. Recheck
-      // the revision after the IPC round-trip so a newer edit remains safe.
-      if (!result.cleared && this.drafts.get(key)?.revision !== submittedRevision) {
-        return false;
-      }
+      // database, so "nothing to delete" still discards the accepted local
+      // revision. A newer edit made during the round-trip keeps only what the
+      // user added after the send.
     }
-    if (this.drafts.get(key)?.revision !== submittedRevision) return false;
+    if (
+      this.drafts.get(key)?.revision !== clearRevision &&
+      this.keepUnsentRemainder(key, submitted)
+    ) {
+      return false;
+    }
     this.drafts.delete(key);
     this.dirtyRevisions.delete(key);
     this.emit(key, null);
     return true;
+  }
+
+  /**
+   * Replace the local draft with whatever was added after `submitted` was
+   * sent. Returns false when nothing remains, so the caller discards it.
+   */
+  private keepUnsentRemainder(key: string, submitted: ComposerDraft): boolean {
+    const latest = this.drafts.get(key);
+    if (!latest) return false;
+    const textChanged = latest.text !== submitted.text;
+    const sentRefIds = new Set(submitted.attachments.map((attachment) => attachment.refId));
+    const remainder: ComposerDraft = {
+      ...latest,
+      text: textChanged ? latest.text : "",
+      mentions: textChanged ? latest.mentions : [],
+      quotedAssistantMessage: textChanged ? latest.quotedAssistantMessage : undefined,
+      attachments: latest.attachments.filter((attachment) => !sentRefIds.has(attachment.refId)),
+    };
+    if (isEmptyComposerDraft(remainder)) return false;
+    if (
+      remainder.text === latest.text &&
+      remainder.attachments.length === latest.attachments.length
+    ) {
+      return true;
+    }
+    const next = { ...remainder, revision: latest.revision + 1, updatedAt: this.now() };
+    this.drafts.set(key, next);
+    this.dirtyRevisions.set(key, next.revision);
+    this.emit(key, next);
+    this.schedulePersist(key);
+    return true;
+  }
+
+  /**
+   * Move an unsent draft to another owner, such as a new session whose folder
+   * changed. The source is cleared so it cannot resurface there later (for
+   * example when the app reopens the last scratch workspace on launch).
+   */
+  async carry(from: ComposerDraftKeyInput, to: ComposerDraftKeyInput): Promise<boolean> {
+    const fromKey = buildComposerDraftKey(from);
+    const toKey = buildComposerDraftKey(to);
+    const source = this.drafts.get(fromKey);
+    if (fromKey === toKey || !source || isEmptyComposerDraft(source)) return false;
+    await this.flush(fromKey);
+
+    const attachments: DraftAttachmentRef[] = [];
+    for (const attachment of source.attachments) {
+      const copied = await this.copyAttachment(attachment, from, fromKey, to, toKey);
+      if (copied) attachments.push(copied);
+    }
+    this.update(to, {
+      text: source.text,
+      mentions: source.mentions,
+      quotedAssistantMessage: source.quotedAssistantMessage,
+      attachments,
+    });
+    await this.clearAfterAccepted(from, this.drafts.get(fromKey)?.revision ?? source.revision);
+    return true;
+  }
+
+  private async copyAttachment(
+    attachment: DraftAttachmentRef,
+    from: ComposerDraftKeyInput,
+    fromKey: string,
+    to: ComposerDraftKeyInput,
+    toKey: string,
+  ): Promise<DraftAttachmentRef | null> {
+    if (!this.transport.putAttachment) return null;
+    try {
+      const result = await this.transport.putAttachment({
+        ...toOwnerRequest(to, toKey),
+        name: attachment.name,
+        size: attachment.size,
+        ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        copyFrom: { ...toOwnerRequest(from, fromKey), refId: attachment.refId },
+      });
+      const ref = result as DraftAttachmentRef | null;
+      return ref && typeof ref.refId === "string" ? ref : null;
+    } catch {
+      // A file that can no longer be copied is dropped, like any other
+      // unavailable draft attachment; the text still moves.
+      return null;
+    }
   }
 
   async flushAll(): Promise<void> {
@@ -329,12 +440,33 @@ export class ComposerDraftStore {
   }
 }
 
+function isEmptyComposerDraft(draft: ComposerDraft): boolean {
+  return (
+    !draft.text.trim() &&
+    draft.mentions.length === 0 &&
+    draft.attachments.length === 0 &&
+    !draft.quotedAssistantMessage
+  );
+}
+
+function toOwnerRequest(input: ComposerDraftKeyInput, draftKey: string) {
+  return {
+    draftKey,
+    scope: input.scope,
+    workspaceId: input.workspaceId,
+    surface: input.surface ?? "main",
+    taskId: input.taskId ?? null,
+    ...(input.remoteDeviceId ? { remoteDeviceId: input.remoteDeviceId } : {}),
+  };
+}
+
 export function createWindowComposerDraftTransport(): ComposerDraftTransport {
   const api = typeof window !== "undefined" ? window.electronAPI : undefined;
   return {
     get: api?.getComposerDraft,
     upsert: api?.upsertComposerDraft,
     clear: api?.clearComposerDraft,
+    putAttachment: api?.putComposerDraftAttachment,
   };
 }
 

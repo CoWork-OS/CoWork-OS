@@ -68,6 +68,12 @@ request-level sequence. SessionRuntime then:
 
 This means tool-local guidance is attached only to tools the current task can actually see.
 
+The intent filter treats the admin lane differently from the rest:
+
+- **Admin-lane tools** (persona, behavioral rules, expertise, lore, heartbeat, integration setup) are matched against the user's own words only (`userText`). That is the task prompt when it is marked `user_typed`, plus the latest follow-up marked `user_typed`.
+- **Every other lane** reads the wider task text, which includes the agent's last output and plan step.
+- **Nothing else opens the admin lane.** Required tools, recent use and task allowlists don't. See [Agent Self-Modification Gates](security/self-modification-gates.md).
+
 The render-context inputs include:
 
 - execution mode

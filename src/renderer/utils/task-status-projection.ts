@@ -128,10 +128,16 @@ export function deriveRevisionAwarePlanSteps(events: TaskEvent[]): PlanStep[] {
   const history = events.map((event, index) => ({ event, index })).sort(compareEventOrder);
   // A terminal task's follow-up starts a new run; its historical plan is not
   // the follow-up's live progress. Ordinary checkpoint resumes retain the plan.
-  const runStart = history.findLastIndex(
-    ({ event }) =>
-      getEffectiveTaskEventType(event) === "task_resumed" && event.payload?.newRunStarted === true,
-  );
+  let runStart = history.length - 1;
+  while (runStart >= 0) {
+    const { event } = history[runStart];
+    if (
+      getEffectiveTaskEventType(event) === "task_resumed" &&
+      event.payload?.newRunStarted === true
+    )
+      break;
+    runStart--;
+  }
   const ordered = runStart >= 0 ? history.slice(runStart) : history;
   let steps: PlanStep[] = [];
   let selectedRevision = -1;

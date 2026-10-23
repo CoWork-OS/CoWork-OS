@@ -1,5 +1,5 @@
 import type { Components } from "react-markdown";
-import { Suspense } from "react";
+import { Suspense, lazy } from "react";
 import { LazyMarkdownRenderer } from "./lazy-renderers";
 import { InlineHtmlPreview, InlineHtmlSourcePreview } from "./InlineHtmlPreview";
 // Shared with the plain-text fallback, so both agree on what counts as a rendered page.
@@ -14,6 +14,12 @@ import {
 } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceBlock } from "./AnswerSurface/AnswerSurface";
 import { CodeBlockRunScopeContext, type CodeBlockRunTarget } from "../utils/code-block-runs";
+import { isMeshyTaskId } from "../../shared/meshy";
+
+// three.js is large: load the 3D card only when a reply has one.
+const ModelCard = lazy(() =>
+  import("./Model3D/ModelCard").then((module) => ({ default: module.ModelCard })),
+);
 
 type AssistantMessageContentProps = {
   message: string;
@@ -45,6 +51,13 @@ type HtmlDirective = {
   title?: string;
 };
 
+type ModelDirective = {
+  path?: string;
+  /** A Meshy task id: the card shows its progress, then its model. */
+  task?: string;
+  title?: string;
+};
+
 type FrameDirective = {
   path?: string;
   title?: string;
@@ -64,6 +77,8 @@ type MessageSegment =
   | { type: "frame"; directive: FrameDirective; raw: string }
   | { type: "frame_source"; html: string; directive: FrameDirective; raw: string }
   | { type: "html_error"; raw: string; error: string }
+  | { type: "model"; directive: ModelDirective; raw: string }
+  | { type: "model_error"; raw: string; error: string }
   | { type: "answer_surface"; source: string; closed: boolean; key: string; raw: string };
 
 function DeferredMarkdown({ children, components }: { children: string; components?: Components }) {
@@ -77,6 +92,7 @@ function DeferredMarkdown({ children, components }: { children: string; componen
 const VIDEO_DIRECTIVE_LINE_REGEX = /^\s*::video\{(.+)\}\s*$/;
 const HTML_DIRECTIVE_LINE_REGEX = /^\s*::html\{(.+)\}\s*$/;
 const FRAME_DIRECTIVE_LINE_REGEX = /^\s*::frame\{(.+)\}\s*$/;
+const MODEL_DIRECTIVE_LINE_REGEX = /^\s*::model\{(.+)\}\s*$/;
 const RICH_FRAME_TAG_LINE_REGEX = /^\s*<rich-frame\b([^>]*)>(?:\s*<\/rich-frame>)?\s*$/i;
 const RICH_FRAME_CLOSE_LINE_REGEX = /^\s*<\/rich-frame>\s*$/i;
 const HTML_FENCE_START_REGEX = /^\s*```(?:html|HTML)\s*$/;
@@ -375,6 +391,47 @@ function parseHtmlDirective(line: string): MessageSegment {
   };
 }
 
+function parseModelDirective(line: string): MessageSegment {
+  const match = line.match(MODEL_DIRECTIVE_LINE_REGEX);
+  if (!match) {
+    return { type: "markdown", content: line };
+  }
+
+  const attrs = match[1];
+  const parsed: Record<string, string> = {};
+  let attrMatch: RegExpExecArray | null;
+
+  DIRECTIVE_ATTR_REGEX.lastIndex = 0;
+  while ((attrMatch = DIRECTIVE_ATTR_REGEX.exec(attrs)) !== null) {
+    const rawValue = attrMatch[2];
+    if (rawValue === "true" || rawValue === "false") {
+      return { type: "model_error", raw: line, error: "3D model embed has no boolean attributes" };
+    }
+    parsed[attrMatch[1]] = decodeQuotedValue(rawValue).trim();
+  }
+
+  if (attrs.replace(DIRECTIVE_ATTR_REGEX, "").trim().length > 0) {
+    return { type: "model_error", raw: line, error: "Invalid 3D model directive syntax" };
+  }
+  const path = parsed.path || undefined;
+  const task = parsed.task || undefined;
+  if (!path && !task) {
+    return { type: "model_error", raw: line, error: "3D model embed requires a path or a task" };
+  }
+  if (path && !/\.(glb|gltf)$/i.test(path)) {
+    return { type: "model_error", raw: line, error: "3D model embeds show .glb or .gltf files" };
+  }
+  if (task && !isMeshyTaskId(task)) {
+    return { type: "model_error", raw: line, error: "Unknown 3D model task id" };
+  }
+
+  return {
+    type: "model",
+    raw: line,
+    directive: { path, task, title: parsed.title || undefined },
+  };
+}
+
 function parseFrameDirective(
   line: string,
   options: { requirePath?: boolean } = {},
@@ -530,6 +587,16 @@ export function parseAssistantMessageSegments(message: string): MessageSegment[]
       }
       continue;
     }
+    if (line.trimStart().startsWith("::model{")) {
+      flushMarkdown();
+      const parsed = parseModelDirective(line);
+      if (parsed.type === "markdown") {
+        markdownBuffer.push(line);
+      } else {
+        segments.push(parsed);
+      }
+      continue;
+    }
     if (line.trimStart().startsWith("::html{")) {
       flushMarkdown();
       const parsed = parseHtmlDirective(line);
@@ -657,6 +724,33 @@ export function AssistantMessageContent({
           return (
             <div key={`video-error-${index}`} className="assistant-video-error">
               {segment.error}
+            </div>
+          );
+        }
+
+        if (segment.type === "model_error") {
+          return (
+            <div key={`model-error-${index}`} className="assistant-html-error">
+              {segment.error}
+            </div>
+          );
+        }
+
+        if (segment.type === "model") {
+          return (
+            <div key={`model-${index}`} className="assistant-model-embed">
+              <Suspense
+                fallback={<div className="model-card model-card-line">Loading 3D viewer…</div>}
+              >
+                <ModelCard
+                  path={segment.directive.path}
+                  taskId={segment.directive.task}
+                  title={segment.directive.title}
+                  workspacePath={workspacePath}
+                  chatTaskId={taskId}
+                  streaming={streaming}
+                />
+              </Suspense>
             </div>
           );
         }

@@ -45,6 +45,10 @@ import { MemoryFeaturesManager } from "../electron/settings/memory-features-mana
 import { MemoryService } from "../electron/memory/MemoryService";
 import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../electron/mcp/settings";
+import { ControlPlaneSettingsManager } from "../electron/control-plane/settings";
+import { AGENT_CARD_PATH, buildCoworkAgentCard } from "../electron/agent-card/agent-card";
+import { buildTaskEstimate } from "../electron/agent-card/task-estimate";
+import { estimateTaskCost, estimateTaskDuration } from "../electron/agent/llm/usage-telemetry";
 import { DEFAULT_MCP_SETTINGS } from "../electron/mcp/types";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
 import { frontmatterString, parseFrontmatterBlock } from "../electron/utils/skill-frontmatter";
@@ -131,6 +135,9 @@ interface DirectRunArgs extends PactDirectArgs {
     | "skills-list"
     | "skills-info"
     | "skills-audit"
+    | "agent-card"
+    | "agent-card-publish"
+    | "task-plan-estimate"
     | "models-list"
     | "backup-create"
     | "backup-restore"
@@ -684,6 +691,15 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         break;
       case "--skills-list":
         args.command = "skills-list";
+        break;
+      case "--agent-card":
+        args.command = "agent-card";
+        break;
+      case "--agent-card-publish":
+        args.command = "agent-card-publish";
+        break;
+      case "--task-plan-estimate":
+        args.command = "task-plan-estimate";
         break;
       case "--skills-info":
         args.command = "skills-info";
@@ -1326,6 +1342,11 @@ async function runLocalMetadataCommand(
     case "skills-info":
     case "skills-audit":
       return await skillsCommand(new SkillRepository(db), args);
+    case "agent-card":
+    case "agent-card-publish":
+      return await agentCardCommand(args);
+    case "task-plan-estimate":
+      return await taskPlanEstimateCommand(args);
     case "models-list":
       return modelsCommand(new LLMModelRepository(db), args);
     case "providers-fallback-list":
@@ -1893,6 +1914,69 @@ async function mcpTestCommand(args: DirectRunArgs): Promise<number> {
       : "No MCP servers configured.",
   );
   return statuses.some((status) => status.status === "error") ? 1 : 0;
+}
+
+/**
+ * `cowork agent-card`: CoWork's own A2A card from this profile's skills, connectors and model
+ * (WP16); `publish on|off` serves it at /.well-known/agent-card.json on the Control Plane.
+ */
+async function agentCardCommand(args: DirectRunArgs): Promise<number> {
+  if (args.command === "agent-card-publish") {
+    const value = String(args.name || "").toLowerCase();
+    if (value !== "on" && value !== "off") {
+      throw new Error("Usage: cowork agent-card publish on|off");
+    }
+    ControlPlaneSettingsManager.updateSettings({ publishAgentCard: value === "on" });
+    writeEvent(
+      args,
+      { type: "agent_card_publish", published: value === "on" },
+      value === "on"
+        ? `The Control Plane now serves the agent card at ${AGENT_CARD_PATH} (it names your skills and connectors).`
+        : `The Control Plane no longer serves ${AGENT_CARD_PATH}.`,
+    );
+    return 0;
+  }
+  const skills = (await readOnlySkillStatus(args)).skills.filter((skill) => !skill.disabled);
+  const providerStatus = LLMProviderFactory.getConfigStatus();
+  const pkg = await readPackageInfo();
+  const card = buildCoworkAgentCard({
+    version: String(pkg.version || ""),
+    skills,
+    mcpServers: MCPSettingsManager.loadSettings().servers.map((server) => ({
+      id: server.id,
+      name: server.name,
+      enabled: server.enabled,
+      tools: server.tools ?? [],
+    })),
+    model: { provider: providerStatus.currentProvider, modelId: providerStatus.currentModel },
+  });
+  const published = ControlPlaneSettingsManager.loadSettings().publishAgentCard === true;
+  writeEvent(
+    args,
+    { type: "agent_card", published, card },
+    `${JSON.stringify(card, null, 2)}\n${
+      published
+        ? `Published at ${AGENT_CARD_PATH} on the Control Plane.`
+        : `Not published. Turn it on with: cowork agent-card publish on`
+    }`,
+  );
+  return 0;
+}
+
+/** `cowork task plan --estimate`: cost and duration from this profile's history (WP16). */
+async function taskPlanEstimateCommand(args: DirectRunArgs): Promise<number> {
+  const providerStatus = LLMProviderFactory.getConfigStatus();
+  const modelId = String(args.model || providerStatus.currentModel || "").trim();
+  if (!modelId) throw new Error("No model is configured; pass --model <id>.");
+  const estimate = buildTaskEstimate({
+    prompt: args.prompt || "",
+    modelId,
+    provider: args.model ? null : providerStatus.currentProvider,
+    cost: await estimateTaskCost(modelId),
+    duration: await estimateTaskDuration(modelId),
+  });
+  writeEvent(args, { type: "task_estimate", estimate }, estimate.summary);
+  return 0;
 }
 
 async function skillsCommand(skillRepo: SkillRepository, args: DirectRunArgs): Promise<number> {

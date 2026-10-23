@@ -7,6 +7,14 @@ import type {
 import type { Workspace } from "../../shared/types";
 import { createBrowserFileBridge } from "./browser-file-bridge";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 const writableWorkspace: Workspace = {
   id: "workspace-1",
   name: "Project",
@@ -258,8 +266,8 @@ describe("browser file bridge", () => {
       draftKey: "local:workspace-1:main:task-1",
       taskId: "task-1",
     };
-    const readStarted = Promise.withResolvers<void>();
-    const readDone = Promise.withResolvers<ArrayBuffer>();
+    const readStarted = deferred<void>();
+    const readDone = deferred<ArrayBuffer>();
     const originalArrayBuffer = file.arrayBuffer.bind(file);
     Object.defineProperty(file, "arrayBuffer", {
       configurable: true,
@@ -338,8 +346,8 @@ describe("browser file bridge", () => {
     const selectionPromise = bridge.api.selectFiles();
     setPickedFiles([file]);
     const [selection] = await selectionPromise;
-    const readStarted = Promise.withResolvers<void>();
-    const readDone = Promise.withResolvers<ArrayBuffer>();
+    const readStarted = deferred<void>();
+    const readDone = deferred<ArrayBuffer>();
     const originalArrayBuffer = file.arrayBuffer.bind(file);
     Object.defineProperty(file, "arrayBuffer", {
       configurable: true,

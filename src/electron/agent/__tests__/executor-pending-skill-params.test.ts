@@ -6,6 +6,9 @@ const mockGetSkill = vi.fn();
 
 vi.mock("../custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
+    forWorkspace() {
+      return this;
+    },
     getSkill: mockGetSkill,
   }),
 }));

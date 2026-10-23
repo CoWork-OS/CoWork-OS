@@ -81,6 +81,28 @@ describe("shared policy-checked redirects", () => {
     expect(decisions).toEqual([`${a.origin}/start`, `${b.origin}/final`]);
   });
 
+  it("computes hop headers per hop, so a signature never follows a redirect", async () => {
+    seen.length = 0;
+    const hops: string[] = [];
+    await fetchWithPolicyCheckedRedirects(
+      `${a.origin}/start`,
+      { headers: { Accept: "application/json" } },
+      {
+        toolName: "test",
+        networkContext: context,
+        publicHeaders: { Accept: "application/json" },
+        hopHeaders: (url) => {
+          hops.push(url.host);
+          return { Signature: `sig=:${url.host}:`, "User-Agent": "CoWork-OS/test" };
+        },
+      },
+    );
+    expect(hops).toEqual([new URL(a.origin).host, new URL(b.origin).host]);
+    expect(seen[0]?.headers.signature).toBe(`sig=:${new URL(a.origin).host}:`);
+    expect(seen[1]?.headers.signature).toBe(`sig=:${new URL(b.origin).host}:`);
+    expect(seen[1]?.headers["user-agent"]).toBe("CoWork-OS/test");
+  });
+
   it("refuses a cross-origin redirect that would carry a body", async () => {
     await expect(
       fetchWithPolicyCheckedRedirects(

@@ -20,6 +20,7 @@ import { createLogger } from "../utils/logger";
 import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sql";
 import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
 import { ensureMemoryCurationSchema } from "../memory/memory-curation-log-sql";
+import { ensureMemorySourcesSchema } from "../memory/memory-source-sql";
 import { ensureKnowledgeGraphQualitySchema } from "../knowledge-graph/knowledge-graph-maintenance-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
@@ -3357,6 +3358,9 @@ export class DatabaseManager {
 
         CREATE INDEX IF NOT EXISTS idx_work_session_contracts_status
           ON work_session_outcome_contracts(session_id, status, version DESC);
+        -- Verified AWU reads each completed task's latest outcome contract.
+        CREATE INDEX IF NOT EXISTS idx_work_session_outcome_contracts_task
+          ON work_session_outcome_contracts(task_id, version DESC);
 
         CREATE TABLE IF NOT EXISTS work_session_constraints (
           id TEXT PRIMARY KEY,
@@ -3399,6 +3403,8 @@ export class DatabaseManager {
           item_id TEXT,
           artifact_revision_id TEXT,
           idempotency_key TEXT,
+          basis TEXT,
+          data_as_of INTEGER,
           created_at INTEGER NOT NULL,
           UNIQUE (session_id, idempotency_key),
           FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
@@ -3527,6 +3533,14 @@ export class DatabaseManager {
     for (const statement of [
       "ALTER TABLE work_session_artifact_revisions ADD COLUMN idempotency_key TEXT",
       "ALTER TABLE work_session_wait_states ADD COLUMN idempotency_key TEXT",
+      // Point at the result: an annotation's intent, values, and the revisions it links.
+      "ALTER TABLE annotations ADD COLUMN intent TEXT",
+      "ALTER TABLE annotations ADD COLUMN before_json TEXT",
+      "ALTER TABLE annotations ADD COLUMN after_json TEXT",
+      "ALTER TABLE annotations ADD COLUMN output_path TEXT",
+      "ALTER TABLE annotations ADD COLUMN artifact_revision_id TEXT",
+      "ALTER TABLE annotations ADD COLUMN result_revision_id TEXT",
+      "ALTER TABLE annotations ADD COLUMN undo_token TEXT",
     ]) {
       try {
         this.db.exec(statement);
@@ -3624,6 +3638,69 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_work_session_metrics_workspace_recorded
           ON work_session_operational_metrics(workspace_id, recorded_at DESC);
 
+        -- Durable attempts of tool calls that write or whose effect is unknown (WP4).
+        CREATE TABLE IF NOT EXISTS tool_attempts (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          step_id TEXT,
+          tool_name TEXT NOT NULL,
+          args_hash TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          effect TEXT NOT NULL,
+          target TEXT,
+          status TEXT NOT NULL,
+          reason TEXT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tool_attempts_task
+          ON tool_attempts(task_id, started_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_tool_attempts_status
+          ON tool_attempts(status, task_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_attempts_key
+          ON tool_attempts(task_id, idempotency_key);
+
+        -- Lifecycle of generated software: owner, use, dependencies, retire/keep (WP9).
+        CREATE TABLE IF NOT EXISTS lifecycle_meta (
+          kind TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          owner TEXT,
+          created_by_task TEXT,
+          last_used_at INTEGER,
+          use_count INTEGER NOT NULL DEFAULT 0,
+          depends_on_json TEXT,
+          protects TEXT,
+          evidence TEXT,
+          retired_at INTEGER,
+          kept_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (kind, item_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_lifecycle_meta_retired
+          ON lifecycle_meta(kind, retired_at);
+
+        -- Shared-change coordination: which task is changing which file (WP11).
+        CREATE TABLE IF NOT EXISTS resource_claims (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          resource_key TEXT NOT NULL,
+          resource_label TEXT NOT NULL,
+          intent TEXT,
+          isolated INTEGER NOT NULL DEFAULT 0,
+          family_root TEXT NOT NULL,
+          claimed_at INTEGER NOT NULL,
+          UNIQUE (task_id, resource_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_resource_claims_resource
+          ON resource_claims(workspace_id, resource_key);
+        CREATE INDEX IF NOT EXISTS idx_resource_claims_claimed_at
+          ON resource_claims(claimed_at);
+
         CREATE TABLE IF NOT EXISTS work_session_rollout_config (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           enabled INTEGER NOT NULL DEFAULT 1,
@@ -3634,6 +3711,18 @@ export class DatabaseManager {
           updated_at INTEGER NOT NULL
         );
       `);
+      // Evidence basis and source data time (WP5) on profiles created before them.
+      const evidenceColumns = new Set(
+        (this.db.pragma("table_info(work_session_evidence)") as Array<{ name?: string }>).map(
+          (column) => column.name,
+        ),
+      );
+      if (!evidenceColumns.has("basis")) {
+        this.db.exec("ALTER TABLE work_session_evidence ADD COLUMN basis TEXT");
+      }
+      if (!evidenceColumns.has("data_as_of")) {
+        this.db.exec("ALTER TABLE work_session_evidence ADD COLUMN data_as_of INTEGER");
+      }
       const rolloutColumns = this.db
         .prepare("PRAGMA table_info(work_session_rollout_config)")
         .all() as Array<{ name?: string }>;
@@ -4441,6 +4530,10 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN desktop_host TEXT",
       // For "Its own desktop": a shared desktop's name (null = a desktop of its own).
       "ALTER TABLE agent_roles ADD COLUMN desktop_group TEXT",
+      // Which files unattended runs work on (own_folder, workspace; null = own_folder).
+      "ALTER TABLE agent_roles ADD COLUMN file_access TEXT",
+      // For "Its own desktop": what it may reach on the network (internet, off; null = internet).
+      "ALTER TABLE agent_roles ADD COLUMN desktop_network TEXT",
     ];
 
     for (const sql of missionControlColumns) {
@@ -5916,6 +6009,26 @@ export class DatabaseManager {
       }
     }
 
+    // Who wrote the task's title and prompt (Task.promptProvenance). Existing rows stay NULL:
+    // a task created before this column existed does not count its prompt as the user's words,
+    // so only what the user types next can expose the admin-lane tools.
+    for (const statement of ["ALTER TABLE tasks ADD COLUMN prompt_provenance TEXT"]) {
+      try {
+        this.db.exec(statement);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/duplicate column name|already exists/i.test(msg)) {
+          continue; // Expected when column exists
+        }
+        schemaLogger.error(
+          "[DatabaseManager] Migration failed (schema may be inconsistent):",
+          statement,
+          msg,
+        );
+        throw err;
+      }
+    }
+
     // Orchestration runs: DAG-based sub-agent orchestration persistence
     try {
       this.db.exec(`
@@ -6669,6 +6782,15 @@ export class DatabaseManager {
           feedback_accepted INTEGER NOT NULL DEFAULT 0,
           feedback_rejected INTEGER NOT NULL DEFAULT 0,
           awu_completed_ok INTEGER NOT NULL DEFAULT 0,
+          awu_verified_ok INTEGER NOT NULL DEFAULT 0,
+          awu_verified_by_contract INTEGER NOT NULL DEFAULT 0,
+          awu_partial INTEGER NOT NULL DEFAULT 0,
+          awu_needs_user_action INTEGER NOT NULL DEFAULT 0,
+          intervention_approval_decisions INTEGER NOT NULL DEFAULT 0,
+          intervention_input_answers INTEGER NOT NULL DEFAULT 0,
+          intervention_steering_messages INTEGER NOT NULL DEFAULT 0,
+          provider_escalations INTEGER NOT NULL DEFAULT 0,
+          rework_runs INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (workspace_id, date_key),
           FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
         );
@@ -6746,6 +6868,35 @@ export class DatabaseManager {
       `);
     } catch {
       // Usage insights rollup tables already exist, ignore.
+    }
+    try {
+      // Verified AWU and intervention counts (WP7) on profiles created before them. The
+      // projector's schema version bump rebuilds the rollups that fill them.
+      const dayColumns = new Set(
+        (this.db.pragma("table_info(usage_insights_day)") as Array<{ name?: string }>).map(
+          (column) => column.name,
+        ),
+      );
+      for (const column of [
+        "awu_verified_ok",
+        "awu_verified_by_contract",
+        "awu_partial",
+        "awu_needs_user_action",
+        "intervention_approval_decisions",
+        "intervention_input_answers",
+        "intervention_steering_messages",
+        "provider_escalations",
+        "rework_runs",
+      ]) {
+        if (!dayColumns.has(column)) {
+          this.db.exec(
+            `ALTER TABLE usage_insights_day ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
+          );
+        }
+      }
+    } catch (error) {
+      // Reports fall back to the live scan when the rollup cannot be extended.
+      schemaLogger.warn("Could not extend usage_insights_day:", error);
     }
     try {
       this.db.exec(`
@@ -8202,6 +8353,12 @@ export class DatabaseManager {
       ensureMemoryCurationSchema(this.db);
     } catch (error) {
       schemaLogger.warn("[DatabaseManager] memory curation schema initialization failed:", error);
+    }
+    // WP15: where a memory came from, so a changed source flags it for a recheck.
+    try {
+      ensureMemorySourcesSchema(this.db);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] memory sources schema initialization failed:", error);
     }
   }
 

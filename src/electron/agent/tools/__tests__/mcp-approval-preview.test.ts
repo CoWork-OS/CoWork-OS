@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAssistantApprovalRequest } from "../../assistant-approval";
-import { buildMcpApprovalPresentation } from "../mcp-approval-preview";
+import { buildMcpApprovalPresentation, withMcpCostLines } from "../mcp-approval-preview";
 
 const NAME_CHANGE = {
   workersId: "693618e08cc11000cb2ec622bc370001",
@@ -49,5 +49,34 @@ describe("buildMcpApprovalPresentation", () => {
     expect(question.question).toContain("to call Workday with the arguments shown below?");
     expect(question.preview?.label).toBe("Arguments");
     expect(question.preview?.text).toContain('"firstName": "Logan Test"');
+  });
+});
+
+describe("costed MCP calls", () => {
+  it("puts the cost above the arguments", () => {
+    const presentation = buildMcpApprovalPresentation(
+      "mcp_meshy_text_to_3d",
+      "Meshy",
+      { prompt: "a treasure chest" },
+      ["Costs 5–25 credits.", "Spend limit for this task on Meshy: 200 credits."],
+    );
+    expect(presentation.approvalPreview).toEqual({
+      label: "Cost and arguments",
+      text:
+        "Costs 5–25 credits.\nSpend limit for this task on Meshy: 200 credits.\n\n" +
+        JSON.stringify({ prompt: "a treasure chest" }, null, 2),
+    });
+  });
+
+  it("shows the cost alone for a call with no arguments", () => {
+    const presentation = buildMcpApprovalPresentation("mcp_meshy_rig", "Meshy", {}, [
+      "Costs about 5 credits.",
+    ]);
+    expect(presentation.approvalPreview).toEqual({ label: "Cost", text: "Costs about 5 credits." });
+  });
+
+  it("leaves a connector's own preview alone when the call has no cost", () => {
+    const preview = { label: "Described by Jira", text: "Create PROJ-1" };
+    expect(withMcpCostLines(preview, [])).toBe(preview);
   });
 });

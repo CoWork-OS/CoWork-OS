@@ -1,3 +1,4 @@
+import "./file-discovery-test-worker";
 /**
  * Tests for GrepTools - regex content search
  */
@@ -23,6 +24,7 @@ vi.mock("electron", () => ({
 }));
 
 // Import after mocking
+import { GrepDiscovery } from "../grep-discovery";
 import { GrepTools } from "../grep-tools";
 import { BoundedRegex, RegexDeadlineError } from "../bounded-regex";
 import { Workspace } from "../../../../shared/types";
@@ -89,8 +91,9 @@ describe("GrepTools", () => {
     },
   );
   it("bounds combinatorial glob expansion", async () => {
-    const tool = new GrepTools(mockWorkspace, mockDaemon as Any, "test-task-id");
-    expect(() => (tool as Any).globToRegex("{a,b}".repeat(20))).toThrow("expansion limit");
+    expect(() => (new GrepDiscovery(mockWorkspace) as Any).globToRegex("{a,b}".repeat(20))).toThrow(
+      "expansion limit",
+    );
   });
   let grepTools: GrepTools;
 
@@ -243,7 +246,7 @@ describe("GrepTools", () => {
 
   describe("glob pattern conversion", () => {
     it("should handle double-star and extensions", () => {
-      const regex = (grepTools as Any).globToRegex("**/*.md");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("**/*.md");
 
       expect(regex.test("README.md")).toBe(true);
       expect(regex.test("docs/guide.md")).toBe(true);
@@ -251,7 +254,7 @@ describe("GrepTools", () => {
     });
 
     it("should handle brace expansion", () => {
-      const regex = (grepTools as Any).globToRegex("**/*.{md,txt}");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("**/*.{md,txt}");
 
       expect(regex.test("docs/readme.md")).toBe(true);
       expect(regex.test("docs/readme.txt")).toBe(true);
@@ -259,7 +262,7 @@ describe("GrepTools", () => {
     });
 
     it("should handle nested directories with double-star", () => {
-      const regex = (grepTools as Any).globToRegex("**/src/**/*.ts");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("**/src/**/*.ts");
 
       expect(regex.test("src/index.ts")).toBe(true);
       expect(regex.test("packages/core/src/utils/helper.ts")).toBe(true);
@@ -267,14 +270,14 @@ describe("GrepTools", () => {
     });
 
     it("should handle single-star wildcard", () => {
-      const regex = (grepTools as Any).globToRegex("*.ts");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("*.ts");
 
       expect(regex.test("index.ts")).toBe(true);
       expect(regex.test("src/index.ts")).toBe(false);
     });
 
     it("should handle question mark wildcard", () => {
-      const regex = (grepTools as Any).globToRegex("file?.ts");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("file?.ts");
 
       expect(regex.test("file1.ts")).toBe(true);
       expect(regex.test("fileA.ts")).toBe(true);
@@ -282,7 +285,7 @@ describe("GrepTools", () => {
     });
 
     it("should escape special regex characters", () => {
-      const regex = (grepTools as Any).globToRegex("test[1].ts");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("test[1].ts");
 
       expect(regex.test("test[1].ts")).toBe(true);
       expect(regex.test("test1.ts")).toBe(false);
@@ -291,37 +294,37 @@ describe("GrepTools", () => {
 
   describe("globPatternToRegex", () => {
     it("should convert double-star followed by slash correctly", () => {
-      const result = (grepTools as Any).globPatternToRegex("**/foo");
+      const result = (new GrepDiscovery(mockWorkspace) as Any).globPatternToRegex("**/foo");
 
       expect(result).toBe("(?:.*/)?foo");
     });
 
     it("should convert double-star at end correctly", () => {
-      const result = (grepTools as Any).globPatternToRegex("src/**");
+      const result = (new GrepDiscovery(mockWorkspace) as Any).globPatternToRegex("src/**");
 
       expect(result).toBe("src/.*");
     });
 
     it("should convert single-star correctly", () => {
-      const result = (grepTools as Any).globPatternToRegex("*.ts");
+      const result = (new GrepDiscovery(mockWorkspace) as Any).globPatternToRegex("*.ts");
 
       expect(result).toBe("[^/]*\\.ts");
     });
 
     it("should handle double-star alone", () => {
-      const result = (grepTools as Any).globPatternToRegex("**");
+      const result = (new GrepDiscovery(mockWorkspace) as Any).globPatternToRegex("**");
 
       expect(result).toBe(".*");
     });
 
     it("should handle empty pattern", () => {
-      const result = (grepTools as Any).globPatternToRegex("");
+      const result = (new GrepDiscovery(mockWorkspace) as Any).globPatternToRegex("");
 
       expect(result).toBe("");
     });
 
     it("should handle pattern with multiple double-stars", () => {
-      const regex = (grepTools as Any).globToRegex("**/src/**/test/**/*.ts");
+      const regex = (new GrepDiscovery(mockWorkspace) as Any).globToRegex("**/src/**/test/**/*.ts");
 
       expect(regex.test("src/test/file.ts")).toBe(true);
       expect(regex.test("pkg/src/utils/test/unit/spec.ts")).toBe(true);
@@ -656,6 +659,9 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
     });
 
     expect(matchedFiles(result)).toEqual(["src/app.ts"]);
+    await (new GrepDiscovery({ ...mockWorkspace, path: dir }) as Any).listGitIgnoredPaths(
+      path.join(dir, "src"),
+    );
     expect(gitCalls()).toHaveLength(1);
     const [, args, options] = gitCalls()[0] as unknown as [string, string[], { cwd: string }];
     expect(args.slice(0, 2)).toEqual([
@@ -720,6 +726,7 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
 
     expect(result.success).toBe(true);
     expect(matchedFiles(result)).toEqual(["app.ts"]);
+    await (new GrepDiscovery({ ...mockWorkspace, path: dir }) as Any).listGitIgnoredPaths(dir);
     expect(gitCalls()).toEqual([]);
   });
 
@@ -732,6 +739,9 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
     const result = await toolFor(worktree).grep({ pattern: "needle", outputMode: "files_only" });
 
     expect(matchedFiles(result)).toEqual(["kept.txt"]);
+    await (new GrepDiscovery({ ...mockWorkspace, path: worktree }) as Any).listGitIgnoredPaths(
+      worktree,
+    );
     expect(gitCalls()).toHaveLength(1);
     expect(gitCalls()[0][1]).toEqual(
       expect.arrayContaining([
@@ -768,6 +778,7 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
     });
 
     expect(matchedFiles(result)).toEqual(["sub/kept.txt"]);
+    await (new GrepDiscovery({ ...mockWorkspace, path: dir }) as Any).listGitIgnoredPaths(sub);
     expect(gitCalls()).toHaveLength(1);
     expect(gitCalls()[0][1]).toEqual(
       expect.arrayContaining([

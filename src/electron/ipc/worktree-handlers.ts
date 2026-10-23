@@ -1,6 +1,8 @@
 import { ipcMain } from "electron";
-import { IPC_CHANNELS, type WorktreeWorkspaceInfo } from "../../shared/types";
+import { IPC_CHANNELS, type MergeReview, type WorktreeWorkspaceInfo } from "../../shared/types";
 import { GitService } from "../git/GitService";
+import { buildMergeReview } from "../git/merge-review";
+import { TaskEventReplayRepository } from "../database/repository-facades";
 import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import type { AgentDaemon } from "../agent/daemon";
 import {
@@ -32,6 +34,8 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_MERGE, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_CLEANUP, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_GET_DIFF, RATE_LIMIT_CONFIGS.standard);
+  rateLimiter.configure(IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT, RATE_LIMIT_CONFIGS.standard);
+  rateLimiter.configure(IPC_CHANNELS.WORKTREE_MERGE_REVIEW, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_GET_SETTINGS, RATE_LIMIT_CONFIGS.frequent);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 
@@ -148,6 +152,62 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     return await worktreeManager.getDiffStats(validatedTaskId);
   });
+
+  // Build Compare: resolve the starting branch to one commit, so every variant starts from it.
+  ipcMain.handle(
+    IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT,
+    async (_, data: unknown): Promise<{ commit: string }> => {
+      checkRateLimit(IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT);
+      const input = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+      const id = validateInput(WorkspaceIdSchema, input.workspaceId, "workspace ID");
+      const branch =
+        typeof input.branch === "string" && input.branch.trim() && input.branch.length <= 250
+          ? input.branch.trim()
+          : undefined;
+      const workspace = agentDaemon.getWorkspaceById(id);
+      if (!workspace) throw new Error("Workspace not found");
+      assertWorkspaceFilesystemAccess(workspace, workspace.path, "read", "worktree repository");
+      const repoPath = await GitService.getRepoRoot(workspace.path);
+      if (branch && !(await GitService.getLocalBranches(repoPath)).includes(branch)) {
+        throw new Error(`Starting branch "${branch}" is unavailable.`);
+      }
+      return { commit: await GitService.resolveCommit(repoPath, { branch }) };
+    },
+  );
+
+  // Worktree changes waiting to merge, grouped by intent, with combined-state checks.
+  ipcMain.handle(
+    IPC_CHANNELS.WORKTREE_MERGE_REVIEW,
+    async (_, workspaceId: unknown): Promise<MergeReview> => {
+      checkRateLimit(IPC_CHANNELS.WORKTREE_MERGE_REVIEW);
+      const id = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
+      const workspace = agentDaemon.getWorkspaceById(id);
+      if (!workspace) throw new Error("Workspace not found");
+      assertWorkspaceFilesystemAccess(workspace, workspace.path, "read", "worktree repository");
+      const events = new TaskEventReplayRepository(agentDaemon.getDatabase());
+      return buildMergeReview(id, {
+        listWorktrees: (workspace) => worktreeManager.listForWorkspace(workspace),
+        getTask: (taskId) => agentDaemon.getTaskById(taskId),
+        diffStats: (info) => GitService.getDiffStats(info.worktreePath, info.baseBranch),
+        changedFiles: (info) => GitService.getChangedFiles(info.worktreePath, info.baseBranch),
+        latestCheck: async (taskId) => {
+          const [latest] = await events.findByTaskIdAndTypes(
+            taskId,
+            ["verification_passed", "verification_failed"],
+            1,
+          );
+          if (!latest) return undefined;
+          const type = latest.legacyType || latest.type;
+          const message =
+            typeof latest.payload?.message === "string"
+              ? latest.payload.message.slice(0, 300)
+              : undefined;
+          return { passed: type === "verification_passed", ...(message ? { message } : {}) };
+        },
+        mergeConflicts: (repoPath, a, b) => GitService.mergeConflicts(repoPath, a, b),
+      });
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.WORKTREE_GET_SETTINGS, async () => {
     checkRateLimit(IPC_CHANNELS.WORKTREE_GET_SETTINGS);

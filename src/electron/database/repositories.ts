@@ -12,7 +12,7 @@ import {
   type ChannelDecisionResolutionGuard,
 } from "../gateway/ChannelDecisionStore";
 import { approvalRequestRevisionHash } from "../agent/approval-revision";
-import { APPROVAL_REQUEST_TIMEOUT_MS } from "../agent/approval-timeouts";
+import { APPROVAL_REQUEST_TIMEOUT_MS, approvalGrantUsable } from "../agent/approval-timeouts";
 import { assertBotFutureAdmission } from "../automation/BotWorkControlStore";
 import {
   assertGraphTaskAdmission,
@@ -27,6 +27,12 @@ import {
 import { assertSchedulerFence } from "../automation/scheduler-lease-store";
 import { commitDispatchReservation } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
+import { isBotWorkspaceId } from "../../shared/bot-containment";
+import {
+  clearAnnotationUndo,
+  recordAnnotationResult,
+  setAnnotationBaseRevision,
+} from "./annotation-results-sql";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
@@ -38,6 +44,7 @@ import {
 } from "../memory/memory-retention";
 import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
 import {
+  prepareApprovalInputLinkByApproval,
   prepareApprovalInputLinkInsert,
   prepareApprovalInputLinkLookup,
   prepareApprovalResponsibilityReviewGate,
@@ -88,9 +95,11 @@ import {
   Artifact,
   Annotation,
   AnnotationCreateInput,
+  AnnotationIntent,
   AnnotationListQuery,
   AnnotationStatus,
   AnnotationUpdateInput,
+  AnnotationValues,
   Workspace,
   ApprovalRequest,
   PersistedPermissionRule,
@@ -291,6 +300,7 @@ export class WorkspaceStore {
     return row ? this.mapRowToWorkspace(row) : undefined;
   }
 
+  /** Every workspace except bots' own folders, which only their bots' tasks use. */
   findAll(): Workspace[] {
     const stmt = this.db.prepare(`
       SELECT *
@@ -298,7 +308,9 @@ export class WorkspaceStore {
       ORDER BY COALESCE(last_used_at, created_at) DESC
     `);
     const rows = stmt.all() as Any[];
-    return rows.map((row) => this.mapRowToWorkspace(row));
+    return rows
+      .filter((row) => !isBotWorkspaceId(row.id))
+      .map((row) => this.mapRowToWorkspace(row));
   }
 
   /**
@@ -855,11 +867,14 @@ export class TaskStore {
     ) {
       throw new Error("Task id must be a UUID.");
     }
-    const { id: _id, ...taskInput } = task;
+    const { id: _id, promptProvenance, ...taskInput } = task;
     void _id;
     const normalizedTask = TaskStore.normalizePromptFields(taskInput);
     const newTask: Task = {
       ...normalizedTask,
+      // Who wrote the prompt is fixed here and never updated (it is not an update field). Only
+      // the exact marker is kept: anything else means the user did not write the prompt.
+      ...(promptProvenance === "user_typed" ? { promptProvenance } : {}),
       id: requestedId || uuidv4(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -891,8 +906,8 @@ export class TaskStore {
     }
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, verification_verdict, verification_report, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code, assigned_agent_role_id, worker_role, semantic_summary, target_node_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, verification_verdict, verification_report, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code, assigned_agent_role_id, worker_role, semantic_summary, target_node_id, prompt_provenance)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -953,6 +968,7 @@ export class TaskStore {
       newTask.workerRole || null,
       newTask.semanticSummary || null,
       newTask.targetNodeId || null,
+      newTask.promptProvenance ?? null,
     );
     if (graphAdmission) linkGraphTaskAdmission(this.db, graphAdmission, newTask.id);
     persistResponsibilityTaskRun(this.db, newTask);
@@ -1325,12 +1341,18 @@ export class TaskStore {
 
   search(
     query: string,
-    options?: { workspaceId?: string; limit?: number; includeArchivedSessions?: boolean },
+    options?: {
+      workspaceId?: string;
+      limit?: number;
+      offset?: number;
+      includeArchivedSessions?: boolean;
+    },
   ): Task[] {
     const normalizedQuery = typeof query === "string" ? query.trim().slice(0, 120) : "";
     if (!normalizedQuery) return [];
 
     const limit = Math.min(100, Math.max(1, Math.floor(options?.limit || 20)));
+    const offset = Math.max(0, Math.floor(options?.offset || 0));
     const escapedQuery = normalizedQuery.replace(/[\\%_]/g, (character) => `\\${character}`);
     const like = `%${escapedQuery}%`;
     const conditions = [
@@ -1354,9 +1376,9 @@ export class TaskStore {
         `SELECT * FROM tasks
          WHERE ${conditions.join(" AND ")}
          ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC
-         LIMIT ?`,
+         LIMIT ? OFFSET ?`,
       )
-      .all(...args, limit) as Any[];
+      .all(...args, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -2101,6 +2123,7 @@ export class TaskStore {
       billingCode: row.billing_code || undefined,
       semanticSummary: row.semantic_summary || undefined,
       targetNodeId: row.target_node_id || undefined,
+      promptProvenance: row.prompt_provenance === "user_typed" ? "user_typed" : undefined,
     });
   }
 
@@ -4079,6 +4102,7 @@ export class TaskTraceRepository {
 
   listTaskTraceRuns(
     request: import("../../shared/types").ListTaskTraceRunsRequest = {},
+    visibleTasks?: Task[],
   ): TaskTraceRunSummary[] {
     const limit =
       typeof request.limit === "number" && Number.isFinite(request.limit)
@@ -4090,9 +4114,12 @@ export class TaskTraceRepository {
         ? request.workspaceId.trim()
         : "";
 
-    const tasks = workspaceId
-      ? this.taskRepo.findByWorkspace(workspaceId, scanLimit, 0)
-      : this.taskRepo.findAll(scanLimit, 0);
+    const tasks =
+      visibleTasks !== undefined
+        ? visibleTasks.filter((task) => !workspaceId || task.workspaceId === workspaceId)
+        : workspaceId
+          ? this.taskRepo.findByWorkspace(workspaceId, scanLimit, 0)
+          : this.taskRepo.findAll(scanLimit, 0);
 
     return buildTaskTraceRunSummaries(tasks, { ...request, limit });
   }
@@ -4202,6 +4229,29 @@ const ANNOTATION_STATUSES: AnnotationStatus[] = [
   "dismissed",
 ];
 
+const ANNOTATION_INTENTS: AnnotationIntent[] = ["change", "comment", "question"];
+const MAX_ANNOTATION_VALUE_KEYS = 50;
+const MAX_ANNOTATION_VALUE_LENGTH = 2_000;
+
+/** An annotation's before/after values, bounded: string values only, 50 keys, 2,000 chars each. */
+export function boundAnnotationValues(value: unknown): AnnotationValues | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([key, entry]) => key.trim() && typeof entry === "string")
+    .slice(0, MAX_ANNOTATION_VALUE_KEYS)
+    .map(([key, entry]) => [
+      key.trim().slice(0, 120),
+      (entry as string).slice(0, MAX_ANNOTATION_VALUE_LENGTH),
+    ]);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeAnnotationIntent(value: unknown): AnnotationIntent | undefined {
+  return ANNOTATION_INTENTS.includes(value as AnnotationIntent)
+    ? (value as AnnotationIntent)
+    : undefined;
+}
+
 function normalizeAnnotationStatus(
   value: unknown,
   fallback: AnnotationStatus = "open",
@@ -4231,6 +4281,10 @@ export class AnnotationStore {
       createdBy: input.createdBy || "user",
       createdAt: now,
       updatedAt: now,
+      intent: normalizeAnnotationIntent(input.intent),
+      before: boundAnnotationValues(input.before),
+      after: boundAnnotationValues(input.after),
+      outputPath: input.outputPath?.trim() || undefined,
     };
 
     this.db
@@ -4238,9 +4292,10 @@ export class AnnotationStore {
         INSERT INTO annotations (
           id, task_id, workspace_id, surface_type, surface_id, body, status,
           target_ref_json, style_patch_json, artifact_id, screenshot_path,
-          created_by, created_at, updated_at, resolved_at, resolved_by_event_id
+          created_by, created_at, updated_at, resolved_at, resolved_by_event_id,
+          intent, before_json, after_json, output_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         annotation.id,
@@ -4259,9 +4314,37 @@ export class AnnotationStore {
         annotation.updatedAt,
         null,
         null,
+        annotation.intent || null,
+        annotation.before ? JSON.stringify(annotation.before) : null,
+        annotation.after ? JSON.stringify(annotation.after) : null,
+        annotation.outputPath || null,
       );
 
     return annotation;
+  }
+
+  /** The revision of the target file the user pointed at. */
+  setBaseRevision(id: string, revisionId: string): Annotation | undefined {
+    setAnnotationBaseRevision(this.db, id, revisionId, Date.now());
+    return this.findById(id);
+  }
+
+  /**
+   * An annotation the agent worked on: `addressed`, with the revision that addressed it and,
+   * when the change can be undone, its undo token. Only an annotation still `addressing` moves.
+   */
+  recordResult(
+    id: string,
+    result: { resultRevisionId?: string; undoToken?: string },
+  ): Annotation | undefined {
+    recordAnnotationResult(this.db, id, result, Date.now());
+    return this.findById(id);
+  }
+
+  /** After an undo: the token is spent, and the annotation is dismissed. */
+  clearUndo(id: string): Annotation | undefined {
+    clearAnnotationUndo(this.db, id, Date.now());
+    return this.findById(id);
   }
 
   update(id: string, patch: AnnotationUpdateInput): Annotation | undefined {
@@ -4443,6 +4526,17 @@ export class AnnotationStore {
       updatedAt: row.updated_at,
       resolvedAt: row.resolved_at || undefined,
       resolvedByEventId: row.resolved_by_event_id || undefined,
+      ...(normalizeAnnotationIntent(row.intent) ? { intent: row.intent } : {}),
+      ...(row.before_json
+        ? { before: safeJsonParse(row.before_json, undefined, "annotation.before_json") }
+        : {}),
+      ...(row.after_json
+        ? { after: safeJsonParse(row.after_json, undefined, "annotation.after_json") }
+        : {}),
+      ...(row.output_path ? { outputPath: row.output_path } : {}),
+      ...(row.artifact_revision_id ? { artifactRevisionId: row.artifact_revision_id } : {}),
+      ...(row.result_revision_id ? { resultRevisionId: row.result_revision_id } : {}),
+      ...(row.undo_token ? { undoToken: row.undo_token } : {}),
     };
   }
 }
@@ -4498,8 +4592,7 @@ export class ApprovalStore {
       if (
         !approval ||
         approval.status !== "approved" ||
-        !Number.isSafeInteger(approval.requestedAt) ||
-        Date.now() >= approval.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS ||
+        !approvalGrantUsable(approval.requestedAt, approval.resolvedAt) ||
         approvalRequestRevisionHash(approval) !== revisionHash
       )
         return false;
@@ -5035,6 +5128,12 @@ export class InputRequestStore {
     )
       throw new Error("Invalid persisted inline approval binding");
     return { approvalId: row.approval_id, taskId: row.task_id, revisionHash: row.revision_hash };
+  }
+
+  /** The input card an inline approval was presented as, whatever its status. */
+  findLinkedInputId(approvalId: string): string | undefined {
+    const row = prepareApprovalInputLinkByApproval(this.db).get(approvalId) as Any;
+    return typeof row?.input_id === "string" ? row.input_id : undefined;
   }
 
   resolve(

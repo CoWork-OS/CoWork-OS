@@ -9,6 +9,8 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createLogger } from "../../utils/logger";
+import type { MemorySourceRecheck } from "../MemorySourceRecheckService";
+import type { MemorySourceRow } from "../memory-source-sql";
 import type {
   MemoryRepoDreamRecord,
   MemoryRepoDreamTrigger,
@@ -56,7 +58,16 @@ export interface MemoryRepoDreamerDeps {
   now?: () => number;
   /** Called after a dream that left changes waiting for review (the user is notified). */
   onReviewPending?: (record: MemoryRepoDreamRecord) => void;
+  /** Memories whose source changed (WP15): rechecked first, then marked reviewed. */
+  sourceRechecks?: {
+    pending: (limit: number) => Promise<MemorySourceRecheck[]>;
+    reviewed: (rows: MemorySourceRow[]) => Promise<void>;
+    forget: (rows: MemorySourceRow[]) => Promise<void>;
+  };
 }
+
+/** Changed-source memories one dream rechecks at most. */
+const DREAM_MAX_RECHECKS = 10;
 
 export type MemoryRepoDreamOutcome =
   | { ran: true; record: MemoryRepoDreamRecord }
@@ -126,6 +137,36 @@ export class MemoryRepoDreamer {
     }
   }
 
+  /**
+   * Changed-source entries still in the folder. A link whose entry is gone (rewritten or
+   * removed since) is dropped.
+   */
+  private async sourceRechecks(files: Map<string, string>): Promise<MemorySourceRecheck[]> {
+    const source = this.deps.sourceRechecks;
+    if (!source) return [];
+    try {
+      const pending = await source.pending(DREAM_MAX_RECHECKS);
+      const hashesByFile = new Map<string, Set<string>>();
+      const present = pending.filter((recheck) => {
+        if (!files.has(recheck.file)) return false;
+        let hashes = hashesByFile.get(recheck.file);
+        if (!hashes) {
+          hashes = new Set(
+            parseMemoryRepoEntries(files.get(recheck.file) ?? "").map((entry) => entry.hash),
+          );
+          hashesByFile.set(recheck.file, hashes);
+        }
+        return hashes.has(recheck.entryHash);
+      });
+      const gone = pending.filter((recheck) => !present.includes(recheck));
+      if (gone.length > 0) await source.forget(gone.map((recheck) => recheck.row));
+      return present;
+    } catch (error) {
+      logger.warn("Could not read changed-source memories:", error);
+      return [];
+    }
+  }
+
   private async dream(
     service: MemoryRepoService,
     trigger: MemoryRepoDreamTrigger,
@@ -149,15 +190,26 @@ export class MemoryRepoDreamer {
       if (isSwarmRepoPath(file) || isBotRepoPath(file)) files.delete(file);
     }
     const inboxEntries = parseMemoryRepoEntries(files.get(MEMORY_REPO_INBOX_FILE) ?? "").length;
-    if (trigger === "daily" && tasks.length === 0 && inboxEntries === 0) {
+    const rechecks = await this.sourceRechecks(files);
+    if (trigger === "daily" && tasks.length === 0 && inboxEntries === 0 && rechecks.length === 0) {
       return { ran: false, reason: "nothing_new" };
     }
-    const workspaceFiles = files.keys().filter((file) => file.startsWith("workspaces/"));
+    const workspaceFiles = Array.from(files.keys()).filter((file) =>
+      file.startsWith("workspaces/"),
+    );
     const input = buildDreamInput({
       files,
       tasks,
-      priority: ["MEMORY.md", "me.md", "lessons.md", ...workspaceFiles],
+      // Files holding a changed-source entry come first, so the size cap never drops them.
+      priority: [
+        ...rechecks.map((recheck) => recheck.file),
+        "MEMORY.md",
+        "me.md",
+        "lessons.md",
+        ...workspaceFiles,
+      ],
       now: startedAt,
+      rechecks,
     });
     const budget = Math.max(0, settings.dailyTokenBudget) - (await this.tokensUsedToday(service));
     const id = `${new Date(startedAt).toISOString().slice(0, 10).replace(/-/g, "")}-${randomUUID().slice(0, 8)}`;
@@ -252,6 +304,18 @@ export class MemoryRepoDreamer {
     logger.info(
       `Dream ${id}: ${record.autoCount} applied, ${record.reviewCount} for review, ${record.rejected} rejected`,
     );
+    // The dream saw these entries next to their current source: they are rechecked.
+    const shown = new Set(
+      (input.rechecked ?? []).map((recheck) => `${recheck.file}#${recheck.entryHash}`),
+    );
+    const reviewed = rechecks.filter((recheck) =>
+      shown.has(`${recheck.file}#${recheck.entryHash}`),
+    );
+    if (reviewed.length > 0) {
+      await this.deps.sourceRechecks
+        ?.reviewed(reviewed.map((recheck) => recheck.row))
+        .catch((error) => logger.warn("Could not mark rechecked memories:", error));
+    }
     if (record.reviewCount > 0 && record.reviewStatus === "pending") {
       try {
         this.deps.onReviewPending?.(record);

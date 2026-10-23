@@ -5,6 +5,21 @@ and recent task conversations, applies safe edits as one undoable commit and put
 branch you accept or reject as a diff in the Memory Hub **Review** tab. The design, triggers,
 budget and settings are in [Memory Repo Phase 2](memory-repo-phase2-design.md).
 
+## Source changes
+
+A memory folder entry saved from a workspace file or a connector record is flagged when that
+source changes ([memory-engine.md §5c](memory-engine.md#5c-source-tied-memories)). A dream
+handles up to 10 flagged entries, most recently changed first:
+
+- a pending flag counts as something new, so the daily dream runs even with no new tasks;
+- the files holding flagged entries go first, so the folder size cap never leaves them out;
+- each flagged line is marked "(source changed)", and a `<source_changes>` section gives its
+  source, the day it changed and the current text (the first 1,500 characters of a file; a
+  connector record has no copy, only the note that it changed; 12,000 characters in all). The
+  model updates the entry, removes it, or leaves it when the source still supports it;
+- after the dream, the entries it was shown are marked reviewed against the source's current
+  content. A link whose entry no longer exists is dropped.
+
 ## What it replaced
 
 Earlier versions had a heuristic curator, also called Dreaming, that merged, promoted, decayed

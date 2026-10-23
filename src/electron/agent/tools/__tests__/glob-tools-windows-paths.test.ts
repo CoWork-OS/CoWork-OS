@@ -1,3 +1,4 @@
+import "./file-discovery-test-worker";
 /**
  * GlobTools on Windows: path.relative() returns "\"-separated paths there, while glob patterns
  * use "/". The path module is simulated so the regression runs on every platform.
@@ -9,7 +10,7 @@ import * as os from "node:os";
 
 const windowsPaths = vi.hoisted(() => ({ enabled: false }));
 
-vi.mock("path", async () => {
+vi.mock("node:path", async () => {
   const actual = await vi.importActual<typeof import("path")>("path");
   const simulated: Record<string, unknown> = { ...actual };
   simulated.relative = (from: string, to: string) => {
@@ -32,8 +33,8 @@ vi.mock("electron", () => ({
   },
 }));
 
-import * as path from "path";
-import { GlobTools } from "../glob-tools";
+import * as path from "node:path";
+import { discoverGlob } from "../glob-discovery";
 import { Workspace } from "../../../../shared/types";
 
 describe("GlobTools with Windows path separators", () => {
@@ -59,9 +60,8 @@ describe("GlobTools with Windows path separators", () => {
       permissions: { read: true, write: true, delete: false, network: false, shell: false },
       createdAt: Date.now(),
     };
-    const tools = new GlobTools(workspace, { logEvent: vi.fn() } as Any, "task");
     const matchedPaths = async (pattern: string) => {
-      const result = await tools.glob({ pattern });
+      const result = discoverGlob(workspace, { patterns: [pattern] }).results[0];
       expect(result.success, result.error).toBe(true);
       return result.matches.map((match) => match.path.split("\\").join("/")).sort();
     };

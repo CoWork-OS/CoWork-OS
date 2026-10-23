@@ -20,7 +20,9 @@
   "icon": "🎮",
   "category": "Engineering",
   "personaTemplateId": "game-developer",
+  "recommendedConnectors": ["Meshy"],
   "tryAsking": [
+    "Make a low-poly treasure chest for my Godot game with Meshy",
     "Set up a Unity project with a third-person character controller",
     "Create an Unreal Blueprint for an inventory system with drag-and-drop",
     "Write a GDScript for procedural terrain generation in Godot 4",

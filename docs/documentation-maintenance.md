@@ -28,3 +28,25 @@ minimums and fenced code examples are also allowed. Do not exempt living support
 guides as historical records. Add regression fixtures when introducing another
 format for release claims; this check cannot assess every natural-language claim
 or verify whether registry publication has completed.
+
+## Implementation status claims
+
+A roadmap phase, feature table row or doc section may say “Implemented” only
+when a regression test or replay fixture that proves it is named in that
+document's Verification section (or next to the claim). Until then, call it
+“Planned” and keep any design text under an explicit “Target design — not yet
+implemented” banner. Do not link to sections that do not exist yet; link once the
+section ships.
+
+## Documentation site ownership
+
+This checkout maintains the Markdown sources and retained VitePress navigation/configuration
+in `docs/.vitepress/config.mts`. The application package does not declare a local VitePress
+build command or dependency; its CI checks documentation versions and source contracts.
+`npm run build` builds application artifacts, not a documentation website.
+
+On `main`, `.github/workflows/notify-website-docs.yml` requests a docs refresh in the separate
+`CoWork-OS/cowork-os-web` repository. That dispatch requires
+`WEBSITE_REPO_DISPATCH_TOKEN`; when absent, the workflow reports that refresh was skipped.
+Website deployment and its dependency/toolchain checks belong to that repository. A passing
+local application build does not verify the published site's pages or anchors.

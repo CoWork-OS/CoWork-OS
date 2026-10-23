@@ -159,8 +159,10 @@ Apply the safety and recovery rules in [references/operations.md](references/ope
 
 ## Verification
 
-- `scripts/run_tests.sh tests/skills/test_unbroker_skill.py` (hermetic; no network), or the
-  dependency-free runner `python3 tests/skills/test_unbroker_skill.py`.
+- In a CoWork source checkout, run `python3 -m unittest discover -s tests -v` from
+  `resources/skills/unbroker` for the hermetic CLI smoke tests. Test sources are
+  excluded from installed packages. The upstream Hermes test harness is not bundled;
+  these tests cover consent, subject isolation and ledger transitions, not email/browser integration.
 - Dry run: `$PDD setup --auto && $PDD doctor && SID=$($PDD intake --full-name "Test Person"
 --email t@example.com --consent | python3 -c 'import sys,json;print(json.load(sys.stdin)["subject_id"])')
 && $PDD next "$SID"` and confirm a readiness summary plus an ordered action queue.

@@ -177,6 +177,23 @@ export class ComposerDraftAttachmentStore {
     }
   }
 
+  /** Stage a copy of another draft's verified attachment under a new owner. */
+  async copy(
+    source: { draftKey: string; workspaceId: string; refId: string },
+    destination: { draftKey: string; workspaceId: string },
+  ): Promise<DraftAttachmentRef | null> {
+    const resolved = await this.resolve(source.draftKey, source.workspaceId, source.refId);
+    if (!resolved) return null;
+    const bytes = await fs.readFile(resolved.path);
+    return this.put({
+      draftKey: destination.draftKey,
+      workspaceId: destination.workspaceId,
+      name: resolved.ref.name,
+      ...(resolved.ref.mimeType ? { mimeType: resolved.ref.mimeType } : {}),
+      dataBase64: bytes.toString("base64"),
+    });
+  }
+
   async release(draftKey: string, workspaceId: string, refId: string): Promise<boolean> {
     const metadata = await this.readMetadata(draftKey, workspaceId, refId);
     if (!metadata) return false;

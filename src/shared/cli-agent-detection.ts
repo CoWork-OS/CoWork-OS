@@ -3,7 +3,7 @@
  *
  * Detects whether a child task is a CLI agent task (Codex CLI / Claude Code)
  * based on multi-signal analysis: task title, event content, and bash command patterns.
- * Used by the renderer to decide whether to render a CliAgentFrame instead of DispatchedAgentsPanel.
+ * Used by the renderer to show CLI runtime details for spawned agents.
  */
 
 import type { Task, TaskEvent } from "./types";

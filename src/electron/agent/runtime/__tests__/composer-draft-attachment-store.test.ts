@@ -120,6 +120,29 @@ describe("ComposerDraftAttachmentStore", () => {
     expect(resolved?.path ? await readFile(resolved.path, "utf8") : null).toBe("hello draft");
   });
 
+  it("copies a verified attachment into another workspace's draft", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "cowork-draft-attachments-"));
+    temporaryDirectories.push(directory);
+    const store = new ComposerDraftAttachmentStore(directory);
+    const source = { draftKey: "local:scratch:new:main", workspaceId: "scratch" };
+    const destination = { draftKey: "local:project:new:main", workspaceId: "project" };
+    const ref = await store.put({
+      ...source,
+      name: "image.png",
+      mimeType: "image/png",
+      dataBase64: Buffer.from("png bytes").toString("base64"),
+    });
+
+    const copied = await store.copy({ ...source, refId: ref.refId }, destination);
+
+    expect(copied).toMatchObject({ name: "image.png", mimeType: "image/png", sha256: ref.sha256 });
+    const resolved = await store.resolve(destination.draftKey, "project", copied!.refId);
+    expect(await readFile(resolved!.path, "utf8")).toBe("png bytes");
+    expect(
+      await store.copy({ ...source, refId: "00000000-0000-0000-0000-000000000000" }, destination),
+    ).toBeNull();
+  });
+
   it("reconciles orphaned pairs, data-only files, and temporary files", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "cowork-draft-attachments-"));
     temporaryDirectories.push(directory);

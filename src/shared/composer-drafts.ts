@@ -98,6 +98,8 @@ export interface ComposerDraftAttachmentPutRequest {
   mimeType?: string;
   dataBase64?: string;
   sourcePath?: string;
+  /** Copy an attachment already staged for another draft (a folder switch). */
+  copyFrom?: ComposerDraftGetRequest & { refId: string };
 }
 
 export interface ComposerDraftAttachmentReleaseRequest {

@@ -65,6 +65,7 @@ import type {
 } from "../../shared/types";
 import { presentApprovalRevision } from "../agent/approval-revision";
 import { ControlPlaneServer, ControlPlaneSettingsManager } from "./index";
+import { publishedAgentCard } from "../agent-card/collect-agent-card";
 import { Methods, Events, ErrorCodes } from "./protocol";
 import type { AgentConfig } from "../../shared/types";
 import type { AgentDaemon } from "../agent/daemon";
@@ -116,11 +117,13 @@ import {
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
+import { composerFollowUpProvenance } from "../agent/follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT } from "../agent/task-prompt-provenance";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
-import { AgentConfigSchema, validateInput } from "../utils/validation";
+import { AgentConfigSchema, InputRequestResponseSchema, validateInput } from "../utils/validation";
 import { ManagedSessionRequirementCorrectionEventSchema } from "../../shared/managed-session-schemas";
 import { ManagedSessionSuccessCriteriaSchema } from "../../shared/managed-session-schemas";
 import {
@@ -1507,6 +1510,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         accessProfileId,
         shellAccess,
         integrationMentions,
+        surfaceOrigin,
       } = sanitizeTaskMessageParams(params);
       const result = await controlPlaneDeps.agentDaemon.sendMessage(
         taskId,
@@ -1523,6 +1527,9 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
           ...(accessProfileId ? { accessProfileId } : {}),
           ...(shellAccess !== undefined ? { shellAccess } : {}),
           ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+          // The desktop composer's device view of this machine: typed unless an answer
+          // surface sent it. Only typed text can expose the admin-lane tools.
+          ...composerFollowUpProvenance(surfaceOrigin),
         },
       );
       return { ok: true, ...result };
@@ -1553,20 +1560,14 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
       return { status };
     }
     case Methods.INPUT_REQUEST_LIST: {
-      const p = (params ?? {}) as Any;
       return {
-        inputRequests: await inputRequestRepo.list({
-          limit:
-            typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.max(1, p.limit) : 50,
-          offset:
-            typeof p.offset === "number" && Number.isFinite(p.offset) ? Math.max(0, p.offset) : 0,
-          ...(typeof p.taskId === "string" && p.taskId.trim() ? { taskId: p.taskId.trim() } : {}),
-          ...(typeof p.status === "string" && p.status.trim() ? { status: p.status.trim() } : {}),
-        }),
+        inputRequests: await inputRequestRepo.list(sanitizeInputRequestListParams(params)),
       };
     }
     case Methods.INPUT_REQUEST_RESPOND:
-      return controlPlaneDeps.agentDaemon.respondToInputRequest(params as Any);
+      return controlPlaneDeps.agentDaemon.respondToInputRequest(
+        sanitizeInputRequestResponseParams(params),
+      );
     case Methods.CHANNEL_LIST:
       return { channels: await channelRepo.findAll() };
     case Methods.CHANNEL_GET: {
@@ -1864,6 +1865,31 @@ function sanitizeApprovalListParams(params: unknown): {
   const offset = Math.max(rawOffset, 0);
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   return { limit, offset, ...(taskId ? { taskId } : {}) };
+}
+
+function sanitizeInputRequestListParams(params: unknown): {
+  limit: number;
+  offset: number;
+  taskId?: string;
+  status?: "pending" | "submitted" | "dismissed";
+} {
+  const p = parameterRecord(params);
+  const { limit, offset, taskId } = sanitizeApprovalListParams({ limit: 50, ...p });
+  const status = typeof p.status === "string" ? p.status.trim() : "";
+  return {
+    limit,
+    offset,
+    ...(taskId ? { taskId } : {}),
+    ...(status === "pending" || status === "submitted" || status === "dismissed" ? { status } : {}),
+  };
+}
+
+function sanitizeInputRequestResponseParams(params: unknown) {
+  const parsed = InputRequestResponseSchema.safeParse(params);
+  if (!parsed.success) {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid input request response" };
+  }
+  return parsed.data;
 }
 
 function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: number } {
@@ -2587,6 +2613,7 @@ export async function startControlPlaneFromSettings(
       }
 
       const server = new ControlPlaneServer({
+        getAgentCard: publishedAgentCard,
         port: settings.port,
         host: settings.host,
         trustProxy: settings.trustProxy,
@@ -3336,6 +3363,26 @@ export function registerTaskAndWorkspaceMethods(
     };
   });
 
+  server.registerMethod(Methods.MANAGED_SESSION_EXPORT_HANDOFF, async (client, params) => {
+    requireScope(client, "admin");
+    // The service validates the request with SessionHandoffExportRequestSchema.
+    return managedSessions.exportHandoff(params ?? {});
+  });
+
+  server.registerMethod(Methods.MANAGED_SESSION_IMPORT_HANDOFF, async (client, params) => {
+    requireScope(client, "admin");
+    // The service validates the request with SessionHandoffImportRequestSchema; the manifest must
+    // sit in the target environment's workspace under .cowork/handoffs/.
+    const result = await managedSessions.importHandoff(params ?? {});
+    if (result.session) {
+      server.broadcastToOperators(Events.MANAGED_SESSION_CREATED, {
+        sessionId: result.session.id,
+        session: result.session,
+      });
+    }
+    return result;
+  });
+
   // Tasks
   server.registerMethod(Methods.TASK_CREATE, async (client, params) => {
     requireScope(client, "admin");
@@ -3397,6 +3444,9 @@ export function registerTaskAndWorkspaceMethods(
           ? { assignedAgentRoleId: validated.assignedAgentRoleId }
           : undefined,
         boardColumn: validated.assignedAgentRoleId ? "todo" : undefined,
+        // An admin client is the owner's own composer on another device (remote view, web UI,
+        // CLI), as for task.sendMessage: the prompt is typed and may expose the admin-lane tools.
+        ...USER_TYPED_TASK_PROMPT,
         requestIdentity: {
           title: validated.title,
           prompt: validated.prompt,
@@ -3458,6 +3508,8 @@ export function registerTaskAndWorkspaceMethods(
       agentConfig: taskAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
+      // The owner's own composer on another device, as above.
+      ...USER_TYPED_TASK_PROMPT,
     });
 
     if (shouldGenerateTaskTitle(validated.title, validated.prompt, validated.generateTitle)) {
@@ -3583,6 +3635,7 @@ export function registerTaskAndWorkspaceMethods(
       accessProfileId,
       shellAccess,
       integrationMentions,
+      surfaceOrigin,
     } = sanitizeTaskMessageParams(params);
     const result = await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
@@ -3594,6 +3647,9 @@ export function registerTaskAndWorkspaceMethods(
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+      // An admin client is the owner's composer on another device (remote view, web UI):
+      // typed unless an answer surface sent it. Only typed text can expose the admin-lane tools.
+      ...composerFollowUpProvenance(surfaceOrigin),
     });
     return { ok: true, ...result };
   });
@@ -3640,6 +3696,20 @@ export function registerTaskAndWorkspaceMethods(
       expectedRevisionHash,
     );
     return { status };
+  });
+
+  server.registerMethod(Methods.INPUT_REQUEST_LIST, async (client, params) => {
+    requireScope(client, "admin");
+    return {
+      inputRequests: await agentDaemon.listInputRequests(sanitizeInputRequestListParams(params)),
+    };
+  });
+
+  server.registerMethod(Methods.INPUT_REQUEST_RESPOND, async (client, params) => {
+    requireScope(client, "admin");
+    // Delegate to the same daemon entrypoint as IPC: it owns idempotency and
+    // approval-bound revision checks, including restarted or stale cards.
+    return agentDaemon.respondToInputRequest(sanitizeInputRequestResponseParams(params));
   });
 
   // Channels (gateway)
@@ -4163,6 +4233,7 @@ export function setupControlPlaneHandlers(
 
         // Create server instance
         const server = new ControlPlaneServer({
+          getAgentCard: publishedAgentCard,
           port: settings.port,
           host: settings.host,
           trustProxy: settings.trustProxy,
@@ -4343,6 +4414,7 @@ export function setupControlPlaneHandlers(
           const settings = ControlPlaneSettingsManager.loadSettings();
 
           controlPlaneServer = new ControlPlaneServer({
+            getAgentCard: publishedAgentCard,
             port: settings.port,
             host: settings.host,
             trustProxy: settings.trustProxy,
@@ -4422,6 +4494,7 @@ export function setupControlPlaneHandlers(
           const settings = ControlPlaneSettingsManager.loadSettings();
 
           controlPlaneServer = new ControlPlaneServer({
+            getAgentCard: publishedAgentCard,
             port: settings.port,
             host: settings.host,
             trustProxy: settings.trustProxy,

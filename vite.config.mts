@@ -6,6 +6,7 @@ import {
   rendererBundleReport,
   mermaidParserPlugin,
   rendererCodeSplitting,
+  rendererOptimizeDeps,
   rendererVendorAliases,
 } from "./scripts/build/renderer-bundle-config.mjs";
 
@@ -30,6 +31,7 @@ export default defineConfig({
       { find: "@shared", replacement: path.resolve(import.meta.dirname, "./src/shared") },
     ],
   },
+  optimizeDeps: rendererOptimizeDeps,
   server: {
     host: "127.0.0.1",
     port: Number(process.env.COWORK_DEV_SERVER_PORT || 5173),

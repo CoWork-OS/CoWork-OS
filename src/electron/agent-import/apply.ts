@@ -17,9 +17,12 @@ import type {
 import { createLogger } from "../utils/logger";
 import {
   IMPORT_PROVIDER_LABELS,
+  isLocalModelProvider,
+  modelProviderLabel,
   planSecretValues,
   scrubSecrets,
   type ImportChannelType,
+  type ImportModelProviderId,
   type ImportPlan,
   type ImportProviderId,
   type ImportSchedule,
@@ -72,7 +75,8 @@ export interface AgentImportTargets {
     saveKey(provider: ImportProviderId, value: string): void;
     /** The provider CoWork uses now and whether it is set up. */
     active(): { provider: string; configured: boolean };
-    selectModel(provider: ImportProviderId, model?: string): void;
+    /** `baseUrl` is set for a local model server (Ollama, OpenAI-compatible). */
+    selectModel(provider: ImportModelProviderId, model?: string, baseUrl?: string): void;
   };
   channels: {
     exists(channel: ImportChannelType): Promise<boolean>;
@@ -228,17 +232,25 @@ class ImportRun {
             reason: "CoWork already has a working model; change it in Settings > Models.",
           };
         }
-        if (
-          !targets.providers.hasKey(payload.provider) &&
-          !this.keysImported.has(payload.provider)
-        ) {
+        const provider = payload.provider;
+        if (isLocalModelProvider(provider)) {
+          // A local server needs no key, but CoWork's OpenAI-compatible setup needs a model.
+          if (provider === "openai-compatible" && !payload.model) {
+            return { ok: false, reason: "No model name; pick one in Settings > Models." };
+          }
+        } else if (!targets.providers.hasKey(provider) && !this.keysImported.has(provider)) {
           return {
             ok: false,
-            reason: `No ${IMPORT_PROVIDER_LABELS[payload.provider]} key; include credentials or add one in Settings > Models.`,
+            reason: `No ${IMPORT_PROVIDER_LABELS[provider]} key; include credentials or add one in Settings > Models.`,
           };
         }
-        if (!dryRun) targets.providers.selectModel(payload.provider, payload.model);
-        return { ok: true };
+        if (!dryRun) targets.providers.selectModel(provider, payload.model, payload.baseUrl);
+        return {
+          ok: true,
+          note: payload.baseUrl
+            ? `${modelProviderLabel(provider)} at ${payload.baseUrl}`
+            : modelProviderLabel(provider),
+        };
       }
       case "channel": {
         if (!payload.tokens) return { ok: false, reason: "No bot token." };

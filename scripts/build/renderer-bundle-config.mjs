@@ -15,6 +15,18 @@ export const rendererCodeSplitting = {
       test: /[/\\]node_modules[/\\](?:react|react-dom|scheduler)[/\\]/,
       priority: 20,
     },
+    // three.js (the in-chat 3D viewer, loaded on demand) is one 660 kB chunk otherwise;
+    // its core and its WebGL renderer are separate files upstream, so they split cleanly.
+    {
+      name: "three-core",
+      test: /[/\\]node_modules[/\\]three[/\\]build[/\\]three\.core\.js$/,
+      priority: 15,
+    },
+    {
+      name: "three-webgl",
+      test: /[/\\]node_modules[/\\]three[/\\]build[/\\]three\.module\.js$/,
+      priority: 15,
+    },
   ],
 };
 
@@ -24,6 +36,17 @@ export const rendererVendorAliases = [
     replacement: path.join(root, "src/renderer/lib/elk-worker-adapter.ts"),
   },
 ];
+
+// The dev dependency optimizer applies aliases too, so pre-bundling Mermaid
+// would inline the adapter, whose `?url` worker import only Vite's own asset
+// pipeline can load. Leave the aliased import external to the pre-bundle; the
+// dev server then resolves it to the adapter like any other source module.
+// The import scan cannot see the adapter's CommonJS ELK client behind the
+// alias; include it up front so the first ELK diagram does not reload the page.
+export const rendererOptimizeDeps = {
+  exclude: ["elkjs/lib/elk.bundled.js"],
+  include: ["elkjs/lib/elk-api.js"],
+};
 
 /** Record actual emitted chunks, separately from assets such as worker engines. */
 export function rendererBundleReport(target) {

@@ -169,6 +169,52 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
       },
     ],
   },
+  meshy: {
+    tagline: "Make 3D models, rigged characters and printable parts, and see them in chat",
+    longDescription:
+      "Meshy's own MCP server, pinned and run on your machine. Ask for a model from a prompt or a photo, then texture, remesh, rig, animate, convert or prepare it for 3D printing. Finished models appear in the chat as interactive 3D cards with a Download menu for every format and a Next menu of follow-ups. Every call that spends credits asks first and names its estimated cost. Needs a Meshy API key (Pro plan or above).",
+    keyFeatures: [
+      {
+        title: "Text or image to 3D",
+        description:
+          "Game props, characters and products from a prompt, one photo or up to four views, with a triangle budget for the asset's use.",
+      },
+      {
+        title: "Rig and animate characters",
+        description:
+          "Auto-rig a humanoid with walking and running clips, add library animations, or make a motion clip from text.",
+      },
+      {
+        title: "3D cards and a gallery",
+        description:
+          "Orbit, animate and download models in the chat. Every format Meshy made (GLB, FBX, OBJ, STL, USDZ) saves at no cost.",
+      },
+      {
+        title: "Ready to print",
+        description:
+          "Check and repair printability, make a multicolor 3MF for your slicer, or split a model into printable parts.",
+      },
+      {
+        title: "Costs before you spend",
+        description:
+          "Approval cards show each call's estimated credits and what the task has spent, with a 200-credit limit per task.",
+      },
+    ],
+    examples: [
+      {
+        prompt: "Make a low-poly treasure chest for my Godot game",
+        resultLabel: "GLB under 2,000 triangles, shown as a 3D card",
+      },
+      {
+        prompt: "Turn ~/photos/mug.jpg into a model I can print at 10 cm",
+        resultLabel: "Printability checked, STL saved",
+      },
+      {
+        prompt: "Rig this knight and make it wave",
+        resultLabel: "Rigged GLB with a wave animation",
+      },
+    ],
+  },
   miro: {
     tagline: "Access and create new content on Miro boards",
     longDescription:

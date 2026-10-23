@@ -9,8 +9,10 @@ import { AgentDaemon } from "../agent/daemon";
 import type {
   DocumentEditorSession,
   DocumentEditRequest,
+  DocumentEditSelection,
   DocumentVersionEntry,
   DocxBlockSelection,
+  FileAnnotationTargetRef,
   PdfRegionSelection,
   Task,
   TaskOutputSummary,
@@ -551,6 +553,10 @@ export class DocumentEditorSessionService {
         prompt,
         instruction,
       });
+      await this.recordPointedEdit(task, workspace.id, session.currentPath, destPathAbs, {
+        selection,
+        instruction,
+      });
       setTimeout(() => {
         void this.runDirectPdfEditTask({
           task,
@@ -595,6 +601,55 @@ export class DocumentEditorSessionService {
             source: "manual",
           });
 
+    await this.recordPointedEdit(task, workspace.id, session.currentPath, destPathAbs, {
+      selection,
+      instruction,
+    });
     return task;
+  }
+
+  /**
+   * The part of the document the user pointed at, recorded as an annotation on the edit task:
+   * its anchor, the instruction, the revision of the source, and the new version it produces.
+   */
+  private async recordPointedEdit(
+    task: Task,
+    workspaceId: string,
+    sourcePath: string,
+    destPath: string,
+    edit: { selection: DocumentEditSelection; instruction: string },
+  ): Promise<void> {
+    const { selection } = edit;
+    const excerpt = selection.excerpt?.trim().slice(0, 2_000);
+    const blockId =
+      selection.kind === "docx" ? selection.startBlockId || selection.blockIds[0] : "";
+    const targetRef: FileAnnotationTargetRef =
+      selection.kind === "pdf"
+        ? {
+            surfaceType: "artifact",
+            filePath: sourcePath,
+            fileType: "pdf",
+            page: selection.pageIndex + 1,
+            rect: { x: selection.x, y: selection.y, width: selection.w, height: selection.h },
+            ...(excerpt ? { textQuote: excerpt } : {}),
+          }
+        : {
+            surfaceType: "artifact",
+            filePath: sourcePath,
+            fileType: "docx",
+            ...(blockId ? { blockId } : {}),
+            ...(excerpt ? { textQuote: excerpt } : {}),
+          };
+    await this.agentDaemon.recordPointedEdit?.({
+      taskId: task.id,
+      workspaceId,
+      surfaceType: "artifact",
+      surfaceId: sourcePath,
+      body: edit.instruction,
+      targetRef,
+      intent: "change",
+      outputPath: destPath,
+      ...(excerpt ? { before: { text: excerpt } } : {}),
+    });
   }
 }

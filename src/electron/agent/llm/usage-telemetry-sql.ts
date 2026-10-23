@@ -85,4 +85,28 @@ export class UsageTelemetryStore {
         .all(model, model) as Array<{ task_id: string; total: number }>
     ).map((row) => Number(row.total));
   }
+
+  /**
+   * Wall-clock duration (created to completed, approval waits included) of the last 30
+   * completed tasks that ran on a model.
+   */
+  taskDurations(model: string): number[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT t.completed_at - t.created_at AS duration
+             FROM tasks t
+             JOIN (SELECT task_id, MAX(timestamp) AS last_call
+                     FROM llm_call_events
+                    WHERE (model_id = ? OR model_key = ?) AND task_id IS NOT NULL AND success = 1
+                    GROUP BY task_id
+                    ORDER BY last_call DESC
+                    LIMIT 30) recent ON recent.task_id = t.id
+            WHERE t.status = 'completed'
+              AND t.completed_at IS NOT NULL
+              AND t.completed_at > t.created_at`,
+        )
+        .all(model, model) as Array<{ duration: number }>
+    ).map((row) => Number(row.duration));
+  }
 }

@@ -10,6 +10,7 @@ import {
   extractArtifactPathAlternativeGroups,
   extractArtifactExtensionsFromText,
   isReadOnlyConstraintOnlyStep,
+  isReadOnlyInspectionStep,
   isArtifactPathLikeToken,
   isLikelyCommandSnippet,
 } from "../step-contract";
@@ -78,6 +79,30 @@ describe("step-contract path extraction", () => {
 
   it("does not treat alternate-extension paths inside shell snippets as artifacts", () => {
     expect(extractArtifactPathCandidates("Run `cat electron-builder.yml/.json`.")).toEqual([]);
+  });
+
+  // Live 2026-10-19: the tail "Support/cowork-os/..." became a workspace file.
+  it("keeps an absolute path with spaces whole instead of a workspace-relative tail", () => {
+    const pack =
+      "/Users/mesut/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md";
+    expect(
+      extractArtifactPathCandidates(
+        `Read the skill instructions and ${pack}, check repository status.`,
+      ),
+    ).toEqual([pack]);
+    expect(extractArtifactPathCandidates(`Read \`${pack}\` first.`)).toEqual([pack]);
+    expect(
+      extractArtifactPathCandidates("Open ~/Library/Mobile Documents/My Notes/plan.md now."),
+    ).toEqual(["~/Library/Mobile Documents/My Notes/plan.md"]);
+  });
+
+  it("does not join separate paths across words, punctuation, or complete file names", () => {
+    expect(extractArtifactPathCandidates("Compare /tmp/out and docs/a.md")).toEqual(["docs/a.md"]);
+    expect(extractArtifactPathCandidates("Read /tmp/out, docs/a.md")).toEqual(["docs/a.md"]);
+    expect(extractArtifactPathCandidates("Diff /tmp/a.md docs/b.md")).toEqual([
+      "/tmp/a.md",
+      "docs/b.md",
+    ]);
   });
 });
 
@@ -175,6 +200,38 @@ describe("step-contract write intent", () => {
         "Verification step: run final editorial checklist in newsletter/weekly/YYYY-WW/final-checklist.md",
       ),
     ).toBe(true);
+  });
+});
+
+describe("step-contract read-only inspection steps", () => {
+  it.each([
+    // Live 2026-10-19 (task e17e79b3): "implement" is a folder name inside the path.
+    "Read the skill instructions and /Users/mesut/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md, check repository status, and scan existing purchasing integrations to resolve the required implementation route before reading other references or changing files.",
+    // Live 2026-10-19 (task 34ca9a3e): "save" is a list noun; the overwrite is negated.
+    "Inspect Git status, ProjectSettings/ProjectVersion.txt, Packages/manifest.json, and existing purchase, wallet, save, UI, and test code under Assets to identify the Unity version and integration points without overwriting uncommitted changes.",
+    "Review scripts/update-version.sh and src/build/config.ts to understand the release flow.",
+  ])("treats %s as read-only", (description) => {
+    expect(isReadOnlyInspectionStep(description)).toBe(true);
+  });
+
+  it.each([
+    "Inspect ProjectSettings/ProjectVersion.txt and update Packages/manifest.json to add com.unity.purchasing.",
+    "Read config.json, then fix the failing test in src/a.test.ts.",
+    "Review the notes, edit, and save notes.md.",
+    "Inspect the purchase code and save the findings to notes/iap-scan.md.",
+    "Review the draft; findings saved to review.md.",
+    "Check the project and scaffold a new widget.",
+    // A prohibition is a guardrail, not an inspection cue.
+    "Wait 55 seconds and only then overwrite `qa-cancel-mid-shell.txt` with the marker. Do not create or modify the file before the wait.",
+  ])("keeps write intent in %s", (description) => {
+    expect(isReadOnlyInspectionStep(description)).toBe(false);
+  });
+
+  it("does not read write verbs out of file paths", () => {
+    expect(descriptionHasStrongWriteIntent("Read skills/implement-in-app-purchases/SKILL.md")).toBe(
+      false,
+    );
+    expect(descriptionHasStrongWriteIntent("Implement skills/iap/SKILL.md")).toBe(true);
   });
 });
 

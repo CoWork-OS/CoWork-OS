@@ -169,7 +169,7 @@ jobs:
           npm run numbat:build
 
       - name: Setup Python for Android worker guard tests
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -212,7 +212,7 @@ jobs:
           npm run numbat:build
 
       - name: Setup Python for Android worker guard tests
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

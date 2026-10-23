@@ -15,6 +15,65 @@ function createVerifier(content = sourceCsv, truncated = false) {
 }
 
 describe("CsvReportEvidenceVerifier", () => {
+  it("accepts the explicit currency in an invoice amount_eur source header", () => {
+    const verifier = new CsvReportEvidenceVerifier("/workspace");
+    verifier.recordRead(
+      "invoices.csv",
+      [
+        "invoice_id,vendor,category,amount_eur,status,due_date",
+        "INV-1001,Northwind Studio,Design,1200.00,Paid,2026-10-01",
+        "INV-1002,Harbor Hosting,Infrastructure,89.50,Paid,2026-10-05",
+        "INV-1003,Northwind Studio,Design,450.00,Unpaid,2026-10-15",
+        "INV-1004,Maple Consulting,Consulting,875.25,Unpaid,2026-10-21",
+        "INV-1005,Harbor Hosting,Infrastructure,89.50,Unpaid,2026-10-30",
+        "INV-1006,Maple Consulting,Consulting,125.00,Paid,2026-10-10",
+      ].join("\n"),
+      false,
+    );
+
+    expect(
+      verifier.validateMarkdownWrite({
+        filePath: "invoice-summary.md",
+        requestText: "Read invoices.csv and create an invoice summary.",
+        content: "# Invoice summary\nInvoice count: 6. Total invoiced: €2,829.25.",
+      }),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["USD_amount", "$"],
+    ["amount (GBP)", "£"],
+    ["total_EUR_amount", "€"],
+    ["amount-euros", "€"],
+  ])("recognizes a separated currency token in the source header: %s", (header, symbol) => {
+    const verifier = createVerifier(`order_id,${header}\nA101,10.00`);
+
+    expect(
+      verifier.validateMarkdownWrite({
+        filePath: "orders-summary.md",
+        requestText: "Summarize orders.csv.",
+        content: `Total amount: ${symbol}10.00.`,
+      }),
+    ).toEqual([]);
+  });
+
+  it.each(["amount", "amount_european", "measurement"])(
+    "keeps amounts currency-unspecified without an explicit currency token: %s",
+    (header) => {
+      const verifier = createVerifier(`order_id,${header}\nA101,10.00`);
+
+      expect(
+        verifier.validateMarkdownWrite({
+          filePath: "orders-summary.md",
+          requestText: "Summarize orders.csv.",
+          content: "Total amount: €10.00.",
+        }),
+      ).toEqual([
+        "The source and request do not specify a currency. Remove currency symbols, codes, and names; label amounts as currency unspecified.",
+      ]);
+    },
+  );
+
   it("blocks invented dates, currency, revenue, margins, and unrequested recommendations", () => {
     const verifier = createVerifier();
     const issues = verifier.validateMarkdownWrite({

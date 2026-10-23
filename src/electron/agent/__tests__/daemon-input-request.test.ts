@@ -217,7 +217,8 @@ describe("AgentDaemon structured input requests", () => {
         expect.stringContaining("Don't install anything; use run_applescript with Pages."),
         undefined,
         undefined,
-        { deliveryMode: "follow_up", messageSource: "user" },
+        // The reply was typed on this task's approval card.
+        { deliveryMode: "follow_up", messageSource: "user", textProvenance: "user_typed" },
       );
     } else {
       expect(daemonLike.sendMessage).not.toHaveBeenCalled();

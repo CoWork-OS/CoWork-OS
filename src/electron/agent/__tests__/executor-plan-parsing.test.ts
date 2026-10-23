@@ -12,6 +12,9 @@ vi.mock("electron", () => ({
 
 vi.mock("../custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
+    forWorkspace() {
+      return this;
+    },
     getEnabledGuidelinesPrompt: () => "",
   }),
 }));
@@ -393,11 +396,11 @@ describe("TaskExecutor plan parsing", () => {
 
   it("keeps verifier workers out of the full-document pipeline", () => {
     const executor = createPlanExecutor({ content: [] });
-    executor.task.title = "Verify: Write a practical one-page checklist for releasing...";
+    executor.task.title = "Verify: Review the release checklist...";
     executor.task.rawPrompt = [
       "WORKER ROLE: Verifier",
       "Inspect files, tests, and supplied or already-captured outputs.",
-      "Task prompt: Write a practical one-page checklist for releasing a small macOS desktop app.",
+      "Task prompt: Review the release checklist for a small macOS desktop app.",
       "Parent summary:",
       "Drafted `macos-app-release-checklist.md` with practical checks; review the document.",
     ].join("\n");
@@ -407,6 +410,24 @@ describe("TaskExecutor plan parsing", () => {
     executor.task.workerRole = undefined;
     expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(true);
     executor.task.workerRole = "verifier";
+    expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
+  });
+
+  it.each([
+    "Read pilot-brief.md and both complete handover.txt files. Create a six-slide pilot-review.pptx and reconcile contradictions in the speaker notes.",
+    "Review notes.md completely and create estimates.xlsx with the findings.",
+    "Analyze requirements.txt and create prototype.html from the results.",
+    "Review notes.md and produce a PowerPoint presentation for the partners.",
+    "Review notes.md completely and produce findings.csv.",
+    "Review pilot-brief.md and engineering-handover.txt completely and reconcile their launch decisions in chat.",
+    "Analyze first.md and second.md together without modifying either source.",
+  ])("keeps artifact-producing document workflows on the tool-backed route: %s", (prompt) => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Client pilot review";
+    executor.task.rawPrompt = prompt;
+    executor.task.userPrompt = prompt;
+    executor.task.prompt = prompt;
+
     expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
   });
 

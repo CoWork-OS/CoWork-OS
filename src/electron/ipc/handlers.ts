@@ -417,6 +417,7 @@ import {
   AgentRoleModelFieldsSchema,
   TaskMessageSchema,
   EditQueuedTaskInputSchema,
+  DiscardInterruptedTaskSchema,
   FileImportSchema,
   FileImportDataSchema,
   DocumentEditorOpenSessionSchema,
@@ -1212,6 +1213,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_SEND_MESSAGE, RATE_LIMIT_CONFIGS.expensi
 rateLimiter.configure(IPC_CHANNELS.TASK_EDIT_QUEUED_INPUT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_QUEUED_INPUTS, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.TASK_STEP_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_DISCARD_INTERRUPTED, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_WRAP_UP, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_FORK_SESSION, RATE_LIMIT_CONFIGS.limited);
@@ -6126,6 +6128,21 @@ export async function setupIpcHandlers(
       "manage",
       "task_cancelled",
       id,
+      undefined,
+      authorization.actor.principalId,
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_DISCARD_INTERRUPTED, async (event, data: unknown) => {
+    checkRateLimit(IPC_CHANNELS.TASK_DISCARD_INTERRUPTED);
+    const input = validateInput(DiscardInterruptedTaskSchema, data, "interrupted turn discard");
+    const authorization = await authorizeTaskForEvent(event, input.taskId, "manage");
+    await agentDaemon.discardInterruptedTask(input.taskId, input.expectedUpdatedAt);
+    await sessionMembershipService.recordTaskAction(
+      input.taskId,
+      "manage",
+      "task_cancelled",
+      input.taskId,
       undefined,
       authorization.actor.principalId,
     );

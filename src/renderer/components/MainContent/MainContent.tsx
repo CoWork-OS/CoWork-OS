@@ -206,6 +206,7 @@ import { useFullAccessConfirmation } from "../FullAccessConfirmationDialog";
 
 import { TaskPauseBanner } from "../TaskPauseBanner";
 import { QueuedMessagesPanel } from "../QueuedMessagesPanel";
+import { SessionProgressCard } from "../SessionProgressCard";
 
 import { Suspense } from "react";
 import type { SurfaceActionOrigin } from "../../../shared/answer-surfaces/actions";
@@ -9766,15 +9767,25 @@ function MainContentComponent({
               </div>
             </div>
           )}
-          {task.status === "interrupted" && task.terminalStatus === "resume_available" && (
-            <div className="task-status-banner task-status-banner-paused">
-              <div className="task-status-banner-content">
-                <strong>Resume available</strong>
-                <span className="task-status-banner-detail">
-                  The task stopped before finishing, but its progress and outputs were preserved.
-                </span>
+          {!remoteSession && task.status === "interrupted" ? (
+            <SessionProgressCard
+              key={task.id}
+              task={task}
+              onSelectTask={onSelectTask}
+              refreshKey={events.length}
+            />
+          ) : (
+            task.status === "interrupted" &&
+            task.terminalStatus === "resume_available" && (
+              <div className="task-status-banner task-status-banner-paused">
+                <div className="task-status-banner-content">
+                  <strong>Resume available</strong>
+                  <span className="task-status-banner-detail">
+                    The task stopped before finishing, but its progress and outputs were preserved.
+                  </span>
+                </div>
               </div>
-            </div>
+            )
           )}
           {task.status === "completed" &&
             task.terminalStatus === "needs_user_action" &&

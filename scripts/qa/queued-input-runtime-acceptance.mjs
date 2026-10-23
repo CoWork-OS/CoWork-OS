@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Owns an isolated npm run dev profile. Only loopback servers and synthetic tasks are used.
+// Owns an isolated Desktop profile. Only loopback servers and synthetic tasks are used.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 
+const productionRenderer = process.env.COWORK_QA_RENDERER === "production";
 const profile = await mkdtemp(path.join(tmpdir(), "cowork-queued-input-qa-"));
 // Development AppearanceManager also synchronizes a checkout-local logging sidecar.
 const devLogSettingsPath = path.join(process.cwd(), ".cowork/dev-log-settings.json");
@@ -62,7 +63,10 @@ const freePort = async () => {
 const debugPort = await freePort();
 const devPort = await freePort();
 const log = openSync(`${profile}/dev.log`, "w");
-const child = spawn(process.execPath, ["scripts/dev_with_logs.mjs"], {
+const childArgs = productionRenderer
+  ? ["node_modules/electron/cli.js", ".", `--remote-debugging-port=${debugPort}`]
+  : ["scripts/dev_with_logs.mjs"];
+const child = spawn(process.execPath, childArgs, {
   cwd: process.cwd(),
   detached: true,
   env: {
@@ -73,6 +77,7 @@ const child = spawn(process.execPath, ["scripts/dev_with_logs.mjs"], {
     COWORK_REMOTE_DEBUGGING_PORT: String(debugPort),
     COWORK_DEV_SERVER_PORT: String(devPort),
     ELECTRON_RUN_AS_NODE: "",
+    ...(productionRenderer ? { NODE_ENV: "production" } : {}),
   },
   stdio: ["ignore", log, log],
 });
@@ -114,7 +119,11 @@ for (let attempt = 0; attempt < 120; attempt++) {
   page = browser
     .contexts()[0]
     .pages()
-    .find((p) => p.url().startsWith(`http://127.0.0.1:${devPort}`));
+    .find((p) =>
+      productionRenderer
+        ? p.url().startsWith("file:") && p.url().includes("renderer/index.html")
+        : p.url().startsWith(`http://127.0.0.1:${devPort}`),
+    );
   if (page) break;
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
@@ -185,6 +194,13 @@ try {
     "Reply briefly to this synthetic acceptance message.",
   );
   await until(() => requests.length > 0, "provider holds the active turn");
+  const running = await api("getTask", first.id);
+  await assert.rejects(
+    api("discardInterruptedTask", first.id, running.updatedAt),
+    /changed or resumed/,
+  );
+  assert.notEqual((await api("getTask", first.id)).status, "cancelled");
+  console.log("Real IPC: stale interrupted-turn discard refused without cancelling active work.");
   const queued = await create("Queued input fixture", "ORIGINAL_INITIAL_TEXT");
   await until(
     async () => (await api("getTask", queued.id)).status === "queued",
@@ -235,6 +251,7 @@ try {
     JSON.stringify(
       {
         passed: true,
+        renderer: productionRenderer ? "production" : "development",
         providerBind: `127.0.0.1:${port}`,
         requests: requests.length,
         taskIds,
@@ -242,6 +259,7 @@ try {
           "queued initial prompt",
           "queued follow-up",
           "stale revision",
+          "stale interrupted-turn discard",
           "Desktop inline edit",
           "edited provider payload",
         ],

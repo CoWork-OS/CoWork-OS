@@ -3396,6 +3396,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   exportTasksJson: (query?: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
   toggleTaskPin: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PIN, taskId),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
+  discardInterruptedTask: (taskId: string, expectedUpdatedAt: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_DISCARD_INTERRUPTED, { taskId, expectedUpdatedAt }),
   wrapUpTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_WRAP_UP, id),
   pauseTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PAUSE, id),
   resumeTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_RESUME, id),
@@ -7331,6 +7333,7 @@ export interface ElectronAPI {
   exportTasksJson: (query?: Any) => Promise<Any>;
   toggleTaskPin: (taskId: string) => Promise<Any>;
   cancelTask: (id: string) => Promise<void>;
+  discardInterruptedTask: (taskId: string, expectedUpdatedAt: number) => Promise<void>;
   wrapUpTask: (id: string) => Promise<void>;
   pauseTask: (id: string) => Promise<void>;
   resumeTask: (id: string) => Promise<void>;

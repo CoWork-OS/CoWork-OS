@@ -472,3 +472,9 @@ Tracked jobs promote repeated quiet polls into completion delivery. Finished not
 in the task journal during a pause or block and retry on lifecycle changes. Deterministic
 message IDs and cancellation tombstones prevent duplicate or cancelled delivery.
 See [Tracked background jobs](background-jobs.md).
+
+## Interrupted turn recovery
+
+Desktop exposes Resume and Discard in the conversation. Discard validates the interrupted
+revision and fences resume during cleanup. Existing transcript and outputs remain saved.
+See [Interrupted turn recovery](interrupted-turn-recovery.md).

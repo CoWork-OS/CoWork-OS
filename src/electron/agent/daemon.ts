@@ -4007,7 +4007,7 @@ export class AgentDaemon extends EventEmitter {
    * conversation snapshots and plan events, then continuing execution.
    */
   private async resumeInterruptedTask(task: Task, resumeMessage?: string): Promise<void> {
-    if (this.shutdownRequested) return;
+    if (this.shutdownRequested || this.interruptedDiscards?.has(task.id)) return;
     // Guard against double-resume (e.g. rapid restarts)
     const currentTask = this.taskRepo.findById(task.id);
     if (!currentTask || currentTask.status !== "interrupted") {
@@ -4180,6 +4180,14 @@ export class AgentDaemon extends EventEmitter {
       executor.setPlan(restoredPlan);
     }
 
+    // Media restoration can yield while another client discards this interrupted generation.
+    if (
+      this.taskRepo.findById(task.id)?.status === "cancelled" ||
+      this.interruptedDiscards?.has(task.id)
+    ) {
+      await executor.cancel("user");
+      return;
+    }
     // Register in active tasks map
     if (this.shutdownRequested) return;
     this.activeTasks.set(effectiveTask.id, {
@@ -7053,6 +7061,19 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Cancel a running or queued task
    */
+  private interruptedDiscards?: Set<string>;
+
+  async discardInterruptedTask(taskId: string, expectedUpdatedAt: number): Promise<void> {
+    const discards = (this.interruptedDiscards ??= new Set());
+    if (discards.has(taskId)) throw new Error("This interrupted turn is already being discarded.");
+    discards.add(taskId);
+    try {
+      await this.cancelTask(taskId, { expectedInterruptedUpdatedAt: expectedUpdatedAt });
+    } finally {
+      discards.delete(taskId);
+    }
+  }
+
   async cancelTask(
     taskId: string,
     options: {
@@ -7061,6 +7082,7 @@ export class AgentDaemon extends EventEmitter {
       strictCleanup?: boolean;
       scopeWorkspaceId?: string;
       controlAuthority?: BotWorkCancellationAuthority;
+      expectedInterruptedUpdatedAt?: number;
     } = {},
   ): Promise<void> {
     if (options.controlAuthority)
@@ -7075,6 +7097,14 @@ export class AgentDaemon extends EventEmitter {
     }
     if (options.scopeWorkspaceId && existing.workspaceId !== options.scopeWorkspaceId)
       throw new Error("Task control workspace changed");
+    if (options.expectedInterruptedUpdatedAt !== undefined) {
+      if (
+        existing.status !== "interrupted" ||
+        existing.updatedAt !== options.expectedInterruptedUpdatedAt
+      )
+        throw new Error("This turn changed or resumed. Refresh the session before discarding it.");
+      // discardInterruptedTask holds the lifecycle fence until all cleanup settles.
+    }
     this.logEvent(taskId, "log", {
       message: "Background completion delivery cancelled",
       backgroundCompletionsCancelled: true,
@@ -7598,7 +7628,7 @@ export class AgentDaemon extends EventEmitter {
    * Resume a paused task
    */
   async resumeTask(taskId: string): Promise<boolean> {
-    if (this.shutdownRequested) return false;
+    if (this.shutdownRequested || this.interruptedDiscards?.has(taskId)) return false;
     const cached = this.activeTasks.get(taskId);
     if (cached) {
       const currentTask = this.taskRepo.findById(taskId);
@@ -7621,13 +7651,23 @@ export class AgentDaemon extends EventEmitter {
     // Reconstruct it from the same durable checkpoint used for interrupted
     // tasks so the recovery card's Resume action remains functional.
     const task = this.taskRepo.findById(taskId);
-    if (task?.status === "paused" && !isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) {
+    if (
+      task &&
+      (task.status === "paused" || task.status === "interrupted") &&
+      !isTerminalTaskStatus(deriveCanonicalTaskStatus(task))
+    ) {
       this.taskRepo.update(taskId, { status: "interrupted" });
       try {
         await this.resumeInterruptedTask({ ...task, status: "interrupted" });
         return true;
       } catch (error) {
-        this.taskRepo.update(taskId, { status: "paused" });
+        const current = this.taskRepo.findById(taskId);
+        if (
+          current &&
+          !isTerminalTaskStatus(deriveCanonicalTaskStatus(current)) &&
+          !this.interruptedDiscards?.has(taskId)
+        )
+          this.taskRepo.update(taskId, { status: task.status });
         throw error;
       }
     }
@@ -17470,6 +17510,8 @@ export class AgentDaemon extends EventEmitter {
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: DaemonFollowUpOptions,
   ): Promise<AgentMessageSendResult> {
+    if (this.interruptedDiscards?.has(taskId))
+      throw new Error("This interrupted turn is being discarded. Retry after cleanup finishes.");
     if (this.shutdownRequested) {
       throw new Error("Agent daemon is shutting down; message was not admitted.");
     }

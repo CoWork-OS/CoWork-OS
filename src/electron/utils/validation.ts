@@ -34,7 +34,11 @@ import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
 import { CHANNEL_TYPES } from "../../shared/gateway-channel-types";
 import { validateGatewayOwnerIds } from "../../shared/gateway-owner-ids";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../shared/guardrail-defaults";
-import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
+import {
+  assertSafeLoomMailboxFolder,
+  isSecureOrLocalLoomUrl,
+  LOOM_BASE_URL_SECURITY_MESSAGE,
+} from "./loom";
 
 // Common validation patterns
 const _MAX_STRING_LENGTH = 10000;
@@ -1978,7 +1982,7 @@ const validateEmailChannelConfigByProtocol = (
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [fieldMap.loomBaseUrl],
-        message: "LOOM base URL must use HTTPS unless it points to localhost/127.0.0.1/::1",
+        message: LOOM_BASE_URL_SECURITY_MESSAGE,
       });
     }
 

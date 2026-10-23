@@ -86,11 +86,25 @@ export type MontyStdlib = {
   sha256_hex: (text: unknown) => string;
 };
 
+function montyTypeName(value: unknown): string {
+  if (value === undefined) return "no value";
+  if (value === null) return "None";
+  if (Array.isArray(value)) return "list";
+  if (value instanceof Map) return "dict";
+  if (value instanceof Set) return "set";
+  if (typeof value === "bigint") return "int";
+  return typeof value;
+}
+
 export function createMontySafeStdlib(): MontyStdlib {
   return {
     json_parse: (text: unknown) => {
-      const s = typeof text === "string" ? text : stableJsonStringify(text);
-      return JSON.parse(s);
+      // str or bytes only, like Python's json.loads. Round-tripping other values
+      // through the serializer turned dicts (JS Maps) into {} and truncated
+      // large lists into invalid JSON.
+      if (typeof text === "string") return JSON.parse(text);
+      if (Buffer.isBuffer(text)) return JSON.parse(text.toString("utf8"));
+      throw new TypeError(`json_parse expects a JSON string or bytes, not ${montyTypeName(text)}`);
     },
     json_stringify: (value: unknown, options?: unknown) => {
       const opts = montyValueToJs(options) as Any;

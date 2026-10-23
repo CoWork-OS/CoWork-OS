@@ -564,7 +564,10 @@ export class LoomEmailClient extends EventEmitter {
     }
 
     const method = options.method || "GET";
-    const url = new URL(path.startsWith("/") ? path : `/${path}`, this.baseUrl);
+    // Join onto the base path: resolving an absolute path against the base
+    // URL would drop a prefix such as `/loom` in `https://host/loom`.
+    const basePath = this.baseUrl.pathname === "/" ? "" : this.baseUrl.pathname;
+    const url = new URL(`${basePath}${path.startsWith("/") ? path : `/${path}`}`, this.baseUrl);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 

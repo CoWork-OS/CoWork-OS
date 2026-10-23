@@ -112,6 +112,8 @@ export class MontyTools {
         description:
           "Run deterministic, sandboxed Python-subset code (Monty) for fast local computation and post-processing. " +
           "The input object is available as `input` inside the script. No file/network/shell access. " +
+          "Values in `input` are already parsed: use them directly, and call json_parse only on a JSON " +
+          "string or bytes (like json.loads; a dict, list or number raises a TypeError). " +
           "For simple character/word/line counting, prefer count_text or text_metrics instead.",
         input_schema: {
           type: "object",

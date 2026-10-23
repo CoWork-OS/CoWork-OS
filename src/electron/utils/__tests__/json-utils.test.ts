@@ -23,6 +23,19 @@ describe("stableJsonStringify", () => {
     );
   });
 
+  it("sorts an object that appears more than once at every place", () => {
+    const shared = { z: 1, a: 2 };
+    expect(stableJsonStringify({ x: shared, y: [shared] }, { sortKeys: true })).toBe(
+      '{"x":{"a":2,"z":1},"y":[{"a":2,"z":1}]}',
+    );
+  });
+
+  it("sorts keys in code-unit order, like Python's sort_keys", () => {
+    expect(stableJsonStringify({ b: 1, a: 2, B: 3, A: 4 }, { sortKeys: true })).toBe(
+      '{"A":4,"B":3,"a":2,"b":1}',
+    );
+  });
+
   it("clamps indent to the supported range", () => {
     expect(stableJsonStringify({ a: 1 }, { indent: 2 })).toBe('{\n  "a": 1\n}');
     // Above 8 is 8, below 0 is 0 rather than an invalid JSON.stringify space.
@@ -40,10 +53,29 @@ describe("stableJsonStringify", () => {
     expect(stableJsonStringify("short", { maxOutputChars: 100 })).toBe('"short"');
   });
 
+  it("keeps the default cap when maxOutputChars is 0, negative or NaN", () => {
+    const long = "y".repeat(300_000);
+    for (const maxOutputChars of [0, -1, Number.NaN]) {
+      const out = stableJsonStringify(long, { maxOutputChars });
+      expect(out.length).toBe(200_000 + "\n[... truncated ...]".length);
+    }
+  });
+
+  it("does not split a surrogate pair when truncating", () => {
+    const smile = String.fromCodePoint(0x1f600);
+    // Output is `"` then the pairs; a cut at 2 would land between halves.
+    expect(stableJsonStringify(smile.repeat(3), { maxOutputChars: 2 })).toBe(
+      '"\n[... truncated ...]',
+    );
+  });
+
   it("throws on a circular object instead of returning a fake null", () => {
     const circular: Record<string, unknown> = { a: 1 };
     circular.self = circular;
     expect(() => stableJsonStringify(circular)).toThrow(/not JSON serializable/);
+    expect(() => stableJsonStringify(circular, { sortKeys: true })).toThrow(
+      /not JSON serializable/,
+    );
   });
 
   it("throws when toJSON throws", () => {
@@ -55,12 +87,12 @@ describe("stableJsonStringify", () => {
     expect(() => stableJsonStringify(exploding)).toThrow(/not JSON serializable: nope/);
   });
 
-  it("keeps BigInt digits", () => {
+  it("writes BigInt as an exact JSON number", () => {
     expect(stableJsonStringify(10n)).toBe("10");
     expect(stableJsonStringify({ n: 5n })).toBe('{"n":5}');
-    expect(stableJsonStringify(2n ** 70n)).toBe('"1180591620717411303424"');
-    expect(stableJsonStringify({ big: 2n ** 70n }, { sortKeys: true })).toBe(
-      '{"big":"1180591620717411303424"}',
+    expect(stableJsonStringify(2n ** 70n)).toBe("1180591620717411303424");
+    expect(stableJsonStringify({ id: 2n ** 70n, name: "x" }, { sortKeys: true })).toBe(
+      '{"id":1180591620717411303424,"name":"x"}',
     );
   });
 

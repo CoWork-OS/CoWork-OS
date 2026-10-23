@@ -157,7 +157,7 @@ jobs:
 
       - name: Setup Python for Android worker guard tests
         if: runner.os != 'Windows'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

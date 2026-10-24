@@ -27,6 +27,48 @@ function evaluate(input: Partial<Parameters<typeof PermissionEngine.evaluate>[0]
   });
 }
 
+it("classifies only host-resolved guest browsers inside task authority", () => {
+  const request = {
+    workspace: {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        accessProfileId: "full_access",
+        accessSandboxMode: "danger-full-access" as const,
+        accessApprovalPolicy: "never" as const,
+        accessNetworkMode: "enabled" as const,
+      },
+    },
+    mode: "bypass_permissions" as const,
+    toolName: "browser_snapshot",
+    toolInput: { trustedTaskComputer: true },
+    rules: [],
+  };
+  expect(evaluate(request).decision).toBe("deny");
+  expect(evaluate({ ...request, trustedTaskComputer: true }).decision).toBe("allow");
+  expect(
+    evaluate({
+      ...request,
+      trustedTaskComputer: true,
+      toolName: "read_terminal",
+      approvalType: "data_export",
+    }).decision,
+  ).not.toBe("allow");
+  expect(
+    evaluate({
+      ...request,
+      trustedTaskComputer: true,
+      rules: [
+        {
+          source: "session",
+          effect: "deny",
+          scope: { kind: "tool", toolName: "browser_snapshot" },
+        },
+      ],
+    }).decision,
+  ).toBe("deny");
+});
+
 describe("PermissionEngine", () => {
   describe("local video provider", () => {
     const videoCall = (toolName: string, provider: string) =>

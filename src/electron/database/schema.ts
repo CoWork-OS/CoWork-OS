@@ -4534,6 +4534,7 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN file_access TEXT",
       // For "Its own desktop": what it may reach on the network (internet, off; null = internet).
       "ALTER TABLE agent_roles ADD COLUMN desktop_network TEXT",
+      "ALTER TABLE agent_roles ADD COLUMN execution_environment TEXT",
     ];
 
     for (const sql of missionControlColumns) {

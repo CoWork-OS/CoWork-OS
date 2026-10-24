@@ -30,6 +30,13 @@ export interface ComputerViewState {
   takeoverRequest?: { reason: string; at: number };
   waitingSince?: number;
   updatedAt: number;
+  environment?: {
+    id: string;
+    backend: "bot-desktop" | "cua";
+    lifetime: "persistent" | "task";
+    state: string;
+    error?: string;
+  };
 }
 
 /** Frames are scaled down to this width at most. */

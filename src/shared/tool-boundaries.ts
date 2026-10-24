@@ -120,6 +120,7 @@ const FAMILY_CLASSES: ReadonlyArray<readonly [ToolBoundaryClass, readonly string
 ];
 
 const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
+  computer_environment: "workspace_files",
   ...Object.fromEntries(
     FAMILY_CLASSES.flatMap(([boundary, names]) => names.map((name) => [name, boundary])),
   ),

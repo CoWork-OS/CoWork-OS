@@ -131,6 +131,30 @@ describe("BotDesktopManager", () => {
     expect(shared.hostWorkFolder("bot-1")?.desktopKey).toBe("shared:research-team");
   });
 
+  it("restarts an existing dedicated computer at quota while refusing a new one", async () => {
+    let now = 1000;
+    const manager = BotDesktopManager.configure({
+      dataDir: () => dataDir,
+      resourcesDir: () => resourcesDir,
+      run: runner,
+      runtimeCandidates: ["docker"],
+      maxEnvironmentDesktops: 1,
+      now: () => now,
+      hostUid: 1000,
+    });
+    const resource = manager.bindEnvironment("quota-a", undefined, "task");
+    await manager.withDesktop(resource, async () => undefined);
+    running.delete(manager.containerName(manager.desktopKey(resource)));
+    now += 60000;
+    await manager.withDesktop(resource, async () => undefined);
+    expect(calls.filter(isDesktopRun)).toHaveLength(2);
+    const second = manager.bindEnvironment("quota-b", undefined, "task");
+    await expect(manager.withDesktop(second, async () => undefined)).rejects.toThrow(
+      /slots are in use/,
+    );
+    expect(calls.filter(isDesktopRun)).toHaveLength(2);
+  });
+
   it("uses the first runtime whose daemon answers", async () => {
     expect(await BotDesktopManager.getInstance().detectRuntime()).toEqual({
       name: "docker",

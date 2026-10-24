@@ -1,3 +1,5 @@
+import { ExecutionEnvironmentController } from "../../environments/ExecutionEnvironmentController";
+import { isEnvironmentTool } from "../../../shared/execution-environment";
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import { trailingBackgroundCommand } from "./trailing-background-command";
 import { isReadOnlyHttpRequestInput } from "../security/http-permission-context";
@@ -987,6 +989,7 @@ export class ToolRegistry {
         deniedTools: Array.from(this.deniedTools.values()).sort(),
         deniedGroups: Array.from(this.deniedGroups.values()).sort(),
         denyAllTools: this.denyAllTools,
+        executionEnvironment: this.environmentController?.().selection() ?? null,
         botWorksOn: this.currentBotWorksOn() ?? null,
         headless: isHeadlessMode(),
         deepWorkMode: this._deepWorkMode,
@@ -1028,6 +1031,7 @@ export class ToolRegistry {
       deniedTools: Array.from(this.deniedTools.values()).sort(),
       deniedGroups: Array.from(this.deniedGroups.values()).sort(),
       denyAllTools: this.denyAllTools,
+      executionEnvironment: this.environmentController?.().selection() ?? null,
       botWorksOn: this.currentBotWorksOn() ?? null,
       headless: isHeadlessMode(),
       deepWorkMode: this._deepWorkMode,
@@ -1321,6 +1325,7 @@ export class ToolRegistry {
       this.workspace.id !== workspace.id ||
       this.workspace.path !== workspace.path ||
       JSON.stringify(this.workspace.permissions) !== JSON.stringify(workspace.permissions);
+    this._environmentController?.updateWorkspace(workspace);
     this.workspace = workspace;
     this.fileTools.setWorkspace(workspace);
     this.skillTools.setWorkspace(workspace);
@@ -1426,6 +1431,9 @@ export class ToolRegistry {
 
   /** Stop every background process this task started with run_command background: true. */
   async stopBackgroundProcesses(reason: string): Promise<number> {
+    if (this._environmentController?.isSelected()) {
+      return this._environmentController.stopProcesses();
+    }
     return this.shellTools.stopAllBackgroundProcesses(reason);
   }
 
@@ -1477,6 +1485,15 @@ export class ToolRegistry {
    * The bot's "Works on" setting for this task, read live so a change applies on the next
    * tool call. Unset outside bot work.
    */
+  private _environmentController?: ExecutionEnvironmentController;
+  private environmentController(): ExecutionEnvironmentController {
+    return (this._environmentController ??= new ExecutionEnvironmentController(
+      this.workspace,
+      this.daemon,
+      this.taskId,
+    ));
+  }
+
   private botWorksOnSource: (() => BotWorksOn | undefined) | null = null;
 
   setBotWorksOnSource(source: (() => BotWorksOn | undefined) | null): void {
@@ -1497,6 +1514,7 @@ export class ToolRegistry {
   private isBlockedByBotWorksOn(toolName: string): boolean {
     const worksOn = this.currentBotWorksOn();
     const restricted = worksOn === "browser" || worksOn === "off" || worksOn === "own_desktop";
+    if (this.environmentController?.().isSelected() && isEnvironmentTool(toolName)) return false;
     const kind = computerToolKind(toolName, {
       // Only a restricted setting needs to know whether an MCP tool drives this computer.
       hostDesktopMcp: restricted && this.getCodexConsentServer(toolName) !== null,
@@ -1554,6 +1572,8 @@ export class ToolRegistry {
    */
   private isBlockedByBotContainment(toolName: string): boolean {
     if (!this.isBotContainedTask()) return false;
+    // These tools are dispatched to the selected guest, never to the host boundary class.
+    if (this.environmentController?.().isSelected() && isEnvironmentTool(toolName)) return false;
     let prefix = "mcp_";
     try {
       prefix = MCPSettingsManager.loadSettings().toolNamePrefix || prefix;
@@ -1570,8 +1590,13 @@ export class ToolRegistry {
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
-    if (this.isBlockedByBotWorksOn(toolName)) return true;
-    if (this.isBlockedByBotContainment(toolName)) return true;
+    try {
+      if (this.isBlockedByBotWorksOn(toolName)) return true;
+      if (this.isBlockedByBotContainment(toolName)) return true;
+    } catch {
+      // Unavailable routing/containment authority is a denial, never a host fallback.
+      return true;
+    }
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
@@ -1592,6 +1617,15 @@ export class ToolRegistry {
   }
 
   isToolAllowed(toolName: string): boolean {
+    try {
+      if (
+        this.environmentController?.().isSelected() &&
+        !this.environmentController().supports(toolName)
+      )
+        return false;
+    } catch {
+      return false;
+    }
     if (
       toolName.startsWith("android_phone_") &&
       isThirdPartyGatewayTask(this.daemon.getTask?.(this.taskId))
@@ -1900,6 +1934,24 @@ export class ToolRegistry {
 
     // Always add mention tools (enables multi-agent collaboration)
     allTools.push(...MentionTools.getToolDefinitions());
+    if (this.environmentController().isSelected())
+      allTools.push({
+        name: "computer_environment",
+        description:
+          "Inspect the selected task computer, reconcile a lost response without replay, import/export a selected workspace file, or finish a disposable computer after its results are saved. File, command and browser tools act inside this computer. Host-only tools are unavailable.",
+        input_schema: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["status", "reconcile", "import", "export", "screenshot", "finish"],
+            },
+            path: { type: "string" },
+            destination: { type: "string" },
+          },
+          required: ["action"],
+        },
+      });
 
     // Channel history tools (local gateway message log)
     if (this.channelTools) {
@@ -1945,6 +1997,15 @@ export class ToolRegistry {
 
     // Filter tools based on security policy (workspace + gateway context)
     let filteredTools = allTools.filter((tool) => this.isToolAllowed(tool.name));
+    if (this.environmentController().isSelected())
+      filteredTools = filteredTools.map((tool) =>
+        isEnvironmentTool(tool.name)
+          ? {
+              ...tool,
+              description: `Runs in the selected task computer. Paths are relative to its work folder; use computer_environment export to deliver files. Guest file transfers are limited to 2 MiB. ${tool.description}`,
+            }
+          : tool,
+      );
 
     // Filter tools based on user's built-in tool settings
     const disabledBySettings: string[] = [];
@@ -2074,6 +2135,10 @@ export class ToolRegistry {
 
   getApprovalType(toolName: string, input?: Any): ApprovalType | null {
     return this.getApprovalTypeForTool(toolName, input);
+  }
+
+  isTaskComputerSelected(): boolean {
+    return this.environmentController().isSelected();
   }
 
   getMcpServerName(toolName: string): string | null {
@@ -2359,6 +2424,15 @@ export class ToolRegistry {
 
   private getApprovalTypeForTool(toolName: string, input?: Any): ApprovalType | null {
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (canonicalToolName === "computer_environment") {
+      if (
+        input?.action === "status" ||
+        input?.action === "reconcile" ||
+        input?.action === "screenshot"
+      )
+        return null;
+      return input?.action === "import" ? "external_file_access" : "workspace_write";
+    }
     if (canonicalToolName === "manage_connector_events") {
       if (input?.action === "list_subscriptions") return null;
       return input?.action === "list_events" ? "network_access" : "external_service";
@@ -2562,13 +2636,14 @@ export class ToolRegistry {
   }
 
   private toolHandlesApprovalInternally(toolName: string, input?: Any): boolean {
+    if (this.environmentController?.().isSelected() && isEnvironmentTool(toolName)) return false;
     return (
       // memory_forget asks before deleting a local memory, except one this task's agent
       // inferred itself (MemoryTools.confirmForget).
       (toolName === "memory_forget" &&
         !(typeof input?.id === "string" && input.id.trim().startsWith("external:"))) ||
-      toolName === "run_command" ||
-      toolName === "delete_file" ||
+      (toolName === "run_command" && !this.environmentController?.().isSelected()) ||
+      (toolName === "delete_file" && !this.environmentController?.().isSelected()) ||
       toolName === "run_applescript" ||
       toolName === "local_photoshop_create" ||
       toolName === "local_photoshop_edit" ||
@@ -2626,6 +2701,9 @@ export class ToolRegistry {
   }
 
   private buildBrowserUseApprovalDetails(toolName: string, input: Any) {
+    // Guest calls never touch Browser Workbench's host profile or session.
+    if (this.isTaskComputerSelected() && this.environmentController().supports(toolName))
+      return null;
     const normalizedToolName = String(toolName || "")
       .trim()
       .toLowerCase();
@@ -3103,7 +3181,22 @@ export class ToolRegistry {
           bookCharge(mcpCharge);
           mcpChargeBooked = true;
         }
-        const result = await next(context);
+        const computer = this.environmentController();
+        if (computer.isSelected() && !computer.supports(context.request.name)) {
+          throw new Error(
+            `Tool "${context.request.name}" is unavailable on the selected computer. No host action was dispatched.`,
+          );
+        }
+        const result =
+          computer.isSelected() && isEnvironmentTool(context.request.name)
+            ? await computer.execute(
+                context.request.name,
+                context.request.input,
+                context.request.runtime?.signal instanceof AbortSignal
+                  ? context.request.runtime.signal
+                  : undefined,
+              )
+            : await next(context);
         let outputBytes: number | undefined;
         try {
           outputBytes = Buffer.byteLength(JSON.stringify(result), "utf8");
@@ -3453,6 +3546,9 @@ export class ToolRegistry {
       "meeting_artifact_get",
       async ({ request }) => this.meetingArtifactTools.get(request.input),
       readParallelSchedulerSpec,
+    );
+    register("computer_environment", async ({ request }) =>
+      this.environmentController().execute("computer_environment", request.input),
     );
     register("tool_search", async ({ request }) =>
       this.searchDeferredTools(request.input?.query || "", request.input?.limit),
@@ -5321,6 +5417,8 @@ ${skillDescriptions}`;
     runtime?: Record<string, unknown>,
   ): Promise<{ result: Any; policyTrace?: Any }> {
     input = snapshotToolInput(input);
+    const selectedComputer = this.environmentController?.();
+    if (selectedComputer?.isSelected()) input = selectedComputer.normalizeInput(name, input);
     await ToolRegistry.prototype.assertApplicationRecoveryBoundary.call(this, name, input, runtime);
     if (this.handlerRegistry.has(name)) {
       return await this.executeWithRegisteredHandler(name, input, runtime);
@@ -5358,6 +5456,8 @@ ${skillDescriptions}`;
 
   async executeTool(name: string, input: Any, _runtime?: Record<string, unknown>): Promise<Any> {
     input = snapshotToolInput(input);
+    const selectedComputer = this.environmentController?.();
+    if (selectedComputer?.isSelected()) input = selectedComputer.normalizeInput(name, input);
     await ToolRegistry.prototype.assertApplicationRecoveryBoundary.call(
       this,
       name,
@@ -5502,6 +5602,16 @@ ${skillDescriptions}`;
     }
 
     await this.assertResponsibilityPolicy(name, input);
+
+    const computer = this.environmentController();
+    if (computer.isSelected() && !computer.supports(name))
+      throw new Error(`Tool "${name}" is unavailable on the selected computer.`);
+    if (computer.isSelected() && isEnvironmentTool(name))
+      return computer.execute(
+        name,
+        input,
+        _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
+      );
 
     // File tools
     if (name === "read_file") {
@@ -6794,6 +6904,19 @@ ${skillDescriptions}`;
    * Cleanup resources (call when task is done)
    */
   async cleanup(): Promise<void> {
+    const computer = this._environmentController;
+    if (computer?.isSelected()) {
+      const status = this.daemon.getTask(this.taskId)?.status;
+      if (["completed", "failed", "cancelled"].includes(status || "")) {
+        await computer.finish().catch((error) =>
+          this.daemon.logEvent(this.taskId, "log", {
+            metric: "execution_environment_cleanup_pending",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+      await computer.close();
+    }
     await this._codeExecTools?.cleanup().catch(() => undefined);
     this.codexConsentClosed = true;
     this.codexTaskConsents?.clear();

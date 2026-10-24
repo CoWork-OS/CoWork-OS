@@ -22,6 +22,8 @@ describe("ComputerHandoffTools", () => {
   });
 
   it("asks through a real input request and waits until the person is done", async () => {
+    const revokeViewer = vi.fn();
+    view.configure({ revokeViewer });
     let resolveAnswer!: (value: Any) => void;
     const requestUserInput = vi.fn(() => new Promise<Any>((resolve) => (resolveAnswer = resolve)));
     const pending = new ComputerHandoffTools("task-1", { requestUserInput }).requestTakeover({
@@ -47,6 +49,7 @@ describe("ComputerHandoffTools", () => {
     const result = await pending;
     expect(result.success).toBe(true);
     expect(result.message).toMatch(/fresh screenshot/);
+    expect(revokeViewer).toHaveBeenCalledWith("task-1");
     expect(view.isHeldByPerson("task-1")).toBe(false);
     expect(view.getState("task-1").takeoverRequest).toBeUndefined();
   });

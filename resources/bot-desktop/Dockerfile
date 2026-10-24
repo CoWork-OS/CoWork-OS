@@ -19,6 +19,7 @@ RUN apt-get update \
       fonts-noto-color-emoji \
       iptables \
       novnc \
+      nodejs \
       openbox \
       procps \
       python3 \

@@ -1,3 +1,4 @@
+import { TaskComputerPanel } from "../TaskComputerPanel";
 import {
   Archive as ArchiveIcon,
   ArrowUp,
@@ -6553,8 +6554,24 @@ function MainContentComponent({
 
   const isBuildTaskView = Boolean(task) && !isBotConversation && isBuildTask(task);
   const buildPreviewPath = useMemo(
-    () => (isBuildTaskView ? pickBuildPreviewPath(statusTaskEventUi.files) : null),
-    [isBuildTaskView, statusTaskEventUi.files],
+    () =>
+      isBuildTaskView
+        ? pickBuildPreviewPath(
+            statusTaskEventUi.files,
+            task?.agentConfig?.executionEnvironment ||
+              task?.agentConfig?.executionEnvironmentBinding
+              ? (task.agentConfig.executionEnvironmentBinding?.exported ?? []).map(
+                  (file) => file.path,
+                )
+              : undefined,
+          )
+        : null,
+    [
+      isBuildTaskView,
+      statusTaskEventUi.files,
+      task?.agentConfig?.executionEnvironment,
+      task?.agentConfig?.executionEnvironmentBinding,
+    ],
   );
   const [buildChangesOpen, setBuildChangesOpen] = useState(false);
   useEffect(() => setBuildChangesOpen(false), [task?.id]);
@@ -9463,6 +9480,11 @@ function MainContentComponent({
               </Suspense>
             )}
 
+            {task &&
+            (task.agentConfig?.executionEnvironment ||
+              task.agentConfig?.executionEnvironmentBinding) ? (
+              <TaskComputerPanel task={task} />
+            ) : null}
             <Suspense
               fallback={
                 <div className="task-conversation-loading" role="status">

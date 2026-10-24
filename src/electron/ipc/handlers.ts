@@ -1,3 +1,8 @@
+import {
+  ExecutionEnvironmentSelectionSchema,
+  environmentControlKey,
+} from "../../shared/execution-environment";
+import { ExecutionEnvironmentController } from "../environments/ExecutionEnvironmentController";
 import { mapBounded, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import {
   collaborativeExecutionLanes,
@@ -1681,6 +1686,11 @@ export async function setupIpcHandlers(
   _app.on("will-quit", () => botDesktops.stopAllOnQuit());
   const computerView = ComputerViewService.getInstance();
   computerView.configure({
+    revokeViewer: (taskId) => {
+      desktopViewers.get(taskId)?.destroy();
+      const botId = agentDaemon.getTask(taskId)?.assignedAgentRoleId;
+      if (botId) desktopViewers.get(botId)?.destroy();
+    },
     notify: (state) => {
       const win = computerUseMainWindow();
       if (win && !win.isDestroyed()) win.webContents.send(IPC_CHANNELS.COMPUTER_VIEW_EVENT, state);
@@ -1688,7 +1698,19 @@ export async function setupIpcHandlers(
     logEvent: (taskId, type, payload) => agentDaemon.logEvent(taskId, type as Any, payload),
     captureBrowser: (taskId) => getBrowserWorkbenchService().capturePreview(taskId),
     captureDesktop: async (taskId) => {
-      const botId = agentDaemon.getTask(taskId)?.assignedAgentRoleId;
+      const task = agentDaemon.getTask(taskId);
+      if (task?.agentConfig?.executionEnvironmentBinding) {
+        const workspace = agentDaemon.getEffectiveWorkspaceForTask(taskId);
+        if (!workspace) return null;
+        const computer = new ExecutionEnvironmentController(workspace, agentDaemon, taskId);
+        try {
+          const png = await computer.capture();
+          return png ? { png, label: "Task computer" } : null;
+        } finally {
+          await computer.close();
+        }
+      }
+      const botId = task?.assignedAgentRoleId;
       const png = botId ? await botDesktops.captureIfRunning(botId) : null;
       return png ? { png, label: "Its own desktop" } : null;
     },
@@ -1713,6 +1735,17 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_WATCH, (event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_WATCH);
     const id = readComputerViewTaskId(taskId);
+    const binding = agentDaemon.getTask(id)?.agentConfig?.executionEnvironmentBinding;
+    if (binding) {
+      computerView.bindEnvironment(id, environmentControlKey(binding));
+      computerView.publishEnvironment(id, {
+        id: binding.id,
+        backend: binding.selection.backend,
+        lifetime: binding.selection.lifetime,
+        state: binding.state,
+        error: binding.error,
+      });
+    }
     const senderId = event.sender.id;
     let watched = computerViewWatches.get(senderId);
     if (!watched) {
@@ -1738,17 +1771,61 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER);
     const id = readComputerViewTaskId(taskId);
     if (!(await agentDaemon.getTaskById(id))) throw new Error("Task not found");
-    return computerView.takeOver(id);
+    const binding = agentDaemon.getTask(id)?.agentConfig?.executionEnvironmentBinding;
+    if (binding) computerView.bindEnvironment(id, environmentControlKey(binding));
+    const state = computerView.takeOver(id);
+    if (binding) await ExecutionEnvironmentController.quiesce(environmentControlKey(binding));
+    return state;
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK);
-    return computerView.handBack(readComputerViewTaskId(taskId));
+    const id = readComputerViewTaskId(taskId);
+    return computerView.handBack(id);
   });
+  const taskComputer = async (taskId: unknown): Promise<ExecutionEnvironmentController | null> => {
+    const task = await agentDaemon.getTaskById(readComputerViewTaskId(taskId));
+    if (!task) throw new Error("Task not found");
+    const role = task.assignedAgentRoleId
+      ? agentDaemon.getAgentRoleById(task.assignedAgentRoleId)
+      : undefined;
+    if (
+      !task.agentConfig?.executionEnvironment &&
+      !task.agentConfig?.executionEnvironmentBinding &&
+      !role?.executionEnvironment
+    )
+      return null;
+    const workspace = agentDaemon.getEffectiveWorkspaceForTask(task.id);
+    if (!workspace) throw new Error("Task workspace not found");
+    return new ExecutionEnvironmentController(workspace, agentDaemon, task.id);
+  };
+  ipcMain.handle(
+    IPC_CHANNELS.COMPUTER_ENVIRONMENT_ACTION,
+    async (_event, taskId: unknown, action: unknown) => {
+      const id = readComputerViewTaskId(taskId);
+      if (!["status", "reconcile", "finish"].includes(String(action)))
+        throw new Error("Unsupported computer action");
+      const computer = await taskComputer(id);
+      if (!computer) throw new Error("This task has no isolated computer");
+      try {
+        return await computer.execute("computer_environment", { action });
+      } finally {
+        await computer.close();
+      }
+    },
+  );
   // The bot's own desktop in a window of its own: the full, interactive view for take-over.
   const desktopBotForTask = async (taskId: unknown): Promise<{ botId: string; name: string }> => {
     const task = await agentDaemon.getTaskById(readComputerViewTaskId(taskId));
     const botId = task?.assignedAgentRoleId;
     const role = botId ? agentDaemon.getAgentRoleById(botId) : undefined;
+    if (
+      task?.agentConfig?.executionEnvironment ||
+      task?.agentConfig?.executionEnvironmentBinding ||
+      role?.executionEnvironment
+    )
+      throw new Error(
+        "Use the task computer file tools; legacy desktop teaching is unavailable for this environment.",
+      );
     if (!botId || role?.worksOn !== "own_desktop") {
       throw new Error("This bot doesn't work on its own desktop.");
     }
@@ -1756,40 +1833,54 @@ export async function setupIpcHandlers(
   };
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_OPEN_DESKTOP, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_OPEN_DESKTOP);
-    const { botId, name } = await desktopBotForTask(taskId);
-    // You can use the desktop only after taking over; otherwise the view is read-only.
-    const url = await botDesktops.viewerUrl(botId, {
-      viewOnly: !computerView.isHeldByPerson(readComputerViewTaskId(taskId)),
-    });
-    const origin = new URL(url).origin;
-    const existing = desktopViewers.get(botId);
-    if (existing && !existing.isDestroyed()) {
-      if (existing.webContents.getURL() !== url) await existing.loadURL(url);
-      existing.focus();
+    const computer = await taskComputer(taskId);
+    try {
+      const { botId, name } = computer
+        ? { botId: readComputerViewTaskId(taskId), name: "Task computer" }
+        : await desktopBotForTask(taskId);
+      // Establish the current generation's resource mapping before checking viewer authority.
+      if (computer) await computer.ensure();
+      const viewOnly = !computerView.ownsControl(readComputerViewTaskId(taskId));
+      const url = computer
+        ? await computer.viewer(viewOnly)
+        : await botDesktops.viewerUrl(botId, { viewOnly });
+      // A hand-back may have happened while the backend prepared its viewer URL.
+      if (!viewOnly && !computerView.ownsControl(readComputerViewTaskId(taskId))) {
+        throw new Error("Computer control changed while opening the desktop. Open it again.");
+      }
+      if (!url) return { opened: true };
+      const origin = new URL(url).origin;
+      const existing = desktopViewers.get(botId);
+      if (existing && !existing.isDestroyed()) {
+        if (existing.webContents.getURL() !== url) await existing.loadURL(url);
+        existing.focus();
+        return { opened: true };
+      }
+      const viewer = new BrowserWindow({
+        width: 1300,
+        height: 860,
+        title: `${name}'s desktop`,
+        autoHideMenuBar: true,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          partition: "cowork-bot-desktop-viewer",
+        },
+      });
+      // The viewer stays on the desktop's own loopback address.
+      viewer.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      viewer.webContents.on("will-navigate", (navigation, target) => {
+        if (new URL(target).origin !== origin) navigation.preventDefault();
+      });
+      viewer.on("page-title-updated", (titleEvent) => titleEvent.preventDefault());
+      viewer.on("closed", () => desktopViewers.delete(botId));
+      desktopViewers.set(botId, viewer);
+      await viewer.loadURL(url);
       return { opened: true };
+    } finally {
+      await computer?.close();
     }
-    const viewer = new BrowserWindow({
-      width: 1300,
-      height: 860,
-      title: `${name}'s desktop`,
-      autoHideMenuBar: true,
-      webPreferences: {
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        partition: "cowork-bot-desktop-viewer",
-      },
-    });
-    // The viewer stays on the desktop's own loopback address.
-    viewer.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    viewer.webContents.on("will-navigate", (navigation, target) => {
-      if (!target.startsWith(origin)) navigation.preventDefault();
-    });
-    viewer.on("page-title-updated", (titleEvent) => titleEvent.preventDefault());
-    viewer.on("closed", () => desktopViewers.delete(botId));
-    desktopViewers.set(botId, viewer);
-    await viewer.loadURL(url);
-    return { opened: true };
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES);
@@ -1861,6 +1952,16 @@ export async function setupIpcHandlers(
   );
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP);
+    const computer = await taskComputer(taskId);
+    if (computer) {
+      try {
+        desktopViewers.get(readComputerViewTaskId(taskId))?.close();
+        await computer.finish();
+        return { stopped: true };
+      } finally {
+        await computer.close();
+      }
+    }
     const { botId } = await desktopBotForTask(taskId);
     desktopViewers.get(botId)?.close();
     await botDesktops.stop(botId);
@@ -10274,6 +10375,10 @@ export async function setupIpcHandlers(
     if (request.companyId !== undefined && request.companyId !== null) {
       request.companyId = validateInput(UUIDSchema, request.companyId, "company ID");
     }
+    if (request.executionEnvironment)
+      request.executionEnvironment = ExecutionEnvironmentSelectionSchema.parse(
+        request.executionEnvironment,
+      );
     Object.assign(request, normalizeAgentRoleModelFields(request));
     if (request.worksOn !== undefined) {
       request.worksOn =
@@ -10309,6 +10414,10 @@ export async function setupIpcHandlers(
       id: validated,
       ...normalizeAgentRoleModelFields(request),
     };
+    if (normalizedRequest.executionEnvironment)
+      normalizedRequest.executionEnvironment = ExecutionEnvironmentSelectionSchema.parse(
+        normalizedRequest.executionEnvironment,
+      );
     if (normalizedRequest.companyId !== undefined && normalizedRequest.companyId !== null) {
       normalizedRequest.companyId = validateInput(
         UUIDSchema,

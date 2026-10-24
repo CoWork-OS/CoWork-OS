@@ -1,3 +1,7 @@
+import type {
+  ExecutionEnvironmentSelection,
+  ExecutionEnvironmentBinding,
+} from "./execution-environment";
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
@@ -2589,6 +2593,12 @@ export interface AgentConfig {
    * blocks switching the task to another workspace. Child tasks inherit the limit.
    */
   botContained?: boolean;
+  /** Opt-in task computer; absent preserves existing execution. */
+  executionEnvironment?: ExecutionEnvironmentSelection;
+  /** Host-owned durable identity, never accepted from renderer/tool arguments. */
+  executionEnvironmentBinding?: ExecutionEnvironmentBinding;
+  /** Host-owned delegation boundary: reuse the ancestor's computer without owning its lifecycle. */
+  executionEnvironmentParentTaskId?: string;
   /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
@@ -6130,6 +6140,7 @@ export interface AgentRole {
   accessProfileId?: AccessProfileId;
   /** Where this bot works: which computer its tasks may drive. Unset means Auto. */
   worksOn?: BotWorksOn;
+  executionEnvironment?: ExecutionEnvironmentSelection;
   /**
    * For "Its own desktop": the SSH host (from your SSH config) its desktop runs on. Unset means
    * this computer.
@@ -6197,6 +6208,7 @@ export interface CreateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** Where this bot works; unset means Auto. */
   worksOn?: BotWorksOn;
+  executionEnvironment?: ExecutionEnvironmentSelection;
   /** The SSH host its own desktop runs on; unset means this computer. */
   desktopHost?: string;
   /** A shared desktop's name; unset means a desktop of its own. */
@@ -6252,6 +6264,7 @@ export interface UpdateAgentRoleRequest {
   accessProfileId?: AccessProfileId | null;
   /** Where this bot works; null resets it to Auto. */
   worksOn?: BotWorksOn | null;
+  executionEnvironment?: ExecutionEnvironmentSelection | null;
   /** The SSH host its own desktop runs on; null means this computer. */
   desktopHost?: string | null;
   /** A shared desktop's name; null means a desktop of its own. */
@@ -9149,6 +9162,7 @@ export const IPC_CHANNELS = {
   COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS: "computerUse:saveCuaSpaceSettings",
   COMPUTER_USE_TEST_CUA_SPACE: "computerUse:testCuaSpace",
   // Live view of a task's computer in the bot's panel, and take-over by the person
+  COMPUTER_ENVIRONMENT_ACTION: "computerEnvironment:action",
   COMPUTER_VIEW_WATCH: "computerView:watch",
   COMPUTER_VIEW_UNWATCH: "computerView:unwatch",
   COMPUTER_VIEW_TAKE_OVER: "computerView:takeOver",

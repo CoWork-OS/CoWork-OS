@@ -117,6 +117,7 @@ const WORKS_ON_RANK: Record<BotWorksOn, number> = {
 export function narrowestBotWorksOn(
   ...values: Array<BotWorksOn | undefined | null>
 ): BotWorksOn | undefined {
+  if (values.includes("browser") && values.includes("own_desktop")) return "off";
   let result: BotWorksOn | undefined;
   for (const value of values) {
     if (!isBotWorksOn(value)) continue;

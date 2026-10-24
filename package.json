@@ -194,6 +194,8 @@
     "models:sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs",
     "models:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs --check",
     "skills:check": "node scripts/qa/skills-check.mjs",
+    "qa:computer-environments": "vitest run src/electron/environments/__tests__ src/electron/computer-use/__tests__/bot-desktop-manager.test.ts src/electron/computer-use/__tests__/computer-view-service.test.ts src/shared/__tests__/bot-computer.test.ts",
+    "qa:computer-environments:smoke": "npm run build:electron && node scripts/qa/task-computer-smoke.cjs",
     "qa:application-execution": "vitest run src/electron/applications/__tests__",
     "qa:space:live": "npm run build:daemon && node scripts/qa/space-live-smoke.cjs",
     "qa:application-execution:smoke": "npm run build:electron && node scripts/qa/application-execution-smoke.cjs",

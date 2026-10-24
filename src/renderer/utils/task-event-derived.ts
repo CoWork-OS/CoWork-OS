@@ -676,6 +676,7 @@ function deriveFiles(
   events: TaskEvent[],
   workspace: Workspace | null | undefined,
   outputSummary: TaskOutputSummary | null,
+  guestComputer = false,
 ): FileInfo[] {
   const fileMap = new Map<string, FileInfo>();
   const directoryPaths = new Set<string>();
@@ -733,6 +734,9 @@ function deriveFiles(
     completionOutputPaths.forEach((outputPath, index) => {
       const key = normalizeWorkspacePathKey(workspace?.path, outputPath);
       if (fileMap.has(key)) return;
+      // Guest output names are not host files. Only published artifact/file events
+      // can populate the host Files panel; a completion summary is not a transfer receipt.
+      if (guestComputer) return;
       if (directoryPaths.has(key)) return;
       fileMap.set(key, {
         path: key,
@@ -1159,7 +1163,15 @@ export function deriveSharedTaskEventUiState(
   const planSteps = deriveRevisionAwarePlanSteps(statusProjectionEvents);
   const checklistState = deriveChecklistState(normalizedEvents);
   const outputSummary = deriveOutputSummary(params.task, statusProjectionEvents);
-  const files = deriveFiles(normalizedEvents, params.workspace, outputSummary);
+  const files = deriveFiles(
+    normalizedEvents,
+    params.workspace,
+    outputSummary,
+    Boolean(
+      params.task?.agentConfig?.executionEnvironment ||
+      params.task?.agentConfig?.executionEnvironmentBinding,
+    ),
+  );
   const toolUsage = deriveToolUsage(normalizedEvents);
   const referencedFiles = deriveReferencedFiles(normalizedEvents);
   const usedToolNames = deriveUsedToolNames(normalizedEvents);

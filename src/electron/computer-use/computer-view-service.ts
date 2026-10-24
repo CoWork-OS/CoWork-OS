@@ -35,6 +35,8 @@ export interface ComputerViewDeps {
   captureDesktop?: (taskId: string) => Promise<{ png: Buffer; label?: string } | null>;
   /** Pauses or resumes the bot's driving of the task's in-app browser tabs. */
   setBrowserPaused?: (taskId: string, paused: boolean) => void;
+  /** Closes interactive desktop viewers synchronously before agent input resumes. */
+  revokeViewer?: (taskId: string) => void;
   logEvent?: (taskId: string, type: string, payload: Record<string, unknown>) => void;
   notify?: (state: ComputerViewState) => void;
   now?: () => number;
@@ -75,6 +77,28 @@ export class ComputerViewService {
   private readonly watchers = new Map<string, number>();
   private readonly pollers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly capturing = new Set<string>();
+  private readonly environments = new Map<string, string>();
+  private readonly environmentHolds = new Map<string, string>();
+
+  bindEnvironment(taskId: string, resourceId: string): void {
+    const old = this.environments.get(taskId);
+    if (old && old !== resourceId && this.environmentHolds.has(old)) {
+      throw new Error("Hand this computer back before switching environments.");
+    }
+    if (this.states.get(taskId)?.status === "held") {
+      const owner = this.environmentHolds.get(resourceId);
+      if (owner && owner !== taskId) throw new Error("Another task holds this computer.");
+      this.environmentHolds.set(resourceId, taskId);
+    }
+    this.environments.set(taskId, resourceId);
+  }
+
+  unbindEnvironment(taskId: string): void {
+    const resource = this.environments.get(taskId);
+    if (resource && this.environmentHolds.get(resource) === taskId)
+      this.environmentHolds.delete(resource);
+    this.environments.delete(taskId);
+  }
 
   constructor(private deps: ComputerViewDeps) {}
 
@@ -84,11 +108,38 @@ export class ComputerViewService {
   }
 
   getState(taskId: string): ComputerViewState {
-    return this.states.get(taskId) ?? { taskId, status: "idle", updatedAt: this.now() };
+    const state = this.states.get(taskId) ?? { taskId, status: "idle", updatedAt: this.now() };
+    const resource = this.environments.get(taskId);
+    return resource && this.environmentHolds.has(resource)
+      ? { ...state, status: "held", frame: undefined }
+      : state;
+  }
+
+  publishEnvironment(taskId: string, environment: ComputerViewState["environment"]): void {
+    this.update(taskId, { environment });
   }
 
   isHeldByPerson(taskId: string): boolean {
-    return this.states.get(taskId)?.status === "held";
+    const resource = this.environments.get(taskId);
+    return (
+      this.states.get(taskId)?.status === "held" ||
+      Boolean(resource && this.environmentHolds.has(resource))
+    );
+  }
+
+  ownsControl(taskId: string): boolean {
+    const resource = this.environments.get(taskId);
+    return resource
+      ? this.environmentHolds.get(resource) === taskId
+      : this.states.get(taskId)?.status === "held";
+  }
+
+  private notifyEnvironmentPeers(taskId: string): void {
+    const resource = this.environments.get(taskId);
+    if (!resource) return;
+    for (const [peer, key] of this.environments) {
+      if (peer !== taskId && key === resource) this.deps.notify?.(this.getState(peer));
+    }
   }
 
   /** Refuses a bot's computer action while the person has taken over. */
@@ -168,18 +219,28 @@ export class ComputerViewService {
   /** The person takes over: the bot's computer and browser actions are refused until hand-back. */
   takeOver(taskId: string): ComputerViewState {
     if (this.isHeldByPerson(taskId)) return this.getState(taskId);
+    const resource = this.environments.get(taskId);
+    if (resource) this.environmentHolds.set(resource, taskId);
     this.deps.setBrowserPaused?.(taskId, true);
     this.deps.logEvent?.(taskId, "computer_taken_over", {});
     const state = this.update(taskId, { status: "held", takeoverRequest: undefined });
+    this.notifyEnvironmentPeers(taskId);
     this.syncPoller(taskId);
     return state;
   }
 
   handBack(taskId: string): ComputerViewState {
     if (!this.isHeldByPerson(taskId)) return this.getState(taskId);
+    const resource = this.environments.get(taskId);
+    const owner = resource ? this.environmentHolds.get(resource) : undefined;
+    if (owner && owner !== taskId)
+      throw new Error("Hand the computer back from the task that took control.");
+    this.deps.revokeViewer?.(taskId);
+    if (resource) this.environmentHolds.delete(resource);
     this.deps.setBrowserPaused?.(taskId, false);
     this.deps.logEvent?.(taskId, "computer_handed_back", {});
     const state = this.update(taskId, { status: "idle" });
+    this.notifyEnvironmentPeers(taskId);
     this.syncPoller(taskId);
     return state;
   }
@@ -214,8 +275,10 @@ export class ComputerViewService {
 
   /** The task finished: forget its view and release any take-over. */
   clearTask(taskId: string): void {
+    this.deps.revokeViewer?.(taskId);
     if (this.isHeldByPerson(taskId)) this.deps.setBrowserPaused?.(taskId, false);
     this.states.delete(taskId);
+    this.unbindEnvironment(taskId);
     this.stopPoller(taskId);
     this.deps.notify?.({ taskId, status: "idle", updatedAt: this.now() });
   }
@@ -224,6 +287,8 @@ export class ComputerViewService {
     for (const taskId of Array.from(this.pollers.keys())) this.stopPoller(taskId);
     this.states.clear();
     this.watchers.clear();
+    this.environments.clear();
+    this.environmentHolds.clear();
   }
 
   private update(taskId: string, patch: Partial<ComputerViewState>): ComputerViewState {

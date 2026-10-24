@@ -1002,6 +1002,53 @@ describe("TaskExecutor entrypoint guards", () => {
     expect(executor.emitEvent).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])(
+    "waits for the task computer completion gate (ready=%s)",
+    async (ready) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      const binding = { id: "computer", state: "ready" };
+      const savedTask = {
+        id: "follow-up-computer",
+        status: "executing",
+        agentConfig: { executionEnvironmentBinding: binding },
+      };
+      executor.task = { ...savedTask, agentConfig: {} }; // The binding was allocated after the turn began.
+      executor.applyRuntimeTaskProjectionToTask = () => ({});
+      executor.buildFollowUpResultSummary = () => "Guest work finished";
+      executor.applyGoalTerminalState = () => undefined;
+      executor.getCompletionProjectionFields = () => ({});
+      let settle!: (value: boolean) => void;
+      executor.daemon = {
+        getTask: () => savedTask,
+        prepareTaskComputerCompletion: vi.fn(
+          () =>
+            new Promise<boolean>((resolve) => {
+              settle = resolve;
+            }),
+        ),
+        updateTask: vi.fn(),
+      };
+      executor.emitEvent = vi.fn();
+      const completion = executor.finalizeFollowUpCompletion("Completed");
+      expect(executor.daemon.updateTask).not.toHaveBeenCalled();
+      expect(executor.task.status).toBe("executing");
+      binding.state = ready ? "released" : "cleanup_pending";
+      savedTask.status = ready ? "executing" : "paused";
+      settle(ready);
+      await completion;
+      expect(executor.task.agentConfig.executionEnvironmentBinding.state).toBe(binding.state);
+      expect(executor.task.status).toBe(ready ? "completed" : "paused");
+      expect(
+        executor.emitEvent.mock.calls.some(([type]: [string]) => type === "task_completed"),
+      ).toBe(ready);
+      expect(
+        executor.daemon.updateTask.mock.calls.some(
+          ([, update]: [string, Any]) => update.status === "completed",
+        ),
+      ).toBe(ready);
+    },
+  );
+
   it("finalizeFollowUpCompletion syncs task row and in-memory task state", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

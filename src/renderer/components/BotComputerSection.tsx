@@ -32,13 +32,18 @@ export function BotComputerSection({
     !off,
   );
   const worksOnLabel = BOT_WORKS_ON_OPTIONS.find((option) => option.value === worksOn)?.label;
+  const environment = state?.environment;
   const held = state?.status === "held";
   const request = !held ? state?.takeoverRequest : undefined;
   const frame = state?.frame;
   // Its work folder: refreshed with each new still, since that is when it may have changed.
-  const { files, reveal } = useBotDesktopFiles(taskId, ownDesktop, frame?.capturedAt);
+  const { files, reveal } = useBotDesktopFiles(
+    taskId,
+    ownDesktop && !environment,
+    frame?.capturedAt,
+  );
   // Teach a task: you record doing it once on its desktop; the bot can replay it later.
-  const teaching = useTaughtTasks(taskId, ownDesktop);
+  const teaching = useTaughtTasks(taskId, ownDesktop && !environment);
   const [taskName, setTaskName] = useState("");
   // It may still be running after the bot's turn ends (it stops after an hour without use).
   const desktopRunning = state?.surface === "own_desktop";
@@ -73,6 +78,14 @@ export function BotComputerSection({
         ) : null}
       </div>
 
+      {environment ? (
+        <p className="bot-computer-note" role="status">
+          {environment.backend === "cua" ? "Cua Space" : "Dedicated Linux computer"} ·{" "}
+          {environment.lifetime === "task" ? "Fresh for this task" : "Kept for this bot"} ·{" "}
+          {environment.state}
+          {environment.error ? ` — ${environment.error}` : ""}
+        </p>
+      ) : null}
       {request ? (
         <div className="bot-computer-request" role="status">
           <strong>{botName} needs you</strong>
@@ -126,7 +139,7 @@ export function BotComputerSection({
               Open desktop
             </button>
           ) : null}
-          {ownDesktop && held && !teaching.recording ? (
+          {ownDesktop && !environment && held && !teaching.recording ? (
             <button
               type="button"
               className="bot-computer-button"
@@ -137,7 +150,7 @@ export function BotComputerSection({
               Record a task
             </button>
           ) : null}
-          {ownDesktop && desktopRunning && !held ? (
+          {ownDesktop && !environment && desktopRunning && !held ? (
             <button
               type="button"
               className="bot-computer-button"

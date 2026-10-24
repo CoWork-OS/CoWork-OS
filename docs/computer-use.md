@@ -36,6 +36,9 @@ The planner and tool policy treat the computer-use lane as a **controlled, last-
 
 ## Run computer use in a Cua Space
 
+For commands, files and a browser to share the same task computer, see
+[Task computers](task-computers.md). The connection below moves desktop control only.
+
 Instead of this computer, the computer-use tools (`screenshot`, `click`,
 `type_text`, `keypress`, `scroll`, `drag` and the rest) can drive a
 [Cua Space](https://cua.ai): a separate computer, on this machine or elsewhere,

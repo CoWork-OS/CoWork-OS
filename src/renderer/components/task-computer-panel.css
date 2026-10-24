@@ -1,0 +1,28 @@
+.task-computer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  margin: 8px 0 16px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.task-computer-panel p {
+  margin: 0;
+}
+
+.task-computer-panel button {
+  margin-right: 8px;
+}
+
+.task-computer-panel small {
+  opacity: 0.7;
+}
+
+.task-computer-panel img {
+  max-width: 480px;
+  width: 100%;
+  border-radius: 6px;
+}

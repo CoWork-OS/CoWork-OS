@@ -17,7 +17,15 @@
 
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash, randomBytes } from "crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  rmSync,
+} from "fs";
 import * as net from "net";
 import * as path from "path";
 import {
@@ -68,6 +76,8 @@ export interface BotDesktopDeps {
    * desktop key (see desktopKey), which is the bot's id unless bots share the desktop.
    */
   inUse?: (desktopKey: string) => boolean;
+  /** Dedicated task-computer quota; legacy desktops retain their existing behavior. */
+  maxEnvironmentDesktops?: number;
 }
 
 const defaultOpenTunnel = (host: string, localPort: number, remotePort: number): ChildProcess =>
@@ -165,6 +175,7 @@ const BOT_DESKTOP_IMAGE_FILES = [
   "start-desktop.sh",
   "cowork-teach.py",
   "cowork-network.sh",
+  "cowork-environment.py",
 ];
 /** Applies the network limit; see resources/bot-desktop/cowork-network.sh. */
 const NETWORK_LIMIT_PROGRAM = "/usr/local/bin/cowork-network";
@@ -348,6 +359,86 @@ export class BotDesktopManager {
 
   /** The SSH host of each desktop key (a bot, or a shared desktop on a host). */
   private readonly keyHosts = new Map<string, string | undefined>();
+  private readonly environmentKeys = new Map<string, string>();
+  private readonly environmentNetworks = new Map<string, BotDesktopNetwork>();
+
+  /** A durable placement descriptor. It contains no credentials or executable input. */
+  bindEnvironment(id: string, botId: string | undefined, lifetime: "persistent" | "task"): string {
+    const host = botId ? this.desktopHost(botId) : undefined;
+    const original = botId ? this.desktopKey(botId) : id;
+    const network = botId ? this.networkFor(original) : "internet";
+    const key = lifetime === "task" ? `task-computer:${id}` : `bot-computer:${original}`;
+    const resource =
+      "environment:" + JSON.stringify({ key, host, network, disposable: lifetime === "task" });
+    this.restoreEnvironment(resource);
+    return resource;
+  }
+
+  restoreEnvironment(resource: string): string {
+    if (!resource.startsWith("environment:")) throw new Error("Invalid computer binding");
+    const value = JSON.parse(resource.slice("environment:".length));
+    if (
+      typeof value.key !== "string" ||
+      !/^(task|bot)-computer:[A-Za-z0-9:@._-]{1,256}$/.test(value.key) ||
+      (value.host !== undefined && !isValidDesktopHost(value.host)) ||
+      !["internet", "off"].includes(value.network)
+    )
+      throw new Error("Invalid computer placement");
+    this.environmentKeys.set(resource, value.key);
+    this.keyHosts.set(value.key, value.host);
+    this.environmentNetworks.set(
+      value.key,
+      this.environmentNetworks.get(value.key) === "off" ? "off" : value.network,
+    );
+    return value.key;
+  }
+
+  /** Removes only a task-owned desktop and its private storage; persistent desktops survive. */
+  async deleteEnvironment(resource: string): Promise<void> {
+    const key = this.restoreEnvironment(resource);
+    if (!key.startsWith("task-computer:") || JSON.parse(resource.slice(12)).disposable !== true) {
+      throw new Error("This computer is persistent and cannot be deleted by task cleanup.");
+    }
+    if (this.busy.has(key)) throw new Error("Computer is still executing; cleanup is pending.");
+    if (!(await this.detectRuntime()))
+      throw new Error("Container runtime is unavailable for cleanup.");
+    const host = this.desktopHost(key);
+    const name = this.containerName(key);
+    try {
+      const owner = await this.container(host, [
+        "inspect",
+        "--format",
+        '{{ index .Config.Labels "cowork.bot-desktop" }}',
+        name,
+      ]);
+      if (owner.stdout.toString().trim() !== botDesktopKey(key))
+        throw new Error("Computer ownership label does not match; cleanup refused.");
+      await this.container(host, ["rm", "--force", name]);
+    } catch (error) {
+      if (
+        !/No such (container|object)/i.test(error instanceof Error ? error.message : String(error))
+      )
+        throw error;
+    }
+    if (this.bindsHome(host)) rmSync(this.homeFolder(key), { recursive: true, force: true });
+    else {
+      try {
+        await this.container(host, ["volume", "rm", `${name}-home`]);
+      } catch (error) {
+        if (!/no such volume/i.test(error instanceof Error ? error.message : String(error)))
+          throw error;
+      }
+    }
+    this.records.get(key)?.tunnel?.kill();
+    this.records.delete(key);
+  }
+
+  /** Host-only control plane used to cancel a guest process while its work lease is held. */
+  async controlEnvironment(resource: string, args: string[], input: string): Promise<RunResult> {
+    const key = this.restoreEnvironment(resource);
+    if (!this.records.has(key)) throw new Error("This computer is not running.");
+    return this.session(key).exec(args, { input, timeoutMs: 20_000 });
+  }
 
   /**
    * Which desktop a bot uses: its own (keyed by the bot), or a shared one that bots with the
@@ -355,6 +446,8 @@ export class BotDesktopManager {
    * folder, turns) is keyed by this.
    */
   desktopKey(botId: string): string {
+    if (botId.startsWith("environment:")) return this.restoreEnvironment(botId);
+    if (this.environmentNetworks.has(botId)) return botId;
     const host = this.desktopHost(botId);
     const group = this.deps.desktopGroupFor?.(botId);
     if (!isValidDesktopGroup(group)) return botId;
@@ -374,6 +467,8 @@ export class BotDesktopManager {
    * of the bots using it.
    */
   networkFor(key: string): BotDesktopNetwork {
+    const pinned = this.environmentNetworks.get(key);
+    if (pinned) return pinned;
     const members = this.keyMembers.get(key) ?? new Set([key]);
     for (const botId of members) {
       if (normalizeBotDesktopNetwork(this.deps.desktopNetworkFor?.(botId)) === "off") return "off";
@@ -915,6 +1010,23 @@ export class BotDesktopManager {
     }
     let pending = this.starting.get(botId);
     if (!pending) {
+      if (/^(task|bot)-computer:/.test(botId)) {
+        const configured =
+          this.deps.maxEnvironmentDesktops ?? Number(process.env.COWORK_MAX_TASK_COMPUTERS || 2);
+        const limit = Number.isInteger(configured) ? Math.max(1, Math.min(8, configured)) : 2;
+        const allocated = new Set(
+          [...this.records.keys(), ...this.starting.keys()].filter((key) =>
+            /^(task|bot)-computer:/.test(key),
+          ),
+        );
+        if (!allocated.has(botId) && allocated.size >= limit)
+          throw Object.assign(
+            new Error(
+              `All ${limit} dedicated computer slots are in use. Stop an idle computer and reconcile this task.`,
+            ),
+            { notDispatched: true },
+          );
+      }
       onStarting?.();
       pending = this.start(botId).finally(() => this.starting.delete(botId));
       this.starting.set(botId, pending);

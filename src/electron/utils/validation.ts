@@ -1,3 +1,4 @@
+import { ExecutionEnvironmentSelectionSchema } from "../../shared/execution-environment";
 /**
  * Input validation schemas for IPC handlers using Zod
  * Provides type-safe validation to prevent malformed input attacks
@@ -315,6 +316,7 @@ export const AgentConfigSchema = z
     chronicleMode: z.enum(["inherit", "enabled", "disabled"]).optional(),
     shellAccess: z.boolean().optional(),
     requireWorktree: z.boolean().optional(),
+    executionEnvironment: ExecutionEnvironmentSelectionSchema.optional(),
     worktreeMode: z.enum(["local", "worktree"]).optional(),
     worktreeBaseBranch: z.string().trim().min(1).max(250).optional(),
     worktreeBaseCommit: z

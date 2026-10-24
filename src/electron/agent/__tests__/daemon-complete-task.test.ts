@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
 import type { TaskOutputSummary } from "../../../shared/types";
 import { PersonalityManager } from "../../settings/personality-manager";
+import { ExecutionEnvironmentController } from "../../environments/ExecutionEnvironmentController";
 
 vi.mock("electron", () => ({
   app: {
@@ -92,6 +93,67 @@ function createDaemonLike() {
     }),
   }) as Any;
 }
+
+describe("task computer completion gate", () => {
+  it("parks unresolved work without replaying or releasing its computer", async () => {
+    const daemon = createDaemonLike();
+    daemon.taskRepo.findById.mockReturnValue({
+      agentConfig: {
+        executionEnvironmentBinding: {
+          id: "computer",
+          state: "unknown",
+          pending: { id: "original-operation" },
+          selection: { lifetime: "task" },
+        },
+      },
+    });
+    daemon.updateTask = vi.fn();
+    daemon.workSessionContractService = { beginWait: vi.fn() };
+    expect(await daemon.prepareTaskComputerCompletion("task-1")).toBe(false);
+    expect(daemon.updateTask).toHaveBeenCalledWith("task-1", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+    });
+    expect(daemon.workSessionContractService.beginWait).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ reason: "execution_environment" }),
+    );
+  });
+
+  it.each([false, true])("gates completion on export and cleanup (fails=%s)", async (fails) => {
+    const daemon = createDaemonLike();
+    daemon.taskRepo.findById.mockReturnValue({
+      agentConfig: {
+        executionEnvironmentBinding: {
+          id: "computer",
+          state: "ready",
+          selection: { lifetime: "task" },
+        },
+      },
+    });
+    daemon.updateTask = vi.fn();
+    daemon.workSessionContractService = { beginWait: vi.fn() };
+    daemon.getEffectiveWorkspaceForTask = () => ({ id: "workspace", path: "/tmp" });
+    const finish = vi
+      .spyOn(ExecutionEnvironmentController.prototype, "finish")
+      .mockImplementation(async () => {
+        if (fails) throw new Error("Export readback failed");
+        return {} as Any;
+      });
+    const close = vi
+      .spyOn(ExecutionEnvironmentController.prototype, "close")
+      .mockResolvedValue(undefined);
+    try {
+      expect(await daemon.prepareTaskComputerCompletion("task-1")).toBe(!fails);
+      expect(finish).toHaveBeenCalledOnce();
+      expect(close).toHaveBeenCalledOnce();
+      expect(daemon.workSessionContractService.beginWait).toHaveBeenCalledTimes(fails ? 1 : 0);
+    } finally {
+      finish.mockRestore();
+      close.mockRestore();
+    }
+  });
+});
 
 describe("application operation completion gate", () => {
   function withApplicationStatus(status: string) {

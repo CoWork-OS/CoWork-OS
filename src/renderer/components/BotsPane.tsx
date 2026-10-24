@@ -574,6 +574,9 @@ export function CreateBotDialog({
             ? { desktopGroup: values.desktopGroup.trim().toLowerCase() }
             : {}),
           ...(values.fileAccess !== "own_folder" ? { fileAccess: values.fileAccess } : {}),
+          ...(values.worksOn === "own_desktop" && values.executionEnvironment
+            ? { executionEnvironment: values.executionEnvironment }
+            : {}),
           ...(values.worksOn === "own_desktop" && values.desktopNetwork !== "internet"
             ? { desktopNetwork: values.desktopNetwork }
             : {}),

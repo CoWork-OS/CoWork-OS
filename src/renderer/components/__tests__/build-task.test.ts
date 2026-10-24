@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILD_INSTRUCTIONS,
+  GUEST_BUILD_INSTRUCTIONS,
+  getBuildComputerPolicyIssue,
   isBuildPrompt,
   isBuildTask,
   stripBuildInstructions,
 } from "../calm/build-task";
+import { BUILTIN_ACCESS_PROFILES } from "../../../shared/access-profiles";
 import { pickBuildPreviewPath } from "../calm/BuildTaskBar";
 import { normalizeInitialPromptText } from "../MainContent/task-event-presentation";
 
@@ -37,6 +40,13 @@ describe("build task detection", () => {
 });
 
 describe("stripBuildInstructions", () => {
+  it("recognises and strips guest steering without sending guest files to host preview", () => {
+    const prompt = `Make a tracker\n\n${GUEST_BUILD_INSTRUCTIONS}`;
+    expect(isBuildPrompt(prompt)).toBe(true);
+    expect(stripBuildInstructions(prompt)).toBe("Make a tracker");
+    expect(GUEST_BUILD_INSTRUCTIONS).toContain("guest browser tools");
+    expect(GUEST_BUILD_INSTRUCTIONS).not.toContain("preview_web_page");
+  });
   it("shows the prompt as the user wrote it", () => {
     expect(stripBuildInstructions(buildPrompt)).toBe("Make a tracker");
   });
@@ -53,7 +63,41 @@ describe("stripBuildInstructions", () => {
   });
 });
 
+describe("Build computer policy admission", () => {
+  it("blocks fresh computers with per-request network consent before creating a task", () => {
+    expect(getBuildComputerPolicyIssue("bot-desktop", BUILTIN_ACCESS_PROFILES[0])).toMatch(
+      /Access profile/,
+    );
+    expect(getBuildComputerPolicyIssue("cua", BUILTIN_ACCESS_PROFILES[1])).toBeTruthy();
+    expect(getBuildComputerPolicyIssue("host", BUILTIN_ACCESS_PROFILES[0])).toBeNull();
+  });
+
+  it("accepts coarse network authority and refuses domain rules", () => {
+    expect(getBuildComputerPolicyIssue("bot-desktop", BUILTIN_ACCESS_PROFILES[2])).toBeNull();
+    expect(
+      getBuildComputerPolicyIssue("cua", {
+        ...BUILTIN_ACCESS_PROFILES[2],
+        domainRules: [{ pattern: "example.com", access: "allow" }],
+      }),
+    ).toBeTruthy();
+  });
+});
+
 describe("pickBuildPreviewPath", () => {
+  it("waits for a guest export receipt before opening a host preview", () => {
+    const files = [
+      { path: "index.html", action: "created" as const, timestamp: 3 },
+      {
+        path: "/w/artifacts/computers/current/index.html",
+        action: "created" as const,
+        timestamp: 2,
+      },
+    ];
+    expect(pickBuildPreviewPath(files, [])).toBeNull();
+    expect(pickBuildPreviewPath(files, ["artifacts/computers/current/index.html"])).toBe(
+      "/w/artifacts/computers/current/index.html",
+    );
+  });
   it("prefers the latest index.html", () => {
     expect(
       pickBuildPreviewPath([

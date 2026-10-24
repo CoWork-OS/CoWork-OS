@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor tool allow-list semantics", () => {
+  it("retains guest commands and recovery tools when task-computer work mentions a desktop", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      title: "Open Calculator",
+      prompt: "Open Calculator on the task computer",
+      agentConfig: {},
+    };
+    executor.toolRegistry = { isTaskComputerSelected: () => true };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+    const allowed = executor.buildStepToolAllowlist(
+      { requiredTools: new Set() },
+      "mutation_required",
+      "general",
+      "Open Calculator and create the result",
+    );
+    for (const name of ["run_command", "computer_environment", "process_output", "stop_process"])
+      expect(allowed.has(name)).toBe(true);
+  });
   it("keeps phone tools and the durable gateway together for Android steps", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: {} };

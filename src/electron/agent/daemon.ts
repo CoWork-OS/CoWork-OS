@@ -1,3 +1,4 @@
+import { ExecutionEnvironmentController } from "../environments/ExecutionEnvironmentController";
 import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
   canReceiveBackgroundCompletion,
@@ -6454,6 +6455,19 @@ export class AgentDaemon extends EventEmitter {
       // A child works on no more computer than the bot it was delegated from: its own bot's
       // setting and any limit it inherited. A caller cannot set this.
       delete next.inheritedBotWorksOn;
+      delete next.executionEnvironmentBinding;
+      delete next.executionEnvironmentParentTaskId;
+      const parentComputer =
+        parent?.agentConfig?.executionEnvironmentBinding?.selection ||
+        parent?.agentConfig?.executionEnvironment ||
+        (parent?.assignedAgentRoleId
+          ? this.getAgentRoleById(parent.assignedAgentRoleId)?.executionEnvironment
+          : undefined);
+      if (parentComputer) {
+        next.executionEnvironment = structuredClone(parentComputer);
+        next.executionEnvironmentParentTaskId =
+          parent?.agentConfig?.executionEnvironmentParentTaskId || parent?.id;
+      }
       const parentRoleWorksOn = parent?.assignedAgentRoleId
         ? this.getAgentRoleById(parent.assignedAgentRoleId)?.worksOn
         : undefined;
@@ -8073,6 +8087,11 @@ export class AgentDaemon extends EventEmitter {
     }
     const evaluation = PermissionEngine.evaluate({
       trustedLocalComputerUse,
+      trustedTaskComputer: Boolean(
+        task &&
+        workspace &&
+        new ExecutionEnvironmentController(workspace, this, taskId).isSelected(),
+      ),
       workspace:
         workspace ||
         ({
@@ -16112,6 +16131,51 @@ export class AgentDaemon extends EventEmitter {
     };
   }
 
+  /** Exports and releases task computers before either initial or follow-up completion. */
+  async prepareTaskComputerCompletion(taskId: string): Promise<boolean> {
+    // A computer's unknown work or unexported results cannot be reported as completed.
+    const computerBinding =
+      this.taskRepo.findById(taskId)?.agentConfig?.executionEnvironmentBinding;
+    if (computerBinding && computerBinding.state !== "released") {
+      let computerBlocker: string | undefined;
+      if (computerBinding.pending || ["unknown", "allocating"].includes(computerBinding.state)) {
+        computerBlocker =
+          "The task computer has unresolved work. Reconcile its original completion receipt before continuing.";
+      } else {
+        const workspace = this.getEffectiveWorkspaceForTask(taskId);
+        if (!workspace) computerBlocker = "The task computer's workspace is unavailable.";
+        else {
+          const computer = new ExecutionEnvironmentController(workspace, this, taskId);
+          try {
+            await computer.finish();
+          } catch (error) {
+            computerBlocker =
+              error instanceof Error ? error.message : "Computer cleanup is pending.";
+          } finally {
+            await computer.close();
+          }
+        }
+      }
+      if (computerBlocker) {
+        this.updateTask(taskId, { status: "paused", terminalStatus: "needs_user_action" });
+        this.workSessionContractService.beginWait(taskId, {
+          kind: "external",
+          requestId: `computer:${computerBinding.id}`,
+          reason: "execution_environment",
+          payload: { environmentId: computerBinding.id, message: computerBlocker },
+        });
+        this.logEvent(taskId, "log", {
+          metric: "execution_environment_wait",
+          message: computerBlocker,
+        });
+        this.finishQueueSlot(taskId);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   /**
    * Mark task as completed
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
@@ -16232,6 +16296,12 @@ export class AgentDaemon extends EventEmitter {
         };
       }
     }
+
+    if (
+      this.taskRepo.findById(taskId)?.agentConfig?.executionEnvironmentBinding &&
+      !(await this.prepareTaskComputerCompletion(taskId))
+    )
+      return;
 
     // A write whose outcome stayed unknown (timeout, lost transport) and was never read back or
     // repeated successfully: the work cannot count as done until someone checks it.

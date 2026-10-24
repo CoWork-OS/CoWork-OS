@@ -16,7 +16,12 @@ import { BuildAccessPicker, useBuildAccessProfile } from "./BuildAccessPicker";
 import type { AccessProfileId } from "../../../shared/access-profiles";
 import type { SettingsTab } from "../MainContent/main-content-types";
 import { BUILD_FOCUS_COMPOSER_EVENT } from "./build-events";
-import { BUILD_INSTRUCTIONS } from "./build-task";
+import {
+  BUILD_INSTRUCTIONS,
+  GUEST_BUILD_INSTRUCTIONS,
+  getBuildComputerPolicyIssue,
+} from "./build-task";
+import { resolveAccessProfileDefinition } from "../../../shared/access-profiles";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { AttachmentTile } from "../AttachmentTile";
@@ -25,6 +30,7 @@ import { BuildMergeReview } from "./BuildMergeReview";
 /** Where a build runs: its checkout, and for Build Compare the shared commit and check. */
 export type BuildCheckoutOptions = Pick<
   AgentConfig,
+  | "executionEnvironment"
   | "worktreeMode"
   | "worktreeBaseBranch"
   | "worktreeBaseCommit"
@@ -180,7 +186,10 @@ export async function submitBuildTask(
   const trimmed =
     text.trim() || (attachments.length > 0 ? "Build something from the attached files." : "");
   if (!trimmed) return false;
-  const result = await onStart(`${trimmed}\n\n${BUILD_INSTRUCTIONS}`, attachments, options);
+  const instructions = options?.executionEnvironment
+    ? GUEST_BUILD_INSTRUCTIONS
+    : BUILD_INSTRUCTIONS;
+  const result = await onStart(`${trimmed}\n\n${instructions}`, attachments, options);
   return result !== false;
 }
 
@@ -203,6 +212,9 @@ export function BuildPanel({
 }: BuildPanelProps) {
   const access = useBuildAccessProfile();
   const [value, setValue] = useState(() => buildDraft.value);
+  const [computer, setComputer] = useState<"host" | "bot-desktop" | "cua">("host");
+  const [computerInputs, setComputerInputs] = useState("");
+  const [computerOutputs, setComputerOutputs] = useState("");
   const [checkoutMode, setCheckoutMode] = useState<CheckoutMode>(() =>
     buildCheckoutDraft.workspaceId === workspace?.id ? buildCheckoutDraft.mode : "local",
   );
@@ -341,9 +353,14 @@ export function BuildPanel({
     return () => window.removeEventListener(BUILD_FOCUS_COMPOSER_EVENT, focusComposer);
   }, []);
 
+  const computerPolicyIssue = getBuildComputerPolicyIssue(
+    computer,
+    resolveAccessProfileDefinition(access.profileId, access.customProfiles),
+  );
   const canSubmit =
     (value.trim().length > 0 || attachments.length > 0) &&
     !submitting &&
+    !computerPolicyIssue &&
     (checkoutMode === "local" || worktreeAvailable);
 
   /**
@@ -374,6 +391,22 @@ export function BuildPanel({
           : await submitBuildTask(onStart, text, attachments, {
               accessProfileId: access.profileId,
               worktreeMode: checkoutMode,
+              ...(computer !== "host"
+                ? {
+                    executionEnvironment: {
+                      backend: computer,
+                      lifetime: "task" as const,
+                      inputPaths: computerInputs
+                        .split("\n")
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                      outputPaths: computerOutputs
+                        .split("\n")
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    },
+                  }
+                : {}),
               ...(checkoutMode === "worktree" && startingBranch
                 ? { worktreeBaseBranch: startingBranch }
                 : {}),
@@ -505,9 +538,22 @@ export function BuildPanel({
                 <option value="worktree" disabled={!worktreeAvailable}>
                   Worktree
                 </option>
-                <option value="compare" disabled={!worktreeAvailable}>
+                <option value="compare" disabled={!worktreeAvailable || computer !== "host"}>
                   Compare
                 </option>
+              </select>
+            </label>
+            <label className="calm-build-checkout">
+              <span>Computer</span>
+              <select
+                aria-label="Task computer"
+                value={computer}
+                disabled={submitting || checkoutMode === "compare"}
+                onChange={(event) => setComputer(event.target.value as typeof computer)}
+              >
+                <option value="host">This computer</option>
+                <option value="bot-desktop">Fresh Linux computer</option>
+                <option value="cua">Fresh Cua Space</option>
               </select>
             </label>
             {checkoutMode === "compare" && worktreeAvailable && (
@@ -553,6 +599,36 @@ export function BuildPanel({
             <kbd>↵</kbd> to build · <kbd>⇧↵</kbd> new line
           </span>
         </div>
+        {computerPolicyIssue ? (
+          <p className="calm-build-location-help" role="status">
+            {computerPolicyIssue}
+          </p>
+        ) : null}
+        {computer !== "host" && checkoutMode !== "compare" ? (
+          <details className="calm-build-transfers">
+            <summary>Files for this computer</summary>
+            <div className="calm-build-transfer-fields">
+              <label>
+                Input files (one workspace path per line)
+                <textarea
+                  value={computerInputs}
+                  onChange={(event) => setComputerInputs(event.target.value)}
+                />
+              </label>
+              <label>
+                Result files (one guest path per line)
+                <textarea
+                  value={computerOutputs}
+                  onChange={(event) => setComputerOutputs(event.target.value)}
+                />
+              </label>
+            </div>
+            <p>
+              Only selected files are imported. Results are saved before the fresh computer is
+              deleted. Docker / Podman or Cua Spaces must be installed.
+            </p>
+          </details>
+        ) : null}
         {checkoutMode === "compare" && worktreeAvailable && (
           <input
             className="calm-build-compare-check"

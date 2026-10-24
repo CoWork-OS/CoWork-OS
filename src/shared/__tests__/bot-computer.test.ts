@@ -20,6 +20,8 @@ describe("bot computer settings", () => {
     expect(narrowestBotWorksOn(undefined, "browser")).toBe("browser");
     expect(narrowestBotWorksOn("auto", undefined)).toBe("auto");
     expect(narrowestBotWorksOn(undefined, null)).toBeUndefined();
+    expect(narrowestBotWorksOn("browser", "own_desktop")).toBe("off");
+    expect(narrowestBotWorksOn("own_desktop", "browser")).toBe("off");
   });
 
   it("knows which computer a tool acts on", () => {

@@ -21,6 +21,7 @@ import {
   type BrowserNetworkProxy,
 } from "../../security/browser-network-proxy";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { isCanonicalLocalFileUrl, isLocalHtmlFileUrl } from "../../browser/webview-url-policy";
 import {
   assertWorkspaceFilesystemAccess,
   evaluateWorkspaceFilesystemAccess,
@@ -787,6 +788,8 @@ export class BrowserService {
   private isAttached = false;
   private networkProxy: BrowserNetworkProxy | null = null;
   private configuredPages = new WeakSet<object>();
+  /** Local pages browser_navigate approved through workspace file access, without #fragment. */
+  private allowedLocalFileUrls = new Set<string>();
   private tabIds = new WeakMap<object, string>();
   /** Open pages of the context in the order they were opened */
   private tabs = new Map<string, BrowserTabRecord>();
@@ -842,6 +845,25 @@ export class BrowserService {
     page.setDefaultNavigationTimeout(this.options.timeout ?? BROWSER_NAVIGATION_TIMEOUT_MS);
   }
 
+  /**
+   * Permit one local .html page the tool layer approved through workspace
+   * filesystem access. Only that exact file is reachable: its sibling files,
+   * other local files and page-initiated navigations to them stay refused, the
+   * same rule the visible workbench applies to local previews.
+   */
+  allowLocalFileUrl(rawUrl: string): void {
+    if (!isLocalHtmlFileUrl(rawUrl)) return;
+    const allowed = new URL(rawUrl);
+    allowed.hash = "";
+    this.allowedLocalFileUrls.add(allowed.href);
+  }
+
+  private isAllowedLocalFileUrl(parsed: URL): boolean {
+    const requested = new URL(parsed.href);
+    requested.hash = "";
+    return this.allowedLocalFileUrls.has(requested.href) && isCanonicalLocalFileUrl(requested.href);
+  }
+
   private assertNetworkUrlAllowed(rawUrl: string, toolName = "browser_navigate"): void {
     let parsed: URL;
     try {
@@ -850,6 +872,12 @@ export class BrowserService {
       throw new Error(`Invalid browser URL: "${rawUrl}"`);
     }
 
+    if (parsed.protocol === "file:") {
+      if (this.isAllowedLocalFileUrl(parsed)) return;
+      throw new Error(
+        `Browser access denied for "${parsed.href}": only a workspace page opened with browser_navigate is reachable`,
+      );
+    }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       throw new Error(
         `Browser network policy only permits http:// and https:// targets, not ${parsed.protocol}`,
@@ -876,7 +904,11 @@ export class BrowserService {
     } catch {
       throw new Error(`Invalid current browser URL: "${url}"`);
     }
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    if (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:" ||
+      parsed.protocol === "file:"
+    ) {
       this.assertNetworkUrlAllowed(url, "browser_session");
       return;
     }
@@ -900,7 +932,11 @@ export class BrowserService {
       await route.abort("blockedbyclient").catch(() => {});
       return;
     }
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    if (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:" ||
+      parsed.protocol === "file:"
+    ) {
       try {
         this.assertNetworkUrlAllowed(requestUrl, "browser_request");
       } catch {

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { pathToFileURL } from "url";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { BrowserTools } from "../browser-tools";
 import { BrowserService } from "../../browser/browser-service";
@@ -941,6 +942,238 @@ describe("BrowserTools browser_navigate", () => {
     expect(descriptionOf("browser_click")).toContain("preferably by ref from browser_snapshot");
     expect(descriptionOf("browser_click")).toContain("call browser_snapshot to verify");
     expect(descriptionOf("browser_fill")).toContain("success:false means the value did not take");
+  });
+});
+
+describe("BrowserTools browser_navigate to local files", () => {
+  const tempRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A task workspace holding one page, reached through the macOS /var -> /private/var alias. */
+  const makeWorkspace = (permissions: Record<string, unknown> = {}) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "browser-file-nav-"));
+    tempRoots.push(root);
+    const workspaceDir = path.join(root, "workspace");
+    fs.mkdirSync(workspaceDir);
+    const pagePath = path.join(workspaceDir, "client-portal.html");
+    fs.writeFileSync(pagePath, "<h1>Client portal</h1>");
+    return {
+      root,
+      workspaceDir,
+      pagePath,
+      canonicalPageUrl: pathToFileURL(fs.realpathSync(pagePath)).href,
+      workspace: {
+        id: "workspace-1",
+        path: workspaceDir,
+        permissions: {
+          read: true,
+          write: true,
+          delete: false,
+          network: true,
+          shell: false,
+          ...permissions,
+        },
+      } as Any,
+    };
+  };
+
+  const makeTools = (workspace: Any, browserWorkbenchService?: Any) => {
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn().mockResolvedValue(false),
+      recordSensitiveSourceRead: vi.fn(),
+    } as Any;
+    const tools = new BrowserTools(workspace, daemon, "task-1", browserWorkbenchService);
+    const browserService = {
+      navigate: vi.fn(async (url: string) => ({
+        url,
+        title: "Client portal",
+        status: null,
+        isError: false,
+      })),
+      allowLocalFileUrl: vi.fn(),
+      close: vi.fn(),
+    };
+    (tools as Any).browserService = browserService;
+    return { tools, daemon, browserService };
+  };
+
+  it("opens an HTML page inside the task's own workspace", async () => {
+    const { workspace, pagePath, canonicalPageUrl } = makeWorkspace();
+    const { tools, daemon, browserService } = makeTools(workspace);
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: pathToFileURL(pagePath).href,
+    });
+
+    expect(result.success).toBe(true);
+    // The headless browser gets the canonical path the check approved, never the alias.
+    expect(browserService.allowLocalFileUrl).toHaveBeenCalledWith(canonicalPageUrl);
+    expect(browserService.navigate).toHaveBeenCalledWith(canonicalPageUrl, "load");
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it("opens a workspace page without network permission, since it is a file read", async () => {
+    const { workspace, pagePath, canonicalPageUrl } = makeWorkspace({ network: false });
+    const { tools, browserService } = makeTools(workspace);
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: pathToFileURL(pagePath).href,
+    });
+
+    expect(result.success).toBe(true);
+    expect(browserService.navigate).toHaveBeenCalledWith(canonicalPageUrl, "load");
+  });
+
+  it("registers both spellings with the visible workbench and keeps the #fragment", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "visible",
+      nativeComputerUseMode: "background_first",
+    });
+    const { workspace, pagePath, canonicalPageUrl } = makeWorkspace();
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue(null),
+      allowLocalPreviewUrl: vi.fn(),
+      navigate: vi.fn(async ({ url }: Any) => ({ success: true, url, visible: true })),
+    };
+    const { tools, browserService } = makeTools(workspace, browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: `${pathToFileURL(pagePath).href}#approvals`,
+    });
+
+    expect(result.success).toBe(true);
+    // Navigation checks see the #fragment; the request guard never does.
+    expect(browserWorkbenchService.allowLocalPreviewUrl).toHaveBeenCalledWith(
+      `${canonicalPageUrl}#approvals`,
+    );
+    expect(browserWorkbenchService.allowLocalPreviewUrl).toHaveBeenCalledWith(canonicalPageUrl);
+    expect(browserWorkbenchService.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ url: `${canonicalPageUrl}#approvals` }),
+    );
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("asks before opening a page outside the workspace and refuses when declined", async () => {
+    const { root, workspace } = makeWorkspace();
+    const outsidePath = path.join(root, "elsewhere.html");
+    fs.writeFileSync(outsidePath, "<p>elsewhere</p>");
+    const { tools, daemon, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: pathToFileURL(outsidePath).href }),
+    ).rejects.toThrow("Browser access denied");
+
+    expect(daemon.requestApproval).toHaveBeenCalled();
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("opens a page outside the workspace once the person approves it", async () => {
+    const { root, workspace } = makeWorkspace();
+    const outsidePath = path.join(root, "elsewhere.html");
+    fs.writeFileSync(outsidePath, "<p>elsewhere</p>");
+    const { tools, daemon, browserService } = makeTools(workspace);
+    daemon.requestApproval.mockResolvedValue(true);
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: pathToFileURL(outsidePath).href,
+    });
+
+    expect(result.success).toBe(true);
+    expect(browserService.navigate).toHaveBeenCalledWith(
+      pathToFileURL(fs.realpathSync(outsidePath)).href,
+      "load",
+    );
+  });
+
+  it("treats a workspace symlink to an outside page as outside the workspace", async () => {
+    const { root, workspaceDir, workspace } = makeWorkspace();
+    const outsidePath = path.join(root, "elsewhere.html");
+    fs.writeFileSync(outsidePath, "<p>elsewhere</p>");
+    const linkPath = path.join(workspaceDir, "link.html");
+    fs.symlinkSync(outsidePath, linkPath);
+    const { tools, daemon, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: pathToFileURL(linkPath).href }),
+    ).rejects.toThrow("Browser access denied");
+
+    expect(daemon.requestApproval).toHaveBeenCalled();
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [".git", "hooks", "page.html"],
+    [".cowork", "policy", "page.html"],
+  ])("refuses a protected workspace location without asking (%s/%s)", async (...segments) => {
+    const { workspaceDir, workspace } = makeWorkspace();
+    const protectedPath = path.join(workspaceDir, ...segments);
+    fs.mkdirSync(path.dirname(protectedPath), { recursive: true });
+    fs.writeFileSync(protectedPath, "<p>protected</p>");
+    const { tools, daemon, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: pathToFileURL(protectedPath).href }),
+    ).rejects.toThrow("protected_path");
+
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a workspace symlink into a protected location", async () => {
+    const { workspaceDir, workspace } = makeWorkspace();
+    const protectedPath = path.join(workspaceDir, ".git", "page.html");
+    fs.mkdirSync(path.dirname(protectedPath), { recursive: true });
+    fs.writeFileSync(protectedPath, "<p>protected</p>");
+    const linkPath = path.join(workspaceDir, "link.html");
+    fs.symlinkSync(protectedPath, linkPath);
+    const { tools, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: pathToFileURL(linkPath).href }),
+    ).rejects.toThrow("protected_path");
+
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("opens only .html pages, not other local files", async () => {
+    const { workspaceDir, workspace } = makeWorkspace();
+    const notesPath = path.join(workspaceDir, "notes.txt");
+    fs.writeFileSync(notesPath, "notes");
+    const { tools, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: pathToFileURL(notesPath).href }),
+    ).rejects.toThrow("local .html pages only");
+
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file URL on another host", async () => {
+    const { workspace } = makeWorkspace();
+    const { tools, daemon, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: "file://fileserver/share/page.html" }),
+    ).rejects.toThrow("Browser access denied");
+
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("still blocks internal network addresses", async () => {
+    const { workspace } = makeWorkspace();
+    const { tools, browserService } = makeTools(workspace);
+
+    await expect(
+      tools.executeTool("browser_navigate", { url: "http://169.254.169.254/latest/meta-data/" }),
+    ).rejects.toThrow("internal_address_blocked");
+
+    expect(browserService.navigate).not.toHaveBeenCalled();
   });
 });
 

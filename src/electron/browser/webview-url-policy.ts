@@ -1,4 +1,6 @@
+import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
 const LOCAL_HTML_EXTENSIONS = new Set([".html", ".htm", ".xhtml"]);
 
@@ -21,6 +23,23 @@ export function isLocalHtmlFileUrl(value: string): boolean {
   if (parsed.hostname && parsed.hostname !== "localhost") return false;
   const extension = path.extname(parsed.pathname).toLowerCase();
   return LOCAL_HTML_EXTENSIONS.has(extension);
+}
+
+/**
+ * True when a local file URL names its own canonical path, with no symlink or
+ * alias anywhere along it. Agent allowances are granted to the canonical path
+ * the workspace check approved; if that path is later replaced by a link, the
+ * same URL would reach a file nobody checked, so the allowance stops applying.
+ */
+export function isCanonicalLocalFileUrl(value: string): boolean {
+  const parsed = parseUrl(value);
+  if (!parsed || parsed.protocol !== "file:" || parsed.hostname) return false;
+  try {
+    const filePath = fileURLToPath(parsed);
+    return fs.realpathSync.native(filePath) === filePath;
+  } catch {
+    return false;
+  }
 }
 
 /**

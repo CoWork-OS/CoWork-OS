@@ -163,6 +163,34 @@ describe("the registry's boundary for a run in a bot's own folder", () => {
     expect(denied(registry, "desktop_run")).toBe(false);
   });
 
+  it("allows guest implementations without reopening contained host tools", () => {
+    const registry = makeRegistry(
+      {
+        id: "test-task",
+        agentConfig: {
+          botContained: true,
+          executionEnvironment: {
+            backend: "bot-desktop",
+            lifetime: "task",
+            inputPaths: [],
+            outputPaths: [],
+          },
+        },
+      },
+      "own_desktop",
+    );
+    for (const name of [
+      "run_command",
+      "execute_code",
+      "process_output",
+      "stop_process",
+      "computer_environment",
+    ])
+      expect(registry.isToolAllowed(name), name).toBe(true);
+    for (const name of ["get_env", "compile_latex", "native_app", "mcp_read_text_file"])
+      expect(registry.isToolAllowed(name), name).toBe(false);
+  });
+
   it("refuses connectors that run as programs on this computer, and unknown ones", () => {
     mcpServers.servers = [
       { id: "local-fs", transport: "stdio" },

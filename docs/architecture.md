@@ -333,6 +333,16 @@ Native GUI control is implemented in the main process (`src/electron/computer-us
 
 `getComputerUseProvider()` in `src/electron/computer-use/provider.ts` picks the backend. By default it is the local helper runtime. When **Run Computer Use in this Cua Space** is on, it is a `CuaSpaceProvider` (`src/electron/computer-use/cua-space/`) that maps the same provider calls onto the Cua Driver MCP tools served by `cua-spacesd` at `<space>/mcp`, so the computer-use tools act inside the Space. Its URL and bearer token live in the encrypted `cua-space` secure-settings category; the renderer only sees whether a token is stored. A misconfigured or unreachable Space fails the action rather than falling back to this computer.
 
+Opt-in [task computers](task-computers.md) use a task-bound
+`ExecutionEnvironmentController` under the existing tool-policy middleware.
+Their binding lives in the task's durable configuration; files, commands, code,
+browser and desktop actions resolve to that binding. The built-in backend wraps
+`BotDesktopManager`; the Cua backend uses private MCP lifecycle calls and an
+interactive guest worker. Both retain unknown operations without replay, export
+through the existing SPACE transfer helpers, and project control/recovery state
+into `ComputerViewService` and WorkSession waits. The legacy global desktop-only
+provider remains separate for compatibility.
+
 ## Application execution and background app control
 
 Application work runs locally; there is no SSH or remote worker route. Routes are an application's API (MCP or a connector, including [remote OAuth MCP servers](remote-mcp-oauth.md)), its own scripting through an application operation, and its window through `native_app`. A route is chosen by what it can actually do for the target (identity, authority, fidelity, readiness and a verification path), not by a fixed ranking of protocols, and a denial is never routed around. [Working with apps in the background](background-app-work.md) is the user-facing overview.

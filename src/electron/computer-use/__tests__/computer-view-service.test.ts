@@ -19,6 +19,56 @@ const makeService = (overrides: Record<string, unknown> = {}) => {
 };
 
 describe("ComputerViewService", () => {
+  it("revokes the viewer before resuming agent actions on every hand-back path", () => {
+    const { service, deps } = makeService();
+    service.bindEnvironment("owner", "shared-computer");
+    service.bindEnvironment("peer", "shared-computer");
+    const revokeViewer = vi.fn(() => {
+      expect(() => service.assertNotHeld("peer")).toThrow(/taken over/);
+    });
+    service.configure({ revokeViewer });
+    service.takeOver("owner");
+    expect(() => service.handBack("peer")).toThrow(/task that took control/);
+    expect(revokeViewer).not.toHaveBeenCalled();
+    service.handBack("owner");
+    expect(revokeViewer).toHaveBeenCalledWith("owner");
+    expect(revokeViewer.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.setBrowserPaused.mock.invocationCallOrder.at(-1)!,
+    );
+    expect(() => service.assertNotHeld("peer")).not.toThrow();
+  });
+
+  it("keeps agent input blocked if viewer revocation fails", () => {
+    const { service } = makeService({
+      revokeViewer: () => {
+        throw new Error("viewer busy");
+      },
+    });
+    service.takeOver("owner");
+    expect(() => service.handBack("owner")).toThrow("viewer busy");
+    expect(() => service.assertNotHeld("owner")).toThrow(/taken over/);
+  });
+
+  it("revokes a viewer before forgetting a task", () => {
+    const revokeViewer = vi.fn();
+    const { service } = makeService({ revokeViewer });
+    service.takeOver("owner");
+    service.clearTask("owner");
+    expect(revokeViewer).toHaveBeenCalledWith("owner");
+    expect(service.isHeldByPerson("owner")).toBe(false);
+  });
+
+  it("retains takeover ownership when the physical computer is bound after takeover", () => {
+    const { service } = makeService();
+    service.takeOver("t1");
+    service.bindEnvironment("t1", "new-computer");
+    service.bindEnvironment("peer", "new-computer");
+    expect(service.ownsControl("t1")).toBe(true);
+    expect(service.ownsControl("peer")).toBe(false);
+    expect(() => service.assertNotHeld("peer")).toThrow(/taken over/);
+    service.handBack("t1");
+    expect(service.isHeldByPerson("peer")).toBe(false);
+  });
   beforeEach(() => {
     vi.useFakeTimers();
   });

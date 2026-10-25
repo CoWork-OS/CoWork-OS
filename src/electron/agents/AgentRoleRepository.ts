@@ -1,3 +1,4 @@
+import { ExecutionEnvironmentSelectionSchema } from "../../shared/execution-environment";
 import Database from "better-sqlite3";
 import {
   isBotDesktopNetwork,
@@ -299,6 +300,9 @@ export class AgentRoleStore {
       maxAutonomousOutputsPerCycle: request.maxAutonomousOutputsPerCycle ?? 1,
       lastUsefulOutputAt: request.lastUsefulOutputAt,
       operatorHealthScore: request.operatorHealthScore,
+      executionEnvironment: request.executionEnvironment
+        ? ExecutionEnvironmentSelectionSchema.parse(request.executionEnvironment)
+        : undefined,
       worksOn: isBotWorksOn(request.worksOn) ? request.worksOn : undefined,
       desktopHost: isValidDesktopHost(request.desktopHost) ? request.desktopHost : undefined,
       desktopGroup: isValidDesktopGroup(request.desktopGroup) ? request.desktopGroup : undefined,
@@ -320,8 +324,8 @@ export class AgentRoleStore {
         heartbeat_profile, heartbeat_active_hours, heartbeat_status, operator_mandate, allowed_loop_types,
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
         last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at, works_on,
-        desktop_host, desktop_group, file_access, desktop_network
-      ) VALUES (${Array.from({ length: 46 }, () => "?").join(", ")})
+        desktop_host, desktop_group, file_access, desktop_network, execution_environment
+      ) VALUES (${Array.from({ length: 47 }, () => "?").join(", ")})
     `);
 
     stmt.run(
@@ -371,6 +375,7 @@ export class AgentRoleStore {
       role.desktopGroup ?? null,
       role.fileAccess ?? null,
       role.desktopNetwork ?? null,
+      role.executionEnvironment ? JSON.stringify(role.executionEnvironment) : null,
     );
 
     const shouldPersistAutomationProfile =
@@ -628,6 +633,14 @@ export class AgentRoleStore {
     if (request.worksOn !== undefined) {
       fields.push("works_on = ?");
       values.push(isBotWorksOn(request.worksOn) ? request.worksOn : null);
+    }
+    if (request.executionEnvironment !== undefined) {
+      fields.push("execution_environment = ?");
+      values.push(
+        request.executionEnvironment
+          ? JSON.stringify(ExecutionEnvironmentSelectionSchema.parse(request.executionEnvironment))
+          : null,
+      );
     }
     if (request.desktopHost !== undefined) {
       fields.push("desktop_host = ?");
@@ -988,6 +1001,9 @@ export class AgentRoleStore {
         typeof row.access_profile_id === "string" && row.access_profile_id.trim()
           ? row.access_profile_id.trim()
           : undefined,
+      executionEnvironment: row.execution_environment
+        ? ExecutionEnvironmentSelectionSchema.parse(JSON.parse(row.execution_environment))
+        : undefined,
       worksOn: isBotWorksOn(row.works_on) ? row.works_on : undefined,
       desktopHost: isValidDesktopHost(row.desktop_host) ? row.desktop_host : undefined,
       desktopGroup: isValidDesktopGroup(row.desktop_group) ? row.desktop_group : undefined,

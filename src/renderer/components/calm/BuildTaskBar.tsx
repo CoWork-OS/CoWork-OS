@@ -2,8 +2,21 @@ import { Code2, ExternalLink, FileDiff } from "lucide-react";
 import type { FileInfo } from "../../utils/task-event-derived";
 
 /** The page to preview: the latest written index.html, else any HTML file. */
-export function pickBuildPreviewPath(files: FileInfo[]): string | null {
-  const html = files.filter((file) => file.action !== "deleted" && /\.html?$/i.test(file.path));
+export function pickBuildPreviewPath(
+  files: FileInfo[],
+  guestExports?: readonly string[],
+): string | null {
+  const html = files.filter((file) => {
+    const candidate = file.path.replace(/\\/g, "/");
+    return (
+      file.action !== "deleted" &&
+      /\.html?$/i.test(file.path) &&
+      (guestExports === undefined ||
+        guestExports.some(
+          (exported) => candidate === exported || candidate.endsWith(`/${exported}`),
+        ))
+    );
+  });
   if (html.length === 0) return null;
   const byRecency = [...html].sort((a, b) => b.timestamp - a.timestamp);
   return (byRecency.find((file) => /(^|[\\/])index\.html?$/i.test(file.path)) ?? byRecency[0]).path;

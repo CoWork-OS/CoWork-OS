@@ -1,7 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
-import { submitBuildCompare } from "../BuildPanel";
+import { submitBuildCompare, submitBuildTask } from "../BuildPanel";
+import { GUEST_BUILD_INSTRUCTIONS } from "../build-task";
 
 const COMMIT = "c".repeat(40);
+
+it("starts a guest build with guest verification and the selected transfer manifest", async () => {
+  const onStart = vi.fn().mockResolvedValue(true);
+  const options = {
+    executionEnvironment: {
+      backend: "cua" as const,
+      lifetime: "task" as const,
+      inputPaths: [],
+      outputPaths: ["index.html"],
+    },
+  };
+  await submitBuildTask(onStart, "Create a board", [], options);
+  expect(onStart).toHaveBeenCalledWith(
+    `Create a board\n\n${GUEST_BUILD_INSTRUCTIONS}`,
+    [],
+    options,
+  );
+});
 
 describe("Build Compare", () => {
   it("starts every variant from one commit with the same check", async () => {

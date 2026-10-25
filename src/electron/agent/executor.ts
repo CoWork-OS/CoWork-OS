@@ -1884,12 +1884,12 @@ export class TaskExecutor {
     return fields as Pick<Task, "semanticSummary" | "verificationVerdict" | "verificationReport">;
   }
 
-  private finalizeSuccessfulFollowUp(
+  private async finalizeSuccessfulFollowUp(
     previousStatus: Task["status"] | undefined,
     toolCallCount = 0,
     exhaustedIterations = false,
     completedCorrelatedBotReply = false,
-  ): void {
+  ): Promise<void> {
     if (this.cancelled) return;
     if (
       previousStatus === "failed" ||
@@ -1901,9 +1901,11 @@ export class TaskExecutor {
         this.task.error?.startsWith("Waiting for ") &&
         this.task.error.endsWith(" to reply before finishing this conversation."))
     ) {
-      this.finalizeFollowUpCompletion("Completed via follow-up", { clearTerminalFailure: true });
+      await this.finalizeFollowUpCompletion("Completed via follow-up", {
+        clearTerminalFailure: true,
+      });
     } else if (toolCallCount > 0 || exhaustedIterations) {
-      this.finalizeFollowUpCompletion(
+      await this.finalizeFollowUpCompletion(
         toolCallCount > 0
           ? `Follow-up completed (${toolCallCount} tool calls)`
           : "Follow-up completed (iterations exhausted)",
@@ -1912,7 +1914,7 @@ export class TaskExecutor {
       this.daemon.updateTaskStatus(this.task.id, previousStatus);
       this.emitEvent("task_status", { status: previousStatus });
     } else {
-      this.finalizeFollowUpCompletion("Follow-up completed (status safety net)");
+      await this.finalizeFollowUpCompletion("Follow-up completed (status safety net)");
     }
   }
 
@@ -1922,10 +1924,13 @@ export class TaskExecutor {
    * action-needed outcome the user can retry, and stop advertising checklist
    * work as in progress.
    */
-  private finalizeApprovalBlockedFollowUp(block: { toolName: string; message: string }): void {
+  private async finalizeApprovalBlockedFollowUp(block: {
+    toolName: string;
+    message: string;
+  }): Promise<void> {
     if (this.cancelled) return;
     this.markInProgressChecklistItemsBlocked();
-    this.finalizeFollowUpCompletion(`Follow-up blocked: ${block.message}`, {
+    await this.finalizeFollowUpCompletion(`Follow-up blocked: ${block.message}`, {
       clearTerminalFailure: false,
       terminalStatus: "needs_user_action",
       failureClass: "user_blocker",
@@ -1954,7 +1959,7 @@ export class TaskExecutor {
     }
   }
 
-  private finalizeFollowUpCompletion(
+  private async finalizeFollowUpCompletion(
     message: string,
     opts?: {
       clearError?: boolean;
@@ -1962,7 +1967,7 @@ export class TaskExecutor {
       terminalStatus?: Task["terminalStatus"];
       failureClass?: Task["failureClass"];
     },
-  ): void {
+  ): Promise<void> {
     if (this.cancelled) return;
     const arithmeticWarning = this.csvArithmeticVerifier?.getWarning();
     if (arithmeticWarning) {
@@ -2029,6 +2034,18 @@ export class TaskExecutor {
     // an update for the team, not the end of the task: the team's synthesis
     // completes the root when it lands.
     if (this.deferFollowUpCompletionToCollaborativeRun()) return;
+
+    // Follow-ups have their own terminal path; use the same computer gate as initial runs.
+    const persistedTask = this.daemon.getTask?.(this.task.id);
+    if (
+      persistedTask?.agentConfig?.executionEnvironmentBinding ||
+      this.task.agentConfig?.executionEnvironmentBinding
+    ) {
+      const ready = await this.daemon.prepareTaskComputerCompletion(this.task.id);
+      const refreshed = this.daemon.getTask(this.task.id);
+      if (refreshed) this.task = { ...this.task, ...refreshed };
+      if (!ready || this.cancelled) return;
+    }
 
     this.task.status = "completed";
     this.task.completedAt = completedAt;
@@ -9781,7 +9798,7 @@ ${transcript}
         message: "Follow-up message processed (chat mode)",
         followUpMessage: message,
       });
-      this.finalizeSuccessfulFollowUp(previousStatus);
+      await this.finalizeSuccessfulFollowUp(previousStatus);
     } catch (error: Any) {
       // Cancellation owns the terminal state, including when a provider ignores
       // the abort and settles after the user has stopped this turn.
@@ -20662,6 +20679,11 @@ ${transcript}
     ]);
 
     const isBotConversation = this.task.agentConfig?.botConversation === true;
+    if (this.toolRegistry?.isTaskComputerSelected?.() === true) {
+      always.add("computer_environment");
+      always.add("process_output");
+      always.add("stop_process");
+    }
     if (/\bandroid\b|phone-harness|phone\.android\.|android_phone_/i.test(nativeGuiText || "")) {
       for (const name of [
         "android_phone_devices",
@@ -20770,7 +20792,7 @@ ${transcript}
     }
 
     const nativeGuiGuard = this.getNativeGuiGuardForStepText(nativeGuiText);
-    if (nativeGuiGuard.nativeGuiIntent) {
+    if (nativeGuiGuard.nativeGuiIntent && this.toolRegistry?.isTaskComputerSelected?.() !== true) {
       if (!nativeGuiGuard.explicitShellIntent) {
         analysis.delete("run_command");
         mutation.delete("run_command");
@@ -29112,10 +29134,10 @@ You are continuing a previous conversation. The context from the previous conver
     return nextAgentConfig;
   }
 
-  private handleGoalSlashFollowUp(message: string): {
+  private async handleGoalSlashFollowUp(message: string): Promise<{
     handled: boolean;
     executionMessage?: string;
-  } {
+  }> {
     const parsed = parseLeadingGoalSlashCommand(message);
     if (!parsed.matched) return { handled: false };
 
@@ -29125,7 +29147,7 @@ You are continuing a previous conversation. The context from the previous conver
     if (parsed.action === "status") {
       const statusMessage = this.formatGoalStatusMessage();
       this.emitGoalAssistantMessage(message, statusMessage);
-      this.finalizeFollowUpCompletion("Goal status reported");
+      await this.finalizeFollowUpCompletion("Goal status reported");
       return { handled: true };
     }
 
@@ -29133,7 +29155,7 @@ You are continuing a previous conversation. The context from the previous conver
       if (!currentGoal || currentGoal.status === "cleared") {
         const statusMessage = "No persistent goal is attached to this task.";
         this.emitGoalAssistantMessage(message, statusMessage);
-        this.finalizeFollowUpCompletion("No goal to pause");
+        await this.finalizeFollowUpCompletion("No goal to pause");
         return { handled: true };
       }
       const goalMode = {
@@ -29148,7 +29170,7 @@ You are continuing a previous conversation. The context from the previous conver
       });
       const statusMessage = `Goal paused.\n\nObjective: ${goalMode.objective}`;
       this.emitGoalAssistantMessage(message, statusMessage);
-      this.finalizeFollowUpCompletion("Goal paused");
+      await this.finalizeFollowUpCompletion("Goal paused");
       return { handled: true };
     }
 
@@ -29156,7 +29178,7 @@ You are continuing a previous conversation. The context from the previous conver
       if (!currentGoal || currentGoal.status === "cleared") {
         const statusMessage = "No persistent goal is attached to this task.";
         this.emitGoalAssistantMessage(message, statusMessage);
-        this.finalizeFollowUpCompletion("No goal to clear");
+        await this.finalizeFollowUpCompletion("No goal to clear");
         return { handled: true };
       }
       const goalMode = {
@@ -29171,7 +29193,7 @@ You are continuing a previous conversation. The context from the previous conver
       });
       const statusMessage = "Goal cleared for this task.";
       this.emitGoalAssistantMessage(message, statusMessage);
-      this.finalizeFollowUpCompletion("Goal cleared");
+      await this.finalizeFollowUpCompletion("Goal cleared");
       return { handled: true };
     }
 
@@ -29179,7 +29201,7 @@ You are continuing a previous conversation. The context from the previous conver
       if (!currentGoal || currentGoal.status === "cleared") {
         const statusMessage = "No persistent goal is attached to this task.";
         this.emitGoalAssistantMessage(message, statusMessage);
-        this.finalizeFollowUpCompletion("No goal to resume");
+        await this.finalizeFollowUpCompletion("No goal to resume");
         return { handled: true };
       }
       const goalMode = {
@@ -42251,7 +42273,7 @@ Return ONLY a JSON object:
     if (!recoveredFromTurnLimit && !shouldResumeAfterFollowup) {
       this.turnSuccessfulToolUsageCounts.clear();
     }
-    const goalFollowUp = this.handleGoalSlashFollowUp(message);
+    const goalFollowUp = await this.handleGoalSlashFollowUp(message);
     if (goalFollowUp.handled) {
       if (opts?.onAccepted || opts?.onExecutionAccepted) {
         if (opts?.transcriptAlreadyContainsMessage) {
@@ -44905,7 +44927,7 @@ Return ONLY a JSON object:
           reason: followUpKernelOutcome.loopBudgetStopReason,
           message: budgetMessage,
         });
-        this.finalizeFollowUpCompletion(budgetMessage, {
+        await this.finalizeFollowUpCompletion(budgetMessage, {
           clearTerminalFailure: false,
           terminalStatus: "partial_success",
           failureClass: "budget_exhausted",
@@ -44994,7 +45016,7 @@ Return ONLY a JSON object:
         message: string;
       } | null;
       if (approvalBlock) {
-        this.finalizeApprovalBlockedFollowUp(approvalBlock);
+        await this.finalizeApprovalBlockedFollowUp(approvalBlock);
         return;
       }
 
@@ -45015,7 +45037,7 @@ Return ONLY a JSON object:
           `hasTextResponse=${hasProvidedTextResponse} | previousStatus=${previousStatus} | elapsed=${followUpElapsedFinal}s`,
       );
 
-      this.finalizeSuccessfulFollowUp(
+      await this.finalizeSuccessfulFollowUp(
         previousStatus,
         followUpToolCallCount,
         iterationCount >= maxIterations,
@@ -45028,7 +45050,7 @@ Return ONLY a JSON object:
       // still finalize as completed with whatever partial output we have.
       if (this.wrapUpRequested && !this.cancelled) {
         logger.info(`${this.logTag} sendMessage wrap-up: finalizing as completed`);
-        this.finalizeFollowUpCompletion("Follow-up completed (wrap-up requested)");
+        await this.finalizeFollowUpCompletion("Follow-up completed (wrap-up requested)");
         return;
       }
 

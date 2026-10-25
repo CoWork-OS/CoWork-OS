@@ -1,3 +1,4 @@
+import type { ExecutionEnvironmentSelection } from "../../shared/execution-environment";
 import { useEffect, useRef, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertCircle, LoaderCircle, X } from "lucide-react";
@@ -31,6 +32,7 @@ export interface BotFormValues {
   modelKey: string;
   /** Where the bot works: which computer its tasks may drive. */
   worksOn: BotWorksOn;
+  executionEnvironment?: ExecutionEnvironmentSelection;
   /** For its own desktop: an SSH host to run it on; empty means this computer. */
   desktopHost: string;
   /** For its own desktop: a shared desktop's name; empty means a desktop of its own. */
@@ -44,6 +46,11 @@ export interface BotFormValues {
 /** Why the Runs on value can't be saved, or null when it can. */
 export function describeDesktopHostError(values: BotFormValues): string | null {
   if (values.worksOn !== "own_desktop") return null;
+  if (values.executionEnvironment?.backend === "cua") {
+    if (values.desktopNetwork === "off")
+      return "Cua cannot enforce No network. Choose a Docker / Podman computer for offline work.";
+    return null;
+  }
   const host = values.desktopHost.trim();
   if (host && !isValidDesktopHost(host)) {
     return "Runs on needs an SSH host from your SSH config, like my-server or me@example.com.";
@@ -260,6 +267,120 @@ export function BotFormDialog({
                 </small>
               </label>
               {values.worksOn === "own_desktop" ? (
+                <>
+                  <label className="bot-form-field">
+                    <span>Computer execution</span>
+                    <select
+                      value={values.executionEnvironment?.backend || "legacy"}
+                      onChange={(event) =>
+                        set({
+                          executionEnvironment:
+                            event.target.value === "legacy"
+                              ? undefined
+                              : {
+                                  backend: event.target.value as "bot-desktop" | "cua",
+                                  lifetime: "persistent",
+                                  inputPaths: [],
+                                  outputPaths: [],
+                                },
+                        })
+                      }
+                    >
+                      <option value="legacy">Desktop tools only (current behavior)</option>
+                      <option value="bot-desktop">All work in its Docker / Podman computer</option>
+                      <option value="cua">All work in a Cua Space</option>
+                    </select>
+                    <small className="bot-form-hint">
+                      Commands, files and browser work share one computer. Unsupported host tools
+                      are unavailable.
+                    </small>
+                  </label>
+                  {values.executionEnvironment ? (
+                    <>
+                      <label className="bot-form-field">
+                        <span>Keep this computer</span>
+                        <select
+                          value={values.executionEnvironment.lifetime}
+                          onChange={(event) =>
+                            set({
+                              executionEnvironment: {
+                                ...values.executionEnvironment!,
+                                lifetime: event.target.value as "persistent" | "task",
+                                ...(event.target.value === "task" ? { space: undefined } : {}),
+                              },
+                            })
+                          }
+                        >
+                          <option value="persistent">Across this bot's tasks</option>
+                          <option value="task">Fresh computer for each task</option>
+                        </select>
+                      </label>
+                      {values.executionEnvironment.backend === "cua" ? (
+                        <label className="bot-form-field">
+                          <span>
+                            Existing Space <small>optional</small>
+                          </span>
+                          <input
+                            value={values.executionEnvironment.space || ""}
+                            disabled={values.executionEnvironment.lifetime === "task"}
+                            onChange={(event) =>
+                              set({
+                                executionEnvironment: {
+                                  ...values.executionEnvironment!,
+                                  space: event.target.value.trim() || undefined,
+                                },
+                              })
+                            }
+                            placeholder="Space ID; leave empty to create one"
+                          />
+                          <small className="bot-form-hint">
+                            Requires Cua Spaces and a Linux Space with Python and Chromium. Existing
+                            Spaces are retained.
+                          </small>
+                        </label>
+                      ) : null}
+                      <label className="bot-form-field">
+                        <span>
+                          Input files <small>one workspace path per line</small>
+                        </span>
+                        <textarea
+                          value={values.executionEnvironment.inputPaths.join("\n")}
+                          onChange={(event) =>
+                            set({
+                              executionEnvironment: {
+                                ...values.executionEnvironment!,
+                                inputPaths: event.target.value.split("\n").filter(Boolean),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="bot-form-field">
+                        <span>
+                          Result files <small>one guest path per line</small>
+                        </span>
+                        <textarea
+                          value={values.executionEnvironment.outputPaths.join("\n")}
+                          onChange={(event) =>
+                            set({
+                              executionEnvironment: {
+                                ...values.executionEnvironment!,
+                                outputPaths: event.target.value.split("\n").filter(Boolean),
+                              },
+                            })
+                          }
+                        />
+                        <small className="bot-form-hint">
+                          Selected results are saved before a fresh computer is deleted. Other files
+                          on that computer are discarded.
+                        </small>
+                      </label>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+              {values.worksOn === "own_desktop" &&
+              values.executionEnvironment?.backend !== "cua" ? (
                 <label className="bot-form-field">
                   <span>
                     Runs on <small>optional</small>
@@ -280,7 +401,8 @@ export function BotFormDialog({
                   </small>
                 </label>
               ) : null}
-              {values.worksOn === "own_desktop" ? (
+              {values.worksOn === "own_desktop" &&
+              values.executionEnvironment?.backend !== "cua" ? (
                 <label className="bot-form-field">
                   <span>
                     Shared desktop <small>optional</small>

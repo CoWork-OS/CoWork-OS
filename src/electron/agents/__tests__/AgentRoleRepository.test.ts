@@ -147,6 +147,58 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
     ).toBeUndefined();
   });
 
+  it("round-trips a computer selection across reopen and clears it without changing legacy settings", async () => {
+    const selection = {
+      backend: "bot-desktop" as const,
+      lifetime: "task" as const,
+      inputPaths: ["input.csv"],
+      outputPaths: ["result.csv"],
+    };
+    const created = agentRoleRepo.create({
+      name: "computer-bot",
+      displayName: "Computer bot",
+      capabilities: ["code"],
+      worksOn: "own_desktop",
+      executionEnvironment: selection,
+    });
+    expect(created.executionEnvironment).toEqual(selection);
+    const { AgentRoleStore } = await import("../AgentRoleRepository");
+    const reopened = new AgentRoleStore(manager.getDatabase());
+    expect(reopened.findById(created.id)?.executionEnvironment).toEqual(selection);
+    expect(
+      reopened.update({ id: created.id, executionEnvironment: null })?.executionEnvironment,
+    ).toBeUndefined();
+    expect(reopened.findById(created.id)?.worksOn).toBe("own_desktop");
+  });
+
+  it("upgrades a profile without the computer column while preserving existing bots", async () => {
+    const existing = agentRoleRepo.create({
+      name: "older-profile-bot",
+      displayName: "Older profile bot",
+      capabilities: ["code"],
+      worksOn: "browser",
+    });
+    manager.getDatabase().exec("ALTER TABLE agent_roles DROP COLUMN execution_environment");
+    manager.close();
+    const { DatabaseManager } = await import("../../database/schema");
+    const { AgentRoleStore } = await import("../AgentRoleRepository");
+    manager = new DatabaseManager();
+    agentRoleRepo = new AgentRoleStore(manager.getDatabase());
+    expect(agentRoleRepo.findById(existing.id)?.worksOn).toBe("browser");
+    expect(agentRoleRepo.findById(existing.id)?.executionEnvironment).toBeUndefined();
+    expect(
+      agentRoleRepo.update({
+        id: existing.id,
+        executionEnvironment: {
+          backend: "bot-desktop",
+          lifetime: "persistent",
+          inputPaths: [],
+          outputPaths: [],
+        },
+      })?.executionEnvironment?.backend,
+    ).toBe("bot-desktop");
+  });
+
   it("stores a bot's Works on setting and resets it to Auto", () => {
     const created = agentRoleRepo.create({
       name: "browser-bot",

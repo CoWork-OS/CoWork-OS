@@ -7229,6 +7229,7 @@ export function App() {
           ? {
               agentConfig: {
                 taskOrigin: "build" as const,
+                executionEnvironment: taskOptions?.executionEnvironment,
                 worktreeMode: taskOptions?.worktreeMode,
                 worktreeBaseBranch: taskOptions?.worktreeBaseBranch,
                 ...(taskOptions?.compareGroupId

@@ -29,6 +29,33 @@ function makeEvent(
 }
 
 describe("deriveToolUsage", () => {
+  it("lists published guest artifacts without turning guest summary paths into host files", () => {
+    const shared = deriveSharedTaskEventUiState({
+      task: {
+        id: "task-1",
+        status: "completed",
+        agentConfig: { executionEnvironment: { backend: "bot-desktop" } },
+      } as Any,
+      workspace: null,
+      verboseSteps: false,
+      rawEvents: [
+        makeEvent("export", 1, "artifact_created", {
+          path: "artifacts/computers/current/index.html",
+        }),
+        makeEvent("done", 2, "task_completed", {
+          bestKnownOutcome: {
+            outputSummary: {
+              created: ["index.html", "artifacts/computers/current/index.html"],
+              outputCount: 2,
+            },
+          },
+        }),
+      ],
+    });
+    expect(shared.files.map((file) => file.path)).toEqual([
+      "artifacts/computers/current/index.html",
+    ]);
+  });
   it("drops a previous session's deferred commands immediately on navigation", () => {
     const previous = makeEvent("pipeline-command", 1, "tool_call", {
       tool: "run_command",

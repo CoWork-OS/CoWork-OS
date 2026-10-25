@@ -535,6 +535,10 @@ or an older plan. Idle conversations remain idle across a clean restart.
 
 ### Where a bot works
 
+To route commands, files, browser and desktop input through one dedicated Linux
+environment, enable [Task computers](task-computers.md) in the bot's computer
+execution setting. The existing desktop-only mode below remains available.
+
 Each bot has a **Works on** setting, chosen in its create and edit dialogs:
 
 | Works on | The bot's tasks can use |

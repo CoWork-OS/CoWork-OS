@@ -181,6 +181,7 @@ describe("ToolRegistry tool restrictions", () => {
     daemon.getTask = vi.fn(() => {
       throw new Error("task store unavailable");
     });
+    expect(registry.isToolAllowed("run_command")).toBe(false);
     (registry as Any).botContainedCache = null;
     expect((registry as Any).isDeniedByTaskRestrictions("get_env")).toBe(true);
   });

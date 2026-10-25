@@ -3575,6 +3575,50 @@ html.visual-calm .calm-build-location-help {
   font: 400 12px/1.5 var(--font-ui);
 }
 
+html.visual-calm .calm-build-transfers {
+  width: 100%;
+  margin-top: 10px;
+  padding: 0 20px;
+  color: var(--calm-text-secondary);
+  text-align: left;
+  font: 400 12px/1.5 var(--font-ui);
+}
+
+html.visual-calm .calm-build-transfers summary {
+  cursor: pointer;
+}
+
+html.visual-calm .calm-build-transfer-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+html.visual-calm .calm-build-transfer-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+html.visual-calm .calm-build-transfer-fields textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--calm-border);
+  border-radius: 7px;
+  resize: vertical;
+  background: var(--calm-surface);
+  color: var(--calm-text);
+  font: 400 12px/1.5 var(--font-mono);
+}
+
+html.visual-calm .calm-build-transfers p {
+  margin: 8px 0 0;
+  color: var(--calm-text-muted);
+}
+
 html.visual-calm .calm-build-hints kbd {
   display: inline-flex;
   align-items: center;

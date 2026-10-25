@@ -53,6 +53,7 @@ import {
   resolveAccessControlledPath,
   type AccessFilesystemOperation,
 } from "../../security/access-profile-paths";
+import { ENVIRONMENT_BROWSER_TOOLS } from "../../../shared/execution-environment";
 
 const SOURCE_PRECEDENCE: Record<string, number> = {
   session: 600,
@@ -90,6 +91,8 @@ export interface PermissionEngineRequest {
   accessPolicyVersion?: AccessPolicyVersion;
   /** Host classification from the installed local driver configuration, never tool input. */
   trustedLocalComputerUse?: boolean;
+  /** Host-resolved routing to the task's isolated browser, never a tool input flag. */
+  trustedTaskComputer?: boolean;
 }
 
 type PermissionFacts = {
@@ -1457,7 +1460,10 @@ export class PermissionEngine {
       // Classify the command as written, as ShellTools does: collapsing its
       // newlines merges heredoc bodies and separate commands into one line.
       (isShell && isLikelyNetworkShellCommand(rawCommand));
-    const isNonWorkspaceInteraction = this.isNonWorkspaceInteractionTool(toolName, approvalType);
+    const isGuestBrowser =
+      request.trustedTaskComputer === true && ENVIRONMENT_BROWSER_TOOLS.has(toolName);
+    const isNonWorkspaceInteraction =
+      !isGuestBrowser && this.isNonWorkspaceInteractionTool(toolName, approvalType);
     const isMutatingTool = this.isMutatingTool(toolName) && !isLocalVideoPoll;
     const isWriteLike =
       isDeleteLike ||

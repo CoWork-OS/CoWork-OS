@@ -68,6 +68,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           providerType: loaded.modelKey ? loaded.providerType || "" : "",
           modelKey: loaded.modelKey || "",
           worksOn: normalizeBotWorksOn(loaded.worksOn),
+          executionEnvironment: loaded.executionEnvironment,
           desktopHost: loaded.desktopHost || "",
           desktopGroup: loaded.desktopGroup || "",
           fileAccess: normalizeBotFileAccess(loaded.fileAccess),
@@ -120,6 +121,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         providerType: values.modelKey ? values.providerType : "",
         modelKey: values.modelKey,
         worksOn: values.worksOn,
+        executionEnvironment:
+          values.worksOn === "own_desktop" ? values.executionEnvironment || null : null,
         desktopHost: values.worksOn === "own_desktop" ? values.desktopHost.trim() || null : null,
         desktopGroup:
           values.worksOn === "own_desktop"

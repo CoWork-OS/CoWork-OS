@@ -1730,6 +1730,7 @@ interface AgentRoleData {
   /** Which files runs nobody started by hand work on; unset means its own folder. */
   fileAccess?: import("../shared/bot-containment").BotFileAccess;
   /** What its own desktop may reach on the network; unset means internet only. */
+  executionEnvironment?: import("../shared/execution-environment").ExecutionEnvironmentSelection;
   desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
@@ -1776,6 +1777,7 @@ interface CreateAgentRoleRequest {
   desktopHost?: string;
   desktopGroup?: string;
   fileAccess?: import("../shared/bot-containment").BotFileAccess;
+  executionEnvironment?: import("../shared/execution-environment").ExecutionEnvironmentSelection;
   desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork;
   soul?: string;
   operatorMandate?: string;
@@ -1813,6 +1815,9 @@ interface UpdateAgentRoleRequest {
   desktopHost?: string | null;
   desktopGroup?: string | null;
   fileAccess?: import("../shared/bot-containment").BotFileAccess | null;
+  executionEnvironment?:
+    | import("../shared/execution-environment").ExecutionEnvironmentSelection
+    | null;
   desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork | null;
   soul?: string;
   operatorMandate?: string;
@@ -4568,6 +4573,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   clearChronicleObservations: (input: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, input),
 
+  computerEnvironmentAction: (taskId: string, action: "status" | "reconcile" | "finish") =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_ENVIRONMENT_ACTION, taskId, action),
   getComputerUseStatus: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_STATUS),
   getCuaSpaceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_CUA_SPACE_SETTINGS),
   saveCuaSpaceSettings: (update: CuaSpaceSettingsUpdate) =>
@@ -8861,6 +8868,10 @@ export interface ElectronAPI {
     screenCaptureStatus: string;
     error: string | null;
   }>;
+  computerEnvironmentAction: (
+    taskId: string,
+    action: "status" | "reconcile" | "finish",
+  ) => Promise<unknown>;
   getCuaSpaceSettings: () => Promise<CuaSpaceDisplaySettings>;
   /** Rejects with the validation reason when an enabled Space URL or token is unusable. */
   saveCuaSpaceSettings: (update: CuaSpaceSettingsUpdate) => Promise<CuaSpaceDisplaySettings>;

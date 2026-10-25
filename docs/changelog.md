@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **OpenAI-compatible video provider replaces Sora**: OpenAI shut down its Videos API and the Sora 2 models on 24 September 2026, so the **OpenAI Sora 2** and **Azure OpenAI Sora 2** video providers are gone and an OpenAI API key no longer counts as a video provider. Settings > AI & Models > Video Model gains an **OpenAI-compatible** provider instead: point it at any service that speaks the OpenAI Videos API (base URL, model name, API key) for text-to-video and image-to-video. Saved Sora settings are ignored; Gemini Veo, Vertex AI Veo, Kling and the local model are unchanged.
+
 - **Waiting decisions no longer lapse after 5 minutes**: an approval card (in a session, on Today or in a chat channel) now stays answerable for 24 hours, and the task waits for you instead of being denied and carrying on without the action. Time spent waiting for your decision no longer counts against a tool's time limit or the task watchdog. A granted approval still has to be used within 5 minutes, unattended runs still deny instead of waiting, and high-impact requests still fail closed if the app restarts before you answer.
 
 ## [0.5.61] - 2026-10-18

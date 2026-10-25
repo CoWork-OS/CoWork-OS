@@ -1046,22 +1046,15 @@ export const CustomProvidersSchema = z.record(z.string(), CustomProviderConfigSc
 
 export const VideoGenerationSettingsSchema = z
   .object({
-    defaultProvider: z.enum(["openai", "azure", "gemini", "vertex", "kling", "local"]).optional(),
-    fallbackProvider: z.enum(["openai", "azure", "gemini", "vertex", "kling", "local"]).optional(),
-    openai: z
-      .object({
-        defaultModel: z.string().max(200).optional(),
-        defaultDuration: z.number().int().min(1).max(60).optional(),
-        defaultAspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional(),
-        defaultResolution: z.enum(["480p", "720p", "1080p"]).optional(),
-      })
+    defaultProvider: z.enum(["openai-compatible", "gemini", "vertex", "kling", "local"]).optional(),
+    fallbackProvider: z
+      .enum(["openai-compatible", "gemini", "vertex", "kling", "local"])
       .optional(),
-    azure: z
+    openaiCompatible: z
       .object({
-        videoApiKey: z.string().max(500).optional(),
-        videoEndpoint: z.string().max(500).optional(),
-        videoDeployment: z.string().max(200).optional(),
-        videoApiVersion: z.string().max(50).optional(),
+        apiKey: z.string().max(500).optional(),
+        baseUrl: z.string().max(500).optional(),
+        model: z.string().max(200).optional(),
         defaultDuration: z.number().int().min(1).max(60).optional(),
         defaultAspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional(),
         defaultResolution: z.enum(["480p", "720p", "1080p"]).optional(),

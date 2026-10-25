@@ -646,7 +646,6 @@ describe("browser Settings definitions", () => {
   it.each([
     ["imageGeneration", "openrouter", "baseUrl", "openrouter", "baseUrl"],
     ["imageGeneration", "azure", "imageEndpoint", "azure", "endpoint"],
-    ["videoGeneration", "azure", "videoEndpoint", "azure", "endpoint"],
   ])(
     "binds %s %s fallback keys to the saved endpoint",
     async (group, provider, urlField, parent, parentUrl) => {

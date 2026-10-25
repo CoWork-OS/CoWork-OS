@@ -943,6 +943,18 @@ const sidebarItems: SidebarItem[] = [
 
 // Secondary channel configuration for "More Channels" tab
 const S = { size: 16, strokeWidth: 1.5 } as const;
+
+type VideoProviderId = "openai-compatible" | "gemini" | "vertex" | "kling" | "local";
+const VIDEO_PROVIDER_IDS: readonly VideoProviderId[] = [
+  "openai-compatible",
+  "gemini",
+  "vertex",
+  "kling",
+  "local",
+];
+function isVideoProviderId(value: unknown): value is VideoProviderId {
+  return typeof value === "string" && (VIDEO_PROVIDER_IDS as readonly string[]).includes(value);
+}
 const secondaryChannelItems: Array<{
   key: SecondaryChannel;
   label: string;
@@ -1062,7 +1074,14 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
       target: { tab: "aimodels", aiModelsSubTab: "image" },
     },
     {
-      terms: ["video", "video model", "sora", "kling", "vertex video", "video generation"],
+      terms: [
+        "video",
+        "video model",
+        "openai-compatible video",
+        "kling",
+        "vertex video",
+        "video generation",
+      ],
       target: { tab: "aimodels", aiModelsSubTab: "video" },
     },
     {
@@ -1782,28 +1801,19 @@ export function Settings({
   const [imageGeminiTimeoutSeconds, setImageGeminiTimeoutSeconds] = useState("300");
 
   // Video generation state
-  const [videoDefaultProvider, setVideoDefaultProvider] = useState<
-    "openai" | "azure" | "gemini" | "vertex" | "kling" | "local" | ""
-  >("");
-  const [videoFallbackProvider, setVideoFallbackProvider] = useState<
-    "openai" | "azure" | "gemini" | "vertex" | "kling" | "local" | ""
-  >("");
+  const [videoDefaultProvider, setVideoDefaultProvider] = useState<VideoProviderId | "">("");
+  const [videoFallbackProvider, setVideoFallbackProvider] = useState<VideoProviderId | "">("");
   // Local video model (runs on this computer)
   const [videoLocalPythonPath, setVideoLocalPythonPath] = useState("");
   const [videoLocalModelDir, setVideoLocalModelDir] = useState("");
   const [videoLocalSteps, setVideoLocalSteps] = useState("");
-  // OpenAI Sora video config
-  const [videoOpenAIModel, setVideoOpenAIModel] = useState("sora-2");
-  const [videoOpenAIDuration, setVideoOpenAIDuration] = useState("5");
-  const [videoOpenAIAspectRatio, setVideoOpenAIAspectRatio] = useState("16:9");
-  const [videoOpenAIResolution, setVideoOpenAIResolution] = useState("720p");
-  // Azure Sora video config
-  const [videoAzureApiKey, setVideoAzureApiKey] = useState("");
-  const [videoAzureEndpoint, setVideoAzureEndpoint] = useState("");
-  const [videoAzureDeployment, setVideoAzureDeployment] = useState("");
-  const [videoAzureApiVersion, setVideoAzureApiVersion] = useState("preview");
-  const [videoAzureDuration, setVideoAzureDuration] = useState("5");
-  const [videoAzureAspectRatio, setVideoAzureAspectRatio] = useState("16:9");
+  // OpenAI-compatible Videos API service config
+  const [videoOpenAICompatApiKey, setVideoOpenAICompatApiKey] = useState("");
+  const [videoOpenAICompatBaseUrl, setVideoOpenAICompatBaseUrl] = useState("");
+  const [videoOpenAICompatModel, setVideoOpenAICompatModel] = useState("");
+  const [videoOpenAICompatDuration, setVideoOpenAICompatDuration] = useState("5");
+  const [videoOpenAICompatAspectRatio, setVideoOpenAICompatAspectRatio] = useState("16:9");
+  const [videoOpenAICompatResolution, setVideoOpenAICompatResolution] = useState("720p");
   // Gemini Veo config
   const [videoGeminiModel, setVideoGeminiModel] = useState<
     "veo-3.1" | "veo-3.1-fast-preview" | "veo-3.0"
@@ -3113,18 +3123,19 @@ export function Settings({
 
       // Video generation settings
       const vg = loadedSettings.videoGeneration;
-      if (vg?.defaultProvider) setVideoDefaultProvider(vg.defaultProvider);
-      if (vg?.fallbackProvider) setVideoFallbackProvider(vg.fallbackProvider);
-      if (vg?.openai?.defaultModel) setVideoOpenAIModel(vg.openai.defaultModel);
-      if (vg?.openai?.defaultDuration) setVideoOpenAIDuration(String(vg.openai.defaultDuration));
-      if (vg?.openai?.defaultAspectRatio) setVideoOpenAIAspectRatio(vg.openai.defaultAspectRatio);
-      if (vg?.openai?.defaultResolution) setVideoOpenAIResolution(vg.openai.defaultResolution);
-      if (vg?.azure?.videoApiKey) setVideoAzureApiKey(vg.azure.videoApiKey);
-      if (vg?.azure?.videoEndpoint) setVideoAzureEndpoint(vg.azure.videoEndpoint);
-      if (vg?.azure?.videoDeployment) setVideoAzureDeployment(vg.azure.videoDeployment);
-      if (vg?.azure?.videoApiVersion) setVideoAzureApiVersion(vg.azure.videoApiVersion);
-      if (vg?.azure?.defaultDuration) setVideoAzureDuration(String(vg.azure.defaultDuration));
-      if (vg?.azure?.defaultAspectRatio) setVideoAzureAspectRatio(vg.azure.defaultAspectRatio);
+      // Settings saved before the Sora providers were retired may still name them.
+      const savedVideoDefault = vg?.defaultProvider;
+      if (isVideoProviderId(savedVideoDefault)) setVideoDefaultProvider(savedVideoDefault);
+      const savedVideoFallback = vg?.fallbackProvider;
+      if (isVideoProviderId(savedVideoFallback)) setVideoFallbackProvider(savedVideoFallback);
+      const vgCompat = vg?.openaiCompatible;
+      if (vgCompat?.apiKey) setVideoOpenAICompatApiKey(vgCompat.apiKey);
+      if (vgCompat?.baseUrl) setVideoOpenAICompatBaseUrl(vgCompat.baseUrl);
+      if (vgCompat?.model) setVideoOpenAICompatModel(vgCompat.model);
+      if (vgCompat?.defaultDuration) setVideoOpenAICompatDuration(String(vgCompat.defaultDuration));
+      if (vgCompat?.defaultAspectRatio)
+        setVideoOpenAICompatAspectRatio(vgCompat.defaultAspectRatio);
+      if (vgCompat?.defaultResolution) setVideoOpenAICompatResolution(vgCompat.defaultResolution);
       if (vg?.gemini?.defaultModel) setVideoGeminiModel(vg.gemini.defaultModel);
       if (vg?.gemini?.defaultDuration) setVideoGeminiDuration(String(vg.gemini.defaultDuration));
       if (vg?.gemini?.defaultAspectRatio) setVideoGeminiAspectRatio(vg.gemini.defaultAspectRatio);
@@ -4385,19 +4396,17 @@ export function Settings({
         videoGeneration: {
           defaultProvider: videoDefaultProvider || undefined,
           fallbackProvider: videoFallbackProvider || undefined,
-          openai: {
-            defaultModel: videoOpenAIModel || undefined,
-            defaultDuration: videoOpenAIDuration ? Number(videoOpenAIDuration) : undefined,
-            defaultAspectRatio: (videoOpenAIAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
-            defaultResolution: (videoOpenAIResolution as "480p" | "720p" | "1080p") || undefined,
-          },
-          azure: {
-            videoApiKey: videoAzureApiKey || undefined,
-            videoEndpoint: videoAzureEndpoint || undefined,
-            videoDeployment: videoAzureDeployment || undefined,
-            videoApiVersion: videoAzureApiVersion || undefined,
-            defaultDuration: videoAzureDuration ? Number(videoAzureDuration) : undefined,
-            defaultAspectRatio: (videoAzureAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+          openaiCompatible: {
+            apiKey: videoOpenAICompatApiKey || undefined,
+            baseUrl: videoOpenAICompatBaseUrl.trim() || undefined,
+            model: videoOpenAICompatModel.trim() || undefined,
+            defaultDuration: videoOpenAICompatDuration
+              ? Number(videoOpenAICompatDuration)
+              : undefined,
+            defaultAspectRatio:
+              (videoOpenAICompatAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+            defaultResolution:
+              (videoOpenAICompatResolution as "480p" | "720p" | "1080p") || undefined,
           },
           gemini: {
             defaultModel: videoGeminiModel || undefined,
@@ -5215,15 +5224,14 @@ export function Settings({
     }
   };
 
-  const activeVideoTab = videoDefaultProvider || "openai";
+  const activeVideoTab = videoDefaultProvider || "openai-compatible";
 
   const videoProviders = [
     {
-      type: "openai" as const,
-      name: "OpenAI Sora",
+      type: "openai-compatible" as const,
+      name: "OpenAI-compatible",
       icon: <CircleDot {...S} />,
     },
-    { type: "azure" as const, name: "Azure Sora", icon: <Cloud {...S} /> },
     { type: "gemini" as const, name: "Gemini Veo", icon: <Star {...S} /> },
     {
       type: "vertex" as const,
@@ -5556,22 +5564,38 @@ export function Settings({
         ))}
       </div>
       <div className="llm-provider-content">
-        {activeVideoTab === "openai" && (
+        {activeVideoTab === "openai-compatible" && (
           <div className="settings-section">
-            <h3>OpenAI Sora 2</h3>
+            <h3>OpenAI-compatible</h3>
             <p className="settings-hint">
-              Uses the OpenAI API key configured in AI Model. Supports text-to-video and
+              Any service that speaks the OpenAI Videos API (POST /videos). Enter its API root, the
+              model name it documents and a dedicated API key. Supports text-to-video and
               image-to-video.
             </p>
-            <label className="settings-label">Default model</label>
-            <select
-              className="settings-select"
-              value={videoOpenAIModel}
-              onChange={(e) => setVideoOpenAIModel(e.target.value)}
-            >
-              <option value="sora-2">sora-2</option>
-              <option value="sora-2-pro">sora-2-pro</option>
-            </select>
+            <label className="settings-label">API Key</label>
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Enter the service's API key"
+              value={videoOpenAICompatApiKey}
+              onChange={(e) => setVideoOpenAICompatApiKey(e.target.value)}
+            />
+            <label className="settings-label settings-label--spaced">Base URL</label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="https://api.example.com/v1"
+              value={videoOpenAICompatBaseUrl}
+              onChange={(e) => setVideoOpenAICompatBaseUrl(e.target.value)}
+            />
+            <label className="settings-label settings-label--spaced">Model</label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="Model name, as the service documents it"
+              value={videoOpenAICompatModel}
+              onChange={(e) => setVideoOpenAICompatModel(e.target.value)}
+            />
             <label className="settings-label settings-label--spaced">
               Default duration (seconds)
             </label>
@@ -5579,15 +5603,15 @@ export function Settings({
               className="settings-input"
               type="number"
               min={1}
-              max={20}
-              value={videoOpenAIDuration}
-              onChange={(e) => setVideoOpenAIDuration(e.target.value)}
+              max={60}
+              value={videoOpenAICompatDuration}
+              onChange={(e) => setVideoOpenAICompatDuration(e.target.value)}
             />
             <label className="settings-label settings-label--spaced">Default aspect ratio</label>
             <select
               className="settings-select"
-              value={videoOpenAIAspectRatio}
-              onChange={(e) => setVideoOpenAIAspectRatio(e.target.value)}
+              value={videoOpenAICompatAspectRatio}
+              onChange={(e) => setVideoOpenAICompatAspectRatio(e.target.value)}
             >
               <option value="16:9">16:9 (landscape)</option>
               <option value="9:16">9:16 (portrait)</option>
@@ -5596,77 +5620,12 @@ export function Settings({
             <label className="settings-label settings-label--spaced">Default resolution</label>
             <select
               className="settings-select"
-              value={videoOpenAIResolution}
-              onChange={(e) => setVideoOpenAIResolution(e.target.value)}
+              value={videoOpenAICompatResolution}
+              onChange={(e) => setVideoOpenAICompatResolution(e.target.value)}
             >
               <option value="480p">480p</option>
               <option value="720p">720p</option>
               <option value="1080p">1080p</option>
-            </select>
-          </div>
-        )}
-
-        {activeVideoTab === "azure" && (
-          <div className="settings-section">
-            <h3>Azure OpenAI Sora 2</h3>
-            <p className="settings-hint">
-              Optionally use a dedicated API key and endpoint for video (e.g. a different Azure
-              resource). Leave blank to reuse the Azure chat credentials from AI Model.
-            </p>
-            <label className="settings-label">API Key (video-specific, optional)</label>
-            <input
-              className="settings-input"
-              type="password"
-              placeholder="Leave blank to use the Azure chat API key"
-              value={videoAzureApiKey}
-              onChange={(e) => setVideoAzureApiKey(e.target.value)}
-            />
-            <label className="settings-label settings-label--spaced">
-              Endpoint (video-specific, optional)
-            </label>
-            <input
-              className="settings-input"
-              type="text"
-              placeholder="Leave blank to use the Azure chat endpoint"
-              value={videoAzureEndpoint}
-              onChange={(e) => setVideoAzureEndpoint(e.target.value)}
-            />
-            <label className="settings-label settings-label--spaced">Sora deployment name</label>
-            <input
-              className="settings-input"
-              type="text"
-              placeholder="e.g. sora"
-              value={videoAzureDeployment}
-              onChange={(e) => setVideoAzureDeployment(e.target.value)}
-            />
-            <label className="settings-label settings-label--spaced">API version</label>
-            <input
-              className="settings-input"
-              type="text"
-              placeholder="preview"
-              value={videoAzureApiVersion}
-              onChange={(e) => setVideoAzureApiVersion(e.target.value)}
-            />
-            <label className="settings-label settings-label--spaced">
-              Default duration (seconds)
-            </label>
-            <input
-              className="settings-input"
-              type="number"
-              min={1}
-              max={20}
-              value={videoAzureDuration}
-              onChange={(e) => setVideoAzureDuration(e.target.value)}
-            />
-            <label className="settings-label settings-label--spaced">Default aspect ratio</label>
-            <select
-              className="settings-select"
-              value={videoAzureAspectRatio}
-              onChange={(e) => setVideoAzureAspectRatio(e.target.value)}
-            >
-              <option value="16:9">16:9 (landscape)</option>
-              <option value="9:16">9:16 (portrait)</option>
-              <option value="1:1">1:1 (square)</option>
             </select>
           </div>
         )}
@@ -5904,21 +5863,11 @@ export function Settings({
             className="settings-select"
             value={videoFallbackProvider}
             onChange={(e) =>
-              setVideoFallbackProvider(
-                (e.target.value || "") as
-                  | "openai"
-                  | "azure"
-                  | "gemini"
-                  | "vertex"
-                  | "kling"
-                  | "local"
-                  | "",
-              )
+              setVideoFallbackProvider((e.target.value || "") as VideoProviderId | "")
             }
           >
             <option value="">None</option>
-            <option value="openai">OpenAI Sora 2</option>
-            <option value="azure">Azure OpenAI Sora 2</option>
+            <option value="openai-compatible">OpenAI-compatible</option>
             <option value="gemini">Gemini Veo 3.1</option>
             <option value="vertex">Vertex AI Veo</option>
             <option value="kling">Kling</option>

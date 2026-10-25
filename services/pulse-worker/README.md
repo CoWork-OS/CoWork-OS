@@ -3,6 +3,10 @@
 Dedicated Cloudflare Worker and D1 database for the explicitly opt-in, content-free Pulse stream.
 It is intentionally separate from the `coworkosapp.com` website Worker and website analytics.
 
+The host shares the `coworkosapp.com` Search Console property and its API paths appear in public
+source, so search crawlers do reach it. `/robots.txt` disallows all crawling and every JSON
+response carries `X-Robots-Tag: noindex`; the collector has no indexable pages.
+
 ## Production deployment record
 
 Deployed on **2026-09-06**. These identifiers describe that deployment; recheck live state before
@@ -115,9 +119,11 @@ npx wrangler d1 migrations apply cowork-pulse --remote --config wrangler.jsonc
 npx wrangler deploy --config wrangler.jsonc
 curl --fail-with-body --max-time 20 https://pulse.coworkosapp.com/v1/status
 curl --fail-with-body --max-time 20 https://pulse.coworkosapp.com/v1/schema
+curl --fail-with-body --max-time 20 https://pulse.coworkosapp.com/robots.txt
 ```
 
-Verify the expected service/schema body, not only HTTP 200. Confirm the displayed Worker route
+Verify the expected service/schema body, not only HTTP 200, and that `robots.txt` returns
+`User-agent: *` / `Disallow: /`. Confirm the displayed Worker route
 and D1 binding. List secrets by name only; do not overwrite them on every deploy.
 
 To read the production summary using the local recovery file without printing the token:

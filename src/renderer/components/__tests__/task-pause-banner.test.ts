@@ -20,6 +20,33 @@ describe("TaskPauseBanner", () => {
     expect(markup).toContain("This task needs command tools to continue.");
   });
 
+  it("offers Resume when the app closed before the turn saved anything", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TaskPauseBanner, {
+        message: "The app closed before this turn saved any progress.",
+        reasonCode: "crashed_before_progress",
+        onResumeTask: vi.fn(),
+        onStopTask: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain(">Resume</button>");
+    expect(markup).toContain("Resume runs your request again from the start");
+    expect(markup).not.toContain("missing detail");
+  });
+
+  it("does not offer Resume for other pauses", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TaskPauseBanner, {
+        message: "Waiting on you.",
+        reasonCode: "required_decision",
+        onResumeTask: vi.fn(),
+      }),
+    );
+
+    expect(markup).not.toContain(">Resume</button>");
+  });
+
   it("explains explicit required decisions as answerable choices", () => {
     const markup = renderToStaticMarkup(
       React.createElement(TaskPauseBanner, {

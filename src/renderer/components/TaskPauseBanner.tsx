@@ -12,6 +12,8 @@ type TaskPauseBannerProps = {
   reasonCode?: string | null;
   markdownComponents?: Any;
   onStopTask?: (() => void) | undefined;
+  /** Offered when the app closed before the turn saved anything (crashed_before_progress). */
+  onResumeTask?: (() => void | Promise<void>) | undefined;
   onOpenAccessProfilePicker?: (() => void | Promise<void>) | undefined;
   onContinueWithoutCommands?: (() => void | Promise<void>) | undefined;
 };
@@ -66,6 +68,12 @@ function getPauseBannerCopy(
       title: "This task needs command tools to continue.",
       instruction:
         "Choose an access profile that permits command tools, or continue without commands using a limited path.",
+    };
+  }
+  if (reasonCode === "crashed_before_progress") {
+    return {
+      title: "Task paused.",
+      instruction: "Resume runs your request again from the start, or stop this task here.",
     };
   }
   if (reasonCode === "skill_parameters") {
@@ -142,12 +150,13 @@ export function TaskPauseBanner({
   reasonCode,
   markdownComponents,
   onStopTask,
+  onResumeTask,
   onOpenAccessProfilePicker,
   onContinueWithoutCommands,
 }: TaskPauseBannerProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [pendingAction, setPendingAction] = useState<
-    "switch_access_profile" | "continue_without_commands" | null
+    "switch_access_profile" | "continue_without_commands" | "resume" | null
   >(null);
   const detailsTitleId = useId();
   const normalizedMessage = typeof message === "string" ? message.trim() : "";
@@ -170,6 +179,7 @@ export function TaskPauseBanner({
       : copy.title;
   const waitingForShellPermission =
     reasonCode === "shell_permission_required" || reasonCode === "shell_permission_still_disabled";
+  const canResume = reasonCode === "crashed_before_progress" && Boolean(onResumeTask);
 
   useEffect(() => {
     setShowDetails(false);
@@ -180,7 +190,7 @@ export function TaskPauseBanner({
   }, [reasonCode, displayMessage]);
 
   const runBannerAction = async (
-    action: "switch_access_profile" | "continue_without_commands",
+    action: "switch_access_profile" | "continue_without_commands" | "resume",
     handler?: (() => void | Promise<void>) | undefined,
   ) => {
     if (!handler || pendingAction) return;
@@ -206,8 +216,18 @@ export function TaskPauseBanner({
           )}
           <span className="task-status-banner-detail">{copy.instruction}</span>
         </div>
-        {(waitingForShellPermission || preview.showDetails || onStopTask) && (
+        {(waitingForShellPermission || canResume || preview.showDetails || onStopTask) && (
           <div className="task-status-banner-actions">
+            {canResume && (
+              <button
+                type="button"
+                className="task-status-banner-primary-btn"
+                onClick={() => void runBannerAction("resume", onResumeTask)}
+                disabled={pendingAction !== null}
+              >
+                {pendingAction === "resume" ? "Resuming..." : "Resume"}
+              </button>
+            )}
             {waitingForShellPermission && onOpenAccessProfilePicker && (
               <button
                 type="button"

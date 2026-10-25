@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentDaemon } from "../daemon";
+import { AgentDaemon, orphanedTaskRecovery } from "../daemon";
 
 function createDaemonLike(overrides?: Partial<Any>) {
   return {
@@ -241,5 +241,40 @@ describe("interrupted turn discard fencing", () => {
     await discard;
     expect(daemon.settleRunningTaskCancellation).toHaveBeenCalledTimes(1);
     expect(daemon.interruptedDiscards.size).toBe(0);
+  });
+});
+
+describe("orphaned task recovery after a crash", () => {
+  const typed = { promptProvenance: "user_typed" as const, agentConfig: {} };
+
+  it("resumes saved work, or skips it for background and system tasks", () => {
+    expect(orphanedTaskRecovery({ hasSavedState: true, resumesOnStartup: true, task: typed })).toBe(
+      "resume",
+    );
+    expect(
+      orphanedTaskRecovery({ hasSavedState: true, resumesOnStartup: false, task: typed }),
+    ).toBe("skip");
+  });
+
+  it("pauses a request typed in the app that saved nothing, for the person to resume", () => {
+    expect(
+      orphanedTaskRecovery({ hasSavedState: false, resumesOnStartup: true, task: typed }),
+    ).toBe("await_user");
+  });
+
+  it.each([
+    { promptProvenance: undefined, agentConfig: {} },
+    { promptProvenance: "user_typed" as const, agentConfig: { originChannel: "whatsapp" } },
+    { promptProvenance: "user_typed" as const, agentConfig: { gatewayContext: "private" } },
+  ])("fails work that nobody typed in the app when nothing was saved: %j", (task) => {
+    expect(
+      orphanedTaskRecovery({ hasSavedState: false, resumesOnStartup: true, task: task as Any }),
+    ).toBe("fail");
+  });
+
+  it("fails background work that saved nothing", () => {
+    expect(
+      orphanedTaskRecovery({ hasSavedState: false, resumesOnStartup: false, task: typed }),
+    ).toBe("fail");
   });
 });

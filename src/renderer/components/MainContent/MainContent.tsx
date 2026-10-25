@@ -9743,6 +9743,9 @@ function MainContentComponent({
               reasonCode={effectivePauseReasonCode}
               markdownComponents={markdownComponents}
               onStopTask={onWrapUpTask ?? onStopTask}
+              onResumeTask={
+                remoteSession ? undefined : () => window.electronAPI.resumeTask(task.id)
+              }
               onOpenAccessProfilePicker={remoteSession ? undefined : handleOpenAccessProfilePicker}
               onContinueWithoutCommands={
                 remoteSession ? undefined : onContinueWithoutCommandsForPausedTask
@@ -9791,7 +9794,7 @@ function MainContentComponent({
           )}
           {!remoteSession && task.status === "interrupted" ? (
             <SessionProgressCard
-              key={task.id}
+              key={`session-recovery:${task.id}`}
               task={task}
               onSelectTask={onSelectTask}
               refreshKey={events.length}
@@ -9825,7 +9828,12 @@ function MainContentComponent({
               </div>
             )}
           {!remoteSession && (
-            <QueuedMessagesPanel key={task.id} taskId={task.id} onChanged={onTasksChanged} />
+            <QueuedMessagesPanel
+              // Sibling keys must differ: the recovery card above is keyed by this task too.
+              key={`queued-messages:${task.id}`}
+              taskId={task.id}
+              onChanged={onTasksChanged}
+            />
           )}
           {quotedAssistantMessage && (
             <div className="composer-quoted-assistant">

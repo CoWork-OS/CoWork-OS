@@ -60,7 +60,7 @@ import {
 } from "../electron/utils/runtime-mode";
 import { isTerminalTaskStatus } from "../shared/task-status";
 import type { AgentConfig, CliTaskOwnership, LLMProviderType, Task } from "../shared/types";
-import { DEFAULT_WORKSPACE_PERMISSIONS, LLM_PROVIDER_TYPES } from "../shared/types";
+import { DEFAULT_WORKSPACE_PERMISSIONS } from "../shared/types";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import { buildTaskTitle } from "./format";
 import { runAgentImportCommand } from "./agent-import-command";
@@ -72,6 +72,11 @@ import { PulseService } from "../electron/telemetry/pulse-service";
 import type { PulsePreviewState } from "../shared/pulse";
 import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
 import { checkRunAccessProfile } from "./run-access-profile";
+import {
+  normalizeProviderType,
+  resolveRunModelPin,
+  resolveSupportedProviderType,
+} from "./run-model-pin";
 import { describeUserActionStop, validateRunTimeoutMs } from "./run-wait";
 import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/async/runtime";
 import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
@@ -339,9 +344,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       interruptPolicy: args.detachedWorker || args.detach ? "detach" : "cancel",
       lastSeenAt: Date.now(),
     };
+    const modelPin = resolveRunModelPin(
+      { provider: args.providerType, model: args.model },
+      {
+        configStatus: () => LLMProviderFactory.getConfigStatus(),
+        resolveSelection: (config, options) =>
+          LLMProviderFactory.resolveTaskModelSelection(config, options),
+      },
+    );
     const agentConfig: AgentConfig = {
       ...(requestedAccessProfileId ? { accessProfileId: requestedAccessProfileId } : {}),
       ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
+      ...modelPin?.agentConfig,
       cli: cliOwnership,
     };
 
@@ -376,6 +390,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       },
       `Created task: ${task.id}  ${task.title}`,
     );
+    if (modelPin) {
+      const { providerType, modelKey } = modelPin.agentConfig;
+      writeEvent(
+        args,
+        { type: "task_model", taskId: task.id, providerType, modelKey, modelId: modelPin.modelId },
+        `Model for this run: ${providerType}/${modelPin.modelId}`,
+      );
+    }
     if (args.readyFile) {
       await writeDetachedReadyFile(args.readyFile, task);
     }
@@ -2647,30 +2669,6 @@ function configureLocalProvider(args: DirectRunArgs): {
 
   LLMProviderFactory.saveSettings(settings);
   return { providerType, model };
-}
-
-function normalizeProviderType(providerType: string): string {
-  switch (providerType) {
-    case "claude":
-      return "anthropic";
-    case "azure_anthropic":
-      return "azure-anthropic";
-    case "openai_compatible":
-      return "openai-compatible";
-    default:
-      return providerType;
-  }
-}
-
-function resolveSupportedProviderType(providerType: string): LLMProviderType {
-  const normalized = normalizeProviderType(providerType);
-  const supportedProvider = LLM_PROVIDER_TYPES.find((candidate) => candidate === normalized);
-  if (!supportedProvider) {
-    throw new Error(
-      `Unknown provider type: ${providerType}. Run cowork providers list for supported providers.`,
-    );
-  }
-  return supportedProvider;
 }
 
 function shouldImportEnvForCommand(command: DirectRunArgs["command"]): boolean {

@@ -39,6 +39,7 @@ import {
   type TaskLike,
   type WorkspaceLike,
 } from "./format";
+import { buildRemoteRunModelPin } from "./run-model-pin";
 import { discoverLocalControlPlane } from "./local-control-plane-discovery";
 import { loadDrillFixture, replayInterruptDrill, runLiveInterruptDrill } from "./drill";
 import {
@@ -753,6 +754,10 @@ async function runTask(ctx: CommandContext): Promise<number> {
     }
     return runDirectTaskProcess(ctx, prompt);
   }
+  const modelPin = buildRemoteRunModelPin({
+    provider: getFlag(ctx.parsed, "--provider"),
+    model: getFlag(ctx.parsed, "--model"),
+  });
   const client = await connectedClient(ctx);
   try {
     const cwd = path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd());
@@ -769,6 +774,7 @@ async function runTask(ctx: CommandContext): Promise<number> {
       ...(getFlag(ctx.parsed, "--permission-mode")
         ? { permissionMode: getFlag(ctx.parsed, "--permission-mode") }
         : {}),
+      ...(modelPin ? { agentConfig: modelPin } : {}),
     };
     const created = await client.request(METHODS.TASK_CREATE, params, 30000);
     const task = ((created as Payload).task || {}) as TaskLike;
@@ -850,6 +856,9 @@ export function buildDirectTaskArgs(parsed: ParsedArgs, prompt: string): string[
     ...(getFlag(parsed, "--permission-mode")
       ? ["--permission-mode", getFlag(parsed, "--permission-mode")!]
       : []),
+    // Pins this run's model on the task; the global default model stays as it is.
+    ...(getFlag(parsed, "--provider") ? ["--provider", getFlag(parsed, "--provider")!] : []),
+    ...(getFlag(parsed, "--model") ? ["--model", getFlag(parsed, "--model")!] : []),
     // Stop with exit code 3 when a person must act (e.g. a PACT sign-in) instead of waiting.
     ...(hasFlag(parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
     // Cancel the task and exit 1 when it runs past this limit. Forwarded even without a
@@ -2373,8 +2382,8 @@ function usage(): void {
       "  cowork daemon start [--background]",
       "  cowork workspace list",
       "  cowork workspace create [path]",
-      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force] [--exit-on-input] [--timeout-ms <ms>]',
-      '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>]',
+      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--provider <type>] [--model <id>] [--detach] [--force] [--exit-on-input] [--timeout-ms <ms>]',
+      '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>] [--provider <type>] [--model <id>]',
       "  cowork tail <taskId>",
       "  cowork tasks list [--active] [--cli]",
       "  cowork tasks cancel <taskId>",

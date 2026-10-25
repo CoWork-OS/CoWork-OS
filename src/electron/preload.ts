@@ -6095,6 +6095,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
   getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
   createWebAccessPairingCode: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_CREATE_PAIRING_CODE),
+  createWebAccessSignInLink: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_CREATE_SIGN_IN_LINK),
+  openWebAccessBrowserApp: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_OPEN_BROWSER_APP),
+  signOutWebAccessBrowsers: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SIGN_OUT_BROWSERS),
 
   // Playwright QA APIs
   qaGetRuns: () => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUNS),

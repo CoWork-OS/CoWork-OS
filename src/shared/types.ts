@@ -9695,6 +9695,9 @@ export const IPC_CHANNELS = {
   WEBACCESS_SAVE_SETTINGS: "webaccess:saveSettings",
   WEBACCESS_GET_STATUS: "webaccess:getStatus",
   WEBACCESS_CREATE_PAIRING_CODE: "webaccess:createPairingCode",
+  WEBACCESS_CREATE_SIGN_IN_LINK: "webaccess:createSignInLink",
+  WEBACCESS_OPEN_BROWSER_APP: "webaccess:openBrowserApp",
+  WEBACCESS_SIGN_OUT_BROWSERS: "webaccess:signOutBrowsers",
 
   // Playwright QA (Automated Visual Testing)
   QA_GET_RUNS: "qa:getRuns",

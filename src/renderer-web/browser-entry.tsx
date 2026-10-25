@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import ReactDOM from "react-dom/client";
 import { WEB_API_VERSION, type WebSessionBootstrap } from "../shared/host-api/contracts";
+import { BROWSER_APP_SIGN_IN_PARAM, readBrowserAppSignInCode } from "../shared/browser-app-link";
 import { installBrowserHostBridge } from "../renderer/host/browser-host-bridge";
 import { BrowserHostTransport, webEndpoint } from "./transport";
 import "../renderer/react-refresh-ignored-exports";
@@ -30,6 +31,46 @@ type ActiveBridge = {
   disposeBridge: () => void;
   signingOut: boolean;
 };
+
+const SIGN_IN_LINK_EXPIRED =
+  "This sign-in link has expired or was already used. Open a new one from CoWork OS (Settings > Web Access > Open in browser) or run cowork web on the host.";
+
+/**
+ * A sign-in link's one-use code, taken from the address bar when the page loads and removed
+ * from it at once, so a reload, a bookmark or a shared screen never carries it.
+ */
+let pendingSignInCode: string | null = takeSignInCodeFromLocation();
+
+function takeSignInCodeFromLocation(): string | null {
+  if (typeof window === "undefined" || !window.location.hash) return null;
+  const code = readBrowserAppSignInCode(window.location.hash);
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  if (!params.has(BROWSER_APP_SIGN_IN_PARAM)) return code;
+  params.delete(BROWSER_APP_SIGN_IN_PARAM);
+  const rest = params.toString();
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${window.location.pathname}${window.location.search}${rest ? `#${rest}` : ""}`,
+  );
+  return code;
+}
+
+/** Hands out the link's code once; React may run startup effects twice in development. */
+function consumePendingSignInCode(): string | null {
+  const code = pendingSignInCode;
+  pendingSignInCode = null;
+  return code;
+}
+
+async function redeemPairingCode(code: string): Promise<boolean> {
+  const { response } = await readJson<unknown>("session/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  return response.ok;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -222,6 +263,22 @@ function BrowserEntry() {
           return;
         }
         if (!response.ok) throw new Error("This browser application cannot connect to the host.");
+        const signInCode = consumePendingSignInCode();
+        if (signInCode) {
+          setState({ kind: "loading", message: "Signing you in…" });
+          const accepted = await redeemPairingCode(signInCode);
+          if (!active) return;
+          if (!accepted) {
+            // A session from an earlier sign-in may still work; otherwise say why.
+            await refreshSession(isActive);
+            if (active) {
+              setState((current) =>
+                current.kind === "login" ? { kind: "login", error: SIGN_IN_LINK_EXPIRED } : current,
+              );
+            }
+            return;
+          }
+        }
         await refreshSession(isActive);
       } catch (error) {
         if (active) {
@@ -281,12 +338,7 @@ function BrowserEntry() {
     if (!pairingCode.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const { response } = await readJson<unknown>("session/pair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: pairingCode.trim() }),
-      });
-      if (!response.ok) {
+      if (!(await redeemPairingCode(pairingCode.trim()))) {
         setState({ kind: "login", error: "The pairing code was not accepted." });
         return;
       }
@@ -345,7 +397,8 @@ function BrowserEntry() {
         {state.kind === "login" && (
           <>
             <p className="browser-entry-description">
-              Enter the pairing code from your CoWork OS app to get started.
+              On the computer running CoWork OS, open Settings &gt; Web Access and choose Open in
+              browser, or run <code>cowork web</code>. You can also paste a pairing code here.
             </p>
             <form className="browser-entry-form" onSubmit={(event) => void pair(event)}>
               <label htmlFor="browser-pairing-code">Pairing code</label>

@@ -3809,3 +3809,18 @@ html.visual-calm
 .settings-page-layout .settings-content a:not([class]):hover {
   text-decoration-color: currentColor;
 }
+
+/* Web Access: browser app actions */
+.web-access-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.web-access-app-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

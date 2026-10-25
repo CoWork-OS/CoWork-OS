@@ -1,6 +1,23 @@
 # Browser application preview
 
-The browser application is currently an opt-in development preview. Set `COWORK_WEB_ENABLED=1` before starting a CoWork host. Its routes live on the existing Control Plane listener at `/app/` and, in desktop mode, on an enabled Web Access listener at `/app/`. The default deployment policy accepts only a loopback listener and loopback Host header. The native Control Plane protocol and existing Web Access bearer-token API retain their own authentication.
+The browser application serves the desktop app to a web browser. It is off by default and still a preview: not every desktop workflow has been reviewed for the browser (see [Web capability matrix](web-capability-matrix.md)).
+
+In the desktop app, turn it on in **Settings > Web Access**: enable Web Access, then **Full app in the browser**. A headless host turns it on with `COWORK_WEB_ENABLED=1`, which still works on desktop too. Its routes live on the Control Plane listener at `/app/` and, in desktop mode, on the Web Access listener at `/app/`. Without a public address, the deployment policy accepts only a loopback listener and loopback Host header. The native Control Plane protocol and existing Web Access bearer-token API retain their own authentication.
+
+## Opening it
+
+- **Desktop:** **Settings > Web Access > Open in browser** opens the app signed in. **Copy sign-in link** copies a link for another browser. On Linux, where other local accounts can read a browser's command line, Open in browser copies the link instead of opening it.
+- **Terminal:** `cowork web` does the same through the Control Plane. `cowork web link` prints the link alone, `cowork web status` shows the address and how many browsers are signed in, and `cowork web sign-out` signs every browser out. On macOS the link reaches the browser through `osascript` on stdin, so it never appears on a command line; on Linux `cowork web` prints the link for you to open.
+
+A sign-in link is the app's address with a one-use pairing code in the fragment: `<origin>/app/#pair=<code>`. Browsers never send the fragment to the server, and the page removes it from the address bar before redeeming it. The code works once and expires after 90 seconds.
+
+**Sign out all browsers** in Settings, or `cowork web sign-out`, ends every browser session at once, and their sockets and terminals close with them. Turning the app off or changing its public address does the same. Browser sessions live in host memory, so restarting the host also signs browsers out; open a new link to sign in again.
+
+## Other devices
+
+Put an HTTPS proxy on the host computer in front of the Web Access listener, for example `tailscale serve --bg 3847`, and enter the proxy's address in **Settings > Web Access > Public HTTPS address**. The app then trusts only a proxy on this computer (`127.0.0.1` and `::1`), requires `X-Forwarded-Proto: https` and the original Host header, and sets `__Host-` session cookies. Use **Copy sign-in link** and open the link on the other device. While a public address is set, browsers on this computer use that address too.
+
+`COWORK_WEB_PUBLIC_ORIGIN` and `COWORK_WEB_TRUSTED_PROXY_ADDRESSES` override the saved address, for proxies on another machine and for headless hosts.
 
 ## Desktop isolation and local builds
 
@@ -12,7 +29,7 @@ Updating a source checkout and rebuilding it changes the app launched from that 
 
 ## Starting the preview
 
-Build the assets with `npm run build:web`. For a disposable Node host, start `node bin/coworkd-node.js --user-data-dir <disposable-dir> --enable-control-plane` with `COWORK_WEB_ENABLED=1`. Its log reports the actual Control Plane address. From a trusted admin client, run `node bin/coworkctl.js --url <ws-url> --token <control-plane-token> call web.pair` to generate a one-use code, then visit `<http-url>/app/` and enter the code. The code expires after 90 seconds. In desktop mode, the enabled Web Access settings panel can generate a code for its own listener. Codes and browser sessions are specific to one listener, profile, and host generation.
+Build the assets with `npm run build:web`. For a disposable Node host, start `node bin/coworkd-node.js --user-data-dir <disposable-dir> --enable-control-plane` with `COWORK_WEB_ENABLED=1`. Its log reports the actual Control Plane address. From a trusted admin client, run `cowork web link --url <ws-url> --token <control-plane-token>` for a sign-in link, or `node bin/coworkctl.js --url <ws-url> --token <control-plane-token> call web.pair` for a bare one-use code to type at `<http-url>/app/`. Codes expire after 90 seconds. In desktop mode, the Web Access settings panel creates links and codes for its own listener. Codes and browser sessions are specific to one listener, profile, and host generation.
 
 Remote exposure requires `COWORK_WEB_PUBLIC_ORIGIN` set to a canonical HTTPS origin and `COWORK_WEB_TRUSTED_PROXY_ADDRESSES` set to the exact address of the TLS-terminating proxy. Forward the original Host and `X-Forwarded-Proto: https`; route `/app/` and `/api/web/v1/` to the same host listener. Browser routes fail closed when the deployment policy does not match the listener and request. A proxy path prefix must rewrite to these host paths while preserving the same prefix on the client side.
 

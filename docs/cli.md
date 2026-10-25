@@ -105,11 +105,17 @@ cowork security prune --yes
 cowork prompt-size "estimate this prompt"
 cowork completions zsh
 cowork dashboard status
+cowork web
+cowork web link
+cowork web status
+cowork web sign-out
 cowork tail <taskId>
 cowork approvals
 cowork run "run this on the remote node" --remote
 cowork --help
 ```
+
+`cowork web` opens the desktop app in your default browser, signed in with a one-use link from the running CoWork host. Turn the browser app on first in **Settings > Web Access**. `cowork web link` prints the link instead, for another device; `status` and `sign-out` show and end browser sessions. See [Browser application preview](browser-preview.md).
 
 Interactive mode accepts free-text tasks and slash commands:
 

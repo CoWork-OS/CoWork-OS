@@ -70,6 +70,8 @@ describe("ImageGenerator Azure", () => {
       prompt: "snow leopard avatar",
       onProgress: (event) => progress.push(event),
     });
+    // The key is read first (it may be a vault reference); let that settle without moving time.
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("gpt-image-2");

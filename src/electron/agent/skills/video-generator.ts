@@ -8,6 +8,7 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { resolveSecretValue } from "../../security/secret-references/resolver";
 import { coverImageToSize } from "../tools/image-utils";
 import {
   buildLocalVideoArgs,
@@ -129,7 +130,7 @@ function generateWithLocal(args: AdapterArgs): AdapterResult {
 
 async function generateWithOpenAI(args: AdapterArgs): Promise<AdapterResult> {
   console.log("[VideoGenerator] generateWithOpenAI called");
-  const apiKey = args.settings.openai?.apiKey?.trim();
+  const apiKey = await resolveSecretValue(args.settings.openai?.apiKey?.trim());
   if (!apiKey) return { success: false, error: "OpenAI API key not configured." };
 
   const vCfg = args.settings.videoGeneration?.openai;
@@ -360,7 +361,7 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
   const azCfg = args.settings.azure;
   const vCfg = args.settings.videoGeneration?.azure;
   // Prefer dedicated video credentials; fall back to main Azure chat credentials
-  const apiKey = vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim();
+  const apiKey = await resolveSecretValue(vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim());
   const rawEndpoint = vCfg?.videoEndpoint?.trim() || azCfg?.endpoint?.trim();
   const model = normalizeAzureVideoModel(args.request.model, vCfg?.videoDeployment);
   const apiVersion = normalizeAzureVideoApiVersion(vCfg?.videoApiVersion);
@@ -465,7 +466,8 @@ async function pollAzureJob(
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
   const azCfg = settings.azure;
   const vCfg = settings.videoGeneration?.azure;
-  const apiKey = (vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim()) ?? "";
+  const apiKey =
+    (await resolveSecretValue(vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim())) ?? "";
   const rawEndpoint = (vCfg?.videoEndpoint?.trim() || azCfg?.endpoint?.trim()) ?? "";
   const apiVersion = normalizeAzureVideoApiVersion(vCfg?.videoApiVersion);
   const base = normalizeAzureBaseEndpoint(rawEndpoint);
@@ -522,7 +524,7 @@ async function pollAzureJob(
 // ── Gemini Veo 3.1 ───────────────────────────────────────────────────────────
 
 async function generateWithGemini(args: AdapterArgs): Promise<AdapterResult> {
-  const apiKey = args.settings.gemini?.apiKey?.trim();
+  const apiKey = await resolveSecretValue(args.settings.gemini?.apiKey?.trim());
   if (!apiKey) return { success: false, error: "Gemini API key not configured." };
 
   const vCfg = args.settings.videoGeneration?.gemini;
@@ -824,7 +826,7 @@ async function pollVertexOperation(
 
 async function generateWithKling(args: AdapterArgs): Promise<AdapterResult> {
   const kCfg = args.settings.videoGeneration?.kling;
-  const apiKey = kCfg?.apiKey?.trim();
+  const apiKey = await resolveSecretValue(kCfg?.apiKey?.trim());
   const baseUrl = (kCfg?.baseUrl?.trim() || "https://api.klingai.com").replace(/\/$/, "");
 
   if (!apiKey) {
@@ -899,7 +901,7 @@ async function pollKlingJob(
   outputPathGuard?: OutputPathGuard,
   networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
-  const apiKey = kCfg?.apiKey?.trim() ?? "";
+  const apiKey = (await resolveSecretValue(kCfg?.apiKey?.trim())) ?? "";
   const baseUrl = (kCfg?.baseUrl?.trim() || "https://api.klingai.com").replace(/\/$/, "");
 
   const statusUrl = `${baseUrl}/v1/videos/text2video/${taskId}`;
@@ -1317,7 +1319,7 @@ export class VideoGenerator {
         this.assertNetworkAccess(providerEndpoint, "get_video_generation_job");
       }
       if (provider === "openai") {
-        const apiKey = settings.openai?.apiKey?.trim() ?? "";
+        const apiKey = (await resolveSecretValue(settings.openai?.apiKey?.trim())) ?? "";
         return await pollOpenAIJob(
           normalizedJobId,
           apiKey,
@@ -1338,7 +1340,7 @@ export class VideoGenerator {
         );
       }
       if (provider === "gemini") {
-        const apiKey = settings.gemini?.apiKey?.trim() ?? "";
+        const apiKey = (await resolveSecretValue(settings.gemini?.apiKey?.trim())) ?? "";
         return await pollGeminiOperation(
           normalizedJobId,
           apiKey,
@@ -1417,7 +1419,7 @@ export class VideoGenerator {
 
     try {
       if (provider === "openai") {
-        const apiKey = settings.openai?.apiKey?.trim() ?? "";
+        const apiKey = (await resolveSecretValue(settings.openai?.apiKey?.trim())) ?? "";
         this.assertNetworkAccess(
           `https://api.openai.com/v1/video/generations/${jobId}/cancel`,
           "cancel_video_generation_job",

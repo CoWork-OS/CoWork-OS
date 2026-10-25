@@ -3809,3 +3809,12 @@ html.visual-calm
 .settings-page-layout .settings-content a:not([class]):hover {
   text-decoration-color: currentColor;
 }
+
+/* Password Managers (System & Security) */
+.password-managers-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}

@@ -4,6 +4,7 @@ import type {
   BrowserVaultItem,
   BrowserVaultSource,
 } from "../../../shared/browser-vault";
+import { isBitwardenBuiltinField } from "../../../shared/secret-references";
 import { loginOriginFor } from "./login-origin";
 
 type Manager = Exclude<BrowserVaultSource, "local">;
@@ -213,6 +214,32 @@ export class PasswordManagerVault {
         : ["get", "password", id, "--nointeraction"],
     );
     return { username: item.username || "", password: password.replace(/[\r\n]+$/, "") };
+  }
+  /** Use a session the user unlocked outside CoWork (`BW_SESSION` from `bw unlock --raw`). */
+  adoptSession(scope: string, source: Manager, token: string) {
+    const key = this.key(scope, source);
+    const generation = this.generations.get(key) || 0;
+    this.sessions.set(key, { token, touchedAt: this.now(), generation });
+  }
+  /** One field of a Bitwarden item, for a `bw://` vault reference. */
+  async bitwardenField(scope: string, item: string, field: string): Promise<string> {
+    if (!item || item.startsWith("-") || item.length > 200) throw new Error("Invalid item.");
+    if (isBitwardenBuiltinField(field)) {
+      const value = await this.call(scope, "bitwarden", ["get", field, item, "--nointeraction"]);
+      return value.replace(/[\r\n]+$/, "");
+    }
+    const text = await this.call(scope, "bitwarden", ["get", "item", item, "--nointeraction"]);
+    let row: unknown;
+    try {
+      row = JSON.parse(text);
+    } catch {
+      throw new Error("Invalid password manager response.");
+    }
+    const fields = row && typeof row === "object" ? (row as { fields?: unknown }).fields : null;
+    const match = Array.isArray(fields)
+      ? fields.find((entry) => entry && typeof entry === "object" && entry.name === field)
+      : undefined;
+    return typeof match?.value === "string" ? match.value : "";
   }
   async otp(scope: string, item: BrowserVaultItem) {
     if (item.source === "local") return "";

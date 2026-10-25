@@ -59,6 +59,42 @@ integration.
 
 For LM Studio, see [LM Studio (Local)](#lm-studio-local) below.
 
+## Keys from a password manager
+
+Any API key field can hold a reference to an item in your password manager instead of the key.
+The same works for an MCP server's environment variables and headers. CoWork reads the value when
+a request needs it, keeps it in memory for up to 10 minutes, and never writes it to disk or to
+settings; settings keep only the reference.
+
+| Reference | Vault | Read with |
+| --- | --- | --- |
+| `op://<vault>/<item>/<field>` or `op://<vault>/<item>/<section>/<field>` | 1Password | `op read` |
+| `bws://<secret-id>` | Bitwarden Secrets Manager | `bws secret get` |
+| `bw://<item>/<field>` | Bitwarden password manager | `bw get` |
+
+For `bw://`, `<item>` is the item's id or its exact name, and `<field>` is `password`,
+`username`, `notes`, `totp` or the name of a custom field. `bw://<item>` alone reads the password.
+
+Set the vaults up in **Settings > System & Security > Password Managers**:
+
+- **1Password**: install the 1Password CLI. With the 1Password app's CLI integration on, the app
+  asks you to approve access. For runs nobody watches (`cowork run`, scheduled tasks), save a
+  service account token, or export `OP_SERVICE_ACCOUNT_TOKEN` for `cowork run`.
+- **Bitwarden Secrets Manager**: install `bws` and save a machine account access token (and the
+  server URL for a self-hosted or EU vault). `cowork run` also reads `BWS_ACCESS_TOKEN`.
+- **Bitwarden**: install `bw`, run `bw login` once, then unlock with your master password in
+  Settings. The session stays in memory until you lock it, quit, or leave it idle for 30 minutes.
+  For `cowork run`, set `BW_SESSION` from `bw unlock --raw`.
+
+**Test a reference** in the same place checks that CoWork can read a reference without showing
+its value. A reference that can't be read stops the request with a message that names the
+reference and what to fix, for example an unlocked vault or a missing item. CoWork does not fall
+back to an older value. `cowork providers list` shows which keys come from a vault.
+
+References work for LLM provider keys (including the keys image, video and vision features reuse)
+and MCP connector environment variables and headers. Other credentials, such as search provider
+keys and messaging channel tokens, still need the key itself.
+
 ## Built-in Model Routes
 
 | Provider               | Configuration                                                  | Billing                                                                                                            |

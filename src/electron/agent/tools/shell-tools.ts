@@ -43,6 +43,7 @@ import {
   evaluateWorkspaceFilesystemAccess,
   hasEffectiveFilesystemScope,
 } from "../../security/access-profile-paths";
+import { redactResolvedSecrets } from "../../security/secret-references/known-secret-values";
 
 /**
  * Executables whose arguments are code, not data. Approval reuse must never
@@ -200,7 +201,7 @@ function redactSecretKeyArrays(output: string): string {
  */
 export function redactShellOutput(output: string): string {
   if (!output) return "";
-  let sanitized = output;
+  let sanitized = redactResolvedSecrets(output);
   for (const { pattern, replacement } of SHELL_OUTPUT_REDACTION_PATTERNS) {
     sanitized = sanitized.replace(pattern, replacement);
   }

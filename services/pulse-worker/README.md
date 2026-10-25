@@ -3,6 +3,10 @@
 Dedicated Cloudflare Worker and D1 database for the explicitly opt-in, content-free Pulse stream.
 It is intentionally separate from the `coworkosapp.com` website Worker and website analytics.
 
+The host shares the `coworkosapp.com` Search Console property and its API paths appear in public
+source, so search crawlers do reach it. `/robots.txt` disallows all crawling and every JSON
+response carries `X-Robots-Tag: noindex`; the collector has no indexable pages.
+
 ## Production deployment record
 
 Deployed on **2026-09-06**. These identifiers describe that deployment; recheck live state before
@@ -17,7 +21,7 @@ maintenance. No application secret values belong in this repository.
 | Worker / route          | `cowork-pulse` / `pulse.coworkosapp.com/*`             |
 | D1 / binding            | `cowork-pulse` / `DB`                                  |
 | D1 ID / creation region | `6ecad471-3b8b-4d85-9ba0-24689188d295` / EEUR          |
-| Worker version          | `dc487b84-0629-4c90-b758-81a7f20f66cd`                 |
+| Worker version          | `7a9f5b1c-20f6-42e8-907f-f754930ce027` (redeployed 2026-10-25; `dc487b84-…` was the 2026-09-06 build) |
 | Applied migrations      | `0001_pulse.sql`, `0002_update_checks.sql`             |
 | Retention schedule      | `17 3 * * *` (03:17 UTC daily)                         |
 | Worker observability    | Disabled in configuration                              |
@@ -28,6 +32,12 @@ Production verification on 2026-09-06 returned:
 - `/v1/schema`: HTTP 200 with the collection summary.
 - `/v1/admin/summary`: HTTP 401 without credentials; HTTP 200 with the admin token and an
   empty database summary. This check exercises D1; `/v1/status` alone does not.
+
+Redeployed on **2026-10-25** from `cowork-os/pulse-robots` (Worker version above) to add the
+crawler controls; this also shipped the streamed request-body bound and schema text from the
+2026-09-26 and 2026-10-02 commits. No migrations were pending. Live checks returned `/v1/status`
+HTTP 200 with the expected body, `/v1/schema` HTTP 200, `/robots.txt` HTTP 200 with
+`User-agent: *` / `Disallow: /`, and `X-Robots-Tag: noindex` on JSON responses.
 
 Earlier HTTP 522 responses came from the DNS record existing before Worker deployment. OAuth
 expired while the Mac was locked; a fresh Wrangler login completed the deployment. Do not repeat
@@ -115,9 +125,11 @@ npx wrangler d1 migrations apply cowork-pulse --remote --config wrangler.jsonc
 npx wrangler deploy --config wrangler.jsonc
 curl --fail-with-body --max-time 20 https://pulse.coworkosapp.com/v1/status
 curl --fail-with-body --max-time 20 https://pulse.coworkosapp.com/v1/schema
+curl --fail-with-body --max-time 20 https://pulse.coworkosapp.com/robots.txt
 ```
 
-Verify the expected service/schema body, not only HTTP 200. Confirm the displayed Worker route
+Verify the expected service/schema body, not only HTTP 200, and that `robots.txt` returns
+`User-agent: *` / `Disallow: /`. Confirm the displayed Worker route
 and D1 binding. List secrets by name only; do not overwrite them on every deploy.
 
 To read the production summary using the local recovery file without printing the token:

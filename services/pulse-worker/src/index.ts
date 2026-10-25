@@ -30,7 +30,12 @@ const JSON_HEADERS = {
   "cache-control": "no-store",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
+  // The collector is an API, never a web page: keep its URLs out of search indexes.
+  "x-robots-tag": "noindex",
 };
+// pulse.coworkosapp.com shares the coworkosapp.com Search Console property, so crawlers that
+// find API URLs in public source must be told not to fetch them.
+const ROBOTS_TXT = "User-agent: *\nDisallow: /\n";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
 const DAY_MS = 86_400_000;
@@ -493,6 +498,14 @@ const schema = {
 
 async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
+  if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/robots.txt")
+    return new Response(request.method === "HEAD" ? null : ROBOTS_TXT, {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "public, max-age=86400",
+        "x-content-type-options": "nosniff",
+      },
+    });
   if (request.method === "GET" && url.pathname === "/v1/status")
     return json({ ok: true, service: "cowork-pulse", schemaVersion: 1 });
   if (request.method === "GET" && url.pathname === "/v1/schema") return json(schema);

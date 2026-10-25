@@ -306,6 +306,10 @@ the selected execution backend, CoWork uses an unavailable read-only profile:
   `access_profile_unavailable` reason; and
 - no approval prompt can turn that unavailable profile into a broader one.
 
+A local `cowork run` checks the profile before it creates the task and exits
+with code `1` when the profile doesn't resolve, instead of starting a task that
+would pause. See [CoWork OS CLI](cli.md#access-profiles).
+
 ## Filesystem behavior
 
 Profile filesystem access is evaluated separately for `read`, `write`, and

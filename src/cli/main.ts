@@ -794,14 +794,14 @@ async function runTask(ctx: CommandContext): Promise<number> {
 }
 
 function runDirectTaskProcess(ctx: CommandContext, prompt: string): Promise<number> {
-  return runDirectCommandProcess(ctx, buildDirectTaskArgs(ctx, prompt));
+  return runDirectCommandProcess(ctx, buildDirectTaskArgs(ctx.parsed, prompt));
 }
 
 async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string): Promise<number> {
   const runtime = resolveDirectRuntime();
   const readyFile = path.join(os.tmpdir(), `cowork-cli-detached-${randomUUID()}.json`);
   const directRunArgs = [
-    ...buildDirectTaskArgs(ctx, prompt),
+    ...buildDirectTaskArgs(ctx.parsed, prompt),
     "--detached-worker",
     "--ready-file",
     readyFile,
@@ -832,25 +832,31 @@ async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string)
   return 0;
 }
 
-function buildDirectTaskArgs(ctx: CommandContext, prompt: string): string[] {
+/** Arguments for the local direct runner (`direct-run.ts`) behind `cowork run`. */
+export function buildDirectTaskArgs(parsed: ParsedArgs, prompt: string): string[] {
   return [
     "--prompt",
     prompt,
     "--cwd",
-    path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd()),
-    ...(getFlag(ctx.parsed, "--title") ? ["--title", getFlag(ctx.parsed, "--title")!] : []),
-    ...(getFlag(ctx.parsed, "--workspace-id")
-      ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!]
+    path.resolve(getFlag(parsed, "--cwd") || process.cwd()),
+    ...(getFlag(parsed, "--title") ? ["--title", getFlag(parsed, "--title")!] : []),
+    ...(getFlag(parsed, "--workspace-id")
+      ? ["--workspace-id", getFlag(parsed, "--workspace-id")!]
       : []),
-    ...(hasFlag(ctx.parsed, "--shell") ? ["--shell"] : []),
-    ...(getFlag(ctx.parsed, "--access-profile")
-      ? ["--access-profile", getFlag(ctx.parsed, "--access-profile")!]
+    ...(hasFlag(parsed, "--shell") ? ["--shell"] : []),
+    ...(getFlag(parsed, "--access-profile")
+      ? ["--access-profile", getFlag(parsed, "--access-profile")!]
       : []),
-    ...(getFlag(ctx.parsed, "--permission-mode")
-      ? ["--permission-mode", getFlag(ctx.parsed, "--permission-mode")!]
+    ...(getFlag(parsed, "--permission-mode")
+      ? ["--permission-mode", getFlag(parsed, "--permission-mode")!]
       : []),
     // Stop with exit code 3 when a person must act (e.g. a PACT sign-in) instead of waiting.
-    ...(hasFlag(ctx.parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
+    ...(hasFlag(parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
+    // Cancel the task and exit 1 when it runs past this limit. Forwarded even without a
+    // value, so the runner rejects it instead of running with no limit.
+    ...(hasFlag(parsed, "--timeout-ms")
+      ? ["--timeout-ms", getFlag(parsed, "--timeout-ms") ?? ""]
+      : []),
   ];
 }
 
@@ -2367,7 +2373,7 @@ function usage(): void {
       "  cowork daemon start [--background]",
       "  cowork workspace list",
       "  cowork workspace create [path]",
-      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force] [--exit-on-input]',
+      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force] [--exit-on-input] [--timeout-ms <ms>]',
       '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>]',
       "  cowork tail <taskId>",
       "  cowork tasks list [--active] [--cli]",

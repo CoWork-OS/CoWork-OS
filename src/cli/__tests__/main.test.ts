@@ -4,7 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { ControlPlaneClient } from "../control-plane-client";
-import { main, parseArgs, parseInteractiveCommand, waitForDaemonReady } from "../main";
+import {
+  buildDirectTaskArgs,
+  main,
+  parseArgs,
+  parseInteractiveCommand,
+  waitForDaemonReady,
+} from "../main";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -70,6 +76,47 @@ describe("CLI argument parsing", () => {
     expect(parsed.rest).toEqual(["inspect the repo"]);
     expect(parsed.flags.get("--access-profile")).toBe("full_access");
     expect(parsed.flags.get("--permission-mode")).toBe("default");
+  });
+});
+
+describe("local cowork run arguments", () => {
+  it("passes --exit-on-input and --timeout-ms to the direct runner", () => {
+    const args = buildDirectTaskArgs(
+      parseArgs([
+        "run",
+        "Reply with READY",
+        "--cwd",
+        "/tmp/project",
+        "--access-profile",
+        "desk-test",
+        "--exit-on-input",
+        "--timeout-ms",
+        "120000",
+      ]),
+      "Reply with READY",
+    );
+
+    expect(args).toEqual([
+      "--prompt",
+      "Reply with READY",
+      "--cwd",
+      path.resolve("/tmp/project"),
+      "--access-profile",
+      "desk-test",
+      "--exit-on-input",
+      "--timeout-ms",
+      "120000",
+    ]);
+  });
+
+  it("passes --timeout-ms without a value so the runner rejects it", () => {
+    const args = buildDirectTaskArgs(parseArgs(["run", "hi", "--timeout-ms"]), "hi");
+
+    expect(args.slice(-2)).toEqual(["--timeout-ms", ""]);
+  });
+
+  it("sets no limit when --timeout-ms is absent", () => {
+    expect(buildDirectTaskArgs(parseArgs(["run", "hi"]), "hi")).not.toContain("--timeout-ms");
   });
 });
 

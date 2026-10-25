@@ -49,6 +49,7 @@ import {
 } from "../shared/interrupt-drill";
 import {
   buildDirectRuntimeLaunch,
+  forwardSignalsToChild,
   resolveChildProcessExitCode,
   type DirectRuntime,
 } from "./direct-runtime";
@@ -814,6 +815,7 @@ async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string)
     ...(ctx.json ? ["--json"] : []),
   ];
   const launch = buildDirectRuntimeLaunch(runtime, directRunArgs, process.env);
+  // No signal forwarding here: a detached runner is meant to outlive this CLI.
   const child = spawn(launch.executable, launch.args, {
     cwd: launch.cwd,
     detached: true,
@@ -898,12 +900,21 @@ function runDirectCommandProcess(ctx: CommandContext, directArgs: string[]): Pro
       stdio: "inherit",
       env: launch.env,
     });
-    child.on("error", reject);
+    // A `kill <cli pid>` must stop the runner too, not leave it running without the CLI.
+    const forwarding = forwardSignalsToChild(child);
+    child.on("error", (error) => {
+      forwarding.stop();
+      reject(error);
+    });
     child.on("close", (code, signal) => {
+      forwarding.stop();
       if (signal) {
         process.stderr.write(`CoWork direct runner exited after receiving ${signal}.\n`);
       }
-      resolve(resolveChildProcessExitCode(code, signal));
+      const exitCode = resolveChildProcessExitCode(code, signal);
+      // Asked to stop: end with the runner, also when the interactive shell started it.
+      if (forwarding.received()) process.exit(exitCode);
+      resolve(exitCode);
     });
   });
 }

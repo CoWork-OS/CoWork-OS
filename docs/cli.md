@@ -222,6 +222,8 @@ Local one-shot execution initializes the database, settings, provider routing, w
 
 Interactive `cowork` and local `cowork run` can be used while the GUI is installed and already configured. They share local profile state, but each CLI task is still a distinct task run with its own terminal output.
 
+A local `cowork run` runs its task in a separate runner process. A `SIGTERM` or `SIGHUP` sent to the `cowork` process alone is passed on to the runner, which cancels the task, shuts down and exits with code `130`; `cowork` then exits with the same code. Ctrl+C in a terminal already reaches both. `SIGKILL` can't be passed on, so to force-stop a run, kill its whole process group (`kill -KILL -- -<pgid>`). A `--detach` runner is meant to outlive `cowork`; stop it with `cowork tasks cancel <taskId>`.
+
 ### Agent Security Commands
 
 Numbat agent security is disabled by default. Configure it in **Settings > System & Security > Agent Security** or through the admin policy before expecting scans or enforcement decisions. Local commands use the desktop profile; add `--remote` only for an intentional Control Plane call, where state-changing operations require admin scope.

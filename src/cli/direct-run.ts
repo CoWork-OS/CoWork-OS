@@ -69,7 +69,7 @@ import type { AgentSecurityFindingStatus } from "../shared/agent-security";
 import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
 import { PulseService } from "../electron/telemetry/pulse-service";
 import type { PulsePreviewState } from "../shared/pulse";
-import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
+import { onFirstStopSignal, shouldRunDirectRunEntrypoint } from "./direct-runtime";
 import {
   normalizeProviderType,
   resolveRunModelPin,
@@ -250,6 +250,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   let activeInterruptPolicy: CliTaskOwnership["interruptPolicy"] = "cancel";
   let cliHeartbeat: ReturnType<typeof setInterval> | null = null;
   let done = false;
+  // Set by onSignal, which then finishes the run itself: cancel, shut down, exit 130.
+  let interrupted = false;
+  let removeSignalHandlers: (() => void) | null = null;
   let titleGeneration: Promise<void> | undefined;
   const restoreConsole = installCliLogFilter();
 
@@ -289,8 +292,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     MemoryService.initFtsWorker(ftsWorkerClient);
 
     daemon = new AgentDaemon(dbManager, { startupRecovery: false });
-    process.once("SIGINT", onSignal);
-    process.once("SIGTERM", onSignal);
+    removeSignalHandlers = onFirstStopSignal(onSignal);
     await daemon.initialize();
 
     if (args.command === "pact") {
@@ -409,7 +411,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     await daemon.startTask(task);
 
-    const status = await waitForTerminalTask(daemon, task.id, args);
+    const status = await waitForTerminalTask(daemon, task.id, args, () => interrupted);
+    if (status === "interrupted") return await untilSignalExit();
     const exitCode =
       status === "needs_user_action"
         ? EXIT_NEEDS_USER_ACTION
@@ -426,12 +429,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     done = true;
     return exitCode;
   } catch (error) {
+    // After a signal the runtime is shut down under the run, so its errors aren't the run's.
+    if (interrupted) return await untilSignalExit();
     writeError(args, formatError(error));
     return 1;
   } finally {
     done = true;
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
+    removeSignalHandlers?.();
     stopCliHeartbeat();
     hostPerfMonitor?.stop({ flush: true });
     await shutdownRuntime();
@@ -441,7 +445,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   function onSignal(signal?: NodeJS.Signals): void {
     if (done) return;
     done = true;
-    const shouldCancel = activeInterruptPolicy === "cancel" || signal === "SIGTERM";
+    interrupted = true;
+    const shouldCancel =
+      activeInterruptPolicy === "cancel" || signal === "SIGTERM" || signal === "SIGHUP";
     const settle = shouldCancel
       ? cancelActiveTask()
       : updateActiveCliOwnership({ endedAt: Date.now(), exitCode: 130 });
@@ -449,6 +455,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       stopCliHeartbeat();
       void shutdownRuntime().finally(() => process.exit(130));
     });
+  }
+
+  /** Parks the run while onSignal finishes it; it exits the process, so this never settles. */
+  function untilSignalExit(): Promise<number> {
+    return new Promise(() => {});
   }
 
   async function cancelActiveTask(): Promise<void> {
@@ -548,11 +559,15 @@ async function waitForTerminalTask(
   daemon: AgentDaemon,
   taskId: string,
   args: DirectRunArgs,
-): Promise<Task["status"] | "needs_user_action"> {
+  isInterrupted: () => boolean = () => false,
+): Promise<Task["status"] | "needs_user_action" | "interrupted"> {
   let lastStatus = "";
   let announcedSignIn = "";
   while (true) {
+    // A signal shuts the runtime down under this loop; stop before reading the closing database.
+    if (isInterrupted()) return "interrupted";
     const task = await daemon.getTaskById(taskId);
+    if (isInterrupted()) return "interrupted";
     if (!task) throw new Error(`Task disappeared: ${taskId}`);
     if (task.status !== lastStatus) {
       lastStatus = task.status;

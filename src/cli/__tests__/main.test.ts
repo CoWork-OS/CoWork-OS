@@ -79,6 +79,47 @@ describe("CLI argument parsing", () => {
   });
 });
 
+describe("local cowork run arguments", () => {
+  it("passes --exit-on-input and --timeout-ms to the direct runner", () => {
+    const args = buildDirectTaskArgs(
+      parseArgs([
+        "run",
+        "Reply with READY",
+        "--cwd",
+        "/tmp/project",
+        "--access-profile",
+        "desk-test",
+        "--exit-on-input",
+        "--timeout-ms",
+        "120000",
+      ]),
+      "Reply with READY",
+    );
+
+    expect(args).toEqual([
+      "--prompt",
+      "Reply with READY",
+      "--cwd",
+      path.resolve("/tmp/project"),
+      "--access-profile",
+      "desk-test",
+      "--exit-on-input",
+      "--timeout-ms",
+      "120000",
+    ]);
+  });
+
+  it("passes --timeout-ms without a value so the runner rejects it", () => {
+    const args = buildDirectTaskArgs(parseArgs(["run", "hi", "--timeout-ms"]), "hi");
+
+    expect(args.slice(-2)).toEqual(["--timeout-ms", ""]);
+  });
+
+  it("sets no limit when --timeout-ms is absent", () => {
+    expect(buildDirectTaskArgs(parseArgs(["run", "hi"]), "hi")).not.toContain("--timeout-ms");
+  });
+});
+
 describe("daemon readiness handshake", () => {
   it.each(["exit", "error"])("fails promptly when the launcher emits %s", async (event) => {
     const child = new EventEmitter();

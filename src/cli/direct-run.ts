@@ -66,16 +66,19 @@ import { secretReferenceSourceLabel } from "../shared/secret-references";
 import { buildTaskTitle } from "./format";
 import { runAgentImportCommand } from "./agent-import-command";
 import { NumbatService } from "../electron/security/numbat";
+import { PermissionSettingsManager } from "../electron/security/permission-settings-manager";
 import type { AgentSecurityFindingStatus } from "../shared/agent-security";
 import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
 import { PulseService } from "../electron/telemetry/pulse-service";
 import type { PulsePreviewState } from "../shared/pulse";
 import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
+import { checkRunAccessProfile } from "./run-access-profile";
 import {
   normalizeProviderType,
   resolveRunModelPin,
   resolveSupportedProviderType,
 } from "./run-model-pin";
+import { describeUserActionStop, validateRunTimeoutMs } from "./run-wait";
 import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/async/runtime";
 import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
 import {
@@ -98,6 +101,8 @@ const payloadRecord = (value: unknown): Payload => (isPayload(value) ? value : {
 interface DirectRunArgs extends PactDirectArgs {
   /** `cowork run`: stop with exit code 3 instead of waiting when a person must act. */
   exitOnInput?: boolean;
+  /** `cowork run`: cancel the task and exit 1 when it hasn't finished after this long. */
+  timeoutMs?: number;
   command:
     | "run"
     | "doctor"
@@ -255,6 +260,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const restoreConsole = installCliLogFilter();
 
   try {
+    if (args.command === "run") validateRunTimeoutMs(args.timeoutMs);
     // Schema initialization runs in a bootstrap worker (DB6).
     const dbManager = await DatabaseManager.open();
     openDbManager = dbManager;
@@ -284,6 +290,24 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const localResult = await runLocalMetadataCommand(dbManager, args);
     if (localResult !== null) return localResult;
 
+    // `--shell` is retained as a compatibility alias for old scripts. New
+    // tasks are always governed by an access profile, never by a workspace
+    // shell mutation.
+    const requestedAccessProfileId =
+      args.accessProfileId ||
+      (args.shellAccess ? BUILTIN_ACCESS_PROFILE_IDS.askForApproval : undefined);
+    if (args.command === "run") {
+      // Fail before the task exists and the runtime starts: a task whose access profile
+      // doesn't resolve pauses at start until a person picks another one.
+      checkRunAccessProfile(
+        {
+          ...(requestedAccessProfileId ? { accessProfileId: requestedAccessProfileId } : {}),
+          ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
+        },
+        PermissionSettingsManager.loadSettings(),
+      );
+    }
+
     MemoryService.initialize(dbManager);
     // Off-main-thread memory search, as on desktop; without it prompt recall returns nothing.
     ftsWorkerClient = new FtsWorkerClient(dbManager.getDatabasePath());
@@ -310,12 +334,6 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
 
     const workspace = await resolveWorkspace(daemon, args);
-    // `--shell` is retained as a compatibility alias for old scripts. New
-    // tasks are always governed by an access profile, never by a workspace
-    // shell mutation.
-    const requestedAccessProfileId =
-      args.accessProfileId ||
-      (args.shellAccess ? BUILTIN_ACCESS_PROFILE_IDS.askForApproval : undefined);
     const cliRunId = randomUUID();
     const cliOwnership: CliTaskOwnership = {
       owner: "cowork-run",
@@ -411,10 +429,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     await daemon.startTask(task);
 
     const status = await waitForTerminalTask(daemon, task.id, args);
+    if (status === "timed_out") {
+      await daemon.cancelTask(task.id).catch(() => {
+        // Best-effort: the run still ends at its limit.
+      });
+      writeError(args, `Timed out after ${args.timeoutMs} ms. The task was cancelled.`, task.id);
+    }
     const exitCode =
       status === "needs_user_action"
         ? EXIT_NEEDS_USER_ACTION
-        : status === "failed" || status === "cancelled"
+        : status === "failed" || status === "cancelled" || status === "timed_out"
           ? 1
           : 0;
     await updateActiveCliOwnership({
@@ -549,9 +573,10 @@ async function waitForTerminalTask(
   daemon: AgentDaemon,
   taskId: string,
   args: DirectRunArgs,
-): Promise<Task["status"] | "needs_user_action"> {
+): Promise<Task["status"] | "needs_user_action" | "timed_out"> {
   let lastStatus = "";
   let announcedSignIn = "";
+  const deadline = args.timeoutMs ? Date.now() + args.timeoutMs : Number.POSITIVE_INFINITY;
   while (true) {
     const task = await daemon.getTaskById(taskId);
     if (!task) throw new Error(`Task disappeared: ${taskId}`);
@@ -573,6 +598,11 @@ async function waitForTerminalTask(
         }
       }
     }
+    const userAction = describeUserActionStop(task, { exitOnInput: args.exitOnInput === true });
+    if (userAction) {
+      writeEvent(args, userAction.payload, userAction.text);
+      return "needs_user_action";
+    }
     if (isTerminalTaskStatus(task.status)) {
       if (task.resultSummary) {
         writeEvent(
@@ -584,7 +614,9 @@ async function waitForTerminalTask(
       if (task.error) writeError(args, task.error, taskId);
       return task.status;
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return "timed_out";
+    await new Promise((resolve) => setTimeout(resolve, Math.min(500, remainingMs)));
   }
 }
 
@@ -1032,6 +1064,11 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         break;
       case "--exit-on-input":
         args.exitOnInput = true;
+        break;
+      case "--timeout-ms":
+        // Validated in main: an unreadable limit must not turn into no limit.
+        args.timeoutMs = Number(next);
+        i++;
         break;
       case "--dry-run":
         args.dryRun = true;

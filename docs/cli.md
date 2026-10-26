@@ -187,10 +187,16 @@ path. `--shell` is also retained as a compatibility alias and maps to the bounde
 `ask_for_approval` profile; it is not an unrestricted shell switch. Prefer `--access-profile` for
 new scripts.
 
-If a named profile is missing, invalid, or unavailable on the target, the task fails closed with a
-read-only unavailable profile and may pause for user action. A later approval cannot widen that
-profile. See [Access Profiles](access-profiles.md) for the full field reference and migration
-contract.
+A local `cowork run` checks the profile before it creates the task. An id that doesn't exist, or a
+profile whose inheritance doesn't resolve, stops the run with exit code `1` and a message that lists
+the profiles that exist. Custom profiles are created in the desktop app under
+**Settings > System & Security > Permissions**. The check also covers the default profile a run
+inherits when it doesn't name one.
+
+If a profile is missing, invalid, or unavailable on a `--remote` target, or is deleted after the task
+starts, the task fails closed with a read-only unavailable profile and pauses for user action; a
+local `cowork run` then stops with exit code `3`. A later approval cannot widen that profile. See
+[Access Profiles](access-profiles.md) for the full field reference and migration contract.
 
 `cowork approvals` displays the pending request details and its `--revision-hash` value. Review those details, then run `cowork approve <approvalId> --revision-hash <displayed-hash>` or `cowork reject <approvalId> --revision-hash <displayed-hash>`. The hash is required for both decisions; changed requests require a fresh review. Remote responses report success only when the server confirms `handled` or `duplicate`.
 
@@ -224,7 +230,9 @@ These command groups are local-first and do not require a Control Plane token:
 
 `cowork drill interrupt <fixture>` is the interrupt drill: start a task, stop it halfway, and print what actually changed. The report lists the task's contract requirements with their status, the files it changed, the calls that were running at the stop with their outcome (`unknown` means check before retrying; the idempotency key is shown), the waits still open, and the `cowork handoff` commands to resume elsewhere. A fixture is a JSON file, or a name under `scripts/qa/drills/` in a checkout. By default the drill replays the fixture's recorded events without the app and checks them against its `expected` block (exit 1 on any difference); `stop-in-flight` is the one shipped. `--live [--workspace <id>] [--timeout-ms <ms>]` runs the fixture's prompt as a real task through the desktop Control Plane, stops it after `interruptAfterToolCalls` tool calls, and reads back the contract (`workSession.contract.get`) and the replay evaluation; add `--check` to compare it with `expected` too. `--json` prints the report as JSON.
 
-Exit codes: `0` success, `1` failure, `3` a person must act (for example a PACT sign-in; resume with `cowork pact authorization wait <id>`), `130` interrupted. `cowork run` keeps waiting for a sign-in in an interactive terminal; pass `--exit-on-input` (or run without a terminal) to stop with code `3` instead.
+Exit codes: `0` success, `1` failure, `3` a person must act (for example a PACT sign-in; resume with `cowork pact authorization wait <id>`), `130` interrupted. `cowork run` keeps waiting for a sign-in in an interactive terminal; pass `--exit-on-input` (or run without a terminal) to stop with code `3` instead. With `--exit-on-input`, `cowork run` also stops with code `3` at any other pause that needs a person, such as a question for you, and prints a `needs_user_action` event with the reason. Pauses that clear on their own, such as independent verification, are waited out.
+
+`cowork run --timeout-ms <ms>` limits a local run: if the task hasn't finished that long after it starts, the task is cancelled and the run exits with code `1`. Use `--exit-on-input --timeout-ms <ms>` together for unattended runs so the run always ends.
 
 ## Runtime Model
 

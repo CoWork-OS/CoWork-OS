@@ -872,6 +872,11 @@ export function buildDirectTaskArgs(parsed: ParsedArgs, prompt: string): string[
     ...(getFlag(parsed, "--model") ? ["--model", getFlag(parsed, "--model")!] : []),
     // Stop with exit code 3 when a person must act (e.g. a PACT sign-in) instead of waiting.
     ...(hasFlag(parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
+    // Cancel the task and exit 1 when it runs past this limit. Forwarded even without a
+    // value, so the runner rejects it instead of running with no limit.
+    ...(hasFlag(parsed, "--timeout-ms")
+      ? ["--timeout-ms", getFlag(parsed, "--timeout-ms") ?? ""]
+      : []),
   ];
 }
 
@@ -2439,7 +2444,7 @@ function usage(): void {
       "  cowork daemon start [--background]",
       "  cowork workspace list",
       "  cowork workspace create [path]",
-      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--provider <type>] [--model <id>] [--detach] [--force] [--exit-on-input]',
+      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--provider <type>] [--model <id>] [--detach] [--force] [--exit-on-input] [--timeout-ms <ms>]',
       '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>] [--provider <type>] [--model <id>]',
       "  cowork tail <taskId>",
       "  cowork tasks list [--active] [--cli]",

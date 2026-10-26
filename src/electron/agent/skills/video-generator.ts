@@ -8,6 +8,7 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { resolveSecretValue } from "../../security/secret-references/resolver";
 import { coverImageToSize } from "../tools/image-utils";
 import {
   buildLocalVideoArgs,
@@ -157,6 +158,13 @@ function resolveOpenAICompatibleVideoConfig(
   return { apiKey, baseUrl };
 }
 
+/** The config with its key read from a vault when the key is a vault reference. */
+async function withResolvedVideoKey<T extends { apiKey: string }>(
+  config: T | null,
+): Promise<T | null> {
+  return config ? { ...config, apiKey: (await resolveSecretValue(config.apiKey)) ?? "" } : null;
+}
+
 function aspectRatioAndResolutionToVideoSize(
   aspectRatio: VideoAspectRatio,
   resolution?: VideoResolution,
@@ -234,7 +242,7 @@ function describeVideosApiError(data: Record<string, unknown>): string | undefin
 }
 
 async function generateWithOpenAICompatible(args: AdapterArgs): Promise<AdapterResult> {
-  const config = resolveOpenAICompatibleVideoConfig(args.settings);
+  const config = await withResolvedVideoKey(resolveOpenAICompatibleVideoConfig(args.settings));
   if (!config) {
     return {
       success: false,
@@ -366,7 +374,7 @@ async function pollOpenAICompatibleJob(
   networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
   const provider: VideoProvider = "openai-compatible";
-  const config = resolveOpenAICompatibleVideoConfig(settings);
+  const config = await withResolvedVideoKey(resolveOpenAICompatibleVideoConfig(settings));
   if (!config) {
     return {
       jobId,
@@ -441,7 +449,7 @@ async function pollOpenAICompatibleJob(
 // ── Gemini Veo 3.1 ───────────────────────────────────────────────────────────
 
 async function generateWithGemini(args: AdapterArgs): Promise<AdapterResult> {
-  const apiKey = args.settings.gemini?.apiKey?.trim();
+  const apiKey = await resolveSecretValue(args.settings.gemini?.apiKey?.trim());
   if (!apiKey) return { success: false, error: "Gemini API key not configured." };
 
   const vCfg = args.settings.videoGeneration?.gemini;
@@ -743,7 +751,7 @@ async function pollVertexOperation(
 
 async function generateWithKling(args: AdapterArgs): Promise<AdapterResult> {
   const kCfg = args.settings.videoGeneration?.kling;
-  const apiKey = kCfg?.apiKey?.trim();
+  const apiKey = await resolveSecretValue(kCfg?.apiKey?.trim());
   const baseUrl = (kCfg?.baseUrl?.trim() || "https://api.klingai.com").replace(/\/$/, "");
 
   if (!apiKey) {
@@ -818,7 +826,7 @@ async function pollKlingJob(
   outputPathGuard?: OutputPathGuard,
   networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
-  const apiKey = kCfg?.apiKey?.trim() ?? "";
+  const apiKey = (await resolveSecretValue(kCfg?.apiKey?.trim())) ?? "";
   const baseUrl = (kCfg?.baseUrl?.trim() || "https://api.klingai.com").replace(/\/$/, "");
 
   const statusUrl = `${baseUrl}/v1/videos/text2video/${taskId}`;
@@ -1209,7 +1217,7 @@ export class VideoGenerator {
         );
       }
       if (provider === "gemini") {
-        const apiKey = settings.gemini?.apiKey?.trim() ?? "";
+        const apiKey = (await resolveSecretValue(settings.gemini?.apiKey?.trim())) ?? "";
         return await pollGeminiOperation(
           normalizedJobId,
           apiKey,

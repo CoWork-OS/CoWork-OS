@@ -16,6 +16,7 @@ import {
   JSONRPCNotification,
 } from "../../types";
 import { createLogger } from "../../../utils/logger";
+import { withoutVaultTokens } from "../../../security/secret-references/secret-cli";
 
 interface PendingRequest {
   resolve: (result: Any) => void;
@@ -206,9 +207,10 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
       }, this.config.connectionTimeout || 30000);
 
       try {
-        // Merge environment variables
+        // Merge environment variables. Tokens that open a vault stay out of the inherited
+        // part; a server gets a vault value only through its own env, as a resolved reference.
         const processEnv = {
-          ...process.env,
+          ...withoutVaultTokens(process.env),
           ...env,
         };
 

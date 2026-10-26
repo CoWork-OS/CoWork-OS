@@ -8,6 +8,7 @@ import { MCPEventService } from "../../mcp/events/MCPEventService";
 import { snapshotToolInput } from "./tool-input-snapshot";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { isFullAccessProfile } from "../../../shared/access-profiles";
+import { looksLikeSecretReference } from "../../../shared/secret-references";
 import { isCodexComputerUseServer } from "../../mcp/codex-computer-use";
 import {
   computerToolKind,
@@ -10813,6 +10814,13 @@ ${skillDescriptions}`;
       if (typeof input?.base_url === "string" && input.base_url.trim()) {
         normalizedInputEnv.RESEND_BASE_URL = input.base_url.trim();
       }
+    }
+    // A vault reference reads whatever item it names, so only the user may write one (in
+    // Settings or the MCP server form); the agent could otherwise send any vault item here.
+    if (Object.values(normalizedInputEnv).some((value) => looksLikeSecretReference(value))) {
+      throw new Error(
+        "Password manager references (op://, bws://, bw://) can only be set by the user in Settings, not by the agent.",
+      );
     }
 
     const envForInspect = this.buildMergedIntegrationEnv(server?.env, normalizedInputEnv, provider);

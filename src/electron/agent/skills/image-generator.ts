@@ -15,6 +15,7 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { resolveSecretValue } from "../../security/secret-references/resolver";
 
 /**
  * Image generation provider types
@@ -1226,8 +1227,9 @@ export class ImageGenerator {
       try {
         if (provider === "gemini") {
           const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
-          const apiKey =
-            settings.imageGeneration?.gemini?.apiKey?.trim() || settings.gemini?.apiKey?.trim();
+          const apiKey = await resolveSecretValue(
+            settings.imageGeneration?.gemini?.apiKey?.trim() || settings.gemini?.apiKey?.trim(),
+          );
           if (!apiKey) {
             if (configuredProviders.includes("gemini")) {
               considerError("gemini", "Gemini API key not configured.");
@@ -1287,8 +1289,9 @@ export class ImageGenerator {
 
         if (provider === "openai") {
           const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
-          const apiKey =
-            settings.imageGeneration?.openai?.apiKey?.trim() || settings.openai?.apiKey?.trim();
+          const apiKey = await resolveSecretValue(
+            settings.imageGeneration?.openai?.apiKey?.trim() || settings.openai?.apiKey?.trim(),
+          );
           if (!apiKey) {
             if (configuredProviders.includes("openai")) {
               considerError("openai", "OpenAI API key not configured.");
@@ -1414,8 +1417,9 @@ export class ImageGenerator {
 
         if (provider === "azure") {
           const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
-          const apiKey =
-            settings.imageGeneration?.azure?.imageApiKey?.trim() || settings.azure?.apiKey?.trim();
+          const apiKey = await resolveSecretValue(
+            settings.imageGeneration?.azure?.imageApiKey?.trim() || settings.azure?.apiKey?.trim(),
+          );
           const endpoint =
             settings.imageGeneration?.azure?.imageEndpoint?.trim() ||
             settings.azure?.endpoint?.trim();
@@ -1511,9 +1515,10 @@ export class ImageGenerator {
 
         if (provider === "openrouter") {
           const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
-          const apiKey =
+          const apiKey = await resolveSecretValue(
             settings.imageGeneration?.openrouter?.apiKey?.trim() ||
-            settings.openrouter?.apiKey?.trim();
+              settings.openrouter?.apiKey?.trim(),
+          );
           const baseUrl = (
             settings.imageGeneration?.openrouter?.baseUrl?.trim() ||
             settings.openrouter?.baseUrl?.trim() ||

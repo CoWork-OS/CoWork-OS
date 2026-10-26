@@ -5,6 +5,7 @@ import {
   getBrowserCredentialService,
 } from "./browser/credentials/browser-credential-service";
 import { registerBrowserVaultIpc } from "./browser/credentials/browser-vault-ipc";
+import { registerSecretSourcesIpc } from "./security/secret-references/secret-sources-ipc";
 import { BROWSER_VAULT_IPC } from "../shared/browser-vault";
 import {
   parseCliApprovalResponse as getCliApprovalResponseArgv,
@@ -5661,6 +5662,8 @@ if (isMacSafeStorageMigrationWorker) {
       audit: (taskId, data) => agentDaemon?.logEvent(taskId, "log", data),
     });
     registerBrowserVaultIpc(ipcMain, credentialService, isVaultOwner);
+    // Settings > System & Security > Password Managers (vault references for keys).
+    registerSecretSourcesIpc(ipcMain, isVaultOwner);
     registerBrowserCredentialsIpc({
       ipcMain,
       // Only the app's own window; never a page inside a browser tab.

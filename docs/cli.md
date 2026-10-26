@@ -140,6 +140,17 @@ The choice is pinned to that task only, the same way the model picker in an open
 
 With `--remote`, `--model` is required and the remote node resolves the pin against its own settings. If that provider is not configured on the node, the task runs on the node's global model and logs a warning.
 
+### Keys from a password manager
+
+Provider keys and MCP connector secrets saved as password manager references (`op://`, `bws://`,
+`bw://`) work in `cowork run` too; see
+[Keys from a password manager](providers.md#keys-from-a-password-manager). Tokens saved in the
+desktop app's **Settings > System & Security > Password Managers** apply to the CLI. Without
+them, `cowork run` reads `OP_SERVICE_ACCOUNT_TOKEN` (or an `op` session), `BWS_ACCESS_TOKEN`
+and `BW_SESSION` (from `bw unlock --raw`) from its environment; a Bitwarden unlock in the
+desktop app does not carry over to the CLI. `cowork providers list` marks keys that come from a
+vault, for example `key from 1Password`.
+
 ### Access Profiles
 
 `cowork run` uses the same access-profile resolver as the desktop app. Select a built-in profile or

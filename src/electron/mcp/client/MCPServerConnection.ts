@@ -31,6 +31,7 @@ import { legacyOnlyServers } from "./legacy-only-servers";
 import { SSETransport } from "./transports/SSETransport";
 import { WebSocketTransport } from "./transports/WebSocketTransport";
 import { StreamableHttpTransport } from "./transports/StreamableHttpTransport";
+import { redactMcpCallResult, resolveMcpServerSecrets } from "./secret-references";
 import { createLogger } from "../../utils/logger";
 import { isLikelyIntegrationAuthError } from "../../notifications/integration-auth";
 
@@ -101,6 +102,8 @@ function toolCallMeta(options: MCPToolCallOptions): Record<string, string | bool
 export class MCPServerConnection extends EventEmitter {
   private config: MCPServerConfig;
   private transport: MCPTransport | null = null;
+  /** `config` with vault references resolved, for the current connection only. */
+  private transportConfig: MCPServerConfig | null = null;
   private status: MCPConnectionStatus = "disconnected";
   private serverInfo: MCPServerInfo | null = null;
   private modernProtocol = false;
@@ -185,6 +188,8 @@ export class MCPServerConnection extends EventEmitter {
     this.setStatus("connecting");
 
     try {
+      // Vault references in env and headers are read here, for this connection only.
+      this.transportConfig = await resolveMcpServerSecrets(this.config);
       // Create transport based on config
       this.transport = this.createTransport();
 
@@ -315,7 +320,7 @@ export class MCPServerConnection extends EventEmitter {
         { beforeSend, signal: options.signal },
       );
 
-      return result as MCPCallResult;
+      return redactMcpCallResult(result as MCPCallResult);
     } catch (error: Any) {
       logger.error("Tool call failed:", error);
       throw new Error(`Tool ${name} failed: ${error.message}`);
@@ -374,32 +379,34 @@ export class MCPServerConnection extends EventEmitter {
    */
   updateConfig(config: MCPServerConfig): void {
     this.config = config;
+    this.transportConfig = null;
   }
 
   /**
    * Create the appropriate transport based on config
    */
   private createTransport(): MCPTransport {
-    switch (this.config.transport) {
+    const config = this.transportConfig ?? this.config;
+    switch (config.transport) {
       case "stdio":
-        return new StdioTransport(this.config);
+        return new StdioTransport(config);
       case "sse":
-        if (!this.config.url) {
+        if (!config.url) {
           throw new Error("URL is required for SSE transport");
         }
-        return new SSETransport(this.config);
+        return new SSETransport(config);
       case "websocket":
-        if (!this.config.url) {
+        if (!config.url) {
           throw new Error("URL is required for WebSocket transport");
         }
-        return new WebSocketTransport(this.config);
+        return new WebSocketTransport(config);
       case "streamable-http":
-        if (!this.config.url) {
+        if (!config.url) {
           throw new Error("URL is required for Streamable HTTP transport");
         }
-        return new StreamableHttpTransport(this.config);
+        return new StreamableHttpTransport(config);
       default:
-        throw new Error(`Unknown transport type: ${this.config.transport}`);
+        throw new Error(`Unknown transport type: ${config.transport}`);
     }
   }
 

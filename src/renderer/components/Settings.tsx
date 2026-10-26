@@ -68,6 +68,7 @@ import {
   HeartPulse,
   Film,
   Download,
+  KeyRound,
 } from "lucide-react";
 import {
   LLMSettingsData,
@@ -228,6 +229,10 @@ const ProfileSettings = lazySettingsPanel(() => import("./ProfileSettings"), "Pr
 const SpaceSandboxSettings = lazySettingsPanel(
   () => import("./SpaceSandboxSettings"),
   "SpaceSandboxSettings",
+);
+const PasswordManagersSettings = lazySettingsPanel(
+  () => import("./PasswordManagersSettings"),
+  "PasswordManagersSettings",
 );
 const AdminPoliciesPanel = lazySettingsPanel(
   () => import("./AdminPoliciesPanel"),
@@ -6081,6 +6086,11 @@ export function Settings({
         })()}
       </div>
       <div className="llm-provider-content">
+        <p className="settings-description">
+          API key fields also accept a password manager reference, such as{" "}
+          <code>op://Private/OpenAI/credential</code>. Set that up in System &amp; Security &gt;
+          Password Managers.
+        </p>
         {settings.providerType === "anthropic" && (
           <>
             <div className="settings-section">
@@ -9391,6 +9401,14 @@ export function Settings({
                     description="Tune the default approval experience and manage profile or workspace-specific rules."
                   >
                     <PermissionSettingsPanel workspaceId={workspaceId} />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    className="system-security-section--password-managers"
+                    icon={<KeyRound {...S} />}
+                    title="Password Managers"
+                    description="Read provider keys and connector secrets from 1Password or Bitwarden instead of storing them in CoWork."
+                  >
+                    <PasswordManagersSettings />
                   </SystemSettingsSection>
                   <SystemSettingsSection
                     icon={<Shield {...S} />}

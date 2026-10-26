@@ -115,6 +115,8 @@ export type SettingsCategory =
   | "guardrails"
   | "permissions"
   | "protected-credentials"
+  // Tokens CoWork uses to read vault references (1Password, Bitwarden Secrets Manager).
+  | "secret-sources"
   | "hooks"
   | "mcp"
   | "secure-mcp-tunnels"

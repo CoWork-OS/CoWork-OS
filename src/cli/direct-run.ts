@@ -62,6 +62,7 @@ import { isTerminalTaskStatus } from "../shared/task-status";
 import type { AgentConfig, CliTaskOwnership, LLMProviderType, Task } from "../shared/types";
 import { DEFAULT_WORKSPACE_PERMISSIONS } from "../shared/types";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
+import { secretReferenceSourceLabel } from "../shared/secret-references";
 import { buildTaskTitle } from "./format";
 import { runAgentImportCommand } from "./agent-import-command";
 import { NumbatService } from "../electron/security/numbat";
@@ -1176,19 +1177,27 @@ async function runLocalMetadataCommand(
     }
     case "providers-list": {
       const providerStatus = LLMProviderFactory.getConfigStatus();
-      const configured = providerStatus.providers.filter((provider) => provider.configured);
+      const llmSettings = LLMProviderFactory.loadSettings();
+      const providers = providerStatus.providers.map((provider) => {
+        const keySource = providerKeySource(llmSettings, provider.type);
+        return keySource ? { ...provider, keySource } : provider;
+      });
+      const configured = providers.filter((provider) => provider.configured);
       writeEvent(
         args,
         {
           type: "providers",
           currentProvider: providerStatus.currentProvider,
           currentModel: providerStatus.currentModel,
-          providers: providerStatus.providers,
+          providers,
         },
         [
           `Current: ${providerStatus.currentProvider} (${providerStatus.currentModel || "default model"})`,
           ...(configured.length
-            ? configured.map((provider) => `- ${provider.name} (${provider.type}) configured`)
+            ? configured.map(
+                (provider) =>
+                  `- ${provider.name} (${provider.type}) configured${"keySource" in provider ? `, key from ${provider.keySource}` : ""}`,
+              )
             : [
                 "No local providers configured. Open Settings > LLM in the desktop app or import provider env settings.",
               ]),
@@ -2632,6 +2641,22 @@ function configureLocalProvider(args: DirectRunArgs): {
 
   LLMProviderFactory.saveSettings(settings);
   return { providerType, model };
+}
+
+/** "1Password" when a provider's saved key is a vault reference, else null. */
+function providerKeySource(settings: unknown, providerType: string): string | null {
+  const record = payloadRecord(settings);
+  const sectionName = providerType.replace(/-([a-z])/g, (_match, letter: string) =>
+    letter.toUpperCase(),
+  );
+  const section = payloadRecord(
+    record[sectionName] ?? payloadRecord(record.customProviders)[providerType],
+  );
+  for (const field of ["apiKey", "subscriptionToken", "secretAccessKey", "accessKeyId"]) {
+    const label = secretReferenceSourceLabel(section[field]);
+    if (label) return label;
+  }
+  return null;
 }
 
 function shouldImportEnvForCommand(command: DirectRunArgs["command"]): boolean {

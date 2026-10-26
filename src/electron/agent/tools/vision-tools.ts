@@ -23,6 +23,7 @@ import { createLogger } from "../../utils/logger";
 import { buildSensitiveSourceRefForPath } from "../security/export-permission-context";
 import { assertWorkspaceReadableFileAccessWithApproval } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { resolveSecretValue } from "../../security/secret-references/resolver";
 
 type VisionProvider = "azure" | "openai" | "anthropic" | "bedrock";
 
@@ -619,7 +620,7 @@ export class VisionTools {
     for (const provider of tryOrder) {
       try {
         if (provider === "azure") {
-          const apiKey = settings.azure?.apiKey?.trim();
+          const apiKey = await resolveSecretValue(settings.azure?.apiKey?.trim());
           const endpoint = settings.azure?.endpoint?.trim();
           const deployment = settings.azure?.deployment?.trim();
           if (!apiKey || !endpoint || !deployment) {
@@ -650,7 +651,7 @@ export class VisionTools {
         }
 
         if (provider === "openai") {
-          const apiKey = settings.openai?.apiKey?.trim();
+          const apiKey = await resolveSecretValue(settings.openai?.apiKey?.trim());
           const accessToken = settings.openai?.accessToken?.trim();
           const refreshToken = settings.openai?.refreshToken?.trim();
           const canUseOAuth = Boolean(accessToken && refreshToken);
@@ -712,7 +713,7 @@ export class VisionTools {
         }
 
         if (provider === "anthropic") {
-          const apiKey = resolveAnthropicCredential(settings);
+          const apiKey = await resolveSecretValue(resolveAnthropicCredential(settings));
           if (!apiKey) {
             lastError = "Claude credentials not configured.";
             continue;

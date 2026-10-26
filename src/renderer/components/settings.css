@@ -3883,3 +3883,12 @@ html.visual-calm
   font-size: 12px;
   color: var(--color-text-muted);
 }
+
+/* Password Managers (System & Security) */
+.password-managers-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}

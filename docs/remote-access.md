@@ -26,6 +26,8 @@ When the server is running, it also serves a minimal web dashboard at `/` (same 
 This is useful for headless/VPS setups: open the URL in a browser (via tunnel/Tailscale), paste the token, and manage tasks, approvals, and pending structured input requests.
 It also includes basic workspace, channel, and account management so you can bring up a fresh VPS without a desktop UI.
 
+To use the whole desktop app from a browser instead, turn on **Settings > Web Access > Full app in the browser** and use **Open in browser** or `cowork web`. For another device, put Tailscale Serve (or another HTTPS proxy on the host) in front of the Web Access port and save its address under **Public HTTPS address**. See [Browser application preview](browser-preview.md).
+
 In headless/managed deployments, CoWork fails closed on raw public binds. Binding the Control Plane to `0.0.0.0` or `::` is blocked unless Tailscale is enabled, the process is running inside a privately published container (`COWORK_CONTROL_PLANE_BIND_CONTEXT=container`), or you set the break-glass `COWORK_CONTROL_PLANE_ALLOW_INSECURE_PUBLIC_BIND=1`.
 
 ## Remote task access profiles

@@ -253,6 +253,63 @@ describe("WebAccessServer", () => {
     expect(deps.handleIpcInvoke).toHaveBeenCalledWith("task:list");
   });
 
+  it("keeps serving its token API when the browser app cannot mount, and says why", async () => {
+    const capabilities = Object.fromEntries(
+      HOST_CAPABILITIES.map((name) => [name, { available: true }]),
+    ) as HostCapabilities;
+    const webApplication = new WebApplication({
+      enabled: true,
+      webDirectory: "/tmp/cowork-web-test-assets",
+      deployment: { mode: "loopback" },
+      getHostIdentity: () => ({
+        installationId: "opaque-installation",
+        profileId: "profile-1",
+        generation: "run-1",
+        runtime: "node",
+        platform: "linux",
+        appVersion: "1.0.0",
+      }),
+      getCapabilities: async () => capabilities,
+      getSessionBootstrap: async () => ({
+        providerReady: false,
+        onboardingCompleted: false,
+        disclaimerAccepted: false,
+        activeWorkspaceId: null,
+      }),
+    });
+    // Another listener already holds this audience, so mounting here fails.
+    const other = webApplication.mount({ audience: "web-access", listenerHost: "127.0.0.1" });
+    await server.setWebApplication(webApplication);
+
+    const status = server.getStatus();
+    expect(status.running).toBe(true);
+    expect(status.browserApplication).toBe(false);
+    expect(status.browserAppError).toContain("already mounted");
+    const legacy = await request(testPort, {
+      path: "/api/tasks",
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(legacy.status).toBe(200);
+    await other.close();
+  });
+
+  it("saves the browser app switch and a checked public address", async () => {
+    expect(server.getConfig()).toMatchObject({ browserApp: false, publicOrigin: "" });
+    const saved = await server.applyConfig({
+      browserApp: true,
+      publicOrigin: "https://Mac.Example.ts.net/",
+    });
+    expect(saved).toMatchObject({ browserApp: true, publicOrigin: "https://mac.example.ts.net" });
+
+    await expect(server.applyConfig({ publicOrigin: "http://mac.example.ts.net" })).rejects.toThrow(
+      "Use an https:// address",
+    );
+    expect(server.getConfig().publicOrigin).toBe("https://mac.example.ts.net");
+    expect(server.getStatus().running).toBe(true);
+
+    expect((await server.applyConfig({ publicOrigin: "" })).publicOrigin).toBe("");
+  });
+
   it("GET /api/accounts routes to account:list with query filters", async () => {
     deps.handleIpcInvoke.mockResolvedValue({ accounts: [] });
 

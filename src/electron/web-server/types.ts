@@ -8,6 +8,13 @@ export interface WebAccessConfig {
   host: string;
   token: string;
   allowedOrigins: string[];
+  /** Serve the full desktop app to browsers at `/app/`, behind one-use sign-in links. */
+  browserApp: boolean;
+  /**
+   * HTTPS origin of a proxy on this computer (such as Tailscale Serve) that forwards to this
+   * listener, so browsers on other devices can sign in. Empty keeps the app on this computer.
+   */
+  publicOrigin: string;
 }
 
 export const DEFAULT_WEB_ACCESS_CONFIG: WebAccessConfig = {
@@ -16,6 +23,8 @@ export const DEFAULT_WEB_ACCESS_CONFIG: WebAccessConfig = {
   host: "127.0.0.1",
   token: "",
   allowedOrigins: ["http://localhost:3847"],
+  browserApp: false,
+  publicOrigin: "",
 };
 
 export interface WebAccessRoute {
@@ -28,6 +37,12 @@ export interface WebAccessRoute {
 export interface WebAccessStatus {
   running: boolean;
   browserApplication: boolean;
+  /** Browsers signed in to the browser app, on every listener. */
+  signedInBrowsers?: number;
+  /** The browser app's address when a listener serves it. */
+  browserAppUrl?: string;
+  /** Why the browser app could not start with the saved settings, if it could not. */
+  browserAppError?: string;
   url?: string;
   port?: number;
   connectedClients: number;

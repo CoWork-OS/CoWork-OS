@@ -231,7 +231,7 @@
     "@xterm/xterm": "^6.0.0",
     "baileys": "6.7.24",
     "botbuilder": "^4.23.3",
-    "chokidar": "^5.0.0",
+    "chokidar": "^6.0.0",
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
     "electron": "44.9.1",

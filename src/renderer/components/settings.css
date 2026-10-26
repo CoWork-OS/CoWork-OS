@@ -3513,6 +3513,65 @@ html.visual-calm
   justify-self: start;
 }
 
+/* Permissions: unsaved-changes bar, stuck to the bottom of the settings scroll area while the
+   panel is on screen. The section clips instead of hiding overflow: overflow: hidden makes it
+   a scroll container, and sticky would then stick to the section, which never scrolls. */
+.system-security-section--permissions {
+  overflow: clip;
+}
+
+.permission-unsaved-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--shadow-md);
+}
+
+.permission-unsaved-bar--error {
+  border-color: var(--color-error);
+}
+
+.permission-unsaved-bar-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.permission-unsaved-bar-title {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.permission-unsaved-bar-detail {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.permission-unsaved-bar--error .permission-unsaved-bar-detail {
+  color: var(--color-error);
+}
+
+.permission-unsaved-bar-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .settings-list-row {
   display: flex;
   align-items: flex-start;

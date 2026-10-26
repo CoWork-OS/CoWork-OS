@@ -28,6 +28,7 @@ export {
   setupControlPlaneHandlers,
   shutdownControlPlane,
   getControlPlaneServer,
+  setControlPlaneStartedListener,
   startControlPlaneFromSettings,
 } from "./handlers";
 export {

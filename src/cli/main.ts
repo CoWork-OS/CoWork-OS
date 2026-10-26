@@ -3,6 +3,15 @@
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { Methods } from "../electron/control-plane/protocol";
+import {
+  WEB_USAGE,
+  formatBrowserAppStatus,
+  isWebSubcommand,
+  linkLifetime,
+  openSignInLinkPrivately,
+  parseSignInLink,
+  type BrowserAppStatusPayload,
+} from "./browser-app-command";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import os from "node:os";
@@ -275,6 +284,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await dashboard(ctx);
       case "open":
         return await openCommand(ctx);
+      case "web":
+        return await webCommand(ctx);
       case "pact":
         return await pactCommand(ctx);
       case "handoff":
@@ -2031,6 +2042,55 @@ async function openCommand(ctx: CommandContext): Promise<number> {
   return usageError("Usage: cowork open dashboard | cowork open task <taskId>");
 }
 
+async function webCommand(ctx: CommandContext): Promise<number> {
+  const sub = ctx.parsed.rest[0] || "open";
+  if (!isWebSubcommand(sub) || ctx.parsed.rest.length > 1) return usageError(WEB_USAGE);
+  const client = await connectedClient(ctx);
+  try {
+    if (sub === "status") {
+      const status = (await client.request(Methods.WEB_STATUS)) as BrowserAppStatusPayload;
+      printLinesOrJson(ctx, status, formatBrowserAppStatus(status));
+      return 0;
+    }
+    if (sub === "sign-out") {
+      const result = (await client.request(Methods.WEB_SIGN_OUT)) as { signedOut?: number };
+      const count = typeof result?.signedOut === "number" ? result.signedOut : 0;
+      printLinesOrJson(ctx, result, [
+        count === 1 ? "Signed out 1 browser." : `Signed out ${count} browsers.`,
+      ]);
+      return 0;
+    }
+
+    const link = parseSignInLink(await client.request(Methods.WEB_SIGN_IN_LINK));
+    if (ctx.json) {
+      printJson(link);
+      return 0;
+    }
+    if (sub === "link" || hasFlag(ctx.parsed, "--print")) {
+      // The link alone on stdout, so it can be piped; the note goes to stderr.
+      process.stdout.write(`${link.url}\n`);
+      process.stderr.write(
+        `Opens ${link.appUrl} and signs in one browser. ${linkLifetime(link.expiresAt)}\n`,
+      );
+      return 0;
+    }
+    if (await openSignInLinkPrivately(link.url)) {
+      process.stdout.write(`Opened ${link.appUrl} in your browser.\n`);
+      return 0;
+    }
+    process.stdout.write(
+      [
+        `Open this link in your browser to sign in. ${linkLifetime(link.expiresAt)}`,
+        link.url,
+        "It was not opened for you: on this system other local accounts can read the command line a browser starts with.",
+      ].join("\n") + "\n",
+    );
+    return 0;
+  } finally {
+    client.close();
+  }
+}
+
 async function connectedClient(ctx: CommandContext): Promise<ControlPlaneClient> {
   if (!ctx.connection.token) {
     const reason = ctx.discoveryError ? `\nAuto-discovery: ${ctx.discoveryError}` : "";
@@ -2255,6 +2315,7 @@ const RESERVED_RUN_PROMPTS = new Set([
   "security",
   "dashboard",
   "open",
+  "web",
 ]);
 
 function isLikelyCommandPrompt(prompt: string): boolean {
@@ -2317,6 +2378,7 @@ function renderCompletions(shell: string): string {
     "prompt-preview",
     "dashboard",
     "open",
+    "web",
     "completions",
   ];
   if (shell === "bash") {
@@ -2415,6 +2477,7 @@ function usage(): void {
       "  cowork completions zsh|bash|fish",
       "  cowork dashboard [open|status]",
       "  cowork open dashboard | cowork open task <taskId>",
+      "  cowork web [open|link|status|sign-out] [--print]   Open the app in a browser; link prints a one-use sign-in link",
       "  cowork pact status|discover|send|grants|disconnect|authorizations|authorization|conversation|receipt",
       "",
       "Exit codes: 0 ok, 1 failed, 3 needs user action (e.g. a business sign-in), 130 interrupted",

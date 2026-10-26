@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Open CoWork OS in any browser**: turn on **Settings > Web Access > Full app in the browser**, then choose **Open in browser**. The whole app opens signed in, with your workspace, chats, files, Git and terminal. No environment variable is needed any more.
+  - `cowork web` does the same from a terminal; `cowork web link` prints a sign-in link for another device.
+  - A sign-in link works once, for 90 seconds, and its code never reaches the server's logs.
+  - **Sign out all browsers** (or `cowork web sign-out`) ends every browser session at once.
+  - **Public HTTPS address** lets browsers on other devices sign in through Tailscale Serve or another HTTPS proxy on this computer.
+
+  See [Browser application preview](browser-preview.md).
+
 - **3D models with Meshy**: a pinned Meshy connector in **Settings → Connectors**. Ask for a model ("a low-poly treasure chest for my Godot game", "turn this photo into something I can print"), and the agent makes it with Meshy's 28 tools. They cover text, image and multi-view to 3D, texturing, remeshing, rigging, animation, format conversion and 3D-print prep. Replies show models as interactive 3D cards:
   - orbit and zoom, animation clips, wireframe and grid;
   - a progress ring while Meshy works;

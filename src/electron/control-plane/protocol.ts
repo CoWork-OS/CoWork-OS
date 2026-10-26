@@ -371,6 +371,12 @@ export const Methods = {
   // File operations (for remote file selection)
   FILE_LIST_DIRECTORY: "file.listDirectory",
 
+  // Browser app (the desktop app served to a web browser by this host; admin scope)
+  WEB_PAIR: "web.pair",
+  WEB_SIGN_IN_LINK: "web.signInLink",
+  WEB_STATUS: "web.status",
+  WEB_SIGN_OUT: "web.signOut",
+
   // Managed account operations (API-first signup/account lifecycle)
   ACCOUNT_LIST: "account.list",
   ACCOUNT_GET: "account.get",

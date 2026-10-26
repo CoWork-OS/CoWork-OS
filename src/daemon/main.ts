@@ -90,6 +90,11 @@ import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
 import { createWebHostIdentity } from "../host/web/host-identity";
 import { createBrowserHostApplication } from "../host/services/browser-host-application";
 import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
+import {
+  loopbackListenerOrigin,
+  registerBrowserAppControlMethods,
+} from "../host/services/browser-app-control";
+import type { WebApplication } from "../host/web/WebApplication";
 import { NotificationService } from "../electron/notifications/service";
 
 interface StartedControlPlane {
@@ -852,8 +857,29 @@ async function main(): Promise<void> {
     }
   }
 
+  let browserApp: WebApplication | null = null;
+  const controlPlaneServer = startedControlPlane?.server;
+  if (controlPlaneServer?.isRunning) {
+    // Registered even while the app is off, so `cowork web` can say how to turn it on.
+    registerBrowserAppControlMethods(controlPlaneServer, {
+      getApplication: () => browserApp,
+      resolveListener: () => {
+        const address = controlPlaneServer.getAddress();
+        if (!address || !browserApp) return null;
+        return {
+          origin:
+            browserApp.getPublicOrigin() ?? loopbackListenerOrigin(address.host, address.port),
+          audience: "control-plane",
+        };
+      },
+      offMessage:
+        "The browser app is off on this host. Restart the daemon with COWORK_WEB_ENABLED=1 to serve it.",
+      noListenerMessage: "The browser app is not mounted on this host's Control Plane listener.",
+    });
+  }
+
   if (isBrowserWebEnabled()) {
-    if (!startedControlPlane?.server?.isRunning) {
+    if (!controlPlaneServer?.isRunning) {
       console.warn(
         "[Daemon] Browser app requested, but no local Control Plane listener is running.",
       );
@@ -867,7 +893,7 @@ async function main(): Promise<void> {
           appVersion,
         });
         const browserDb = dbManager.getDatabase();
-        const browserApp = createBrowserHostApplication({
+        const createdApp = createBrowserHostApplication({
           db: browserDb,
           webDirectory: path.resolve(__dirname, "../../web"),
           deployment: webDeploymentFromEnv(),
@@ -877,14 +903,9 @@ async function main(): Promise<void> {
           channelGateway,
           notificationService,
         });
-        await startedControlPlane.server.setWebApplication(browserApp);
-        startedControlPlane.server.registerMethod("web.pair", async (client) => {
-          if (!client.hasScope("admin")) throw new Error("Admin scope is required.");
-          return browserApp.createPairingCode("control-plane");
-        });
-        console.log(
-          "[Daemon] Browser app enabled. Use an admin Control Plane client to call web.pair.",
-        );
+        await controlPlaneServer.setWebApplication(createdApp);
+        browserApp = createdApp;
+        console.log("[Daemon] Browser app enabled. Run `cowork web` for a sign-in link.");
       } catch (error) {
         console.error("[Daemon] Browser app failed to start:", error);
       }

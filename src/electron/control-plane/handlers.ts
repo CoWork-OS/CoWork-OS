@@ -241,6 +241,25 @@ export function getControlPlaneServer(): ControlPlaneServer | null {
   return controlPlaneServer;
 }
 
+type ControlPlaneStartedListener = (server: ControlPlaneServer) => Promise<void> | void;
+let controlPlaneStartedListener: ControlPlaneStartedListener | null = null;
+
+/**
+ * Runs after the Control Plane is started from Settings, so main-process features that serve
+ * on its listener (the browser app) attach to the new server too.
+ */
+export function setControlPlaneStartedListener(listener: ControlPlaneStartedListener | null): void {
+  controlPlaneStartedListener = listener;
+}
+
+function notifyControlPlaneStarted(server: ControlPlaneServer): void {
+  const listener = controlPlaneStartedListener;
+  if (!listener) return;
+  void Promise.resolve()
+    .then(() => listener(server))
+    .catch((error) => console.error("[ControlPlane] Started listener failed:", error));
+}
+
 export function getStartupAutoConnectRemoteDeviceIds(
   devices: Array<Pick<ManagedDevice, "id" | "autoConnect">>,
 ): string[] {
@@ -4269,6 +4288,7 @@ export function setupControlPlaneHandlers(
           // Start with Tailscale if configured
           const tailscaleResult = await server.startWithTailscale();
           writeLocalControlPlaneConnectionFileForServer(server);
+          notifyControlPlaneStarted(server);
 
           const address = server.getAddress();
 

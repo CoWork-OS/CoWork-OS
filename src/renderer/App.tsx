@@ -8,6 +8,11 @@ import {
   hasHostMethod,
 } from "./host/browser-capabilities";
 import { StaleBrowserDecisionError } from "./host/browser-decision-bridge";
+import {
+  chooseBrowserHostFolderWorkspace,
+  hasBrowserHostFolderPicker,
+} from "./host/browser-host-folders";
+import { BrowserFolderPickerHost } from "./components/BrowserFolderPicker/BrowserFolderPicker";
 import { matchBrowserShortcut } from "../shared/browser-shortcuts";
 import {
   memo,
@@ -6225,10 +6230,16 @@ export function App() {
   // Opens the folder dialog and returns the matching (or newly created)
   // workspace, without applying it anywhere.
   const pickFolderWorkspace = async (): Promise<Workspace | null> => {
-    const pickerDefaultPath =
+    const pickerStartWorkspace =
       currentWorkspace && !currentWorkspace.isTemp && !isTempWorkspaceId(currentWorkspace.id)
-        ? currentWorkspace.path
+        ? currentWorkspace
         : undefined;
+    // A browser session has no native dialog; the host's folder picker returns
+    // the folder's workspace directly.
+    if (isBrowserHost && hasBrowserHostFolderPicker()) {
+      return chooseBrowserHostFolderWorkspace({ startWorkspaceId: pickerStartWorkspace?.id });
+    }
+    const pickerDefaultPath = pickerStartWorkspace?.path;
 
     // Open folder selection dialog
     const folderPath = await window.electronAPI.selectFolder(pickerDefaultPath);
@@ -6298,7 +6309,7 @@ export function App() {
   };
 
   const handlePickBuildFolder = async () => {
-    if (isBrowserHost) return;
+    if (isBrowserHost && !hasBrowserHostFolderPicker()) return;
     try {
       const workspace = await pickFolderWorkspace();
       if (workspace) await selectBuildWorkspace(workspace);
@@ -8432,6 +8443,7 @@ export function App() {
         />
       )}
       <PrivateBrowserPrompts />
+      {isBrowserHost && <BrowserFolderPickerHost />}
       <div
         className={`title-bar${RAIL_VIEWS.has(currentView) ? " title-bar-shell" : ""}`}
         style={
@@ -8959,7 +8971,7 @@ export function App() {
                   }}
                   onPickFolder={handlePickBuildFolder}
                   folderPickerUnavailableReason={
-                    isBrowserHost
+                    isBrowserHost && !hasBrowserHostFolderPicker()
                       ? "Browser sessions cannot select arbitrary computer folders. Workspace switching is limited to folders made available to this browser session; use the desktop app to choose another folder."
                       : undefined
                   }

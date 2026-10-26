@@ -7142,12 +7142,14 @@ export async function setupIpcHandlers(
     return managedSessionService.listAgents(params);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_GET_IPC, async (_, agentId: string) => {
-    return (await managedSessionService.getAgent(agentId)) || null;
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return (await managedSessionService.getAgent(validatedAgentId)) || null;
   });
   ipcMain.handle(
     IPC_CHANNELS.MANAGED_AGENT_RUNTIME_TOOL_CATALOG_IPC,
     async (_, agentId: string) => {
-      return managedSessionService.getRuntimeToolCatalog(agentId);
+      const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+      return managedSessionService.getRuntimeToolCatalog(validatedAgentId);
     },
   );
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_CREATE_IPC, async (_, request: Any) => {
@@ -7158,16 +7160,20 @@ export async function setupIpcHandlers(
     return managedSessionService.updateAgent(request.agentId, request);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ARCHIVE_IPC, async (_, agentId: string) => {
-    return (await managedSessionService.archiveAgent(agentId)) || null;
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return (await managedSessionService.archiveAgent(validatedAgentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_PUBLISH_IPC, async (_, agentId: string) => {
-    return (await managedSessionService.publishAgent(agentId)) || null;
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return (await managedSessionService.publishAgent(validatedAgentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_SUSPEND_IPC, async (_, agentId: string) => {
-    return (await managedSessionService.suspendAgent(agentId)) || null;
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return (await managedSessionService.suspendAgent(validatedAgentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_LIST_IPC, async (_, agentId: string) => {
-    return managedSessionService.listManagedAgentRoutines(agentId);
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return managedSessionService.listManagedAgentRoutines(validatedAgentId);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_CREATE_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
@@ -7221,7 +7227,8 @@ export async function setupIpcHandlers(
     },
   );
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_INSIGHTS_GET_IPC, async (_, agentId: string) => {
-    return managedSessionService.getAgentInsights(agentId);
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return managedSessionService.getAgentInsights(validatedAgentId);
   });
   ipcMain.handle(
     IPC_CHANNELS.MANAGED_AGENT_AUDIT_LIST_IPC,
@@ -7230,7 +7237,8 @@ export async function setupIpcHandlers(
     },
   );
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_SLACK_HEALTH_GET_IPC, async (_, agentId: string) => {
-    return managedSessionService.getSlackDeploymentHealth(agentId);
+    const validatedAgentId = validateInput(StringIdSchema, agentId, "agent ID");
+    return managedSessionService.getSlackDeploymentHealth(validatedAgentId);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_CONVERT_ROLE_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
@@ -7284,7 +7292,8 @@ export async function setupIpcHandlers(
     return managedSessionService.listEnvironments(params);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_GET_IPC, async (_, environmentId: string) => {
-    return (await managedSessionService.getEnvironment(environmentId)) || null;
+    const validatedEnvironmentId = validateInput(StringIdSchema, environmentId, "environment ID");
+    return (await managedSessionService.getEnvironment(validatedEnvironmentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_CREATE_IPC, async (_, request: Any) => {
     return managedSessionService.createEnvironment(request);
@@ -7294,13 +7303,15 @@ export async function setupIpcHandlers(
     return (await managedSessionService.updateEnvironment(request.environmentId, request)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_ARCHIVE_IPC, async (_, environmentId: string) => {
-    return (await managedSessionService.archiveEnvironment(environmentId)) || null;
+    const validatedEnvironmentId = validateInput(StringIdSchema, environmentId, "environment ID");
+    return (await managedSessionService.archiveEnvironment(validatedEnvironmentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_LIST_IPC, async (_, params?: Any) => {
     return managedSessionService.listSessions(params);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_GET_IPC, async (_, sessionId: string) => {
-    return (await managedSessionService.getSession(sessionId)) || null;
+    const validatedSessionId = validateInput(StringIdSchema, sessionId, "session ID");
+    return (await managedSessionService.getSession(validatedSessionId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_CREATE_IPC, async (_, request: Any) => {
     return managedSessionService.createSession(request);
@@ -7325,10 +7336,12 @@ export async function setupIpcHandlers(
     },
   );
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_RESUME_IPC, async (_, sessionId: string) => {
-    return managedSessionService.resumeSession(sessionId);
+    const validatedSessionId = validateInput(StringIdSchema, sessionId, "session ID");
+    return managedSessionService.resumeSession(validatedSessionId);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_CANCEL_IPC, async (_, sessionId: string) => {
-    return managedSessionService.cancelSession(sessionId);
+    const validatedSessionId = validateInput(StringIdSchema, sessionId, "session ID");
+    return managedSessionService.cancelSession(validatedSessionId);
   });
   ipcMain.handle(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, async (_, request: unknown) => {
     checkRateLimit(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC);
@@ -7525,7 +7538,8 @@ export async function setupIpcHandlers(
     },
   );
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_WORKPAPER_GET_IPC, async (_, sessionId: string) => {
-    return managedSessionService.getSessionWorkpaper(sessionId);
+    const validatedSessionId = validateInput(StringIdSchema, sessionId, "session ID");
+    return managedSessionService.getSessionWorkpaper(validatedSessionId);
   });
   ipcMain.handle(
     IPC_CHANNELS.MANAGED_SESSION_GENERATE_AUDIO_SUMMARY,

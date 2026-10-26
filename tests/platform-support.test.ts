@@ -17,11 +17,11 @@ const launcherSupport = require("../scripts/platform-support.cjs") as {
 };
 
 describe("platform support policy", () => {
-  it("records Ventura and Darwin 22 as the Electron 44 floors", () => {
+  it("records Ventura and Darwin 22 as the Electron 45 floors", () => {
     expect(PLATFORM_SUPPORT.macos.minimumProductVersion).toBe("13.0");
     expect(PLATFORM_SUPPORT.macos.minimumDarwinVersion).toBe("22.0.0");
     expect(PLATFORM_SUPPORT.macos.lastMontereyCompatibleVersion).toBe("0.5.51");
-    expect(packageJson.dependencies.electron).toMatch(/^44\.\d+\.\d+$/);
+    expect(packageJson.dependencies.electron).toMatch(/^45\.\d+\.\d+$/);
     expect(packageJson.dependencies["@electron/rebuild"]).toMatch(/^4\.2\.\d+$/);
     expect(packageJson.build.mac.minimumSystemVersion).toBe("13.0");
     expect(packageJson.build.dmg.title).toContain("macOS 13+");

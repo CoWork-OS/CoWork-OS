@@ -2,7 +2,7 @@
 
 ## CoWork OS says this macOS version is unsupported
 
-CoWork OS `0.5.52` and later use Electron 44 and require **macOS 13 Ventura or later**. macOS 12 Monterey cannot launch this runtime. `0.5.51` is the final Monterey-compatible CoWork OS release.
+CoWork OS `0.5.52` and later use Electron 44 or newer and require **macOS 13 Ventura or later**. macOS 12 Monterey cannot launch this runtime. `0.5.51` is the final Monterey-compatible CoWork OS release.
 
 If you installed through npm and must remain on Monterey, reinstall the compatible release:
 

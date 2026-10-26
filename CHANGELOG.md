@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pick the model for one `cowork run`**: `--provider` and `--model` now pin that run's task to the model, like the model picker in an open conversation, without changing the global default, so runs on different models can go side by side. Before, `cowork run` accepted both flags and ignored them. An unknown or unconfigured provider stops the run before the task is created, and the resolved model is printed (`task_model` with `--json`). With `--remote`, `--model` is required. See [Choosing the model for one run](docs/cli.md#choosing-the-model-for-one-run).
 - **Computer use in a Cua Space**: the computer-use tools (`screenshot`, `click`, `type_text`, `keypress`, `scroll`, `drag`) can drive a Cua Space instead of this computer. Turn it on in **Settings > Tools > Computer use** with the Space URL and token; **Test connection** checks that the Space answers and accepts the token. The token is stored encrypted and never reaches the renderer, is dropped when the Space address changes, and plain `http://` is allowed only for this computer and private network addresses. An unreachable Space fails the action instead of falling back to your own desktop. See [Run computer use in a Cua Space](docs/computer-use.md#run-computer-use-in-a-cua-space).
 
+### Changed
+
+- **Electron 45**: the desktop runtime moves from Electron 44 to Electron 45 (Chromium 156, Node.js 24.22). macOS 13 Ventura remains the minimum. `node-abi` is updated to 4.40.0 so native modules rebuild for Electron 45.
+
 ### Fixed
 
 - **Stopping `cowork run` stops its task**: a `SIGTERM` or `SIGHUP` sent to the `cowork` process alone now reaches the local task runner, which cancels the task and exits with code `130`. Before, the runner kept going without `cowork`, holding the output pipe and the profile database open, so a script waiting for the output to close hung too. A stopped run also no longer prints `The database connection is not open`. See [Runtime Model](docs/cli.md#runtime-model).

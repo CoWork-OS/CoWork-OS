@@ -210,7 +210,7 @@
     "skills:lineage": "node scripts/qa/build-bundled-skill-lineage.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
+    "@anthropic-ai/sdk": "^1.1.0",
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
     "@aws-sdk/credential-provider-ini": "3.973.20",

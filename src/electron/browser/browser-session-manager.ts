@@ -25,7 +25,12 @@ import {
   parseKeyCombo,
   resolveKeyDefinition,
 } from "./browser-keyboard";
-import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
+import {
+  isCanonicalLocalFileUrl,
+  isLocalHtmlFileUrl,
+  isLoopbackHttpUrl,
+  normalizeWebviewUrl,
+} from "./webview-url-policy";
 import { isAgentIdentityHeader } from "../security/agent-request-identity";
 import { agentNavigationIdentity, type AgentNavigationSignature } from "./browser-agent-identity";
 
@@ -662,7 +667,10 @@ export class BrowserSessionManager {
     }
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return false;
-    return this.touchAllowance(this.allowedLocalPreviewUrls, normalized);
+    return (
+      this.touchAllowance(this.allowedLocalPreviewUrls, normalized) &&
+      isCanonicalLocalFileUrl(normalized)
+    );
   }
 
   private touchAllowance(allowances: Map<string, number>, key: string): boolean {

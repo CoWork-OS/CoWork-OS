@@ -43,6 +43,14 @@ describe("internal-address boundary and its admin escape hatch", () => {
     });
   });
 
+  it("never treats a file: URL as a network target", () => {
+    // Local pages are a filesystem read; browser_navigate routes them through
+    // workspace file access instead of this policy.
+    expect(
+      evaluateNetworkPolicy({ url: "file:///tmp/workspace/index.html", toolName: "web_fetch" }),
+    ).toMatchObject({ action: "deny", reason: "internal_address_blocked" });
+  });
+
   it("keeps loopback reachable so the agent can fetch a dev server it started", () => {
     expect(
       evaluateNetworkPolicy({ url: "http://127.0.0.1:5173/", toolName: "web_fetch" }).action,

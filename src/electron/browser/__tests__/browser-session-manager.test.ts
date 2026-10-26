@@ -1,3 +1,7 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { pathToFileURL } from "url";
 import { describe, expect, it } from "vitest";
 import {
   BrowserSessionManager,
@@ -73,6 +77,32 @@ describe("BrowserSessionManager helpers", () => {
     expect(
       isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, "http://127.0.0.1:4174"),
     ).toBe(false);
+  });
+
+  it("honors a registered local page only while it names its own canonical file", () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "session-local-page-")));
+    try {
+      const pagePath = path.join(root, "index.html");
+      const outsidePath = path.join(root, "secret.html");
+      fs.writeFileSync(pagePath, "<h1>Prototype</h1>");
+      fs.writeFileSync(outsidePath, "<p>secret</p>");
+      const pageUrl = pathToFileURL(pagePath).href;
+      const manager = new BrowserSessionManager();
+      const isAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+      const policy = { networkEnabled: false };
+
+      expect(isAllowed(policy, pageUrl)).toBe(false);
+      manager.allowLocalPreviewUrl(pageUrl);
+      expect(isAllowed(policy, pageUrl)).toBe(true);
+      expect(isAllowed(policy, pathToFileURL(outsidePath).href)).toBe(false);
+
+      // Swapping the approved path for a link would reach a file nobody checked.
+      fs.rmSync(pagePath);
+      fs.symlinkSync(outsidePath, pagePath);
+      expect(isAllowed(policy, pageUrl)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

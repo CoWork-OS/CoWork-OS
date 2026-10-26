@@ -5,9 +5,11 @@ import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { maskFilledPasswords, passwordRecentlyFilled } from "../../browser/credentials/autofill";
 import * as os from "os";
+import * as fsSync from "fs";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { createHash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "url";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import {
@@ -31,6 +33,7 @@ import {
   getBrowserWorkbenchService,
 } from "../../browser/browser-workbench-service";
 import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
+import { isLocalHtmlFileUrl } from "../../browser/webview-url-policy";
 import { BrowserHistoryRepository } from "../../database/repository-facades";
 import { browserProfileKey } from "../../../shared/browser-profile";
 import { DEVELOPER_MODE_BROWSER_TOOLS } from "../../../shared/browser-settings";
@@ -44,8 +47,14 @@ import {
   assertWorkspaceFilesystemAccess,
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
+  isProtectedWorkspacePath,
   resolveWorkspaceFilesystemAccessWithApproval,
 } from "../../security/access-profile-paths";
+import {
+  checkProjectAccess,
+  getProjectIdFromWorkspaceRelPath,
+  getWorkspaceRelativePosixPath,
+} from "../../security/project-access";
 import { BuiltinToolsSettingsManager } from "./builtin-settings";
 import { LLMProviderFactory } from "../llm/provider-factory";
 import { createConfiguredJevProvider, isJevActiveHarnessEnabled } from "../jev";
@@ -442,6 +451,9 @@ export class BrowserTools {
     if (!url) {
       throw new Error("url is required");
     }
+    if (/^file:/i.test(url)) {
+      return await this.resolveLocalPageNavigation(url);
+    }
     if (!this.workspace.permissions?.network) {
       throw new Error("Workspace does not have network permission for browser navigation");
     }
@@ -464,6 +476,92 @@ export class BrowserTools {
     // rather than navigated to and read back through browser_get_content.
     await assertPolicyResolvedHostAllowed(new URL(url).hostname);
     return url;
+  }
+
+  /**
+   * A `file:` URL is a filesystem read, not a network request, so it goes
+   * through workspace file access instead of the network policy (whose
+   * internal-address check reads the empty host as internal and refused pages
+   * the agent had just built in its own workspace). Inside the workspace the
+   * page opens; outside it needs the external-read approval; protected
+   * locations (`.git`, `.cowork/policy`, ...) are refused before anyone is asked.
+   *
+   * Only local .html pages are opened. The returned URL names the canonical
+   * path that was approved, so a symlink or the macOS /private alias cannot
+   * point the browser at a different file than the one checked.
+   */
+  private async resolveLocalPageNavigation(url: string): Promise<string> {
+    let parsed: URL;
+    let requestedPath: string;
+    try {
+      parsed = new URL(url);
+      requestedPath = fileURLToPath(parsed);
+    } catch {
+      throw new Error(`Browser access denied for "${url}": not a local file URL`);
+    }
+    const denied = (reason: string) =>
+      new Error(`Browser access denied for "${parsed.href}": ${reason}`);
+    if (!isLocalHtmlFileUrl(parsed.href)) {
+      throw denied(
+        "browser_navigate opens local .html pages only; read other files with read_file or parse_document",
+      );
+    }
+    if (isProtectedWorkspacePath(this.workspace.path, requestedPath)) {
+      throw denied("protected_path");
+    }
+
+    let resolvedPath: string;
+    try {
+      resolvedPath = await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        requestedPath,
+        "browser page",
+        createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "browser"),
+      );
+    } catch (error) {
+      throw denied(error instanceof Error ? error.message : String(error));
+    }
+    const target = pathToFileURL(resolvedPath);
+    if (isProtectedWorkspacePath(this.workspace.path, resolvedPath)) {
+      throw denied("protected_path");
+    }
+    if (!isLocalHtmlFileUrl(target.href)) {
+      throw denied("the path resolves to a file that is not an .html page");
+    }
+
+    const workspaceRoot = fsSync.existsSync(this.workspace.path)
+      ? fsSync.realpathSync(this.workspace.path)
+      : path.resolve(this.workspace.path);
+    const relPosix = getWorkspaceRelativePosixPath(workspaceRoot, resolvedPath);
+    const projectId = relPosix === null ? null : getProjectIdFromWorkspaceRelPath(relPosix);
+    if (projectId) {
+      const access = await checkProjectAccess({
+        workspacePath: workspaceRoot,
+        projectId,
+        agentRoleId: this.daemon.getTask(this.taskId)?.assignedAgentRoleId || null,
+      });
+      if (!access.allowed) {
+        throw denied(access.reason || `access denied for project "${projectId}"`);
+      }
+    }
+
+    target.search = parsed.search;
+    target.hash = parsed.hash;
+    return target.href;
+  }
+
+  /**
+   * Let the visible workbench load an approved local page. Its request guard
+   * sees the URL without the #fragment while navigation checks see it with
+   * one, so both spellings are registered.
+   */
+  private allowLocalPageInWorkbench(url: string): void {
+    this.browserWorkbenchService.allowLocalPreviewUrl(url);
+    const withoutFragment = new URL(url);
+    withoutFragment.hash = "";
+    if (withoutFragment.href !== url) {
+      this.browserWorkbenchService.allowLocalPreviewUrl(withoutFragment.href);
+    }
   }
 
   private hasExplicitRealBrowserConsent(input: unknown): boolean {
@@ -2320,8 +2418,10 @@ export class BrowserTools {
         // headless, or Browser Use Cloud routing. This prevents a fallback
         // backend from changing the error or bypassing the guardrail.
         const navigationUrl = await this.ensureVisibleNavigationAllowed(input?.url);
+        const localPage = navigationUrl.startsWith("file:");
         if (await this.shouldUseVisibleWorkbenchForNavigation(input)) {
           await beforeEffect();
+          if (localPage) this.allowLocalPageInWorkbench(navigationUrl);
           const visibleResult = await this.browserWorkbenchService.navigate({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -2475,7 +2575,8 @@ export class BrowserTools {
                 : this.browserState.debuggerUrl,
           });
           await beforeEffect();
-          result = await this.browserService.navigate(input.url, input.wait_until || "load");
+          if (localPage) this.browserService.allowLocalFileUrl(navigationUrl);
+          result = await this.browserService.navigate(navigationUrl, input.wait_until || "load");
         } catch (error) {
           if (this.isProfileLaunchConflict(error)) {
             const conflictResult = this.profileLaunchConflictResult(error);
@@ -2801,8 +2902,10 @@ export class BrowserTools {
         const rawUrl = typeof input?.url === "string" ? input.url.trim() : "";
         const url = rawUrl ? await this.ensureVisibleNavigationAllowed(rawUrl) : "";
         await beforeEffect();
-        // Same agent allowance as browser_navigate: a local dev server for the TTL.
-        if (url) this.browserWorkbenchService.allowLocalPreviewUrl(url);
+        // Same agent allowance as browser_navigate: a local dev server for the TTL,
+        // or the approved local page.
+        if (url.startsWith("file:")) this.allowLocalPageInWorkbench(url);
+        else if (url) this.browserWorkbenchService.allowLocalPreviewUrl(url);
         const background = input?.background === true;
         const tabId = await this.browserWorkbenchService.openTab({
           taskId: this.taskId,

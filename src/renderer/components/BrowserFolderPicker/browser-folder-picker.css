@@ -1,0 +1,200 @@
+/* Host folder picker shown in browser sessions in place of the native folder dialog. */
+
+.browser-folder-picker {
+  max-width: 560px;
+  height: min(620px, 86vh);
+}
+
+.browser-folder-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px 8px;
+}
+
+.browser-folder-picker-root,
+.browser-folder-picker-filter {
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.browser-folder-picker-root {
+  flex: 0 1 180px;
+}
+
+.browser-folder-picker-filter {
+  flex: 1 1 auto;
+}
+
+.browser-folder-picker-up {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-glass);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.browser-folder-picker-up svg {
+  flex: 0 0 auto;
+}
+
+.browser-folder-picker-up:hover:not(:disabled) {
+  background: var(--color-bg-glass-hover);
+  color: var(--color-text);
+}
+
+.browser-folder-picker-up:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.browser-folder-picker-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 0 20px 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.browser-folder-picker-crumbs button {
+  max-width: 180px;
+  overflow: hidden;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.browser-folder-picker-crumbs button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.browser-folder-picker-crumbs button[aria-current="location"] {
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.browser-folder-picker-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 12px;
+  padding: 4px 0;
+  border-top: 1px solid var(--color-border-subtle);
+  transition: opacity 0.15s ease;
+}
+
+.browser-folder-picker-body[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.browser-folder-picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-folder-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-folder-picker-item > svg:first-child {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.browser-folder-picker-item span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-folder-picker-item-chevron {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+}
+
+.browser-folder-picker-item:hover:not(:disabled),
+.browser-folder-picker-item:focus-visible {
+  background: var(--color-bg-hover);
+}
+
+.browser-folder-picker-item:hover .browser-folder-picker-item-chevron,
+.browser-folder-picker-item:focus-visible .browser-folder-picker-item-chevron {
+  opacity: 1;
+}
+
+.browser-folder-picker-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.browser-folder-picker-note {
+  margin: 8px 8px 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.browser-folder-picker-error {
+  margin: 8px 20px 0;
+  color: var(--color-error);
+  font-size: 12px;
+}
+
+.browser-folder-picker-hidden {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.browser-folder-picker-actions {
+  display: flex;
+  gap: 8px;
+}

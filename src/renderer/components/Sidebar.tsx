@@ -1,4 +1,8 @@
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
+import {
+  chooseBrowserHostFolderWorkspace,
+  hasBrowserHostFolderPicker,
+} from "../host/browser-host-folders";
 import { SidebarNotices } from "./sidebar/SidebarNotices";
 import {
   useState,
@@ -1122,6 +1126,34 @@ function SidebarComponent({
       setWorkspaceActionError(message);
     }
   }, [updateWorkspaceNavSettings, isBrowserHost]);
+
+  // A browser session picks an existing host folder through the host folder
+  // picker, which returns that folder's workspace (added when it is new).
+  const handleChooseHostFolder = useCallback(async () => {
+    setNewWorkspaceName(null);
+    try {
+      const added = await chooseBrowserHostFolderWorkspace();
+      if (!added) return;
+      setSidebarWorkspaces((current) => [
+        added,
+        ...current.filter((candidate) => candidate.id !== added.id),
+      ]);
+      updateWorkspaceNavSettings((current) => ({
+        ...current,
+        visibleWorkspaceIds: [...new Set([...current.visibleWorkspaceIds, added.id])],
+        collapsedWorkspaceIds: current.collapsedWorkspaceIds.filter(
+          (workspaceId) => workspaceId !== added.id,
+        ),
+        expandedWorkspaceIds: [...new Set([...current.expandedWorkspaceIds, added.id])],
+      }));
+      window.dispatchEvent(new CustomEvent("cowork-browser-workspace-selected", { detail: added }));
+      setWorkspaceActionError(null);
+    } catch (error) {
+      setWorkspaceActionError(
+        error instanceof Error ? error.message : "Could not add that folder.",
+      );
+    }
+  }, [updateWorkspaceNavSettings]);
 
   const handleAddAllWorkspaces = useCallback(() => {
     const workspaceIds = knownSidebarWorkspaces
@@ -3056,6 +3088,15 @@ function SidebarComponent({
             </label>
             {workspaceActionError && <p role="alert">{workspaceActionError}</p>}
             <div className="modal-actions">
+              {hasBrowserHostFolderPicker() && (
+                <button
+                  type="button"
+                  disabled={creatingWorkspace}
+                  onClick={() => void handleChooseHostFolder()}
+                >
+                  Choose existing folder…
+                </button>
+              )}
               <button
                 type="button"
                 disabled={creatingWorkspace}

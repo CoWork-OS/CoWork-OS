@@ -58,7 +58,7 @@ function parseTaskId(value: unknown): { taskId: string } {
   return { taskId: (value as { taskId: string }).taskId };
 }
 
-function toBrowserWorkspace(workspace: Workspace): Workspace {
+export function toBrowserWorkspace(workspace: Workspace): Workspace {
   const permissions = workspace.permissions;
   return {
     id: workspace.id,

@@ -1,5 +1,11 @@
 import { useFullAccessConfirmation } from "./FullAccessConfirmationDialog";
-import { useEffect, useMemo, useState } from "react";
+import {
+  hasUnsavedPermissionChanges,
+  permissionSaveErrorMessage,
+  saveUnsavedPermissionDraftOnLeave,
+  takeFailedPermissionDraft,
+} from "./permission-settings-draft";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   PermissionMode,
   PermissionRule,
@@ -110,6 +116,63 @@ function normalizeDomainRules(value: string): NonNullable<AccessProfileDefinitio
 
 interface PermissionSettingsPanelProps {
   workspaceId?: string;
+}
+
+/** Store settings through main, which validates them (inheritance included) and may throw. */
+async function persistPermissionSettings(next: PermissionSettingsData): Promise<void> {
+  await window.electronAPI.savePermissionSettings(next);
+  window.dispatchEvent(new CustomEvent("cowork:permission-settings-updated", { detail: next }));
+}
+
+/**
+ * Shown while the panel holds edits main has not stored. It sticks to the bottom of the
+ * settings scroll area: the panel is long, and a Save button below the workspace rules was
+ * easy to miss, so edits were lost on leaving.
+ */
+export function PermissionUnsavedChangesBar({
+  saving,
+  error,
+  onSave,
+  onDiscard,
+}: {
+  saving: boolean;
+  error: string | null;
+  onSave: () => void;
+  onDiscard: () => void;
+}) {
+  return (
+    <div
+      className={`permission-unsaved-bar${error ? " permission-unsaved-bar--error" : ""}`}
+      role={error ? "alert" : "status"}
+    >
+      <div className="permission-unsaved-bar-copy">
+        <span className="permission-unsaved-bar-title">Unsaved changes</span>
+        <span className="permission-unsaved-bar-detail">
+          {error
+            ? `Couldn't save: ${error}`
+            : "Not applied until saved. Leaving this page saves them."}
+        </span>
+      </div>
+      <div className="permission-unsaved-bar-actions">
+        <button
+          type="button"
+          className="button-small button-secondary"
+          onClick={onDiscard}
+          disabled={saving}
+        >
+          Discard
+        </button>
+        <button
+          type="button"
+          className="button-small button-primary"
+          onClick={onSave}
+          disabled={saving}
+        >
+          {saving ? "Saving..." : "Save changes"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function scopeToLabel(scope: PermissionRuleScope): string {
@@ -227,6 +290,9 @@ export function detectApprovalExperiencePreset(
 export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanelProps) {
   const fullAccessConfirmation = useFullAccessConfirmation();
   const [settings, setSettings] = useState<PermissionSettingsData>(DEFAULT_SETTINGS);
+  // What main last stored or returned; `settings` differing from it means unsaved edits.
+  const [savedSettings, setSavedSettings] = useState<PermissionSettingsData>(DEFAULT_SETTINGS);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [builtinSettings, setBuiltinSettings] = useState<BuiltinToolsSettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -252,17 +318,60 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
     void loadWorkspaceRules(workspaceId);
   }, [workspaceId]);
 
+  const isDirty = !loading && hasUnsavedPermissionChanges(savedSettings, settings);
+
+  // Leaving the panel (another Settings tab, closing Settings, closing the window) saves
+  // unsaved edits instead of dropping them; a save main refuses comes back on the next open.
+  const latestStateRef = useRef({ loading, settings, savedSettings });
+  useEffect(() => {
+    latestStateRef.current = { loading, settings, savedSettings };
+  });
+  useEffect(() => {
+    const saveOnLeave = () => {
+      const current = latestStateRef.current;
+      if (
+        current.loading ||
+        !hasUnsavedPermissionChanges(current.savedSettings, current.settings)
+      ) {
+        return;
+      }
+      void saveUnsavedPermissionDraftOnLeave(current.settings, persistPermissionSettings);
+    };
+    window.addEventListener("pagehide", saveOnLeave);
+    return () => {
+      window.removeEventListener("pagehide", saveOnLeave);
+      saveOnLeave();
+    };
+  }, []);
+
   const loadSettings = async () => {
     try {
       setLoading(true);
+      const failed = await takeFailedPermissionDraft();
       const loaded = await window.electronAPI.getPermissionSettings();
-      setSettings(loaded);
+      setSavedSettings(loaded);
+      setSettings(failed?.draft ?? loaded);
+      setSaveError(failed?.error ?? null);
+      setStatusMessage(null);
     } catch (error) {
       console.error("Failed to load permission settings:", error);
+      setSavedSettings(DEFAULT_SETTINGS);
       setSettings(DEFAULT_SETTINGS);
     } finally {
       setLoading(false);
     }
+  };
+
+  /** A local edit: it makes any earlier "saved" message stale. */
+  const updateSettings = (next: PermissionSettingsData) => {
+    setSettings(next);
+    setStatusMessage(null);
+  };
+
+  const discardChanges = () => {
+    setSettings(savedSettings);
+    setSaveError(null);
+    setStatusMessage(null);
   };
 
   const loadBuiltinSettings = async () => {
@@ -278,13 +387,16 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   const saveSettings = async (next: PermissionSettingsData) => {
     try {
       setSaving(true);
-      await window.electronAPI.savePermissionSettings(next);
-      setSettings(next);
-      window.dispatchEvent(new CustomEvent("cowork:permission-settings-updated", { detail: next }));
-      setStatusMessage("Permission settings saved.");
+      setSaveError(null);
+      await persistPermissionSettings(next);
+      // Edits made while the save ran stay unsaved; only what was sent is stored.
+      setSavedSettings(next);
+      if (!hasUnsavedPermissionChanges(next, latestStateRef.current.settings)) {
+        setStatusMessage("Permission settings saved.");
+      }
     } catch (error) {
       console.error("Failed to save permission settings:", error);
-      setStatusMessage("Failed to save permission settings.");
+      setSaveError(permissionSaveErrorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -312,7 +424,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         window.electronAPI.savePermissionSettings(next.permissionSettings),
         window.electronAPI.saveBuiltinToolsSettings(next.builtinSettings),
       ]);
+      // The preset was applied to the panel's settings, so this also stores pending edits.
       setSettings(next.permissionSettings);
+      setSavedSettings(next.permissionSettings);
+      setSaveError(null);
       setBuiltinSettings(next.builtinSettings);
       window.dispatchEvent(
         new CustomEvent("cowork:permission-settings-updated", {
@@ -326,7 +441,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       );
     } catch (error) {
       console.error("Failed to apply approval preset:", error);
-      setStatusMessage("Failed to update approval settings.");
+      setStatusMessage(`Failed to update approval settings: ${permissionSaveErrorMessage(error)}`);
     } finally {
       setSaving(false);
     }
@@ -360,10 +475,9 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       ...settings,
       rules: [...settings.rules, nextRule],
     };
-    setSettings(nextSettings);
+    updateSettings(nextSettings);
     setRuleDraft(DEFAULT_RULE_DRAFT);
     setRuleFormOpen(false);
-    setStatusMessage("Rule added locally. Save to persist it.");
   };
 
   const removeRule = (index: number) => {
@@ -371,8 +485,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       ...settings,
       rules: settings.rules.filter((_, ruleIndex) => ruleIndex !== index),
     };
-    setSettings(nextSettings);
-    setStatusMessage("Rule removed locally. Save to persist it.");
+    updateSettings(nextSettings);
   };
 
   const removeWorkspaceRule = async (ruleId: string) => {
@@ -431,7 +544,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       setStatusMessage("That custom profile ID is already in use.");
       return;
     }
-    setSettings({
+    updateSettings({
       ...settings,
       accessProfiles: [...(settings.accessProfiles || []), { ...newProfile, id, label }],
     });
@@ -441,21 +554,19 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       label: "Custom profile",
     });
     setProfileFormOpen(false);
-    setStatusMessage("Custom profile added locally. Save to persist it.");
   };
 
   const removeCustomProfile = (profileId: AccessProfileId) => {
     const nextProfiles = (settings.accessProfiles || []).filter(
       (profile) => profile.id !== profileId,
     );
-    setSettings({
+    updateSettings({
       ...settings,
       accessProfiles: nextProfiles,
       ...(settings.defaultAccessProfileId === profileId
         ? { defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval }
         : {}),
     });
-    setStatusMessage("Custom profile removed locally. Save to persist it.");
   };
 
   const inheritanceOptions = [...BUILTIN_ACCESS_PROFILES, ...(settings.accessProfiles || [])];
@@ -515,7 +626,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
           onChange={(e) => {
             const mode = e.target.value as PermissionMode;
             fullAccessConfirmation.request(mode === "bypass_permissions", () =>
-              setSettings({ ...settings, defaultMode: mode }),
+              updateSettings({ ...settings, defaultMode: mode }),
             );
           }}
         >
@@ -554,7 +665,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
             fullAccessConfirmation.request(
               profile?.sandbox === "danger-full-access" && profile?.approval === "never",
               () =>
-                setSettings({
+                updateSettings({
                   ...settings,
                   defaultAccessProfileId: profileId,
                   defaultPermissionAccess:
@@ -608,7 +719,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     value={profile.label}
                     aria-label={`${profile.id} label`}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -629,7 +740,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     value={profile.description}
                     aria-label={`${profile.id} description`}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -649,7 +760,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     className="settings-select"
                     value={profile.extends || ""}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -682,7 +793,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     className="settings-select"
                     value={profile.sandbox}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -705,7 +816,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     className="settings-select"
                     value={profile.approval}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -728,7 +839,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     className="settings-select"
                     value={profile.reviewer}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -751,7 +862,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     className="settings-select"
                     value={profile.network}
                     onChange={(e) =>
-                      setSettings({
+                      updateSettings({
                         ...settings,
                         accessProfiles: updateProfileList(
                           settings.accessProfiles || [],
@@ -778,7 +889,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                   aria-label={`${profile.id} additional roots`}
                   placeholder="Additional workspace roots"
                   onChange={(e) =>
-                    setSettings({
+                    updateSettings({
                       ...settings,
                       accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
                         workspaceRoots: normalizeProfileList(e.target.value),
@@ -794,7 +905,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                   aria-label={`${profile.id} filesystem rules`}
                   placeholder="Filesystem rules: read:/path, write:/path, deny:/path"
                   onChange={(e) =>
-                    setSettings({
+                    updateSettings({
                       ...settings,
                       accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
                         filesystemRules: normalizeFilesystemRules(e.target.value),
@@ -810,7 +921,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                   aria-label={`${profile.id} domain rules`}
                   placeholder="Domain rules: allow:example.com, deny:private.example.com"
                   onChange={(e) =>
-                    setSettings({
+                    updateSettings({
                       ...settings,
                       accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
                         domainRules: normalizeDomainRules(e.target.value),
@@ -1114,15 +1225,14 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         )}
       </div>
 
-      <div className="settings-actions" style={{ marginTop: "12px" }}>
-        <button
-          className="button-primary"
-          onClick={() => void saveSettings(settings)}
-          disabled={saving}
-        >
-          {saving ? "Saving..." : "Save Settings"}
-        </button>
-      </div>
+      {isDirty && (
+        <PermissionUnsavedChangesBar
+          saving={saving}
+          error={saveError}
+          onSave={() => void saveSettings(settings)}
+          onDiscard={discardChanges}
+        />
+      )}
     </div>
   );
 }

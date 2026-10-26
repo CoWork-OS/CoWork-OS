@@ -292,10 +292,39 @@ export class WebApplication {
     return { code, expiresAt };
   }
 
-  /** Revoke browser authority after a local host action or listener shutdown. */
-  revokeSessions(audience?: string): void {
+  /** Whether a listener is currently serving this application for the audience. */
+  isMounted(audience: string): boolean {
+    return this.enabled && this.mounts.has(audience);
+  }
+
+  /** The HTTPS address browsers use in proxy mode, or null for loopback-only hosting. */
+  getPublicOrigin(): string | null {
+    return this.publicOrigin?.origin ?? null;
+  }
+
+  /** Signed-in browser sessions, for one listener or all of them. */
+  countSessions(audience?: string): number {
+    this.pruneExpiredRecords();
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      if (!audience || session.audience === audience) count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * Revoke browser authority after a local host action or listener shutdown.
+   * Returns how many signed-in sessions were ended.
+   */
+  revokeSessions(audience?: string): number {
+    // Expired sessions are dropped first so the count names only live sign-ins.
+    this.pruneExpiredRecords();
+    let revoked = 0;
     for (const [key, session] of this.sessions) {
-      if (!audience || session.audience === audience) this.revokeSession(key);
+      if (!audience || session.audience === audience) {
+        this.revokeSession(key);
+        revoked += 1;
+      }
     }
     for (const [key, ticket] of this.tickets) {
       if (!audience || ticket.audience === audience) this.tickets.delete(key);
@@ -306,6 +335,7 @@ export class WebApplication {
     for (const key of this.pairingAttempts.keys()) {
       if (!audience || key.startsWith(`${audience}:`)) this.pairingAttempts.delete(key);
     }
+    return revoked;
   }
 
   /** Close every mounted WebSocket server and invalidate in-memory authority. */
@@ -1574,7 +1604,7 @@ function isWebApplicationPath(pathname: string): boolean {
   );
 }
 
-function parseCanonicalPublicOrigin(value: string): URL {
+export function parseCanonicalPublicOrigin(value: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(value);

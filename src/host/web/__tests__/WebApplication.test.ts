@@ -19,6 +19,13 @@ import {
   type WebApplicationOptions,
   type WebDeploymentPolicy,
 } from "../WebApplication";
+import { readBrowserAppSignInCode } from "../../../shared/browser-app-link";
+import {
+  createBrowserAppSignInLink,
+  getBrowserAppStatus,
+  signOutBrowserApp,
+  type BrowserAppAccess,
+} from "../../services/browser-app-control";
 
 interface TestHost {
   app: WebApplication;
@@ -1037,5 +1044,77 @@ describe("WebApplication host core", () => {
         getListenerPort: () => host.port,
       }),
     ).toThrow(/loopback/);
+  });
+});
+
+describe("WebApplication browser app controls", () => {
+  it("reports mounts, counts live sessions and returns how many sign-outs ended", async () => {
+    const host = await createHost();
+    expect(host.app.isMounted("test-browser")).toBe(true);
+    expect(host.app.isMounted("another-listener")).toBe(false);
+    expect(host.app.getPublicOrigin()).toBeNull();
+    expect(host.app.countSessions()).toBe(0);
+
+    await pair(host);
+    await pair(host);
+    expect(host.app.countSessions()).toBe(2);
+    expect(host.app.countSessions("test-browser")).toBe(2);
+    expect(host.app.countSessions("another-listener")).toBe(0);
+
+    expect(host.app.revokeSessions("another-listener")).toBe(0);
+    expect(host.app.revokeSessions()).toBe(2);
+    expect(host.app.countSessions()).toBe(0);
+  });
+
+  it("signs a browser in from a one-use link and out again", async () => {
+    const host = await createHost();
+    const access: BrowserAppAccess = {
+      getApplication: () => host.app,
+      resolveListener: () => ({ origin: host.origin, audience: "test-browser" }),
+      offMessage: "off",
+      noListenerMessage: "no listener",
+    };
+
+    const link = createBrowserAppSignInLink(access);
+    expect(link.appUrl).toBe(`${host.origin}/app/`);
+    const url = new URL(link.url);
+    expect(`${url.origin}${url.pathname}`).toBe(`${host.origin}/app/`);
+    expect(url.search).toBe("");
+    const code = readBrowserAppSignInCode(url.hash);
+    expect(code).toBeTruthy();
+
+    const { cookie } = await pair(host, code!);
+    expect(cookie).toContain("=");
+    expect(getBrowserAppStatus(access)).toEqual({
+      enabled: true,
+      appUrl: `${host.origin}/app/`,
+      remote: false,
+      signedInBrowsers: 1,
+    });
+
+    // The code works once.
+    const reused = await request(host, {
+      path: `${WEB_API_PATH}/session/pair`,
+      method: "POST",
+      headers: { Origin: host.origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    expect(reused.status).toBeGreaterThanOrEqual(400);
+
+    expect(signOutBrowserApp(access)).toEqual({ signedOut: 1 });
+    expect(getBrowserAppStatus(access).signedInBrowsers).toBe(0);
+  });
+
+  it("refuses a link when no listener serves the app", async () => {
+    const host = await createHost();
+    const access: BrowserAppAccess = {
+      getApplication: () => host.app,
+      resolveListener: () => ({ origin: host.origin, audience: "not-mounted" }),
+      offMessage: "off",
+      noListenerMessage: "Nothing is serving the browser app.",
+    };
+    expect(() => createBrowserAppSignInLink(access)).toThrow("Nothing is serving the browser app.");
+    expect(getBrowserAppStatus(access)).toMatchObject({ enabled: true, signedInBrowsers: 0 });
+    expect(getBrowserAppStatus(access).appUrl).toBeUndefined();
   });
 });

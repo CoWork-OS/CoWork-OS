@@ -379,6 +379,24 @@ describe("integration_setup tool", () => {
     expect(mocks.installServer).not.toHaveBeenCalled();
   });
 
+  it("refuses a password manager reference written by the agent", async () => {
+    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
+
+    const outcome = await registry
+      .executeTool("integration_setup", {
+        action: "configure",
+        provider: "resend",
+        api_key: "op://Private/Bank/password",
+      })
+      .then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+      );
+
+    expect(JSON.stringify(outcome)).toContain("can only be set by the user in Settings");
+    expect(mocks.installServer).not.toHaveBeenCalled();
+  });
+
   it("configures HubSpot with OAuth", async () => {
     const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
 

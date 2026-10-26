@@ -216,7 +216,7 @@ const URL_KEYS = [
   "azureAnthropic.endpoint",
   "imageGeneration.openrouter.baseUrl",
   "imageGeneration.azure.imageEndpoint",
-  "videoGeneration.azure.videoEndpoint",
+  "videoGeneration.openaiCompatible.baseUrl",
   "videoGeneration.kling.baseUrl",
 ] as const;
 

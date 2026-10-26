@@ -1,5 +1,14 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { pathToFileURL } from "url";
 import { describe, expect, it } from "vitest";
-import { isAllowedWebviewUrl, isLocalHtmlFileUrl, isLoopbackHttpUrl } from "../webview-url-policy";
+import {
+  isAllowedWebviewUrl,
+  isCanonicalLocalFileUrl,
+  isLocalHtmlFileUrl,
+  isLoopbackHttpUrl,
+} from "../webview-url-policy";
 
 describe("webview URL policy", () => {
   it("allows standard browser and app preview schemes", () => {
@@ -44,5 +53,33 @@ describe("webview URL policy", () => {
     expect(isAllowedWebviewUrl("data:text/html,<h1>x</h1>")).toBe(false);
     expect(isAllowedWebviewUrl("not a url")).toBe(false);
     expect(isAllowedWebviewUrl("")).toBe(false);
+  });
+
+  it("accepts a local file URL only when it names its own canonical path", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "webview-canonical-"));
+    try {
+      const canonicalRoot = fs.realpathSync.native(root);
+      const pagePath = path.join(canonicalRoot, "index.html");
+      fs.writeFileSync(pagePath, "<h1>page</h1>");
+      fs.symlinkSync(pagePath, path.join(canonicalRoot, "link.html"));
+
+      expect(isCanonicalLocalFileUrl(pathToFileURL(pagePath).href)).toBe(true);
+      expect(
+        isCanonicalLocalFileUrl(pathToFileURL(path.join(canonicalRoot, "link.html")).href),
+      ).toBe(false);
+      expect(
+        isCanonicalLocalFileUrl(pathToFileURL(path.join(canonicalRoot, "missing.html")).href),
+      ).toBe(false);
+      expect(isCanonicalLocalFileUrl("file://fileserver/share/index.html")).toBe(false);
+      expect(isCanonicalLocalFileUrl("https://example.com/index.html")).toBe(false);
+      if (canonicalRoot !== root) {
+        // macOS: os.tmpdir() sits under the /var -> /private/var alias.
+        expect(isCanonicalLocalFileUrl(pathToFileURL(path.join(root, "index.html")).href)).toBe(
+          false,
+        );
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -1622,7 +1622,7 @@ Access CoWork OS from any web browser — no Electron desktop app required.
 | **Security**            | Challenge-response authentication (extends existing control plane auth). HTTPS recommended for production                   |
 | **Existing foundation** | Control plane already serves a web dashboard at `http://127.0.0.1:18789/`. Web mode extends this to the full React UI       |
 
-An opt-in development preview of the browser application now exists (`COWORK_WEB_ENABLED=1`), without full desktop parity; see [Browser application preview](browser-preview.md).
+A preview of the browser application now exists, without full desktop parity. Turn it on in **Settings > Web Access > Full app in the browser** (or `COWORK_WEB_ENABLED=1` on a headless host), then use **Open in browser** or `cowork web`; see [Browser application preview](browser-preview.md).
 
 ---
 

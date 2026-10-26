@@ -4,6 +4,7 @@ import path from "node:path";
 import vm from "node:vm";
 import ts from "typescript";
 import { isTerminalTaskStatus } from "../src/shared/task-status";
+import { describeUserActionStop } from "../src/cli/run-wait";
 
 type WaitForTerminalTask = (
   daemon: { getTaskById(id: string): Promise<Record<string, unknown> | undefined> },
@@ -26,6 +27,7 @@ function loadWaitForTerminalTask(writeEvent = vi.fn(), writeError = vi.fn()): Wa
   }).outputText;
   return vm.runInNewContext(`${javascript}\nwaitForTerminalTask`, {
     describePactSignInPause: async () => null,
+    describeUserActionStop,
     isTerminalTaskStatus,
     writeEvent,
     writeError,

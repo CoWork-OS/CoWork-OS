@@ -5,6 +5,7 @@ import {
   getBrowserCredentialService,
 } from "./browser/credentials/browser-credential-service";
 import { registerBrowserVaultIpc } from "./browser/credentials/browser-vault-ipc";
+import { registerSecretSourcesIpc } from "./security/secret-references/secret-sources-ipc";
 import { BROWSER_VAULT_IPC } from "../shared/browser-vault";
 import {
   parseCliApprovalResponse as getCliApprovalResponseArgv,
@@ -237,13 +238,26 @@ import { setMailboxForwardingServiceInstance } from "./mailbox/mailbox-forwardin
 import {
   ControlPlaneSettingsManager,
   setupControlPlaneHandlers,
+  setControlPlaneStartedListener,
   shutdownControlPlane,
   startControlPlaneFromSettings,
   getControlPlaneServer,
 } from "./control-plane";
 import { getAttentionService } from "./ipc/attention-handlers";
-import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
 import type { WebApplication } from "../host/web/WebApplication";
+import {
+  createBrowserAppSignInLink,
+  getBrowserAppStatus,
+  loopbackListenerOrigin,
+  registerBrowserAppControlMethods,
+  signOutBrowserApp,
+  type BrowserAppAccess,
+  type BrowserAppListener,
+} from "../host/services/browser-app-control";
+import {
+  desktopBrowserAppDeployment,
+  isDesktopBrowserAppEnabled,
+} from "./web-server/browser-app-settings";
 import { sanitizeTaskMessageParams } from "./control-plane/sanitize";
 import {
   getArgValue,
@@ -385,12 +399,90 @@ import {
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
 let browserWebApplication: WebApplication | null = null;
-let browserPairingControlPlane: ReturnType<typeof getControlPlaneServer> = null;
+/** The deployment the current browser application was built for; a change rebuilds it. */
+let browserWebDeploymentKey: string | null = null;
+/** Why the browser app could not start with the saved settings, shown in Settings. */
+let browserWebApplicationError: string | undefined;
+/** Control Plane servers that carry the browser app methods (each registers them once). */
+const browserAppMethodServers = new WeakSet<object>();
+/** Which application each listener currently serves, so an unchanged app is not remounted. */
+const browserAppListenerTargets = new WeakMap<object, WebApplication | null>();
 let webAccessServerRef: WebAccessServer | null = null;
+/** Serializes attach calls from startup, Settings saves, and Control Plane restarts. */
+let browserWebAttachQueue: Promise<void> = Promise.resolve();
 
-async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): Promise<void> {
-  if (!isBrowserWebEnabled()) return;
+function resolveDesktopBrowserAppListener(): BrowserAppListener | null {
+  const application = browserWebApplication;
+  if (!application) return null;
+  const publicOrigin = application.getPublicOrigin();
+  if (application.isMounted("web-access") && webAccessServerRef) {
+    const { host, port } = webAccessServerRef.getConfig();
+    const status = webAccessServerRef.getStatus();
+    return {
+      origin: publicOrigin ?? loopbackListenerOrigin(host, status.port ?? port),
+      audience: "web-access",
+    };
+  }
+  const address = getControlPlaneServer()?.getAddress();
+  if (application.isMounted("control-plane") && address) {
+    return {
+      origin: publicOrigin ?? loopbackListenerOrigin(address.host, address.port),
+      audience: "control-plane",
+    };
+  }
+  return null;
+}
+
+const desktopBrowserAppAccess: BrowserAppAccess = {
+  getApplication: () => browserWebApplication,
+  resolveListener: resolveDesktopBrowserAppListener,
+  offMessage:
+    "The browser app is off. Turn it on in CoWork OS under Settings > Web Access > Full app in the browser.",
+  noListenerMessage:
+    "Nothing is serving the browser app yet. Turn on Web Access in CoWork OS Settings.",
+};
+
+async function setListenerBrowserApp(
+  listener: { setWebApplication(application?: WebApplication): Promise<void> },
+  application: WebApplication | null,
+): Promise<void> {
+  if (browserAppListenerTargets.get(listener) === application) return;
+  browserAppListenerTargets.set(listener, application);
+  await listener.setWebApplication(application ?? undefined);
+}
+
+function attachBrowserWebApplication(webAccessServer?: WebAccessServer): Promise<void> {
+  const run = browserWebAttachQueue.then(() => attachBrowserWebApplicationNow(webAccessServer));
+  browserWebAttachQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function attachBrowserWebApplicationNow(webAccessServer?: WebAccessServer): Promise<void> {
+  const webAccess = webAccessServer ?? webAccessServerRef ?? undefined;
+  const controlPlane = getControlPlaneServer();
+  if (controlPlane && !browserAppMethodServers.has(controlPlane)) {
+    registerBrowserAppControlMethods(controlPlane, desktopBrowserAppAccess);
+    browserAppMethodServers.add(controlPlane);
+  }
+
+  const settings = webAccess?.getConfig() ?? DEFAULT_WEB_ACCESS_CONFIG;
+  const enabled = isDesktopBrowserAppEnabled(settings);
   try {
+    const deployment = desktopBrowserAppDeployment(settings);
+    const deploymentKey = JSON.stringify(deployment);
+
+    // Turning the app off or changing where browsers reach it ends every browser sign-in.
+    if (browserWebApplication && (!enabled || deploymentKey !== browserWebDeploymentKey)) {
+      const previous = browserWebApplication;
+      browserWebApplication = null;
+      browserWebDeploymentKey = null;
+      if (controlPlane) await setListenerBrowserApp(controlPlane, null);
+      if (webAccess) await setListenerBrowserApp(webAccess, null);
+      await previous.close();
+    }
+    browserWebApplicationError = undefined;
+    if (!enabled) return;
+
     if (!browserWebApplication) {
       // Loaded only when browser web access is enabled; most desktop runs never need them.
       const [{ createWebHostIdentity }, { createBrowserHostApplication }] = await Promise.all([
@@ -406,7 +498,7 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
       browserWebApplication = createBrowserHostApplication({
         db: dbManager.getDatabase(),
         webDirectory: path.join(app.getAppPath(), "dist", "web"),
-        deployment: webDeploymentFromEnv(),
+        deployment,
         identity,
         taskCommands: agentDaemon,
         agentDaemon,
@@ -417,19 +509,14 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         getEventTriggerService: () => eventTriggerService,
         getHeartbeatService: () => heartbeatService,
       });
+      browserWebDeploymentKey = deploymentKey;
     }
 
-    const controlPlane = getControlPlaneServer();
-    if (controlPlane?.isRunning && controlPlane !== browserPairingControlPlane) {
-      await controlPlane.setWebApplication(browserWebApplication);
-      controlPlane.registerMethod("web.pair", async (client) => {
-        if (!client.hasScope("admin")) throw new Error("Admin scope is required.");
-        return browserWebApplication!.createPairingCode("control-plane");
-      });
-      browserPairingControlPlane = controlPlane;
-    }
-    if (webAccessServer) await webAccessServer.setWebApplication(browserWebApplication);
+    if (controlPlane?.isRunning) await setListenerBrowserApp(controlPlane, browserWebApplication);
+    if (webAccess) await setListenerBrowserApp(webAccess, browserWebApplication);
   } catch (error) {
+    browserWebApplicationError =
+      error instanceof Error ? error.message : "The browser app could not start.";
     console.error("[BrowserWeb] Failed to attach browser application:", error);
   }
 }
@@ -4802,14 +4889,27 @@ if (isMacSafeStorageMigrationWorker) {
             console.error("[WebAccess] Failed to start enabled server:", error);
           }
         }
+        // A Control Plane started later from Settings serves the browser app too.
+        setControlPlaneStartedListener(() => attachBrowserWebApplication(webAccessServer));
         setupWebAccessHandlers(webAccessServer, {
           saveSettings: saveWebAccessSettings,
-          createPairingCode: isBrowserWebEnabled()
-            ? () => {
-                if (!browserWebApplication) throw new Error("Browser application is unavailable.");
-                return browserWebApplication.createPairingCode("web-access");
+          onSettingsApplied: () => attachBrowserWebApplication(webAccessServer),
+          browserApp: {
+            createPairingCode: () => {
+              const application = browserWebApplication;
+              if (!application) throw new Error(desktopBrowserAppAccess.offMessage);
+              if (!application.isMounted("web-access")) {
+                throw new Error(desktopBrowserAppAccess.noListenerMessage);
               }
-            : undefined,
+              return application.createPairingCode("web-access");
+            },
+            createSignInLink: () => createBrowserAppSignInLink(desktopBrowserAppAccess),
+            signOutAll: () => signOutBrowserApp(desktopBrowserAppAccess),
+            getStatus: () => ({
+              ...getBrowserAppStatus(desktopBrowserAppAccess),
+              ...(browserWebApplicationError ? { error: browserWebApplicationError } : {}),
+            }),
+          },
         });
         await attachBrowserWebApplication(webAccessServer);
 
@@ -5562,6 +5662,8 @@ if (isMacSafeStorageMigrationWorker) {
       audit: (taskId, data) => agentDaemon?.logEvent(taskId, "log", data),
     });
     registerBrowserVaultIpc(ipcMain, credentialService, isVaultOwner);
+    // Settings > System & Security > Password Managers (vault references for keys).
+    registerSecretSourcesIpc(ipcMain, isVaultOwner);
     registerBrowserCredentialsIpc({
       ipcMain,
       // Only the app's own window; never a page inside a browser tab.

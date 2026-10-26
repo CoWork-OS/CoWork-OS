@@ -9695,6 +9695,9 @@ export const IPC_CHANNELS = {
   WEBACCESS_SAVE_SETTINGS: "webaccess:saveSettings",
   WEBACCESS_GET_STATUS: "webaccess:getStatus",
   WEBACCESS_CREATE_PAIRING_CODE: "webaccess:createPairingCode",
+  WEBACCESS_CREATE_SIGN_IN_LINK: "webaccess:createSignInLink",
+  WEBACCESS_OPEN_BROWSER_APP: "webaccess:openBrowserApp",
+  WEBACCESS_SIGN_OUT_BROWSERS: "webaccess:signOutBrowsers",
 
   // Playwright QA (Automated Visual Testing)
   QA_GET_RUNS: "qa:getRuns",
@@ -10112,21 +10115,15 @@ export interface LLMSettingsData {
   };
   /** Text-to-video generation settings. Provider-specific config + routing. */
   videoGeneration?: {
-    defaultProvider?: "openai" | "azure" | "gemini" | "vertex" | "kling" | "local";
-    fallbackProvider?: "openai" | "azure" | "gemini" | "vertex" | "kling" | "local";
-    openai?: {
-      defaultModel?: string;
-      defaultDuration?: number;
-      defaultAspectRatio?: "16:9" | "9:16" | "1:1";
-      defaultResolution?: "480p" | "720p" | "1080p";
-    };
-    azure?: {
-      /** Dedicated API key for video (overrides the main Azure chat API key if set) */
-      videoApiKey?: string;
-      /** Dedicated endpoint for video (overrides the main Azure chat endpoint if set) */
-      videoEndpoint?: string;
-      videoDeployment?: string;
-      videoApiVersion?: string;
+    defaultProvider?: "openai-compatible" | "gemini" | "vertex" | "kling" | "local";
+    fallbackProvider?: "openai-compatible" | "gemini" | "vertex" | "kling" | "local";
+    /** Any service that speaks the OpenAI Videos API (`POST {baseUrl}/videos`). */
+    openaiCompatible?: {
+      apiKey?: string;
+      /** API root the `/videos` routes hang off, e.g. https://api.example.com/v1 */
+      baseUrl?: string;
+      /** Model name as the service documents it. */
+      model?: string;
       defaultDuration?: number;
       defaultAspectRatio?: "16:9" | "9:16" | "1:1";
       defaultResolution?: "480p" | "720p" | "1080p";

@@ -11,6 +11,8 @@ import {
   type DecisionSleep,
 } from "../decisions";
 import { normalizeDecisionApiKey } from "../decisions/http-client";
+import { looksLikeSecretReference } from "../../../shared/secret-references";
+import { resolveSecretValue } from "../../security/secret-references/resolver";
 
 const TYPESAFE_PATH = "/v1/systemone";
 const OPENROUTER_PATH = "/api/alpha/decisions";
@@ -178,15 +180,36 @@ export function createJevProvider(
     maxRetries: settings.maxRetries,
     ...factoryOptions,
   };
-  const provider =
+  const build = (apiKey: string): DecisionProvider =>
     resolved.providerType === "openrouter"
-      ? new OpenRouterDecisionProvider(options)
-      : new TypeSafeDecisionProvider(options);
+      ? new OpenRouterDecisionProvider({ ...options, apiKey })
+      : new TypeSafeDecisionProvider({ ...options, apiKey });
+  const provider = looksLikeSecretReference(resolved.apiKey)
+    ? decisionProviderWithSecretReference(resolved.apiKey, build)
+    : build(resolved.apiKey);
 
   return {
     provider,
     providerType: resolved.providerType,
     model: resolved.model,
+  };
+}
+
+/** Read a key stored as a vault reference on each call; rebuild the provider when it changes. */
+function decisionProviderWithSecretReference(
+  reference: string,
+  build: (apiKey: string) => DecisionProvider,
+): DecisionProvider {
+  let current: { apiKey: string; provider: DecisionProvider } | null = null;
+  const provider = async () => {
+    const apiKey = normalizeDecisionApiKey((await resolveSecretValue(reference)) || "");
+    if (!current || current.apiKey !== apiKey) current = { apiKey, provider: build(apiKey) };
+    return current.provider;
+  };
+  return {
+    decide: async (request, options) => (await provider()).decide(request, options),
+    testConnection: async (options) => (await provider()).testConnection(options),
+    health: async (options) => (await provider()).health(options),
   };
 }
 

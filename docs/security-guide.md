@@ -690,6 +690,7 @@ All these are stored encrypted in the database:
 | `guardrails`         | Safety limits and blocked patterns                                                |
 | `hooks`              | Automation hooks configuration                                                    |
 | `mcp`                | MCP server configurations                                                         |
+| `secret-sources`     | Tokens for reading password manager references (1Password, Bitwarden)             |
 | `secure-mcp-tunnels` | Secure MCP tunnel definitions and tunnel tokens                                   |
 | `acp`                | ACP-related persisted settings and lifecycle metadata                             |
 | `controlplane`       | Control plane settings, tokens, allowed browser origins, and proxy trust settings |
@@ -753,6 +754,19 @@ Your API keys are:
 4. Never logged or displayed in full
 5. Never passed to shell commands or subprocesses
 6. Checksummed for integrity verification
+
+A key field can instead hold a password manager reference (`op://`, `bws://`, `bw://`; see
+[Keys from a password manager](providers.md#keys-from-a-password-manager)). The value is read
+with the vault's own CLI, run without a shell, with closed input, a 30-second limit and a minimal
+environment that does not include other keys. It is held in memory for up to 10 minutes, never
+written to disk, and masked by exact value in command output, MCP tool results and memory.
+Errors name the reference and the fix but never include the CLI's output. The tokens that open a
+vault (1Password service account token, Bitwarden Secrets Manager access token) are stored in
+the encrypted `secret-sources` category and never sent back to the renderer; a Bitwarden master
+password is used once to unlock and not kept. MCP servers that inherit CoWork's environment do
+not inherit vault tokens such as `OP_SERVICE_ACCOUNT_TOKEN`, `BWS_ACCESS_TOKEN` or `BW_SESSION`.
+Only you can write a reference: the agent's `integration_setup` tool refuses one, because a
+reference reads whatever vault item it names.
 
 Saved provider credentials remain bound to their configured endpoint during model
 discovery, connection tests, and settings saves. Changing the destination requires

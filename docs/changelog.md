@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Open CoWork OS in any browser**: turn on **Settings > Web Access > Full app in the browser**, then choose **Open in browser**. The whole app opens signed in, with your workspace, chats, files, Git and terminal. No environment variable is needed any more.
+  - `cowork web` does the same from a terminal; `cowork web link` prints a sign-in link for another device.
+  - A sign-in link works once, for 90 seconds, and its code never reaches the server's logs.
+  - **Sign out all browsers** (or `cowork web sign-out`) ends every browser session at once.
+  - **Public HTTPS address** lets browsers on other devices sign in through Tailscale Serve or another HTTPS proxy on this computer.
+
+  See [Browser application preview](browser-preview.md).
+
 - **3D models with Meshy**: a pinned Meshy connector in **Settings → Connectors**. Ask for a model ("a low-poly treasure chest for my Godot game", "turn this photo into something I can print"), and the agent makes it with Meshy's 28 tools. They cover text, image and multi-view to 3D, texturing, remeshing, rigging, animation, format conversion and 3D-print prep. Replies show models as interactive 3D cards:
   - orbit and zoom, animation clips, wireframe and grid;
   - a progress ring while Meshy works;
@@ -25,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skill proposals ask you**: approving a `skill_proposal` shows the exact draft in an approval prompt and saves nothing without a yes, so the agent can no longer approve its own proposal. Writes to `.cowork/skills/**` and workspace skill files (`skills/*.json`) need approval even where ordinary edits are allowed. `add_behavioral_rule` and `set_expertise` are admin-only like the other persona tools. (#723)
 
 ### Changed
+
+- **OpenAI-compatible video provider replaces Sora**: OpenAI shut down its Videos API and the Sora 2 models on 24 September 2026, so the **OpenAI Sora 2** and **Azure OpenAI Sora 2** video providers are gone and an OpenAI API key no longer counts as a video provider. Settings > AI & Models > Video Model gains an **OpenAI-compatible** provider instead: point it at any service that speaks the OpenAI Videos API (base URL, model name, API key) for text-to-video and image-to-video. Saved Sora settings are ignored; Gemini Veo, Vertex AI Veo, Kling and the local model are unchanged.
 
 - **Waiting decisions no longer lapse after 5 minutes**: an approval card (in a session, on Today or in a chat channel) now stays answerable for 24 hours, and the task waits for you instead of being denied and carrying on without the action. Time spent waiting for your decision no longer counts against a tool's time limit or the task watchdog. A granted approval still has to be used within 5 minutes, unattended runs still deny instead of waiting, and high-impact requests still fail closed if the app restarts before you answer.
 

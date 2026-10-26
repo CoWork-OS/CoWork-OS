@@ -9,6 +9,8 @@
  *   is ordinary engineering text and must not hide a memory; it is informational only.
  */
 
+import { redactResolvedSecrets } from "../security/secret-references/known-secret-values";
+
 export const REDACTED_SECRET = "[REDACTED_SECRET]";
 
 interface SecretRule {
@@ -109,6 +111,13 @@ export function redactSecrets(text: string): SecretRedaction {
   let output = text;
   let count = 0;
   const kinds: string[] = [];
+  // Exact values read from vault references, which may not match any key shape below.
+  const withoutVaultValues = redactResolvedSecrets(output);
+  if (withoutVaultValues !== output) {
+    output = withoutVaultValues;
+    count += 1;
+    kinds.push("vault_reference_value");
+  }
   for (const rule of SECRET_RULES) {
     rule.pattern.lastIndex = 0;
     let hits = 0;

@@ -11,6 +11,10 @@ import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { WebAccessConfig, WebAccessStatus, DEFAULT_WEB_ACCESS_CONFIG } from "./types";
+import {
+  normalizeBrowserAppPublicOrigin,
+  storedBrowserAppPublicOrigin,
+} from "./browser-app-settings";
 import { WebApplication, type WebApplicationMount } from "../../host/web/WebApplication";
 import type { Duplex } from "stream";
 
@@ -33,6 +37,7 @@ export class WebAccessServer {
   private deps: WebAccessServerDeps;
   private startedAt?: number;
   private webApplicationMount: WebApplicationMount | null = null;
+  private browserAppMountError: string | undefined;
 
   constructor(config: Partial<WebAccessConfig>, deps: WebAccessServerDeps) {
     this.config = this.normalizeConfig(config);
@@ -115,6 +120,9 @@ export class WebAccessServer {
     return {
       running: !!this.server,
       browserApplication: !!this.server && !!this.webApplicationMount,
+      ...(this.server && this.browserAppMountError
+        ? { browserAppError: this.browserAppMountError }
+        : {}),
       url: this.server ? `http://${this.config.host}:${this.config.port}` : undefined,
       port: this.config.port,
       connectedClients: this.wsClients.size,
@@ -141,7 +149,12 @@ export class WebAccessServer {
   async applyConfig(updates: Partial<WebAccessConfig>): Promise<WebAccessConfig> {
     const previousConfig = { ...this.config };
     const wasRunning = !!this.server;
-    const nextConfig = this.normalizeConfig({ ...this.config, ...updates });
+    // A typed public address is checked here so Settings can say what is wrong with it.
+    const validatedUpdates =
+      updates.publicOrigin === undefined
+        ? updates
+        : { ...updates, publicOrigin: normalizeBrowserAppPublicOrigin(updates.publicOrigin) };
+    const nextConfig = this.normalizeConfig({ ...this.config, ...validatedUpdates });
     const needsRestart =
       wasRunning &&
       (previousConfig.host !== nextConfig.host || previousConfig.port !== nextConfig.port);
@@ -223,16 +236,26 @@ export class WebAccessServer {
   }
 
   private mountWebApplication(): void {
+    this.browserAppMountError = undefined;
     const webApplication = this.deps.webApplication;
     if (!webApplication?.enabled) return;
-    this.webApplicationMount = webApplication.mount({
-      audience: "web-access",
-      listenerHost: this.config.host,
-      getListenerPort: () => {
-        const address = this.server?.address();
-        return address && typeof address !== "string" ? address.port : undefined;
-      },
-    });
+    try {
+      this.webApplicationMount = webApplication.mount({
+        audience: "web-access",
+        listenerHost: this.config.host,
+        getListenerPort: () => {
+          const address = this.server?.address();
+          return address && typeof address !== "string" ? address.port : undefined;
+        },
+      });
+    } catch (error) {
+      // The browser app refuses some listeners (a LAN bind without an HTTPS proxy); the
+      // listener and its token API keep working without it, and Settings shows why.
+      this.webApplicationMount = null;
+      this.browserAppMountError =
+        error instanceof Error ? error.message : "The browser app could not use this listener.";
+      this.log("[WebAccess] Browser app not mounted:", this.browserAppMountError);
+    }
   }
 
   private authenticate(req: http.IncomingMessage): boolean {
@@ -427,6 +450,8 @@ export class WebAccessServer {
             .map((origin) => origin.trim())
             .filter(Boolean)
         : [...DEFAULT_WEB_ACCESS_CONFIG.allowedOrigins],
+      browserApp: merged.browserApp === true,
+      publicOrigin: storedBrowserAppPublicOrigin(merged.publicOrigin),
     };
 
     if (!normalized.token) {

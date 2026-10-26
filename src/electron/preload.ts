@@ -12,6 +12,12 @@ import {
   type BrowserVaultPrompt,
 } from "../shared/browser-vault";
 import {
+  SECRET_SOURCES_IPC,
+  type SecretReferenceTestResult,
+  type SecretSourcesSettingsUpdate,
+  type SecretSourcesStatus,
+} from "../shared/secret-references";
+import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
@@ -2522,6 +2528,35 @@ contextBridge.exposeInMainWorld("electronAPI", {
       success: boolean;
       error?: string;
       [key: string]: unknown;
+    }>,
+  // Settings > System & Security > Password Managers. No token or vault value comes back.
+  getSecretSourcesStatus: () =>
+    ipcRenderer.invoke(SECRET_SOURCES_IPC.status) as Promise<{
+      success: boolean;
+      status?: SecretSourcesStatus;
+      error?: string;
+    }>,
+  saveSecretSources: (update: SecretSourcesSettingsUpdate) =>
+    ipcRenderer.invoke(SECRET_SOURCES_IPC.save, update) as Promise<{
+      success: boolean;
+      status?: SecretSourcesStatus;
+      error?: string;
+    }>,
+  unlockBitwardenForKeys: (password: string) =>
+    ipcRenderer.invoke(SECRET_SOURCES_IPC.unlockBitwarden, { password }) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  lockBitwardenForKeys: () =>
+    ipcRenderer.invoke(SECRET_SOURCES_IPC.lockBitwarden) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  testSecretReference: (reference: string) =>
+    ipcRenderer.invoke(SECRET_SOURCES_IPC.test, { reference }) as Promise<{
+      success: boolean;
+      result?: SecretReferenceTestResult;
+      error?: string;
     }>,
   onBrowserVaultPromptChanged: (callback: () => void) => {
     const listener = () => callback();
@@ -6095,6 +6130,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
   getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
   createWebAccessPairingCode: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_CREATE_PAIRING_CODE),
+  createWebAccessSignInLink: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_CREATE_SIGN_IN_LINK),
+  openWebAccessBrowserApp: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_OPEN_BROWSER_APP),
+  signOutWebAccessBrowsers: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SIGN_OUT_BROWSERS),
 
   // Playwright QA APIs
   qaGetRuns: () => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUNS),
@@ -6750,6 +6788,23 @@ export interface ElectronAPI {
     command: BrowserVaultCommand,
   ) => Promise<{ success: boolean; error?: string; [key: string]: unknown }>;
   onBrowserVaultPromptChanged: (callback: () => void) => () => void;
+  getSecretSourcesStatus: () => Promise<{
+    success: boolean;
+    status?: SecretSourcesStatus;
+    error?: string;
+  }>;
+  saveSecretSources: (update: SecretSourcesSettingsUpdate) => Promise<{
+    success: boolean;
+    status?: SecretSourcesStatus;
+    error?: string;
+  }>;
+  unlockBitwardenForKeys: (password: string) => Promise<{ success: boolean; error?: string }>;
+  lockBitwardenForKeys: () => Promise<{ success: boolean; error?: string }>;
+  testSecretReference: (reference: string) => Promise<{
+    success: boolean;
+    result?: SecretReferenceTestResult;
+    error?: string;
+  }>;
   listBrowserLogins: (data: { workspaceId: string }) => Promise<BrowserLoginsResult>;
   listBrowserLoginsForPage: (data: {
     workspaceId: string;

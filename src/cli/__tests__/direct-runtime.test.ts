@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildDirectRuntimeLaunch,
+  forwardSignalsToChild,
+  onFirstStopSignal,
   resolveChildProcessExitCode,
   shouldRunDirectRunEntrypoint,
 } from "../direct-runtime";
@@ -191,5 +194,85 @@ describe("shouldRunDirectRunEntrypoint", () => {
         argv: ["Electron", "/path/to/app"],
       }),
     ).toBe(false);
+  });
+});
+
+describe("forwardSignalsToChild", () => {
+  it("passes SIGTERM and SIGHUP sent to the CLI on to the runner", () => {
+    const cli = new EventEmitter();
+    const runner = { kill: vi.fn(() => true) };
+
+    const forwarding = forwardSignalsToChild(runner, cli);
+    expect(forwarding.received()).toBeNull();
+    cli.emit("SIGTERM", "SIGTERM");
+    cli.emit("SIGHUP", "SIGHUP");
+
+    expect(runner.kill.mock.calls).toEqual([["SIGTERM"], ["SIGHUP"]]);
+    // The CLI was asked to stop, so it ends with the runner instead of carrying on.
+    expect(forwarding.received()).toBe("SIGHUP");
+  });
+
+  it("leaves SIGINT alone, since Ctrl+C already reaches the runner's process group", () => {
+    const cli = new EventEmitter();
+    const runner = { kill: vi.fn(() => true) };
+
+    const forwarding = forwardSignalsToChild(runner, cli);
+
+    expect(cli.listenerCount("SIGINT")).toBe(0);
+    cli.emit("SIGINT", "SIGINT");
+    expect(runner.kill).not.toHaveBeenCalled();
+    expect(forwarding.received()).toBeNull();
+  });
+
+  it("stops forwarding once the runner has closed", () => {
+    const cli = new EventEmitter();
+    const runner = { kill: vi.fn(() => true) };
+
+    forwardSignalsToChild(runner, cli).stop();
+    cli.emit("SIGTERM", "SIGTERM");
+
+    expect(runner.kill).not.toHaveBeenCalled();
+    expect(cli.listenerCount("SIGTERM")).toBe(0);
+    expect(cli.listenerCount("SIGHUP")).toBe(0);
+  });
+});
+
+describe("onFirstStopSignal", () => {
+  it("stops once when a process-group kill and the CLI both deliver SIGTERM", () => {
+    const runner = new EventEmitter();
+    const onStop = vi.fn();
+
+    onFirstStopSignal(onStop, runner);
+    runner.emit("SIGTERM", "SIGTERM");
+    runner.emit("SIGTERM", "SIGTERM");
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onStop).toHaveBeenCalledWith("SIGTERM");
+    // Still listening: a repeat with no listener would take the default action and kill the
+    // runner before its task is cancelled.
+    expect(runner.listenerCount("SIGTERM")).toBe(1);
+  });
+
+  it("treats SIGINT, SIGTERM and SIGHUP as one stop", () => {
+    const runner = new EventEmitter();
+    const onStop = vi.fn();
+
+    onFirstStopSignal(onStop, runner);
+    runner.emit("SIGHUP", "SIGHUP");
+    runner.emit("SIGINT", "SIGINT");
+    runner.emit("SIGTERM", "SIGTERM");
+
+    expect(onStop.mock.calls).toEqual([["SIGHUP"]]);
+  });
+
+  it("removes its listeners when the run ends", () => {
+    const runner = new EventEmitter();
+
+    const remove = onFirstStopSignal(vi.fn(), runner);
+    remove();
+
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+      expect(runner.listenerCount(signal)).toBe(0);
+    }
   });
 });

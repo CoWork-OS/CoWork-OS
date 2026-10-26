@@ -1,3 +1,5 @@
+import type { ChildProcess } from "child_process";
+import type { EventEmitter } from "events";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -26,6 +28,64 @@ export function resolveChildProcessExitCode(
   if (signal === "SIGTERM") return 143;
   if (signal) return 1;
   return code ?? 1;
+}
+
+/**
+ * Signals the CLI passes on to the direct runner it started. Sent to the CLI's pid alone, they
+ * would otherwise end only the CLI and leave the runner going, reparented to init and still
+ * holding the output pipe and the profile database. SIGINT is not forwarded: Ctrl+C in a terminal
+ * already reaches the whole foreground process group, runner included.
+ */
+export const FORWARDED_DIRECT_RUNNER_SIGNALS = ["SIGTERM", "SIGHUP"] as const;
+
+/**
+ * Forwards {@link FORWARDED_DIRECT_RUNNER_SIGNALS} to `child` until `stop` runs. `received` is
+ * the last signal passed on, if any: the CLI was asked to stop and should end with the runner.
+ */
+export function forwardSignalsToChild(
+  child: Pick<ChildProcess, "kill">,
+  target: Pick<EventEmitter, "on" | "off"> = process,
+): { stop: () => void; received: () => NodeJS.Signals | null } {
+  let received: NodeJS.Signals | null = null;
+  const forwarders = FORWARDED_DIRECT_RUNNER_SIGNALS.map((signal) => {
+    const forward = () => {
+      received = signal;
+      child.kill(signal);
+    };
+    target.on(signal, forward);
+    return { signal, forward };
+  });
+  return {
+    stop: () => {
+      for (const { signal, forward } of forwarders) target.off(signal, forward);
+    },
+    received: () => received,
+  };
+}
+
+/** Signals that stop a direct run. */
+export const DIRECT_RUNNER_STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/**
+ * Calls `onStop` for the first stop signal only, and keeps absorbing repeats until the returned
+ * function removes the listeners. Repeats are expected: a process-group kill reaches the runner
+ * directly and again through the CLI's forwarding, and with no listener left the repeat would
+ * kill the runner before its task is cancelled.
+ */
+export function onFirstStopSignal(
+  onStop: (signal: NodeJS.Signals) => void,
+  target: Pick<EventEmitter, "on" | "off"> = process,
+): () => void {
+  let stopped = false;
+  const listener = (signal: NodeJS.Signals) => {
+    if (stopped) return;
+    stopped = true;
+    onStop(signal);
+  };
+  for (const signal of DIRECT_RUNNER_STOP_SIGNALS) target.on(signal, listener);
+  return () => {
+    for (const signal of DIRECT_RUNNER_STOP_SIGNALS) target.off(signal, listener);
+  };
 }
 
 export function shouldRunDirectRunEntrypoint(options: {

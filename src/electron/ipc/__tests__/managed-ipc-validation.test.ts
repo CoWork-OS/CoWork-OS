@@ -48,11 +48,15 @@ describe("managed IPC ID validation", () => {
     it.each(Object.entries(MANAGED_ID_HANDLERS))(
       "%s validates its ID before calling the service",
       (channel, context) => {
-        const start = source.search(new RegExp(`ipcMain\\.handle\\(\\s*IPC_CHANNELS\\.${channel},`));
+        const start = source.search(
+          new RegExp(`ipcMain\\.handle\\(\\s*IPC_CHANNELS\\.${channel},`),
+        );
         expect(start, channel).toBeGreaterThanOrEqual(0);
         const next = source.indexOf("ipcMain.handle(", start + 1);
         const body = source.slice(start, next === -1 ? undefined : next);
-        const validation = body.search(new RegExp(`validateInput\\(StringIdSchema, \\w+, "${context}"\\)`));
+        const validation = body.search(
+          new RegExp(`validateInput\\(StringIdSchema, \\w+, "${context}"\\)`),
+        );
         const serviceCall = body.indexOf("managedSessionService.");
         expect(validation, channel).toBeGreaterThan(0);
         expect(serviceCall, channel).toBeGreaterThan(validation);

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stopping `cowork run` stops its task**: a `SIGTERM` or `SIGHUP` sent to the `cowork` process alone now reaches the local task runner, which cancels the task and exits with code `130`. Before, the runner kept going without `cowork`, holding the output pipe and the profile database open, so a script waiting for the output to close hung too. A stopped run also no longer prints `The database connection is not open`. See [Runtime Model](docs/cli.md#runtime-model).
 - **`cowork run` no longer waits forever on a missing access profile**: an `--access-profile` id that doesn't exist, or a default profile that was deleted, now stops the run before the task is created, with exit code 1, the profiles that exist and where to create one (**Settings > System & Security > Permissions**). Before, the task paused for user action and `cowork run` kept waiting with no output, even with `--exit-on-input`. `--exit-on-input` now stops with exit code 3 at any pause that needs a person, not only a PACT sign-in. `--timeout-ms` now limits a local run and cancels the task when it runs out; before, it was accepted but never reached the task runner. See [Access Profiles](docs/cli.md#access-profiles).
 
 ### Security

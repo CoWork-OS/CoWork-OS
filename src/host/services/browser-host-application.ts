@@ -70,6 +70,7 @@ import type { HeartbeatService } from "../../electron/agents/HeartbeatService";
 import type { NotificationService } from "../../electron/notifications/service";
 import { BrowserDesktopRpcService } from "./browser-desktop-rpc";
 import { createBrowserCoreDefinitions } from "./browser-core-methods";
+import { createBrowserHostFolderDefinitions } from "./browser-host-folder-methods";
 import { createBrowserSettingsDefinitions } from "./browser-settings-methods";
 import { createBrowserMCPDefinitions } from "./browser-mcp-methods";
 import { createBrowserIntegrationDefinitions } from "./browser-integration-methods";
@@ -217,6 +218,10 @@ export function createBrowserHostApplication(
     ...createBrowserCoreDefinitions({
       db: options.db,
       agentDaemon: options.agentDaemon ?? {},
+      resolveWorkspace: resolveBrowserWorkspace,
+    }),
+    ...createBrowserHostFolderDefinitions({
+      workspaces: workspaceRepository,
       resolveWorkspace: resolveBrowserWorkspace,
     }),
     ...createBrowserAwarenessDefinitions({

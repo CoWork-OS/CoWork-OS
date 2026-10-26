@@ -166,7 +166,12 @@ describe("ChatGPT subscription prompt caching through the installed transport", 
     expect(a.instructions).toBe("Stable instructions");
     expect(b.instructions).toBe(a.instructions);
     expect(a.input.slice(0, -1)).toEqual(b.input.slice(0, a.input.length - 1));
-    expect(a.input[0].content[0].text).toBe("Read the fixture");
+    // pi-ai declares tools as Codex does: an additional_tools item at the head of the input.
+    expect(a.input[0]).toMatchObject({ type: "additional_tools", role: "developer" });
+    expect(a.input[0].tools.map((tool: { name: string }) => tool.name)).toEqual(["lookup"]);
+    expect(a.input.find((item: { role?: string }) => item.role === "user").content[0].text).toBe(
+      "Read the fixture",
+    );
     expect(a.input.at(-2)).toMatchObject({
       type: "function_call_output",
       call_id: "call_fixture",
@@ -205,7 +210,10 @@ describe("ChatGPT subscription prompt caching through the installed transport", 
       expect(body).not.toHaveProperty("prompt_cache_key");
       expect(headers["session-id"]).toBeUndefined();
       expect(body.instructions).toBe(request.system);
-      expect(body.input).toHaveLength(1);
+      // Only the tool declaration and the user turn: no instruction item is left behind.
+      expect(
+        body.input.map((item: { type?: string; role?: string }) => item.type ?? item.role),
+      ).toEqual(["additional_tools", "user"]);
     }
   });
 });

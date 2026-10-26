@@ -19,7 +19,7 @@ import {
 
 // ── Provider & model types ────────────────────────────────────────────────────
 
-export type VideoProvider = "openai" | "azure" | "gemini" | "vertex" | "kling" | "local";
+export type VideoProvider = "openai-compatible" | "gemini" | "vertex" | "kling" | "local";
 
 export type VideoGenerationMode =
   | "text_to_video"
@@ -125,187 +125,39 @@ function generateWithLocal(args: AdapterArgs): AdapterResult {
   return { success: true, jobId, pending: true, model: "wan2.2-ti2v-5b" };
 }
 
-// ── OpenAI Sora 2 ─────────────────────────────────────────────────────────────
-
-async function generateWithOpenAI(args: AdapterArgs): Promise<AdapterResult> {
-  console.log("[VideoGenerator] generateWithOpenAI called");
-  const apiKey = args.settings.openai?.apiKey?.trim();
-  if (!apiKey) return { success: false, error: "OpenAI API key not configured." };
-
-  const vCfg = args.settings.videoGeneration?.openai;
-  const model = args.request.model || vCfg?.defaultModel || "sora-2";
-  const duration = args.request.duration ?? vCfg?.defaultDuration ?? 5;
-  const aspectRatio = args.request.aspectRatio ?? vCfg?.defaultAspectRatio ?? "16:9";
-
-  const mode = args.request.mode ?? "text_to_video";
-  if (mode !== "text_to_video" && mode !== "image_to_video") {
-    return { success: false, error: `OpenAI Sora does not support mode "${mode}".` };
-  }
-
-  const body: Record<string, unknown> = {
-    model,
-    prompt: args.request.prompt,
-    n: 1,
-    size: aspectRatioToSoraSize(aspectRatio),
-    duration,
-  };
-
-  if (mode === "image_to_video" && args.request.referenceImagePath) {
-    const imgData = fs.readFileSync(args.request.referenceImagePath);
-    body.image = { b64_json: imgData.toString("base64") };
-  }
-
-  args.networkPolicyGuard?.("https://api.openai.com/v1/video/generations", "generate_video");
-  const response = await fetch("https://api.openai.com/v1/video/generations", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => String(response.status));
-    return { success: false, error: `OpenAI Sora error ${response.status}: ${errText}` };
-  }
-
-  const data = (await response.json()) as {
-    id?: string;
-    status?: string;
-    data?: Array<{ url?: string; b64_json?: string }>;
-  };
-
-  const jobId = data.id;
-
-  if (data.status === "queued" || data.status === "running" || (!data.data && jobId)) {
-    return { success: true, jobId, pending: true, model };
-  }
-
-  if (data.data && data.data.length > 0) {
-    const outputPaths = await downloadVideoItems(
-      data.data,
-      args.outputDir,
-      args.request.filename,
-      args.outputPathGuard,
-      args.networkPolicyGuard,
-    );
-    return { success: true, jobId, outputPaths, model };
-  }
-
-  return { success: false, jobId, error: "No video data in OpenAI response." };
-}
-
-async function pollOpenAIJob(
-  jobId: string,
-  apiKey: string,
-  outputDir: string,
-  filename?: string,
-  outputPathGuard?: OutputPathGuard,
-  networkPolicyGuard?: NetworkPolicyGuard,
-): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
-  networkPolicyGuard?.(
-    `https://api.openai.com/v1/video/generations/${jobId}`,
-    "get_video_generation_job",
-  );
-  const response = await fetch(`https://api.openai.com/v1/video/generations/${jobId}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!response.ok) {
-    return { jobId, provider: "openai", status: "failed", error: `HTTP ${response.status}` };
-  }
-  const data = (await response.json()) as {
-    id?: string;
-    status?: string;
-    data?: Array<{ url?: string; b64_json?: string }>;
-    error?: { message?: string };
-  };
-  const status = mapOpenAIStatus(data.status);
-  if (status === "succeeded" && data.data?.length) {
-    const outputPaths = await downloadVideoItems(
-      data.data,
-      outputDir,
-      filename,
-      outputPathGuard,
-      networkPolicyGuard,
-    );
-    return { jobId, provider: "openai", status, outputPaths };
-  }
-  return {
-    jobId,
-    provider: "openai",
-    status,
-    error: data.error?.message,
-  };
-}
-
-function mapOpenAIStatus(s?: string): VideoGenerationJobStatus["status"] {
-  if (s === "succeeded") return "succeeded";
-  if (s === "failed") return "failed";
-  if (s === "cancelled") return "cancelled";
-  if (s === "running") return "running";
-  return "pending";
-}
-
-function aspectRatioToSoraSize(ar: VideoAspectRatio): string {
-  if (ar === "9:16") return "480x854";
-  if (ar === "1:1") return "480x480";
-  return "854x480"; // 16:9
-}
-
-// ── Azure OpenAI Sora 2 ───────────────────────────────────────────────────────
-// Current Azure Sora 2 overview docs use the OpenAI-style v1 video API:
-//   POST   {base}/openai/v1/videos?api-version=preview
-//   GET    {base}/openai/v1/videos/{videoId}?api-version=preview
-//   GET    {base}/openai/v1/videos/{videoId}/content?api-version=preview&variant=video
+// ── OpenAI-compatible Videos API ──────────────────────────────────────────────
+// Any service that implements the OpenAI Videos API shape:
+//   POST   {baseUrl}/videos                        (JSON, or multipart with input_reference)
+//   GET    {baseUrl}/videos/{videoId}
+//   GET    {baseUrl}/videos/{videoId}/content?variant=video
 //
-// Notes:
-// - Azure's preview REST reference still documents an older
-//   `/openai/v1/video/generations/jobs` flow, but Sora 2 itself currently uses
-//   `/openai/v1/videos`.
-// - The live Sora 2 endpoint is strict about payload types: `seconds` must be
-//   one of "4", "8", or "12" as a string.
+// OpenAI removed its own Videos API and the Sora 2 models on 2026-09-24, so
+// this adapter ships with no built-in endpoint: the user points it at whichever
+// service they use (base URL, model and API key in Settings → Video Model).
 
 /**
- * Normalize any Azure endpoint the user may have entered to the base URL.
- * e.g. "https://foo.openai.azure.com/openai/v1/videos" → "https://foo.openai.azure.com"
- * e.g. "https://foo.openai.azure.com" → "https://foo.openai.azure.com"
+ * Normalize the configured base URL to the API root the `/videos` routes hang off.
+ * e.g. "https://api.example.com/v1/videos/" → "https://api.example.com/v1"
  */
-function normalizeAzureBaseEndpoint(endpoint: string): string {
-  const idx = endpoint.indexOf("/openai/");
-  if (idx !== -1) return endpoint.slice(0, idx);
-  return endpoint.replace(/\/$/, "");
+export function normalizeOpenAICompatibleVideoBaseUrl(raw: string): string {
+  let base = raw.trim().replace(/\/+$/, "");
+  if (/\/videos$/i.test(base)) base = base.slice(0, -"/videos".length);
+  return base.replace(/\/+$/, "");
 }
 
-function normalizeAzureVideoModel(
-  model?: string,
-  configuredModel?: string,
-): "sora-2" | "sora-2-pro" {
-  const raw = model?.trim() || configuredModel?.trim() || "";
-  const lowered = raw.toLowerCase();
-
-  if (lowered === "sora-2-pro") return "sora-2-pro";
-  if (lowered === "sora" || lowered === "sora-2") return "sora-2";
-
-  if (raw) {
-    console.warn(
-      `[VideoGenerator] Ignoring incompatible Azure video model override "${raw}" and using Sora 2.`,
-    );
-  }
-  return "sora-2";
+function resolveOpenAICompatibleVideoConfig(
+  settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+): { apiKey: string; baseUrl: string } | null {
+  const cfg = settings.videoGeneration?.openaiCompatible;
+  const apiKey = cfg?.apiKey?.trim();
+  const rawBaseUrl = cfg?.baseUrl?.trim();
+  if (!apiKey || !rawBaseUrl) return null;
+  const baseUrl = normalizeOpenAICompatibleVideoBaseUrl(rawBaseUrl);
+  if (!/^https?:\/\//i.test(baseUrl)) return null;
+  return { apiKey, baseUrl };
 }
 
-function normalizeAzureVideoApiVersion(apiVersion?: string): string {
-  const raw = apiVersion?.trim();
-  if (!raw) return "preview";
-
-  // Azure Sora's video endpoint expects the preview label rather than the
-  // dated preview API versions commonly used by chat/completions settings.
-  if (/^\d{4}-\d{2}-\d{2}-preview$/i.test(raw)) return "preview";
-  return raw;
-}
-
-function aspectRatioAndResolutionToAzureVideoSize(
+function aspectRatioAndResolutionToVideoSize(
   aspectRatio: VideoAspectRatio,
   resolution?: VideoResolution,
 ):
@@ -342,60 +194,86 @@ function imageMimeTypeForPath(filePath: string): string {
   return "image/jpeg";
 }
 
-function normalizeAzureVideoSeconds(seconds?: number): "4" | "8" | "12" {
-  const value = Number.isFinite(seconds) ? Math.max(1, Math.round(seconds as number)) : 4;
-  if (value <= 6) return "4";
-  if (value <= 10) return "8";
-  return "12";
+/** The Videos API takes `seconds` as a string; each service documents its own range. */
+function normalizeVideoSeconds(seconds?: number): string {
+  const value = Number.isFinite(seconds) ? Math.max(1, Math.round(seconds as number)) : 5;
+  return String(value);
 }
 
-function mapAzureVideoStatus(status?: string): VideoGenerationJobStatus["status"] {
-  if (status === "completed") return "succeeded";
-  if (status === "failed") return "failed";
-  if (status === "in_progress") return "running";
+function mapVideosApiStatus(status?: string): VideoGenerationJobStatus["status"] {
+  const s = status?.trim().toLowerCase();
+  if (s === "completed" || s === "succeeded" || s === "success" || s === "done") return "succeeded";
+  if (s === "failed" || s === "error") return "failed";
+  if (s === "cancelled" || s === "canceled") return "cancelled";
+  if (s === "in_progress" || s === "running" || s === "processing") return "running";
   return "pending";
 }
 
-async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
-  const azCfg = args.settings.azure;
-  const vCfg = args.settings.videoGeneration?.azure;
-  // Prefer dedicated video credentials; fall back to main Azure chat credentials
-  const apiKey = vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim();
-  const rawEndpoint = vCfg?.videoEndpoint?.trim() || azCfg?.endpoint?.trim();
-  const model = normalizeAzureVideoModel(args.request.model, vCfg?.videoDeployment);
-  const apiVersion = normalizeAzureVideoApiVersion(vCfg?.videoApiVersion);
+/** A finished job may link its file directly instead of serving `/content`. */
+function findVideoUrlInStatus(data: Record<string, unknown>): string | undefined {
+  const candidates: unknown[] = [
+    data.url,
+    data.video_url,
+    (data.output as Record<string, unknown> | undefined)?.url,
+    (data.data as Array<Record<string, unknown>> | undefined)?.[0]?.url,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && /^https?:\/\//i.test(candidate)) return candidate;
+  }
+  return undefined;
+}
 
-  if (!apiKey || !rawEndpoint) {
+function describeVideosApiError(data: Record<string, unknown>): string | undefined {
+  const error = data.error;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return undefined;
+}
+
+async function generateWithOpenAICompatible(args: AdapterArgs): Promise<AdapterResult> {
+  const config = resolveOpenAICompatibleVideoConfig(args.settings);
+  if (!config) {
     return {
       success: false,
-      error: "Azure OpenAI API key and endpoint are required for video generation.",
+      error:
+        "OpenAI-compatible video service is not configured (base URL and API key are required).",
     };
   }
 
-  const base = normalizeAzureBaseEndpoint(rawEndpoint);
-  const url = `${base}/openai/v1/videos?api-version=${encodeURIComponent(apiVersion)}`;
-
-  const duration = args.request.duration ?? vCfg?.defaultDuration ?? 5;
-  const aspectRatio = args.request.aspectRatio ?? vCfg?.defaultAspectRatio ?? "16:9";
-  const resolution = args.request.resolution ?? vCfg?.defaultResolution ?? "720p";
-  const size = aspectRatioAndResolutionToAzureVideoSize(aspectRatio, resolution);
-  const seconds = normalizeAzureVideoSeconds(duration);
+  const vCfg = args.settings.videoGeneration?.openaiCompatible;
+  const model = args.request.model?.trim() || vCfg?.model?.trim();
+  if (!model) {
+    return {
+      success: false,
+      error: "OpenAI-compatible video model is not configured. Set the model name in Settings.",
+    };
+  }
 
   const mode = args.request.mode ?? "text_to_video";
   if (mode !== "text_to_video" && mode !== "image_to_video") {
-    return { success: false, error: `Azure Sora does not support mode "${mode}".` };
+    return { success: false, error: `OpenAI-compatible video does not support mode "${mode}".` };
   }
 
+  const url = `${config.baseUrl}/videos`;
+  const duration = args.request.duration ?? vCfg?.defaultDuration ?? 5;
+  const aspectRatio = args.request.aspectRatio ?? vCfg?.defaultAspectRatio ?? "16:9";
+  const resolution = args.request.resolution ?? vCfg?.defaultResolution ?? "720p";
+  const size = aspectRatioAndResolutionToVideoSize(aspectRatio, resolution);
+  const seconds = normalizeVideoSeconds(duration);
+
   const body: Record<string, unknown> = {
-    prompt: args.request.prompt,
     model,
+    prompt: args.request.prompt,
     size,
     seconds,
   };
 
   let requestInit: RequestInit;
   if (mode === "image_to_video" && args.request.referenceImagePath) {
-    // Sora takes the first frame as a multipart `input_reference` file whose
+    // The first frame goes as a multipart `input_reference` file whose
     // dimensions must equal `size`, so the picture is center-cropped to fit.
     const [width, height] = size.split("x").map(Number);
     const fitted = coverImageToSize(args.request.referenceImagePath, width, height);
@@ -418,19 +296,23 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
       reference.name,
     );
     console.log(
-      `[VideoGenerator][Azure] POST ${url}`,
+      `[VideoGenerator][OpenAI-compatible] POST ${url}`,
       JSON.stringify({
         ...body,
         input_reference: `${reference.name} (${reference.buffer.length} bytes)`,
       }),
     );
     // fetch sets the multipart boundary itself.
-    requestInit = { method: "POST", headers: { "api-key": apiKey }, body: form };
-  } else {
-    console.log(`[VideoGenerator][Azure] POST ${url}`, JSON.stringify(body));
     requestInit = {
       method: "POST",
-      headers: { "api-key": apiKey, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      body: form,
+    };
+  } else {
+    console.log(`[VideoGenerator][OpenAI-compatible] POST ${url}`, JSON.stringify(body));
+    requestInit = {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     };
   }
@@ -442,20 +324,40 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
     const errText = await response.text().catch(() => String(response.status));
     return {
       success: false,
-      error: `Azure Sora error ${response.status}: ${errText} — URL: ${url}`,
+      error: `OpenAI-compatible video error ${response.status}: ${errText} — URL: ${url}`,
     };
   }
 
-  const data = (await response.json()) as { id?: string; status?: string };
-  const jobId = data.id;
+  const data = (await response.json()) as Record<string, unknown> & {
+    id?: string;
+    status?: string;
+  };
+  const jobId = typeof data.id === "string" ? data.id : undefined;
   if (!jobId) {
-    return { success: false, error: `Azure Sora: no job ID in response: ${JSON.stringify(data)}` };
+    return {
+      success: false,
+      error: `OpenAI-compatible video: no job ID in response: ${JSON.stringify(data)}`,
+    };
+  }
+
+  if (mapVideosApiStatus(data.status) === "succeeded") {
+    const finished = await pollOpenAICompatibleJob(
+      jobId,
+      args.settings,
+      args.outputDir,
+      args.request.filename,
+      args.outputPathGuard,
+      args.networkPolicyGuard,
+    );
+    if (finished.status === "succeeded") {
+      return { success: true, jobId, outputPaths: finished.outputPaths, model };
+    }
   }
 
   return { success: true, jobId, pending: true, model };
 }
 
-async function pollAzureJob(
+async function pollOpenAICompatibleJob(
   jobId: string,
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
   outputDir: string,
@@ -463,60 +365,77 @@ async function pollAzureJob(
   outputPathGuard?: OutputPathGuard,
   networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
-  const azCfg = settings.azure;
-  const vCfg = settings.videoGeneration?.azure;
-  const apiKey = (vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim()) ?? "";
-  const rawEndpoint = (vCfg?.videoEndpoint?.trim() || azCfg?.endpoint?.trim()) ?? "";
-  const apiVersion = normalizeAzureVideoApiVersion(vCfg?.videoApiVersion);
-  const base = normalizeAzureBaseEndpoint(rawEndpoint);
+  const provider: VideoProvider = "openai-compatible";
+  const config = resolveOpenAICompatibleVideoConfig(settings);
+  if (!config) {
+    return {
+      jobId,
+      provider,
+      status: "failed",
+      error: "OpenAI-compatible video service is not configured.",
+    };
+  }
 
-  const statusUrl = `${base}/openai/v1/videos/${jobId}?api-version=${encodeURIComponent(apiVersion)}`;
-  console.log(`[VideoGenerator][Azure] GET ${statusUrl}`);
+  const authHeaders = { Authorization: `Bearer ${config.apiKey}` };
+  const statusUrl = `${config.baseUrl}/videos/${encodeURIComponent(jobId)}`;
+  console.log(`[VideoGenerator][OpenAI-compatible] GET ${statusUrl}`);
 
   networkPolicyGuard?.(statusUrl, "get_video_generation_job");
-  const response = await fetch(statusUrl, { headers: { "api-key": apiKey } });
+  const response = await fetch(statusUrl, { headers: authHeaders });
   if (!response.ok) {
     return {
       jobId,
-      provider: "azure",
+      provider,
       status: "failed",
       error: `HTTP ${response.status} polling ${statusUrl}`,
     };
   }
 
-  const data = (await response.json()) as {
+  const data = (await response.json()) as Record<string, unknown> & {
     status?: string;
-    error?: { message?: string; code?: string };
+    progress?: unknown;
   };
-
-  const status = mapAzureVideoStatus(data.status);
+  const status = mapVideosApiStatus(data.status);
+  const progressPercent = typeof data.progress === "number" ? data.progress : undefined;
 
   if (status === "succeeded") {
-    const videoUrl = `${base}/openai/v1/videos/${jobId}/content?api-version=${encodeURIComponent(apiVersion)}&variant=video`;
-    console.log(`[VideoGenerator][Azure] Downloading video from ${videoUrl}`);
-    networkPolicyGuard?.(videoUrl, "video_output_download");
-    const videoResponse = await fetch(videoUrl, {
-      headers: { "api-key": apiKey, Accept: "application/binary" },
+    const outputPath = buildOutputPath(outputDir, filename, "mp4");
+    outputPathGuard?.(outputPath);
+    const directUrl = findVideoUrlInStatus(data);
+    if (directUrl) {
+      await downloadUrlToFile(directUrl, outputPath, outputPathGuard, networkPolicyGuard);
+      return { jobId, provider, status: "succeeded", outputPaths: [outputPath] };
+    }
+
+    const contentUrl = `${statusUrl}/content?variant=video`;
+    console.log(`[VideoGenerator][OpenAI-compatible] Downloading video from ${contentUrl}`);
+    networkPolicyGuard?.(contentUrl, "video_output_download");
+    const videoResponse = await fetch(contentUrl, {
+      headers: { ...authHeaders, Accept: "video/mp4, application/octet-stream;q=0.9, */*;q=0.8" },
     });
     if (!videoResponse.ok) {
       return {
         jobId,
-        provider: "azure",
+        provider,
         status: "failed",
         error: `Failed to download video: HTTP ${videoResponse.status}`,
       };
     }
-
-    const outputPath = buildOutputPath(outputDir, filename, "mp4");
-    outputPathGuard?.(outputPath);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    const buffer = Buffer.from(await videoResponse.arrayBuffer());
-    fs.writeFileSync(outputPath, buffer);
-
-    return { jobId, provider: "azure", status: "succeeded", outputPaths: [outputPath] };
+    fs.writeFileSync(outputPath, Buffer.from(await videoResponse.arrayBuffer()));
+    return { jobId, provider, status: "succeeded", outputPaths: [outputPath] };
   }
 
-  return { jobId, provider: "azure", status, error: data.error?.message };
+  if (status === "failed" || status === "cancelled") {
+    return {
+      jobId,
+      provider,
+      status,
+      error: describeVideosApiError(data) ?? `Video generation ${status}.`,
+    };
+  }
+
+  return { jobId, provider, status, progressPercent };
 }
 
 // ── Gemini Veo 3.1 ───────────────────────────────────────────────────────────
@@ -956,29 +875,6 @@ async function pollKlingJob(
 
 // ── Shared utilities ──────────────────────────────────────────────────────────
 
-async function downloadVideoItems(
-  items: Array<{ url?: string; b64_json?: string }>,
-  outputDir: string,
-  filename?: string,
-  outputPathGuard?: OutputPathGuard,
-  networkPolicyGuard?: NetworkPolicyGuard,
-): Promise<string[]> {
-  const outputPaths: string[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const outputPath = buildOutputPath(outputDir, filename ? `${filename}_${i}` : undefined, "mp4");
-    outputPathGuard?.(outputPath);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    if (item.url) {
-      await downloadUrlToFile(item.url, outputPath, outputPathGuard, networkPolicyGuard);
-    } else if (item.b64_json) {
-      fs.writeFileSync(outputPath, Buffer.from(item.b64_json, "base64"));
-    }
-    outputPaths.push(outputPath);
-  }
-  return outputPaths;
-}
-
 async function downloadUrlToFile(
   url: string,
   outputPath: string,
@@ -1024,19 +920,17 @@ export function buildOutputPath(outputDir: string, filename?: string, ext = "mp4
 function buildSetupHint(provider: VideoProvider): { type: string; label: string; target: string } {
   if (provider === "gemini")
     return { type: "open_settings", label: "Set up Gemini API key", target: "gemini" };
-  if (provider === "azure")
-    return {
-      type: "open_settings",
-      label: "Set up Azure OpenAI video deployment",
-      target: "azure",
-    };
   if (provider === "vertex")
     return { type: "open_settings", label: "Set up Vertex AI project/access token", target: "llm" };
   if (provider === "kling")
     return { type: "open_settings", label: "Set up Kling API key", target: "llm" };
   if (provider === "local")
     return { type: "open_settings", label: "Set up the local video model", target: "llm" };
-  return { type: "open_settings", label: "Set up OpenAI API key", target: "openai" };
+  return {
+    type: "open_settings",
+    label: "Set up an OpenAI-compatible video service",
+    target: "llm",
+  };
 }
 
 // ── Provider availability check ───────────────────────────────────────────────
@@ -1045,12 +939,7 @@ function getConfiguredVideoProviders(
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
 ): VideoProvider[] {
   const providers: VideoProvider[] = [];
-  if (settings.openai?.apiKey?.trim()) providers.push("openai");
-  const azureVideoApiKey =
-    settings.videoGeneration?.azure?.videoApiKey?.trim() || settings.azure?.apiKey?.trim();
-  const azureVideoEndpoint =
-    settings.videoGeneration?.azure?.videoEndpoint?.trim() || settings.azure?.endpoint?.trim();
-  if (azureVideoApiKey && azureVideoEndpoint) providers.push("azure");
+  if (resolveOpenAICompatibleVideoConfig(settings)) providers.push("openai-compatible");
   if (settings.gemini?.apiKey?.trim()) providers.push("gemini");
   if (
     settings.videoGeneration?.vertex?.projectId?.trim() &&
@@ -1126,14 +1015,8 @@ export class VideoGenerator {
     settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
   ): string | null {
     switch (provider) {
-      case "openai":
-        return "https://api.openai.com/v1/video/generations";
-      case "azure": {
-        const endpoint =
-          settings.videoGeneration?.azure?.videoEndpoint?.trim() ||
-          settings.azure?.endpoint?.trim();
-        return endpoint ? normalizeAzureBaseEndpoint(endpoint) : null;
-      }
+      case "openai-compatible":
+        return resolveOpenAICompatibleVideoConfig(settings)?.baseUrl ?? null;
       case "gemini":
         return "https://generativelanguage.googleapis.com/v1beta";
       case "vertex": {
@@ -1232,8 +1115,8 @@ export class VideoGenerator {
       return {
         success: false,
         error:
-          "No video generation provider configured. Configure OpenAI / Azure / Gemini / Vertex / Kling in Settings → AI Models → Video Generation.",
-        actionHint: buildSetupHint("openai"),
+          "No video generation provider configured. Configure an OpenAI-compatible video service, Gemini, Vertex AI, Kling or the local model in Settings → AI Models → Video Generation.",
+        actionHint: buildSetupHint("openai-compatible"),
       };
     }
 
@@ -1255,8 +1138,7 @@ export class VideoGenerator {
       let result: AdapterResult;
 
       try {
-        if (provider === "openai") result = await generateWithOpenAI(args);
-        else if (provider === "azure") result = await generateWithAzure(args);
+        if (provider === "openai-compatible") result = await generateWithOpenAICompatible(args);
         else if (provider === "gemini") result = await generateWithGemini(args);
         else if (provider === "vertex") result = await generateWithVertex(args);
         else if (provider === "kling") result = await generateWithKling(args);
@@ -1289,7 +1171,7 @@ export class VideoGenerator {
     return {
       success: false,
       error: bestError?.error ?? "All video providers failed.",
-      actionHint: bestError?.actionHint ?? buildSetupHint("openai"),
+      actionHint: bestError?.actionHint ?? buildSetupHint("openai-compatible"),
     };
   }
 
@@ -1316,19 +1198,8 @@ export class VideoGenerator {
       if (providerEndpoint) {
         this.assertNetworkAccess(providerEndpoint, "get_video_generation_job");
       }
-      if (provider === "openai") {
-        const apiKey = settings.openai?.apiKey?.trim() ?? "";
-        return await pollOpenAIJob(
-          normalizedJobId,
-          apiKey,
-          outputDir,
-          filename,
-          this.assertOutputPathAllowed.bind(this),
-          this.assertNetworkAccess.bind(this),
-        );
-      }
-      if (provider === "azure") {
-        return await pollAzureJob(
+      if (provider === "openai-compatible") {
+        return await pollOpenAICompatibleJob(
           normalizedJobId,
           settings,
           outputDir,
@@ -1413,24 +1284,7 @@ export class VideoGenerator {
     jobId: string,
     provider: VideoProvider,
   ): Promise<{ success: boolean; error?: string }> {
-    const settings = LLMProviderFactory.loadSettings();
-
     try {
-      if (provider === "openai") {
-        const apiKey = settings.openai?.apiKey?.trim() ?? "";
-        this.assertNetworkAccess(
-          `https://api.openai.com/v1/video/generations/${jobId}/cancel`,
-          "cancel_video_generation_job",
-        );
-        const response = await fetch(
-          `https://api.openai.com/v1/video/generations/${jobId}/cancel`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${apiKey}` },
-          },
-        );
-        return { success: response.ok, error: response.ok ? undefined : `HTTP ${response.status}` };
-      }
       if (provider === "local") {
         return cancelLocalVideoJob(jobId)
           ? { success: true }

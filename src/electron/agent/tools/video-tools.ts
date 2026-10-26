@@ -14,8 +14,7 @@ import { LLMTool } from "../llm/types";
  * VideoTools — Tools for AI video generation
  *
  * Supports all configured video providers:
- *   - OpenAI Sora 2 (text_to_video, image_to_video)
- *   - Azure OpenAI Sora 2 (text_to_video, image_to_video)
+ *   - Any OpenAI-compatible Videos API service (text_to_video, image_to_video)
  *   - Gemini API Veo 3.1 (text_to_video, image_to_video)
  *   - Vertex AI Veo 3 / 3.1 (text_to_video, image_to_video)
  *   - Kling (text_to_video, image_to_video)
@@ -174,7 +173,7 @@ export class VideoTools {
       {
         name: "generate_video",
         description: `Generate a video from a text prompt (or an image/video reference) using AI.
-CoWork OS will pick the best configured provider automatically (OpenAI Sora 2 / Azure Sora 2 / Gemini Veo 3.1 / Vertex AI Veo / Kling), unless you specify a provider.
+CoWork OS will pick the best configured provider automatically (OpenAI-compatible video service / Gemini Veo 3.1 / Vertex AI Veo / Kling / local model), unless you specify a provider.
 
 Modes:
 - text_to_video (default): generate a video from a text prompt
@@ -183,11 +182,11 @@ Modes:
 - extend_video: extend the duration of an existing video (provider-native, referenceVideoPath required)
 
 Provider support:
-- openai: Sora 2 — text_to_video, image_to_video
-- azure: Sora 2 via Azure OpenAI deployment ("sora-2" or "sora-2-pro") — text_to_video, image_to_video
+- openai-compatible: any service that speaks the OpenAI Videos API, using the model configured in Settings — text_to_video, image_to_video
 - gemini: Veo 3.1 / 3.1-fast / 3.0 — text_to_video, image_to_video
 - vertex: Veo 3 / 3.1 on Vertex AI — text_to_video, image_to_video
 - kling: Kling v2 — text_to_video, image_to_video
+- local: Wan 2.2 on this machine — text_to_video, image_to_video
 
 Most providers use async job submission. When pending=true is returned, call get_video_generation_job with the returned jobId to check status.
 Generated videos are saved to the workspace folder.`,
@@ -206,14 +205,14 @@ Generated videos are saved to the workspace folder.`,
             },
             provider: {
               type: "string",
-              enum: ["auto", "openai", "azure", "gemini", "vertex", "kling", "local"],
+              enum: ["auto", "openai-compatible", "gemini", "vertex", "kling", "local"],
               description:
                 'Provider override. "auto" uses the configured default with fallbacks (default: auto).',
             },
             model: {
               type: "string",
               description:
-                'Optional model override (e.g. "sora-2" for OpenAI/Azure, "veo-3.1", "kling-v2"). Leave empty for provider default.',
+                'Optional model override (e.g. "veo-3.1", "kling-v2", or a model name the configured OpenAI-compatible service accepts). Leave empty for provider default.',
             },
             duration: {
               type: "number",
@@ -263,7 +262,7 @@ When succeeded, outputPaths contains the path(s) to the generated video(s).`,
             },
             provider: {
               type: "string",
-              enum: ["openai", "azure", "gemini", "vertex", "kling", "local"],
+              enum: ["openai-compatible", "gemini", "vertex", "kling", "local"],
               description: "The provider that submitted the job.",
             },
             filename: {
@@ -286,7 +285,7 @@ When succeeded, outputPaths contains the path(s) to the generated video(s).`,
             },
             provider: {
               type: "string",
-              enum: ["openai", "azure", "gemini", "vertex", "kling", "local"],
+              enum: ["openai-compatible", "gemini", "vertex", "kling", "local"],
               description: "The provider that owns the job.",
             },
           },

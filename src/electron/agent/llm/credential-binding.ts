@@ -165,7 +165,6 @@ function settingsBindings(settings: LLMSettingsData): Binding[] {
       PROVIDER_DEFAULT_BASE_URLS.openrouter,
     ],
     ["imageGeneration", "azure", "imageApiKey", "imageEndpoint", "azure", "endpoint", undefined],
-    ["videoGeneration", "azure", "videoApiKey", "videoEndpoint", "azure", "endpoint", undefined],
   ] as const) {
     const ownPath = [group, provider, credential];
     const path = valueAt(settings, ownPath) ? ownPath : [parent, "apiKey"];
@@ -181,6 +180,11 @@ function settingsBindings(settings: LLMSettingsData): Binding[] {
     ["videoGeneration", "kling", "apiKey"],
     settings.videoGeneration?.kling?.baseUrl?.trim() || "https://api.klingai.com",
     "Kling",
+  );
+  add(
+    ["videoGeneration", "openaiCompatible", "apiKey"],
+    settings.videoGeneration?.openaiCompatible?.baseUrl?.trim(),
+    "OpenAI-compatible video",
   );
   return bindings;
 }

@@ -2,6 +2,7 @@ import type { LLMMessage } from "../llm/types";
 import type { LoopBudgetStopReason } from "./LoopBudgetPolicy";
 
 export type TurnKernelStopReason =
+  | "awaiting_user_input"
   | LoopBudgetStopReason
   | "max_empty_responses"
   | "context_capacity_exhausted"

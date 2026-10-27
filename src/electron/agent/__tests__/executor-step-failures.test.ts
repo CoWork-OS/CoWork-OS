@@ -2764,6 +2764,57 @@ relationship_memory:
     });
   });
 
+  it.each([
+    ["request_takeover", "Structured input request dismissed by user"],
+    [
+      "write_file",
+      "The person has taken over this computer. Do not use computer or browser tools until they hand it back",
+    ],
+  ])(
+    "pauses a mutation step immediately after %s is blocked by human control",
+    async (tool, error) => {
+      executor = createExecutorWithStubs(
+        [
+          toolUseResponse(
+            tool,
+            tool === "write_file"
+              ? { path: "report.txt", content: "Verified" }
+              : { reason: "Verify the dashboard" },
+          ),
+        ],
+        {},
+      );
+      executor.shouldPauseForQuestions = true;
+      executor.shouldPauseForRequiredDecision = true;
+      executor.getAvailableTools.mockReturnValue([
+        { name: tool, description: "", input_schema: { type: "object", properties: {} } },
+      ]);
+      executor.toolRegistry.executeTool = vi.fn(async () => {
+        throw new Error(error);
+      });
+      const step: Any = {
+        id: "takeover-report",
+        description: "Write report.txt after human verification",
+        status: "pending",
+      };
+
+      await expect(executor.executeStep(step)).rejects.toMatchObject({
+        name: "AwaitingUserInputError",
+        message: expect.stringContaining("hand the computer back"),
+      });
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledTimes(1);
+      expect(executor.callLLMWithRetry).toHaveBeenCalledTimes(1);
+      expect(step.status).not.toBe("completed");
+      expect(
+        executor.conversationHistory.some(
+          (message: Any) =>
+            Array.isArray(message.content) &&
+            message.content.some((block: Any) => block.type === "tool_result" && block.is_error),
+        ),
+      ).toBe(true);
+    },
+  );
+
   it("uses the last assistant explanation when finalizing a required-decision pause", () => {
     executor = createExecutorWithStubs([textResponse("done")], {});
     (executor as Any).daemon.updateTaskStatus = vi.fn();

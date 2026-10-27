@@ -55,6 +55,7 @@ computer. At most two dedicated computers start concurrently by default;
 
 The Cua backend needs `cua mcp`, `cua sandbox exec -i` (Cua 0.7+), and a Linux
 Space with Python, Chromium, X11 capture/input tools, and Node for JavaScript.
+Desktop capture supports `scrot` or ImageMagick's `import`; input uses `xdotool`.
 It reuses Cua's sign-in; no token or host environment is forwarded to the guest.
 Lifecycle uses a private MCP connection; command/file payloads use interactive
 CLI transport, avoiding `space_bash`'s display-output truncation. Cua's account,
@@ -129,6 +130,7 @@ task or an explicit reconciliation; it is not an always-running orphan collector
 ```sh
 npm run qa:computer-environments
 npm run qa:computer-environments:smoke
+npm run qa:computer-environments:cua
 npm run qa:application-execution
 npm run type-check
 npm run build:daemon
@@ -138,9 +140,16 @@ npm run build:react
 The live smoke uses two real Linux containers and synthetic files. It checks
 separate files, imports, command readback, a web server bound to guest
 `127.0.0.1`, browser click/readback, screenshots, takeover, artifact publication
-and confirmed container/storage deletion. It removes only its own resources.
-Fixture tests and Cua protocol mocks do not establish VM isolation, Cua live
-operation, macOS/Windows guest support, or packaged-app acceptance.
+and confirmed container/storage deletion. It also checks that startup cleanup in
+another profile preserves the live browser and server. It removes only its own resources.
+Set `COWORK_QA_CONTAINER_RUNTIME=podman` for an explicit Podman run; the smoke
+will not fall back to Docker. The Cua smoke creates its own local Linux Space,
+checks attachment, commands, files, browser interaction, desktop capture, takeover,
+exports and deletion, and removes only its own resources. It requires a working
+`cua` CLI and local runtime. Runtime selection remains Cua's decision: a successful
+container run does not establish VM or gVisor isolation. Fixture tests and protocol
+mocks do not establish live operation, macOS/Windows guest support, or packaged-app
+acceptance.
 
 For native Electron acceptance, run `npm run dev` with an isolated synthetic
 profile and a guest web server explicitly bound to `127.0.0.1`. Open the desktop
@@ -151,3 +160,7 @@ before the next agent browser action succeeds. Complete a follow-up and verify
 the computer becomes released, selected files appear as host artifacts with
 matching hashes, and the owned container and private storage are gone. A failed
 export or unresolved operation must leave completion paused for recovery.
+
+Startup cleanup stops only containers labelled for the current profile. Legacy
+containers without a profile label are left untouched; inspect and stop those
+explicitly rather than guessing their owner.

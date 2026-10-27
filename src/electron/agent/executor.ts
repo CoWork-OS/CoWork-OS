@@ -19289,7 +19289,8 @@ ${transcript}
     if (
       nativeGuiStepGuard.nativeGuiIntent &&
       opts.toolName === "run_command" &&
-      !nativeGuiStepGuard.explicitShellIntent
+      !nativeGuiStepGuard.explicitShellIntent &&
+      this.toolRegistry?.isTaskComputerSelected?.() !== true
     ) {
       return {
         blockedResult: {

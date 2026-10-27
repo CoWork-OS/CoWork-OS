@@ -50,8 +50,9 @@ export function electronPresent(cwd = process.cwd()) {
   }
 }
 
-function installGitHooks() {
+function installGitHooks(cwd) {
   const res = spawnSync(process.execPath, ["scripts/install_git_hooks.mjs"], {
+    cwd,
     stdio: "inherit",
     env: process.env,
   });
@@ -63,12 +64,16 @@ function installGitHooks() {
 }
 
 async function main() {
+  // npm can replace an installed file: package while native setup recovers optional
+  // dependencies. Keep a path to the recreated directory instead of inheriting its old inode.
+  const setupCwd = process.cwd();
   // 1. Bootstrap: install deps if electron is missing
-  if (!electronPresent()) {
+  if (!electronPresent(setupCwd)) {
     console.log(
       "[cowork] setup:bootstrap electron not found in local or parent node_modules; running fallback install.",
     );
     const installRes = spawnNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
+      cwd: setupCwd,
       stdio: "inherit",
       env: process.env,
     });
@@ -94,6 +99,7 @@ async function main() {
     console.log(`[cowork] setup:native (outer attempt ${attempt}/${maxAttempts})`);
 
     const res = spawnSync(process.execPath, ["scripts/setup_native.mjs"], {
+      cwd: setupCwd,
       stdio: "inherit",
       env: process.env,
     });
@@ -101,7 +107,7 @@ async function main() {
     lastStatus = res.status ?? 1;
 
     if (lastStatus === 0) {
-      installGitHooks();
+      installGitHooks(setupCwd);
       process.exit(0);
     }
 

@@ -13,6 +13,7 @@ import pathlib
 import re
 import signal
 import shlex
+import shutil
 import socket
 import struct
 import stat
@@ -201,7 +202,14 @@ def dispatch(req):
         if tool == "desktop_screenshot":
             with tempfile.TemporaryDirectory() as folder:
                 image = pathlib.Path(folder) / "screen.png"
-                subprocess.run(["scrot", "--overwrite", str(image)], check=True, timeout=10)
+                if shutil.which("scrot"):
+                    capture = ["scrot", "--overwrite", str(image)]
+                elif shutil.which("import"):
+                    # The canonical Cua Linux image ships ImageMagick rather than scrot.
+                    capture = ["import", "-window", "root", str(image)]
+                else:
+                    raise ValueError("Desktop capture requires scrot or ImageMagick import in the guest.")
+                subprocess.run(capture, check=True, timeout=10)
                 return {"success": True, "imageBase64": base64.b64encode(bounded_read(image)).decode(), "mediaType": "image/png"}
         if tool == "desktop_open_url":
             return browser("browser_navigate", args, state, root)

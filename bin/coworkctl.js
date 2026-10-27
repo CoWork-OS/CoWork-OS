@@ -82,7 +82,7 @@ async function main() {
   const cmd = args[0];
   if (!cmd || cmd === "-h" || cmd === "--help") {
     usage();
-    process.exitCode = 1;
+    process.exitCode = cmd ? 0 : 1;
     return;
   }
 

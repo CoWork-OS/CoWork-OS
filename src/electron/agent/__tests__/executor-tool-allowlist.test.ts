@@ -2,6 +2,68 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor tool allow-list semantics", () => {
+  function nativeGuiPreflight(guest: boolean) {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { title: "Build dashboard", agentConfig: {} };
+    executor.getExecutionTaskPrompt = () => "Verify the dashboard in the guest browser";
+    executor.isCodeFirstUiTask = () => false;
+    executor.getCurrentStepNativeGuiGuard = () => ({
+      nativeGuiIntent: true,
+      explicitShellIntent: false,
+      explicitAppleScriptIntent: false,
+    });
+    executor.toolRegistry = { isTaskComputerSelected: () => guest };
+    executor.getEffectiveTaskDomain = () => "code";
+    executor.sanitizeFallbackInstruction = (text: string) => text;
+    executor.emitEvent = vi.fn();
+    return executor;
+  }
+
+  it("lets a guest command start its web server even when the step includes GUI work", () => {
+    const executor = nativeGuiPreflight(true);
+    expect(
+      executor.applyPreToolUsePolicyHook({
+        toolName: "run_command",
+        input: { command: "python3 -m http.server 8765 --bind 127.0.0.1" },
+      }),
+    ).toEqual({});
+  });
+
+  it("keeps the native GUI guard on host commands despite model-supplied guest claims", () => {
+    const executor = nativeGuiPreflight(false);
+    const result = executor.applyPreToolUsePolicyHook({
+      toolName: "run_command",
+      input: { command: "pwd", guest: true },
+    });
+    expect(result.blockedResult.error).toMatch(/Native GUI step detected/);
+  });
+
+  it("still applies explicit pre-tool policy denials to guest commands", () => {
+    const executor = nativeGuiPreflight(true);
+    executor.agentPolicyConfig = {
+      hooks: {
+        on_pre_tool_use: [
+          {
+            whenTool: "run_command",
+            action: "block_with_feedback",
+            feedback: "Commands denied by policy",
+          },
+        ],
+      },
+    };
+    const result = executor.applyPreToolUsePolicyHook({
+      toolName: "run_command",
+      input: { command: "pwd" },
+    });
+    expect(result.blockedResult.error).toBe("Commands denied by policy");
+  });
+
+  it("does not exempt host AppleScript when a task computer is selected", () => {
+    const executor = nativeGuiPreflight(true);
+    const result = executor.applyPreToolUsePolicyHook({ toolName: "run_applescript", input: {} });
+    expect(result.blockedResult.error).toMatch(/Native GUI step detected/);
+  });
+
   it("retains guest commands and recovery tools when task-computer work mentions a desktop", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

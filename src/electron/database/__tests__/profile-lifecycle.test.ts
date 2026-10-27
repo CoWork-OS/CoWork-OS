@@ -36,6 +36,29 @@ describe("profile lifecycle", () => {
   });
 
   describe("migration lock", () => {
+    it("publishes a complete exclusive record and removes its staging file", () => {
+      const dbPath = path.join(dir, "p.db");
+      const link = fs.linkSync;
+      const observed = vi.spyOn(fs, "linkSync").mockImplementation((source, target) => {
+        expect(fs.existsSync(target)).toBe(false);
+        expect(JSON.parse(fs.readFileSync(source, "utf8"))).toEqual({
+          pid: process.pid,
+          host: os.hostname(),
+          acquiredAt: expect.any(Number),
+        });
+        link(source, target);
+      });
+      let release: (() => void) | undefined;
+      try {
+        release = acquireMigrationLock(dbPath);
+        expect(observed).toHaveBeenCalledOnce();
+        expect(fs.readdirSync(dir)).toEqual(["p.db.migration.lock"]);
+      } finally {
+        release?.();
+        observed.mockRestore();
+      }
+    });
+
     it("is exclusive, and released for the next holder", () => {
       const dbPath = path.join(dir, "p.db");
       const release = acquireMigrationLock(dbPath);

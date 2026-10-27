@@ -387,6 +387,33 @@ describe("BotDesktopManager", () => {
     ]);
   });
 
+  it("scopes startup cleanup to the profile that created the desktop", async () => {
+    const manager = BotDesktopManager.getInstance();
+    await manager.withDesktop("owned", async () => undefined);
+    const created = calls.find(isDesktopRun)!;
+    const profileLabel = created.find((arg) => arg.startsWith("cowork.profile="))!;
+    expect(profileLabel).toMatch(/^cowork\.profile=[a-f0-9]{32}$/);
+    expect(profileLabel).not.toContain(dataDir);
+    await manager.stopLeftovers();
+    const ownList = calls.find((call) => call[1] === "ps")!;
+    expect(ownList).toContain(`label=${profileLabel}`);
+    const other = new BotDesktopManager({
+      dataDir: () => path.join(dataDir, "other-profile"),
+      resourcesDir: () => resourcesDir,
+      runtimeCandidates: ["docker"],
+      run: runner,
+    });
+    try {
+      await other.stopLeftovers();
+      const otherList = calls.filter((call) => call[1] === "ps").at(-1)!;
+      expect(otherList.find((arg) => arg.startsWith("label=cowork.profile="))).not.toBe(
+        `label=${profileLabel}`,
+      );
+    } finally {
+      other.dispose();
+    }
+  });
+
   it("explains what is missing without a container runtime", async () => {
     BotDesktopManager.configure({
       dataDir: () => dataDir,

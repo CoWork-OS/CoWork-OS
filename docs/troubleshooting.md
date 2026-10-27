@@ -700,6 +700,8 @@ Going back to 0.5.54 after upgrading also works: that release opens the upgraded
 
 Before old memory data is removed, CoWork writes a backup to `backups/` in the app data folder (`legacy-memory-*` and `memory-items-facts-*`). The desktop app encrypts it with the OS keychain (`.json.enc`). The headless daemon, and any install without an OS keychain, writes it as plain JSON (`.json`) that only your user account can read; the same facts are already stored unencrypted in the database and the memory folder. Once you've checked that your memories are in the memory folder, you can delete these backups.
 
+Going back to 0.5.61 or earlier after a version with the secrets data key has started: the older version cannot read your saved provider keys and other secrets, shows them as missing, and refuses to save secure settings. It leaves them as they are, and installing the newer version again makes them readable. Don't relaunch the older version with `COWORK_ACCEPT_NEW_KEYCHAIN_KEY=1`, which archives them out of reach. See [Secrets Encryption](secrets-encryption.md#rolling-back).
+
 If CoWork says **"This profile's database was upgraded by a newer CoWork OS"**, a newer build has already migrated this profile past what the running build supports. Install the newer version again to open it. The message is there so an older build never runs on a schema it doesn't understand.
 
 ## Updates says "Could not confirm you're up to date"

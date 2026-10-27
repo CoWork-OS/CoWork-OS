@@ -13,7 +13,7 @@ import {
 } from "../safe-storage";
 
 /** A stand-in OS keychain: "sealing" reverses the bytes behind an "os|" marker. */
-function fakeNative(options: { sync?: boolean; foreign?: boolean } = {}) {
+function fakeNative(options: { sync?: boolean; foreign?: boolean; backend?: string } = {}) {
   const seal = (text: string) => Buffer.concat([Buffer.from("os|"), Buffer.from(text).reverse()]);
   const open = (sealed: Buffer) => {
     if (options.foreign || sealed.subarray(0, 3).toString() !== "os|") {
@@ -27,6 +27,7 @@ function fakeNative(options: { sync?: boolean; foreign?: boolean } = {}) {
     isAsyncEncryptionAvailable: vi.fn(async () => true),
     encryptStringAsync: vi.fn(async (text: string) => seal(text)),
     decryptStringAsync: vi.fn(async (sealed: Buffer) => ({ result: open(sealed) })),
+    ...(options.backend ? { getSelectedStorageBackend: vi.fn(() => options.backend!) } : {}),
     ...(options.sync === false
       ? {}
       : {
@@ -119,6 +120,30 @@ describe("safe storage data key", () => {
 
     setNativeSafeStorageForTests(null);
     expect(getSafeStorage()).toBeNull();
+  });
+
+  it("creates no key on Linux's fixed-key fallback, where the async probe still says available", async () => {
+    const native = fakeNative({ backend: "basic_text" });
+    setNativeSafeStorageForTests(native);
+
+    await expect(initializeSafeStorageDataKey(dir)).resolves.toBe("unavailable");
+    expect(fs.existsSync(path.join(dir, SAFE_STORAGE_DATA_KEY_FILE))).toBe(false);
+    expect(native.encryptStringAsync).not.toHaveBeenCalled();
+    expect(hasSafeStorageDataKey()).toBe(false);
+  });
+
+  it("still opens a key that exists on the fixed-key fallback, and still reports the backend", async () => {
+    setNativeSafeStorageForTests(fakeNative({ backend: "gnome_libsecret" }));
+    await initializeSafeStorageDataKey(dir);
+    const sealed = getSafeStorage()!.encryptString("kept");
+
+    resetSafeStorageDataKeyForTests();
+    setNativeSafeStorageForTests(fakeNative({ backend: "basic_text" }));
+    await expect(initializeSafeStorageDataKey(dir)).resolves.toBe("loaded");
+    const storage = getSafeStorage()!;
+    expect(storage.decryptString(sealed)).toBe("kept");
+    // The browser vault refuses to store logins on this backend; it must still see it.
+    expect(storage.getSelectedStorageBackend?.()).toBe("basic_text");
   });
 
   it("agrees on one key when another process created the file first", async () => {

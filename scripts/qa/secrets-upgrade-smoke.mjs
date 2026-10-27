@@ -8,7 +8,8 @@
  *   2. current, first start: creates the data key (key file and database copy), moves every
  *      secret onto it, reads the API key, and logs no safeStorage deprecation warning.
  *   3. current again: nothing is left to move.
- *   4. CLI (app directories only): `cowork run` reaches the provider with the right key.
+ *   4. CLI (macOS app directories): `cowork run` reaches the provider with the right key.
+ *      Elsewhere the CLI runs under Node, without the OS keychain, by design.
  *   5. key file deleted: the next start restores it from the database copy.
  *   6. rollback: the baseline opens the upgraded profile. It cannot read the secrets, and it
  *      must leave them as they are.
@@ -136,24 +137,104 @@ function summarizeLog(log) {
 
 const results = {};
 
-async function runApp(label, spec, fn) {
-  const app = await _electron.launch({
-    executablePath: spec.executablePath,
-    args: [...options["electron-arg"], ...spec.appArgs],
-    cwd: spec.appDir ?? path.dirname(spec.executablePath),
-    timeout: 180_000,
-    env,
+/** When Playwright cannot attach, start the app plainly to capture why it exits. */
+function plainLaunchOutput(spec) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      spec.executablePath,
+      [...options["electron-arg"], ...spec.appArgs, "--remote-debugging-port=0"],
+      { cwd: spec.appDir ?? path.dirname(spec.executablePath), env },
+    );
+    let output = "";
+    child.stdout.on("data", (d) => (output += d));
+    child.stderr.on("data", (d) => (output += d));
+    const timer = setTimeout(() => child.kill(), 60_000);
+    child.on("error", (error) => (output += `\nspawn error: ${error.message}`));
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve(`${output}\n[exit code ${code}, signal ${signal}]`);
+    });
   });
+}
+
+/** Rejects when `promise` takes longer than `ms`. */
+function withDeadline(promise, ms, what) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms / 1000} s`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Why a running app stopped answering: on macOS, its main thread's stack (a keychain prompt
+ * nobody can answer blocks it inside the Security framework) and any open prompt process.
+ */
+async function hangReport(label, pid) {
+  if (process.platform !== "darwin" || !pid) return "";
+  const run = (cmd, args) =>
+    new Promise((resolve) => {
+      const child = spawn(cmd, args);
+      let text = "";
+      child.stdout.on("data", (d) => (text += d));
+      child.stderr.on("data", (d) => (text += d));
+      child.on("error", (error) => resolve(`${cmd}: ${error.message}`));
+      child.on("close", () => resolve(text));
+    });
+  const sampleFile = path.join(out, `${label}-sample.txt`);
+  await run("sample", [String(pid), "3", "-file", sampleFile]);
+  const sample = fs.existsSync(sampleFile) ? fs.readFileSync(sampleFile, "utf8") : "";
+  const mainThread = sample
+    .split(/\n(?=\s*\d+ Thread_)/)
+    .find((part) => /Thread_\d+.*main/i.test(part));
+  const prompts = await run("/bin/sh", [
+    "-c",
+    "ps -axo pid,comm | grep -iE 'SecurityAgent|coreautha|UserNotificationCenter' | grep -v grep",
+  ]);
+  return `prompt processes:\n${prompts || "(none)"}\nmain thread:\n${(mainThread ?? sample)
+    .split("\n")
+    .slice(0, 80)
+    .join("\n")}`;
+}
+
+async function runApp(label, spec, fn) {
+  console.log(`${label}: starting`);
+  let app;
+  try {
+    app = await _electron.launch({
+      executablePath: spec.executablePath,
+      args: [...options["electron-arg"], ...spec.appArgs],
+      cwd: spec.appDir ?? path.dirname(spec.executablePath),
+      timeout: 180_000,
+      env,
+    });
+  } catch (error) {
+    const output = await plainLaunchOutput(spec);
+    fs.writeFileSync(path.join(out, `${label}.log`), output);
+    console.log(`${label}: could not launch; the app's own output:\n${output.slice(-4000)}`);
+    results[label] = { error: String(error?.message || error), ...summarizeLog(output) };
+    return;
+  }
+  console.log(`${label}: launched`);
+  const pid = app.process().pid;
   let log = "";
   app.process().stdout?.on("data", (d) => (log += d));
   app.process().stderr?.on("data", (d) => (log += d));
+  // Every call into the app has a deadline: a blocked main process otherwise hangs the run.
+  const deadline = (promise, what) => withDeadline(promise, 180_000, `${label}: ${what}`);
   try {
-    await app.evaluate(({ shell }) => {
-      shell.openExternal = async () => {};
-    });
-    const backend = await app
-      .evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend?.() ?? null)
-      .catch(() => null);
+    await deadline(
+      app.evaluate(({ shell }) => {
+        shell.openExternal = async () => {};
+      }),
+      "first call into the main process",
+    );
+    const backend = await deadline(
+      app.evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend?.() ?? null),
+      "reading the storage backend",
+    ).catch(() => null);
     let page;
     for (let i = 0; i < 400 && !page; i++) {
       page = app.windows().find((w) => w.url().includes("/renderer/index.html"));
@@ -163,17 +244,33 @@ async function runApp(label, spec, fn) {
     await page.waitForFunction(() => !!window.electronAPI?.getLLMSettings, null, {
       timeout: 120_000,
     });
+    console.log(`${label}: window ready`);
     await page.waitForTimeout(5000);
     const api = (name, ...args) =>
-      page.evaluate(({ name, args }) => window.electronAPI[name](...args), { name, args });
+      deadline(
+        page.evaluate(({ name, args }) => window.electronAPI[name](...args), { name, args }),
+        name,
+      );
     results[label] = { ...(await fn(api)), ...(backend ? { linuxBackend: backend } : {}) };
   } catch (error) {
     results[label] = { error: String(error?.stack || error) };
+    if (/timed out/.test(String(error?.message))) {
+      const report = await hangReport(label, pid);
+      if (report) {
+        results[label].hang = report;
+        console.log(`${label}: the app stopped answering.\n${report}`);
+      }
+    }
   } finally {
-    await app.close().catch(() => {});
+    await withDeadline(app.close(), 60_000, `${label}: close`).catch(() => {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    });
     fs.writeFileSync(path.join(out, `${label}.log`), log);
   }
   Object.assign(results[label], summarizeLog(log));
+  console.log(`${label}: ${results[label].error ? "failed" : "done"}`);
 }
 
 /** Read the profile's database through a copy (the app's WAL holds the latest pages). */
@@ -232,6 +329,8 @@ function inspectProfile() {
       canarySealedBy: canary ? sealedBy(canary.encrypted_data) : null,
       dataKeyInDatabase: keyRow?.encrypted_data.startsWith("key:") ?? false,
       dataKeyFile: fs.existsSync(keyFile),
+      // Chromium keeps its own encryption key here (DPAPI-protected on Windows).
+      localStateInProfile: fs.existsSync(path.join(profile, "Local State")),
       unreadableBackups: backups,
       fingerprint: JSON.stringify(rows.map((row) => [row.category, row.encrypted_data])),
     };
@@ -264,9 +363,10 @@ Object.assign(results["2-current"], inspectProfile());
 await runApp("3-current-again", current, keyReads);
 Object.assign(results["3-current-again"], inspectProfile());
 
-// 4. The CLI on the upgraded profile (it needs the app directory's bin/).
+// 4. The CLI on the upgraded profile (it needs the app directory's bin/). Only on macOS does
+// it enter through the app and use the OS keychain; elsewhere it runs under Node.
 const cliEntry = current.appDir && path.join(current.appDir, "bin", "cowork-cli.js");
-if (!options["skip-cli"] && cliEntry && fs.existsSync(cliEntry)) {
+if (!options["skip-cli"] && process.platform === "darwin" && cliEntry && fs.existsSync(cliEntry)) {
   const before = authHeaders.length;
   const cli = spawn(
     process.execPath,
@@ -383,6 +483,8 @@ const summary = {
   failed: checks.filter((c) => !c.ok),
 };
 fs.writeFileSync(path.join(out, "results.json"), JSON.stringify(summary, null, 2));
+for (const [step, result] of Object.entries(results))
+  console.log(`${step} ${JSON.stringify(result)}`);
 for (const c of checks) console.log(`${c.ok ? "ok  " : "FAIL"} ${c.step}: ${c.name}`);
 console.log(
   `\n${checks.length - summary.failed.length}/${checks.length} checks passed; evidence in ${out}`,

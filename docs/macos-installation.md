@@ -90,7 +90,7 @@ npm downloads through Node.js, which does not attach the quarantine attribute, a
 
 ## First start
 
-Whichever method you used, the first start may ask for access to the `cowork-os Safe Storage` keychain item. That is the macOS keychain, not Gatekeeper. Enter your Mac login password and click **Always Allow** so CoWork OS can store local credentials securely.
+Whichever method you used, the first start may ask for access to the `CoWork OS Safe Storage` keychain item (on a Mac that ran an early version, also `cowork-os Safe Storage`, as in the screenshot). That is the macOS keychain, not Gatekeeper. Enter your Mac login password and click **Always Allow** so CoWork OS can store local credentials securely. Releases are not code-signed, so macOS may ask again after an update. See [Secrets Encryption](secrets-encryption.md#macos).
 
 <img src="../screenshots/macos-install/05-keychain-safe-storage.png" alt="macOS keychain prompt asking to allow CoWork OS safe storage access" width="480">
 

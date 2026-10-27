@@ -632,11 +632,20 @@ Typical `userData` locations:
 
 ### Encryption Layers
 
-**Primary: OS Keychain (when available)**
+**Primary: a data key sealed by the OS keychain (when available)**
 
-- macOS: Keychain Services
-- Windows: DPAPI (Data Protection API)
-- Linux: libsecret
+- Each secret is encrypted with one random AES-256-GCM data key per profile (`ck1:` values).
+- The data key is sealed by the OS keychain and opened once per start:
+  - macOS: Keychain Services (item `CoWork OS Safe Storage`)
+  - Windows: DPAPI (Data Protection API)
+  - Linux: Secret Service (libsecret)
+- The sealed key is stored in `safe-storage-key.json` in the profile folder and in the
+  database. The database copy restores a lost file.
+- Secrets that older versions sealed with the keychain directly move onto the data key at
+  the first start.
+
+See [Secrets Encryption](secrets-encryption.md) for the format, the startup sequence, keychain
+changes, upgrade and rollback.
 
 **Fallback: App-Level Encryption** (`app2:` records)
 

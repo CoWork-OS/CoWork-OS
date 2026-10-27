@@ -5,6 +5,12 @@
 The task-computer implementation in PR #774 is already merged. This preparation
 adds fixes discovered during live qualification, release notes and repeatable QA.
 
+Main advanced during qualification to `8446d348371a46a6d2fb842d64a1f5ce661f8838`
+with #797 (data-key durability and identity recovery). The local artifacts and
+upgrade results below precede that change. Rebuild and repeat the relevant
+secret/upgrade/install checks from the final merged release revision; do not
+treat these earlier artifacts as acceptance of #797.
+
 ## Verified locally
 
 | Check | Command or surface | Result |

@@ -62,6 +62,12 @@ command guard and explicit policy denials remain enforced.
 
 - Back up the profile before upgrading. Keep the backup and the previous installer
   until the upgraded profile and saved provider sign-ins have been checked.
+- The secrets data key is also sealed into the settings database, so a lost key
+  file can be restored without creating a replacement key that orphans secrets.
+  After secrets are re-encrypted, 0.5.61 and earlier cannot read them. A downgrade
+  requires re-entering credentials or reinstalling this version; retain the
+  pre-upgrade backup. This durability change landed in #797 during qualification
+  and still needs inclusion in the final clean release build.
 - Existing tasks and bots retain their execution route unless task-computer
   execution is selected. The model and orchestration still run on the host;
   connected services and memory keep their separate permissions.

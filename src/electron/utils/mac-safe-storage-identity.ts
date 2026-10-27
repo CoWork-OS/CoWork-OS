@@ -13,6 +13,8 @@ export const LEGACY_MAC_SAFE_STORAGE_APP_NAMES = [
   "cowork-oss",
   "com.cowork-os.app",
   "com.github.Electron",
+  // Development Electron.app identifier since scripts/brand_electron_dev_app.mjs set one.
+  "com.cowork-os.app.dev",
   // Chromium's generic identity, used when safeStorage runs before a window exists.
   "Chromium",
 ] as const;

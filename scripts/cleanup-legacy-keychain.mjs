@@ -32,6 +32,7 @@ export const REMOVABLE_IDENTITIES = [
   "cowork-os",
   "cowork-oss",
   "com.cowork-os.app",
+  "com.cowork-os.app.dev",
   "cowork-profile-probe",
   "cowork-safe-storage-probe",
 ];

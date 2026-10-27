@@ -13,10 +13,10 @@ terminal and branding changes. See the PR checks for the latest merged candidate
 | Check | Command or surface | Result |
 | --- | --- | --- |
 | Build | Explicit `npm run build` after the main refresh | Passed all renderer, web, location helper, Electron, daemon, CLI and connector builds. Locked dependency installation was also completed during candidate preparation. |
-| Full suite and bundled skills gates | `npm test` | On the earlier main base, 128 Node tests and 18,712 Vitest tests passed; five Vitest tests skipped. |
+| Full suite and bundled skills gates | `npm test` | After the startup-notice change, 132 Node tests and 18,728 Vitest tests passed; five Vitest tests skipped. |
 | Terminal and takeover regressions | Terminal command-mark and block-runner tests plus executor step-failure suite | 346 tests passed after merging the terminal and branding changes. |
 | Retry regression | Executor step-failure and computer-handoff suites | 323 tests passed, including two new cases that persist the failed tool result and pause before another provider call while human control blocks a required mutation. |
-| Keychain regressions | Six focused storage/identity suites | 41 tests passed. |
+| Keychain regressions | Storage/identity suites and startup-notice tests | The earlier candidate passed 41 tests; four focused suites passed 19 tests after adding the notice. |
 | Installed launcher regression | Node dependency, setup cwd and CLI-help suites | Five tests passed; an installed import-only dependency no longer triggers an unnecessary npm reinstall. |
 | Static checks | Type check, lint, formatting, docs versions and diff checks | Passed after the final runtime fix. |
 | Approval/reliability baseline | `qa:approval-boundaries`; `qa:harness` | Earlier candidate: 546 approval tests, 1,516 harness tests, fixture evaluation and nine memory evaluation tests passed. |
@@ -25,8 +25,8 @@ terminal and branding changes. See the PR checks for the latest merged candidate
 | Cua | `task-computer-cua-smoke.cjs` | Passed Cua 0.9.0 owned Space, borrowed attachment without deletion, imports, commands/files, browser interaction, desktop capture, takeover, export and confirmed deletion. |
 | Bot/database upgrade | Published 0.5.61 → rebuilt current candidate | Passed two current daemon starts and current desktop startup; synthetic bots, teams, decisions, routines and history preserved. |
 | Memory upgrade | `release-upgrade-memory-smoke.mjs`, published 0.5.61 baseline | Passed previous desktop and daemon, two current daemon and two current desktop starts, previous daemon downgrade, and current daemon after downgrade. |
-| Clean npm install | Explicit pack → `release-smoke-install.mjs` | Earlier-base retry-fix tarball passed install/setup without bootstrap fallback, Electron SQLite loading, browser-host workflow, CLI help, cold/warm local execution with clean exit, and authenticated desktop launcher startup. |
-| macOS artifacts | Ad hoc arm64 DMG/ZIP and packaged smoke | Earlier-base retry-fix artifacts passed signature, mounted DMG launch, ZIP installation and metadata checks. The packaged executor, storage code and all 20 compiled connectors matched that candidate. |
+| Clean npm install | Explicit pack → `release-smoke-install.mjs` | The refreshed-main tarball passed install/setup without bootstrap fallback, Electron SQLite loading, browser-host workflow, CLI help, cold/warm local execution with clean exit, and authenticated desktop launcher startup. |
+| macOS artifacts | Ad hoc arm64 DMG/ZIP and packaged smoke | The refreshed-main artifacts passed signature, mounted DMG, ZIP installation and metadata checks before the later startup-notice change. The former launch check only required the process to survive eight seconds and did not prove the first window loaded. |
 
 The Docker/Podman/Cua lifecycle runs preceded the final executor-only retry fix;
 the packaged viewer check exercises that fix separately. An upgrade run
@@ -52,6 +52,22 @@ access enabled. The file was restored from the database with the identical seale
 key hash, and redacted `config.get` still reported the configured
 `openai-compatible` provider. The restored window loaded in 831 ms. No real
 profile, Keychain item, security setting or personal credential was modified.
+
+The refreshed ad hoc package encountered another startup wait: at
+`2026-10-27T16:58:13Z`, macOS `securityd` reported displaying a Keychain access
+prompt for the new bundle. A native sample at `16:59:01Z` showed the asynchronous
+request waiting in `SecItemCopyMatching`. A retry eventually reached the first
+window after about 37 minutes; the delay must not be counted as a normal startup
+pass. CoWork now shows a notice if this operation remains pending for two seconds,
+and closes it when the operation completes. It continues waiting for the real
+Keychain result without granting access or switching encryption methods.
+The macOS artifact smoke now waits up to 60 seconds for the first-window load
+event and fails if the app exits or never reaches it; regression tests cover a
+pending process, an early clean exit and split log output.
+An Electron fixture displayed the notice and closed it after a synthetic wait.
+A fresh development profile using the real Keychain opened its data key at
+`2026-10-27T20:27:39.186Z` and loaded the first window at
+`2026-10-27T20:27:41.805Z`.
 
 ## Real-provider acceptance and its limits
 

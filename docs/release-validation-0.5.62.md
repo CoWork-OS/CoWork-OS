@@ -134,9 +134,22 @@ allowances. Only task-owned synthetic resources were cleaned up.
 
 - Cua selected Docker `runc` locally. No VM or gVisor isolation is claimed for
   Cua. Its external viewer's close/fencing behavior is outside this proof.
-- macOS qualification artifacts are ad hoc signed and not notarized. Signed
-  distribution requires the normal signing/notarization gate. Windows and Linux
-  need their own exact-candidate platform checks.
+- macOS releases ship ad hoc signed and not notarized, by design (see
+  [macOS Installation](macos-installation.md)); the terminal installer is the
+  recommended path, and the artifact smoke covers its ZIP installation. There is
+  no Developer ID gate. Browser-downloaded DMGs still need **Open Anyway**.
+- Platform artifacts on the merged candidate (`0a9017f3a`/`992c5b298`, code identical
+  to `3e9624082`): the manual **Windows Installer Smoke** workflow
+  ([run 40597821782](https://github.com/CoWork-OS/CoWork-OS/actions/runs/40597821782))
+  packaged and passed `CoWork-OS-Setup-0.5.62.exe`. The manual **macOS DMG Smoke**
+  ([run 40600468769](https://github.com/CoWork-OS/CoWork-OS/actions/runs/40600468769))
+  passed signature, DMG first-window and terminal-installer checks on a clean runner,
+  after giving that workflow the same 4 GB Node heap as CI. Its first run ran out of
+  heap during the Electron TypeScript build. The Linux x64 server package was built
+  with `npm run package:linux:server` in an emulated `node:24-bookworm` amd64 container
+  and passed `package:linux:server:smoke` (daemon `/health` on `127.0.0.1`); SHA-256
+  `a023bfd55ea90a02b24a19941ad2eb4d78c0effdffd3395d8153e077c2326c6f`. The tag-triggered
+  release workflow rebuilds all of these; nothing was uploaded.
 - Fresh install/upgrade fixtures use synthetic data; personal provider sign-ins
   and real channel delivery are not covered.
 - Local qualification artifacts for `3e9624082` are staged outside the checkout

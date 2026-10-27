@@ -159,7 +159,17 @@ export function getSafeStorage(): SafeStorageLike | null {
   }
   // Before the data key is open (or in a process that never opens it), the OS keychain
   // seals values directly; the next start re-encrypts them with the data key.
-  return hasSyncApi(native) ? native : null;
+  if (!hasSyncApi(native)) return null;
+  if (usesFixedKeyFallback(native)) {
+    // No OS keychain: answer as the synchronous probe does there, without calling it.
+    return {
+      getSelectedStorageBackend: () => native.getSelectedStorageBackend?.() ?? "unknown",
+      isEncryptionAvailable: () => false,
+      encryptString: (plaintext) => native.encryptString(plaintext),
+      decryptString: (ciphertext) => native.decryptString(ciphertext),
+    };
+  }
+  return native;
 }
 
 /** Whether this Electron has the asynchronous safeStorage API (Electron 45 and later). */

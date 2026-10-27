@@ -137,13 +137,22 @@ function summarizeLog(log) {
 
 const results = {};
 
+// When the app exits at once, Playwright rejects an internal promise nobody awaits; the
+// launch itself still fails below, where the app's own output is captured.
+process.on("unhandledRejection", (error) => {
+  console.log(`(unhandled rejection: ${error?.message || error})`);
+});
+
 /** When Playwright cannot attach, start the app plainly to capture why it exits. */
 function plainLaunchOutput(spec) {
   return new Promise((resolve) => {
     const child = spawn(
       spec.executablePath,
       [...options["electron-arg"], ...spec.appArgs, "--remote-debugging-port=0"],
-      { cwd: spec.appDir ?? path.dirname(spec.executablePath), env },
+      {
+        cwd: spec.appDir ?? path.dirname(spec.executablePath),
+        env: { ...env, ELECTRON_ENABLE_LOGGING: "1", ELECTRON_ENABLE_STACK_DUMPING: "1" },
+      },
     );
     let output = "";
     child.stdout.on("data", (d) => (output += d));

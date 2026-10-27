@@ -130,6 +130,11 @@ describe("safe storage data key", () => {
     expect(fs.existsSync(path.join(dir, SAFE_STORAGE_DATA_KEY_FILE))).toBe(false);
     expect(native.encryptStringAsync).not.toHaveBeenCalled();
     expect(hasSafeStorageDataKey()).toBe(false);
+    // Callers keep sealing with the app key, as before, without the deprecated sync probe.
+    const storage = getSafeStorage()!;
+    expect(storage.isEncryptionAvailable()).toBe(false);
+    expect(native.isEncryptionAvailable).not.toHaveBeenCalled();
+    expect(storage.getSelectedStorageBackend?.()).toBe("basic_text");
   });
 
   it("still opens a key that exists on the fixed-key fallback, and still reports the backend", async () => {

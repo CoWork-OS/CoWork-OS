@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const safeStorageState = vi.hoisted(() => ({ available: false }));
 
-vi.mock("../../utils/safe-storage", () => ({
+// The rest of the module stays real (data key state: no key opened in this test).
+vi.mock("../../utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../utils/safe-storage")>()),
   getSafeStorage: () => ({
     isEncryptionAvailable: () => safeStorageState.available,
     encryptString: (value: string) => Buffer.from(value, "utf8"),

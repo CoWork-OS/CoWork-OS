@@ -15,7 +15,9 @@ const mockEncryptString = vi.fn();
 const mockDecryptString = vi.fn();
 const mockIsEncryptionAvailable = vi.fn();
 
-vi.mock("../../utils/safe-storage", () => ({
+// The rest of the module stays real (data key state: no key opened in this test).
+vi.mock("../../utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../utils/safe-storage")>()),
   getSafeStorage: () => ({
     encryptString: (data: string) => mockEncryptString(data),
     decryptString: (buffer: Buffer) => mockDecryptString(buffer),

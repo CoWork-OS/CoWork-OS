@@ -271,7 +271,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     hostPerfMonitor = startHostPerfMonitor({ runtime: "cli" });
     // Opt-in database worker (async SQLite plan, DB2); starts after schema setup.
     await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "cli" });
-    new SecureSettingsRepository(dbManager.getDatabase());
+    // Opens the data key that seals secrets before anything reads them (utils/safe-storage).
+    await new SecureSettingsRepository(dbManager.getDatabase()).openDataKey(getUserDataDir());
     taskRepo = new TaskRepository(dbManager.getDatabase());
 
     LLMProviderFactory.initialize();

@@ -17,9 +17,16 @@ import * as fs from "fs";
 import * as path from "path";
 import { getUserDataDir } from "../utils/user-data-dir";
 import {
+  adoptRecoveredDataKey,
   getSafeStorage,
+  hasAsyncSafeStorage,
   hasSafeStorageDataKey,
+  initializeSafeStorageDataKey,
   isDataKeySealed,
+  readSealedDataKeyFile,
+  wasDataKeyOpenAttempted,
+  type DataKeyStatus,
+  type DataKeyStore,
   type SafeStorageLike,
 } from "../utils/safe-storage";
 import { rewrapEncryptedValues, type OsSealedDecrypt } from "../utils/safe-storage-rewrap";
@@ -200,6 +207,12 @@ interface SecureSettingsRow {
 const MACHINE_ID_FILE = ".cowork-machine-id";
 /** Known plaintext encrypted once with the OS keychain key to detect a key change. */
 const KEYCHAIN_CANARY_VALUE = "cowork-os-keychain-canary-v1";
+/**
+ * Reserved row holding the sealed data key (utils/safe-storage) beside the secrets it
+ * protects. `key:` keeps it out of every `os:` scan; it is not a settings category.
+ */
+const DATA_KEY_CATEGORY = "__safe_storage_data_key__";
+const DATA_KEY_PREFIX = "key:";
 
 /**
  * - `verified`: the stored canary decrypts with the current OS keychain key.
@@ -234,6 +247,20 @@ export class SecureSettingsRepository {
   >();
 
   constructor(private db: Database.Database) {
+    if (!wasDataKeyOpenAttempted() && hasAsyncSafeStorage()) {
+      // The data key opens after construction (openDataKey); probing the keychain here
+      // would go through the deprecated synchronous call.
+      this.safeStorage = null;
+      this.encryptionAvailable = false;
+      this.initializeMachineId();
+      try {
+        ensureSecureSettingsSchema(db);
+      } catch (error) {
+        logger.debug("Could not ensure the secure settings schema here:", error);
+      }
+      SecureSettingsRepository.instance = this;
+      return;
+    }
     this.safeStorage = getSafeStorage();
     try {
       this.encryptionAvailable = this.safeStorage?.isEncryptionAvailable() ?? false;
@@ -476,6 +503,66 @@ export class SecureSettingsRepository {
       }
     }
     throw new SecureSettingsConflictError(category);
+  }
+
+  /** The data key's durable copy lives in this database (see DATA_KEY_CATEGORY). */
+  private dataKeyStore(): DataKeyStore {
+    return {
+      readSealedKey: () => {
+        const row = this.findByCategory(DATA_KEY_CATEGORY as SettingsCategory);
+        return row?.encrypted_data.startsWith(DATA_KEY_PREFIX)
+          ? row.encrypted_data.slice(DATA_KEY_PREFIX.length)
+          : null;
+      },
+      storeSealedKey: (sealed) => {
+        const encryptedData = DATA_KEY_PREFIX + sealed;
+        const current = this.findByCategory(DATA_KEY_CATEGORY as SettingsCategory);
+        if (current?.encrypted_data === encryptedData) return;
+        this.commitOnHost([
+          {
+            category: DATA_KEY_CATEGORY,
+            expectedRevision: readSecureSettingsRevision(this.db, DATA_KEY_CATEGORY),
+            record: { encryptedData, checksum: this.computeChecksum(encryptedData) },
+          },
+        ]);
+      },
+      hasDataKeySealedSecrets: () =>
+        this.listOsSealedRows().some((row) =>
+          isDataKeySealed(Buffer.from(row.encrypted_data.slice(3), "base64")),
+        ),
+    };
+  }
+
+  /**
+   * Open the data key that seals secrets (utils/safe-storage), with its durable copy in
+   * this database, then use it here. When this keychain cannot open the key (the app's
+   * keychain identity changed), `recover` may unseal it under a former identity; the key
+   * is then re-sealed with the current keychain. Without a data key, secrets stay sealed
+   * by the OS keychain directly, as before.
+   */
+  async openDataKey(
+    userDataDir: string,
+    recover?: (sealed: string) => Promise<string | null>,
+  ): Promise<DataKeyStatus | "recovered"> {
+    const store = this.dataKeyStore();
+    let status: DataKeyStatus | "recovered" = await initializeSafeStorageDataKey(
+      userDataDir,
+      store,
+    );
+    if (status === "unreadable" && recover) {
+      const sealed = store.readSealedKey() ?? readSealedDataKeyFile(userDataDir);
+      const keyHex = sealed ? await recover(sealed) : null;
+      if (keyHex && (await adoptRecoveredDataKey(userDataDir, keyHex, store))) {
+        status = "recovered";
+      }
+    }
+    this.safeStorage = getSafeStorage();
+    try {
+      this.encryptionAvailable = this.safeStorage?.isEncryptionAvailable() ?? false;
+    } catch {
+      this.encryptionAvailable = false;
+    }
+    return status;
   }
 
   /**
@@ -961,7 +1048,9 @@ export class SecureSettingsRepository {
   listCategories(): SettingsCategory[] {
     const stmt = this.db.prepare("SELECT category FROM secure_settings ORDER BY category");
     const rows = stmt.all() as Array<{ category: string }>;
-    return rows.map((r) => r.category as SettingsCategory);
+    return rows
+      .filter((r) => r.category !== DATA_KEY_CATEGORY)
+      .map((r) => r.category as SettingsCategory);
   }
 
   /**

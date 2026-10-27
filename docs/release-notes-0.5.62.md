@@ -53,12 +53,15 @@ since 0.5.61, not only the task-computer feature.
 
 ## Upgrade notes
 
-Candidate validation also fixed six release-path problems: desktop capture on Cua
+Candidate validation also fixed release-path problems: desktop capture on Cua
 images without `scrot`, partial migration-lock publication during simultaneous
 startup, optional SQLite recovery removing Electron's download or setup directory,
-the GUI preflight guard blocking a task computer's server command, and startup cleanup interrupting computers owned by another profile, and a failure exit
-status from `coworkctl --help`. The host
-command guard and explicit policy denials remain enforced.
+and the GUI preflight guard blocking a task computer's server command. Startup
+cleanup now respects profile ownership, explicit `coworkctl --help` succeeds, and
+installed import-only dependencies no longer trigger unnecessary npm repair.
+Dismissing a takeover or encountering held human control pauses the current
+completion step before another provider call. The host command guard and explicit
+policy denials remain enforced.
 
 - Back up the profile before upgrading. Keep the backup and the previous installer
   until the upgraded profile and saved provider sign-ins have been checked.
@@ -66,8 +69,8 @@ command guard and explicit policy denials remain enforced.
   file can be restored without creating a replacement key that orphans secrets.
   After secrets are re-encrypted, 0.5.61 and earlier cannot read them. A downgrade
   requires re-entering credentials or reinstalling this version; retain the
-  pre-upgrade backup. This durability change landed in #797 during qualification
-  and still needs inclusion in the final clean release build.
+  pre-upgrade backup. This durability change from #797 is included in the rebuilt
+  candidate and has passed synthetic native key-file loss recovery.
 - Existing tasks and bots retain their execution route unless task-computer
   execution is selected. The model and orchestration still run on the host;
   connected services and memory keep their separate permissions.

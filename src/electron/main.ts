@@ -73,7 +73,6 @@ import {
   Menu,
   nativeImage,
   screen,
-  safeStorage,
   systemPreferences,
   webContents,
   WebContentsView,
@@ -383,7 +382,13 @@ import {
   primeMacSafeStorageContext,
   shouldAdoptNewKeychainKey,
 } from "./utils/mac-safe-storage-bootstrap";
-import { getSafeStorage } from "./utils/safe-storage";
+import {
+  decryptOsSealedAsync,
+  getSafeStorage,
+  hasSafeStorageDataKey,
+  initializeSafeStorageDataKey,
+} from "./utils/safe-storage";
+import { rewrapChannelConfigs, rewrapMailboxValues } from "./utils/safe-storage-rewrap";
 import {
   keepDirectRunAliveWithoutWindows,
   stripInjectedSystemCaOption,
@@ -1785,6 +1790,61 @@ async function handleCliApprovalResponse(request: CliApprovalResponse): Promise<
   );
 }
 
+/** Open (or create) the data key that seals secrets; see utils/safe-storage. */
+async function openSafeStorageDataKey(): Promise<void> {
+  try {
+    const status = await initializeSafeStorageDataKey(getUserDataDir());
+    if (status === "unreadable") {
+      logger.warn(
+        "The secrets data key is sealed by an OS keychain this process cannot use; secrets stay sealed by the keychain directly.",
+      );
+    } else if (status === "created") {
+      logger.info("Created the data key that seals secrets.");
+    }
+  } catch (error) {
+    logger.warn(
+      "Could not open the secrets data key; secrets stay sealed by the OS keychain.",
+      error,
+    );
+  }
+}
+
+/** Move values still sealed by the OS keychain directly onto the data key. */
+async function rewrapSecretsWithDataKey(
+  database: Parameters<typeof rewrapChannelConfigs>[0]["database"],
+  deferStartupTask: (name: string, task: () => Promise<void>) => void,
+): Promise<void> {
+  const storage = getSafeStorage();
+  if (!storage || !hasSafeStorageDataKey()) return;
+  try {
+    const settings =
+      await SecureSettingsRepository.getInstance().rewrapOsSealedRows(decryptOsSealedAsync);
+    if (settings > 0) logger.info("Re-encrypted secure settings with the data key.", { settings });
+    await rewrapChannelConfigs({ database, storage, decrypt: decryptOsSealedAsync, logger });
+  } catch (error) {
+    logger.warn(
+      "Could not re-encrypt every secret with the data key; it retries next start.",
+      error,
+    );
+  }
+  // Mailbox content can be large, so it moves after the window is up.
+  deferStartupTask("mailbox-data-key-rewrap", async () => {
+    const mailbox = getMailboxServiceInstance();
+    if (!mailbox) return;
+    await rewrapMailboxValues({
+      store: {
+        targets: Object.keys(MAILBOX_ENCRYPTED_COLUMNS) as MailboxEncryptedColumnTarget[],
+        list: (target) => mailbox.listOsEncryptedValues(target),
+        replaceIfUnchanged: (target, key, next, previous) =>
+          mailbox.replaceEncryptedValueIfUnchanged(target, key, next, previous),
+      },
+      storage,
+      decrypt: decryptOsSealedAsync,
+      logger,
+    });
+  });
+}
+
 async function runCliDirectMode(): Promise<void> {
   try {
     process.env.COWORK_HEADLESS = "1";
@@ -1796,6 +1856,7 @@ async function runCliDirectMode(): Promise<void> {
     if (await primeMacSafeStorageContext()) {
       logger.info("Initialized macOS Keychain context before loading secure settings.");
     }
+    await openSafeStorageDataKey();
     const directRunPath = path.join(app.getAppPath(), "dist", "cli", "cli", "direct-run.js");
     if (!fsSync.existsSync(directRunPath)) {
       throw new Error(
@@ -1827,7 +1888,8 @@ async function runMacSafeStorageMigrationWorkerMode(): Promise<void> {
     let pendingResult = "";
     await runMacSafeStorageMigrationWorker({
       platform: process.platform,
-      safeStorage,
+      // No data key here: the worker reads values the legacy identity's keychain sealed.
+      decrypt: decryptOsSealedAsync,
       readInput: async () => {
         const chunks: Buffer[] = [];
         for await (const chunk of process.stdin) {
@@ -2226,6 +2288,7 @@ if (isMacSafeStorageMigrationWorker) {
       if (await primeMacSafeStorageContext()) {
         logger.info("Initialized macOS Keychain context before loading secure settings.");
       }
+      await openSafeStorageDataKey();
       getDesktopLocationService().installPermissionHandlers();
       installMcpInstallConfirmationHandler();
       const startupStartedAt = Date.now();
@@ -2423,6 +2486,9 @@ if (isMacSafeStorageMigrationWorker) {
       logger.info("SecureSettingsRepository initialized");
       // Legacy remote app connections are retained for migration only; never start them.
       logStartupLane("blocking_startup", { event: "secure_settings_ready" });
+      // Values still sealed by the OS keychain directly move to the data key first, so the
+      // legacy-identity migration below only sees what the current keychain cannot read.
+      await rewrapSecretsWithDataKey(dbManager.getDatabase(), deferStartupTask);
       if (process.platform === "darwin") {
         await migrateLegacyMacSafeStorageSettings({
           platform: process.platform,

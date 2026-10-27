@@ -3,6 +3,7 @@ import {
   environmentControlKey,
 } from "../../shared/execution-environment";
 import { ExecutionEnvironmentController } from "../environments/ExecutionEnvironmentController";
+import { getSafeStorage } from "../utils/safe-storage";
 import { mapBounded, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import {
   collaborativeExecutionLanes,
@@ -74,7 +75,6 @@ import {
   dialog,
   app as _app,
   nativeTheme,
-  safeStorage,
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
@@ -1902,13 +1902,15 @@ export async function setupIpcHandlers(
   // desktop, encrypted with the OS keychain when it is available.
   const taughtTasks = BotTaskRecordings.configure({
     dataDir: () => _app.getPath("userData"),
-    cipher: () =>
-      safeStorage.isEncryptionAvailable()
+    cipher: () => {
+      const storage = getSafeStorage();
+      return storage?.isEncryptionAvailable()
         ? {
-            encrypt: (plain) => safeStorage.encryptString(plain.toString("utf8")),
-            decrypt: (sealed) => Buffer.from(safeStorage.decryptString(sealed), "utf8"),
+            encrypt: (plain) => storage.encryptString(plain.toString("utf8")),
+            decrypt: (sealed) => Buffer.from(storage.decryptString(sealed), "utf8"),
           }
-        : null,
+        : null;
+    },
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_START_RECORDING, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_START_RECORDING);

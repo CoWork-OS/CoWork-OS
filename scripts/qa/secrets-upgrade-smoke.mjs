@@ -121,8 +121,9 @@ const env = {
   COWORK_IMPORT_ENV_SETTINGS: "0",
   COWORK_BACKGROUND_AUTOSTART: "0",
   COWORK_DEV_BRAND_APP: "0",
-  ELECTRON_RUN_AS_NODE: "",
 };
+// Removed, not emptied: on Windows Electron treats an empty value as set and runs as Node.
+delete env.ELECTRON_RUN_AS_NODE;
 
 function summarizeLog(log) {
   return {
@@ -178,8 +179,9 @@ function withDeadline(promise, ms, what) {
 }
 
 /**
- * Why a running app stopped answering: on macOS, its main thread's stack (a keychain prompt
- * nobody can answer blocks it inside the Security framework) and any open prompt process.
+ * Why a running app stalled, on macOS: open prompt processes (nobody answers a keychain
+ * prompt on a runner), the main thread's stack, and any thread waiting in the keychain (the
+ * async safeStorage calls wait there without blocking the main thread).
  */
 async function hangReport(label, pid) {
   if (process.platform !== "darwin" || !pid) return "";
@@ -195,17 +197,22 @@ async function hangReport(label, pid) {
   const sampleFile = path.join(out, `${label}-sample.txt`);
   await run("sample", [String(pid), "3", "-file", sampleFile]);
   const sample = fs.existsSync(sampleFile) ? fs.readFileSync(sampleFile, "utf8") : "";
-  const mainThread = sample
-    .split(/\n(?=\s*\d+ Thread_)/)
-    .find((part) => /Thread_\d+.*main/i.test(part));
+  const threads = sample.split(/\n(?=\s*\d+ Thread_)/);
+  const mainThread = threads.find((part) => /Thread_\d+.*main/i.test(part)) ?? "";
+  const keychainThreads = threads.filter((part) =>
+    /SecKeychain|SecItem|Keychain|OSCrypt|SecurityAgent/.test(part),
+  );
   const prompts = await run("/bin/sh", [
     "-c",
     "ps -axo pid,comm | grep -iE 'SecurityAgent|coreautha|UserNotificationCenter' | grep -v grep",
   ]);
-  return `prompt processes:\n${prompts || "(none)"}\nmain thread:\n${(mainThread ?? sample)
-    .split("\n")
-    .slice(0, 80)
-    .join("\n")}`;
+  const top = (text, lines) => text.split("\n").slice(0, lines).join("\n");
+  return [
+    `prompt processes:\n${prompts || "(none)"}`,
+    `main thread:\n${top(mainThread || sample, 40)}`,
+    `threads in the keychain (${keychainThreads.length}):`,
+    ...keychainThreads.slice(0, 3).map((part) => top(part, 40)),
+  ].join("\n");
 }
 
 async function runApp(label, spec, fn) {
@@ -263,13 +270,12 @@ async function runApp(label, spec, fn) {
     results[label] = { ...(await fn(api)), ...(backend ? { linuxBackend: backend } : {}) };
   } catch (error) {
     results[label] = { error: String(error?.stack || error) };
-    if (/timed out/.test(String(error?.message))) {
-      const report = await hangReport(label, pid);
-      if (report) {
-        results[label].hang = report;
-        console.log(`${label}: the app stopped answering.\n${report}`);
-      }
-    }
+    const report = await hangReport(label, pid);
+    if (report) results[label].hang = report;
+    const tail = log.split("\n").slice(-60).join("\n");
+    console.log(
+      `${label}: ${error?.message || error}\n${report}\napp output (last 60 lines):\n${tail}`,
+    );
   } finally {
     await withDeadline(app.close(), 60_000, `${label}: close`).catch(() => {
       try {
@@ -314,6 +320,10 @@ function inspectProfile() {
         .all()
         .map((r) => r.name),
     );
+    // The app never got as far as creating its database; the step's checks fail on this.
+    if (!tables.has("secure_settings")) {
+      return { secrets: 0, sealing: {}, databaseCreated: false, fingerprint: "" };
+    }
     const rows = db
       .prepare("SELECT category, encrypted_data FROM secure_settings WHERE category <> ?")
       .all(DATA_KEY_CATEGORY);

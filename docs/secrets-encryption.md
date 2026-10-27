@@ -134,8 +134,10 @@ Electron 45 still reads them. They need to move before CoWork upgrades to Electr
 
 ### macOS
 
-The keychain item is **CoWork OS Safe Storage** (account `CoWork OS`) in the login
-keychain. Development and packaged builds use the same name, so they share it.
+The keychain item is **CoWork OS Safe Storage** (account `CoWork OS Key`) in the login
+keychain. Development and packaged builds use the same name, so they share it. A Mac that
+ran an early version can also have an older item with the same name and account
+`CoWork OS`; the current versions don't use it.
 
 Releases are ad hoc signed, so macOS treats each release as a different app. After an
 update, macOS may ask once whether CoWork OS may use the item. Choose **Always Allow**. This

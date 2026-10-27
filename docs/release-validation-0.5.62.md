@@ -1,32 +1,34 @@
 # 0.5.62 release validation
 
 Release preparation for PR #798, on macOS arm64 with Node 24.21.0. Nothing has
-been tagged, uploaded or published. The branch includes main
-`ebfa473455a8eda1b1e2ac2c3a092bc6703ef49f`, including #797 and subsequent terminal
-and branding updates. The task-computer implementation in #774 is already merged.
-The packaged real-provider and viewer qualification below used retry-fix commit
-`4400e6a59` on main `8446d348371a46a6d2fb842d64a1f5ce661f8838`, before the later
-terminal and branding changes. See the PR checks for the latest merged candidate.
+been tagged, uploaded or published. The qualified candidate is
+`3e9624082`, which merges main `a82214d00eb1577a9d6e5a03bc8c7f715c163597`
+(including #797, #800 and the terminal and branding updates) into the release
+branch. The task-computer implementation in #774 is already merged. The
+real-provider walkthrough below used the earlier retry-fix commit `4400e6a59` on
+main `8446d348371a46a6d2fb842d64a1f5ce661f8838`; the deterministic packaged viewer
+retest was repeated on the merged candidate. See the PR checks for the latest head.
 
 ## Current checks
 
 | Check | Command or surface | Result |
 | --- | --- | --- |
-| Build | Explicit `npm run build` after the main refresh | Passed all renderer, web, location helper, Electron, daemon, CLI and connector builds. Locked dependency installation was also completed during candidate preparation. |
-| Full suite and bundled skills gates | `npm test` | After the startup-notice change, 132 Node tests and 18,728 Vitest tests passed; five Vitest tests skipped. |
+| Build | Explicit `npm run build` on `3e9624082` | Passed all renderer, web, location helper, Electron, daemon, CLI and connector builds. Locked dependency installation was also completed during candidate preparation. |
+| Full suite and bundled skills gates | `npm test` | Before the #800 merge, 132 Node tests and 18,728 Vitest tests passed (five skipped). On `3e9624082`, 18,737 Vitest tests passed and one failed in two local full runs while host load averaged about 129 from unrelated processes: `execution-environment.test.ts` "recovers a lost background handle and stops it during completion", which waits on a real guest-agent process with a bounded stop. The file passed 30/30 in three isolated runs, and exact-head CI Tests passed. #800 does not touch this code. |
 | Terminal and takeover regressions | Terminal command-mark and block-runner tests plus executor step-failure suite | 346 tests passed after merging the terminal and branding changes. |
 | Retry regression | Executor step-failure and computer-handoff suites | 323 tests passed, including two new cases that persist the failed tool result and pause before another provider call while human control blocks a required mutation. |
 | Keychain regressions | Storage/identity suites and startup-notice tests | The earlier candidate passed 41 tests; four focused suites passed 19 tests after adding the notice. |
 | Installed launcher regression | Node dependency, setup cwd and CLI-help suites | Five tests passed; an installed import-only dependency no longer triggers an unnecessary npm reinstall. |
-| Static checks | Type check, lint, formatting, docs versions and diff checks | Passed after the final runtime fix. |
+| Static checks | Type check, lint, formatting, docs versions, release surfaces, positioning copy and diff checks | Passed on `3e9624082`. |
 | Approval/reliability baseline | `qa:approval-boundaries`; `qa:harness` | Earlier candidate: 546 approval tests, 1,516 harness tests, fixture evaluation and nine memory evaluation tests passed. |
 | Docker | Explicit Docker task-computer smoke | Passed two guests, import/export, commands, browser click/readback, screenshots, takeover, actual SQLite/policy routing, host-tool denial and physical cleanup. Another profile's startup preserves the live browser/server. |
 | Podman | Same smoke with `COWORK_QA_CONTAINER_RUNTIME=podman` | Passed with Podman 6.1.4 on a dedicated AppleHV VM and Docker fallback excluded. The test VM was stopped and removed. |
 | Cua | `task-computer-cua-smoke.cjs` | Passed Cua 0.9.0 owned Space, borrowed attachment without deletion, imports, commands/files, browser interaction, desktop capture, takeover, export and confirmed deletion. |
 | Bot/database upgrade | Published 0.5.61 → rebuilt current candidate | Passed two current daemon starts and current desktop startup; synthetic bots, teams, decisions, routines and history preserved. |
 | Memory upgrade | `release-upgrade-memory-smoke.mjs`, published 0.5.61 baseline | Passed previous desktop and daemon, two current daemon and two current desktop starts, previous daemon downgrade, and current daemon after downgrade. |
-| Clean npm install | Explicit pack → `release-smoke-install.mjs` | The refreshed-main tarball passed install/setup without bootstrap fallback, Electron SQLite loading, browser-host workflow, CLI help, cold/warm local execution with clean exit, and authenticated desktop launcher startup. |
-| macOS artifacts | Ad hoc arm64 DMG/ZIP and packaged smoke | The refreshed-main artifacts passed signature, mounted DMG, ZIP installation and metadata checks before the later startup-notice change. The former launch check only required the process to survive eight seconds and did not prove the first window loaded. |
+| Clean npm install | Explicit pack → `release-smoke-install.mjs` | The `3e9624082` tarball (SHA-256 `18d782017a59e16704444b65a0700c91e6a4ce9dd32d6e314b56e85f04cd2339`) contains the required desktop, CLI and launcher entrypoints and passed install/setup without bootstrap fallback, Electron SQLite loading, browser-host workflow, cold/warm local execution with clean exit, and authenticated desktop launcher startup. |
+| macOS artifacts | Ad hoc arm64 DMG/ZIP and `smoke-desktop-artifacts.mjs --allow-unsigned` | Built from a staging tree whose shipped tracked sources match `3e9624082`. Updater names aligned and checked; signature, mounted-DMG first-window load (`did_finish_load` within 60 seconds), ZIP installation, `hdiutil verify` and `unzip -t` passed. DMG `b3771dce4b0783d2cbbec62a74f74e4cf57da04396291046e743e85311452b0b`, ZIP `bf3bea4e028fb7ada5fa43864194a48227e9686ac98ca895d2fbde544174dd36`. The packaged app contains the #800 identity entry. |
+| Packaged viewer | `3e9624082` packaged app, deterministic loopback provider fixture | With real Keychain access, a fresh synthetic profile created its data key and loaded the first window 465 ms into startup. The task started `python3 -m http.server 8765 --bind 127.0.0.1` in the guest, read **Ready** and requested takeover. After Take over, a pointer click on Verify in the native interactive viewer changed the page to **Verified**; Done was then submitted, and the next provider call followed only after that. A fresh snapshot without reload observed **Verified**; the task wrote `report.txt`, stopped the actual process and finished `completed` / `ok`. The 50-byte export matches its receipt (`f6eef934240fdb77d07fd25c3443a4f595eb788f0c24059e289176ceaf16593a`); the binding is `released` with no processes, and the task-owned container and private folder are absent. The pre-merge head `216fcb31b` passed the same retest. |
 
 The Docker/Podman/Cua lifecycle runs preceded the final executor-only retry fix;
 the packaged viewer check exercises that fix separately. An upgrade run
@@ -67,7 +69,10 @@ pending process, an early clean exit and split log output.
 An Electron fixture displayed the notice and closed it after a synthetic wait.
 A fresh development profile using the real Keychain opened its data key at
 `2026-10-27T20:27:39.186Z` and loaded the first window at
-`2026-10-27T20:27:41.805Z`.
+`2026-10-27T20:27:41.805Z`. The rebuilt ad hoc packages for `216fcb31b` and
+`3e9624082` each started fresh synthetic profiles with real Keychain access and no
+visible wait (first window 551 ms and 465 ms into startup). That does not prove a
+prompt cannot appear for other bundle identities or machines.
 
 ## Real-provider acceptance and its limits
 
@@ -134,10 +139,15 @@ allowances. Only task-owned synthetic resources were cleaned up.
   need their own exact-candidate platform checks.
 - Fresh install/upgrade fixtures use synthetic data; personal provider sign-ins
   and real channel delivery are not covered.
-- Earlier-base local artifacts are staged outside the checkout under
-  `/tmp/cowork-798-release/release/` and `/tmp/cowork-798-artifacts/`. They
-  predate the later terminal and branding changes. Use a rebuilt release artifact;
-  SHA-256 sidecars belong outside the npm tarball.
+- Local qualification artifacts for `3e9624082` are staged outside the checkout
+  under `/tmp/cowork-798-upstream-stage/release-merge/` and
+  `/tmp/cowork-798-merge-artifacts/`. They are not release artifacts: rebuild from
+  the clean release revision. SHA-256 sidecars belong outside the npm tarball.
+- During the merged-head viewer run, the app window twice stopped repainting
+  while its page kept updating, and resizing the window restored it once. Both
+  windows were behind another app or Space at the time, so this is recorded as
+  an observation, not a confirmed defect. **Open desktop** also did not restore a
+  minimized viewer window.
 - Before publication, require review and green exact-head CI, merge the release
   preparation, rebuild from the clean release revision, and rerun release smoke.
   Merge, tagging, npm publication and installer deployment are separate actions.

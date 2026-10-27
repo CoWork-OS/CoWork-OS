@@ -98,8 +98,9 @@ react to what happened. A quiet "Sent the output of …" line marks that message
 - **Stop**: while a command runs, the Run button shows a spinner that turns into Stop on hover. Stop
   sends Ctrl+C. A stopped run is not sent to the agent.
 - **Finish detection**: the zsh integration emits shell-integration marks (OSC 133 `C` when output
-  starts, `D;<status>` when the prompt returns); bash emits the `D` mark from `PROMPT_COMMAND`. Other
-  shells and Windows `cmd.exe` do not show the Run button.
+  starts, `D;<status>` when the prompt returns, and `E` with the command line just before `C`);
+  bash emits the `D` mark from `PROMPT_COMMAND`. Other shells and Windows `cmd.exe` do not show the
+  Run button.
 - **Policy**: a run is the user's own input to their terminal, so it is gated like typing into a
   tab: the task's access profile must allow command tools, and dangerous-command guardrails still
   apply. The agent cannot start a run; only a click can.
@@ -198,8 +199,21 @@ What the agent can and cannot do with your tabs:
   out
   ```
 
-`last_command` is the last command run through the tab by CoWork (a code block run, for example).
-Commands you type by hand show up in `read_terminal` output, not in `last_command`.
+`last_command` is the last command that ran in the tab, redacted like `read_terminal` output and
+cut to 300 characters.
+
+- **zsh**: commands you type by hand count too. Just before each command runs, the shell
+  integration's `preexec` hook reports the line you typed in a shell-integration mark (OSC 133
+  `E`, carrying the tab's nonce and the line percent-encoded, cut at 2,048 bytes). Output from
+  programs in the tab cannot fake the mark, because only the shell knows the nonce. A line your
+  shell keeps out of its history because it starts with a space (`setopt HIST_IGNORE_SPACE`) is
+  reported without its text, so `last_command` is left out until the next command.
+- **bash**: only commands CoWork ran through the tab count, such as a code block run. Commands you
+  type by hand show up in `read_terminal` output, not in `last_command`. Bash has no `preexec`
+  hook, and a `DEBUG` trap is not a safe stand-in: it would replace your own `DEBUG` trap
+  (bash-preexec, atuin, starship) or be replaced by it, and it sees only the first simple command
+  of a line unless it reads history, which skips lines `HISTCONTROL=ignorespace` drops and would
+  then report the previous command.
 
 ### Code block runs name their tab
 

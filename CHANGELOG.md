@@ -21,6 +21,7 @@ See [Release Notes 0.5.62](docs/release-notes-0.5.62.md) for the complete candid
 
 ### Changed
 
+- **New app icon and logo**: the app icon, Dock icon, notification icon, favicons and in-app logos now use the flat snow leopard mark: a cream leopard on a dark tile for the icon, and the bare mark beside "COWORK OS" for the wordmark. The task view loading logo follows the light or dark theme, and the menu bar template uses the same mark. The vector sources are in `resources/branding/`.
 - **Secrets sealed with a data key**: API keys, tokens and other secrets are now encrypted with one random key that the OS keychain protects, instead of with the keychain directly for every value. Electron 45 deprecates, and Electron 46 removes, the synchronous keychain calls the old approach needed. Existing secrets are re-encrypted on the first start of this version. A sealed copy of the key is kept in the settings database as well as in `safe-storage-key.json`: a lost key file is restored, and a new key is never created while secrets need the old one. **Rolling back to 0.5.61 or earlier after this version has started cannot read the re-encrypted secrets**; re-enter them, or reinstall this version.
 - **Electron 45**: the desktop runtime moves from Electron 44 to Electron 45 (Chromium 156, Node.js 24.22). macOS 13 Ventura remains the minimum. `node-abi` is updated to 4.40.0 so native modules rebuild for Electron 45.
 

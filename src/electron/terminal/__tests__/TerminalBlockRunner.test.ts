@@ -20,6 +20,7 @@ describe("TerminalBlockRunner", () => {
   };
   const start = () => `${ESC}]133;C;${nonce()}${BEL}`;
   const done = (status: number) => `${ESC}]133;D;${nonce()};${status}${BEL}`;
+  const commandMark = (encoded: string) => `${ESC}]133;E;${nonce()};${encoded}${BEL}`;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -105,6 +106,20 @@ describe("TerminalBlockRunner", () => {
     expect(secondResult.tabId).toBe(firstResult.tabId);
     expect(secondResult.output).toBe(`${ESC}[31merror: rejected${ESC}[0m\r\n`);
     expect(secondResult.exitCode).toBe(1);
+  });
+
+  it("keeps zsh's command mark out of the output and takes the tab's last command from it", async () => {
+    const runner = new TerminalBlockRunner(manager, { shellIntegration: "zsh" });
+    const result = runner.run(params({ command: "echo a\necho b" }));
+    emitOutput(`${done(0)}${PROMPT}`);
+    // The pasted lines run as one command line: zsh reports it, then the start mark.
+    emitOutput(`echo a\r\necho b\r\n${commandMark("echo%20a%0Aecho%20b")}${start()}a\r\n`);
+    emitOutput(`b\r\n${done(0)}${PROMPT}`);
+
+    await expect(result).resolves.toMatchObject({ output: "a\r\nb\r\n", exitCode: 0 });
+    // The shell's line replaces the bracketed-paste input the run typed.
+    const [tab] = manager.listTabs("workspace-1");
+    expect(tab.lastCommand).toBe("echo a\necho b");
   });
 
   it("drops zsh's partial-line marker before the prompt", async () => {

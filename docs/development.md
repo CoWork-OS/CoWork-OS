@@ -178,7 +178,9 @@ history in the database.
 
 ## macOS Dev Electron Bundle
 
-On macOS, `npm run dev` brands the local `node_modules/electron/dist/Electron.app` display name and icon as CoWork OS by default. The branding script preserves `CFBundleName=Electron` and `CFBundleIdentifier=com.github.Electron`; the app sets its name to `CoWork OS` before first using safeStorage, so dev and packaged builds share the `CoWork OS Safe Storage` Keychain identity.
+On macOS, `npm run dev` brands the local `node_modules/electron/dist/Electron.app` display name and icon as CoWork OS by default, and gives it the bundle identifier `com.cowork-os.app.dev` (`COWORK_DEV_BUNDLE_ID` sets another). The stock `com.github.Electron` identifier is shared by every Electron app on the machine, and macOS 26 can block the menu bar icon for it. The script keeps `CFBundleName=Electron`; the app sets its name to `CoWork OS` before first using safeStorage, so dev and packaged builds share the `CoWork OS Safe Storage` Keychain item.
+
+The Keychain item stays the same, but macOS checks each app identifier separately, so the first dev launch with the new identifier asks once for access to `CoWork OS Safe Storage`: choose **Always Allow**. If you deny it, that run cannot read existing settings; relaunch and allow it. macOS also treats the new identifier as a new app for notifications and for Privacy & Security permissions (Accessibility, Screen Recording, Automation), so grant those again for dev runs.
 
 ### Stable signing for Keychain access
 

@@ -67,6 +67,7 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
 
   const trayHeading = isMacOS ? "Menu Bar" : "System Tray";
   const trayLabel = isMacOS ? "menu bar" : "system tray";
+  const trayIconOn = settings?.enabled ?? false;
 
   if (!supportsTraySettings) {
     return (
@@ -113,13 +114,13 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
                 <p className="tray-settings-option-desc">
                   {isMacOS ? (
                     <>
-                      Adds a CoWork icon to the menu bar for quick access. Turn off to hide the
-                      icon; the app can still run from the Dock or when you open a window.
+                      Adds the CoWork leopard to the menu bar for quick access. Off by default; the
+                      app still runs from the Dock, and Quick Task stays on ⇧⌘Space.
                     </>
                   ) : (
                     <>
-                      Adds a CoWork icon to the notification area for quick access. Turn off to hide
-                      the icon while CoWork keeps running.
+                      Adds the CoWork leopard to the notification area for quick access. Off by
+                      default; Quick Task stays on Ctrl+Shift+Space.
                     </>
                   )}
                 </p>
@@ -127,7 +128,7 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
               <label className="settings-toggle tray-settings-toggle">
                 <input
                   type="checkbox"
-                  checked={settings?.enabled ?? true}
+                  checked={trayIconOn}
                   onChange={(e) => void handleSave({ enabled: e.target.checked })}
                   disabled={saving}
                   aria-label={isMacOS ? "Show menu bar icon" : "Show system tray icon"}
@@ -143,17 +144,26 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
                 <div className="tray-settings-option-text">
                   <span className="tray-settings-option-title">Show Dock icon</span>
                   <p className="tray-settings-option-desc">
-                    While CoWork is open, show its icon in the Dock. Turn off if you prefer to work
-                    from the menu bar only (the Dock icon can still appear briefly when you focus
-                    the app).
+                    {trayIconOn ? (
+                      <>
+                        While CoWork is open, show its icon in the Dock. Turn off if you prefer to
+                        work from the menu bar only (the Dock icon can still appear briefly when you
+                        focus the app).
+                      </>
+                    ) : (
+                      <>
+                        The Dock icon stays while the menu bar icon is off, so CoWork can always be
+                        reopened.
+                      </>
+                    )}
                   </p>
                 </div>
                 <label className="settings-toggle tray-settings-toggle">
                   <input
                     type="checkbox"
-                    checked={settings?.showDockIcon ?? true}
+                    checked={trayIconOn ? (settings?.showDockIcon ?? true) : true}
                     onChange={(e) => void handleSave({ showDockIcon: e.target.checked })}
-                    disabled={saving}
+                    disabled={saving || !trayIconOn}
                     aria-label="Show Dock icon"
                   />
                   <span className="toggle-slider" />
@@ -191,17 +201,25 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
                   Close button hides, does not quit
                 </span>
                 <p className="tray-settings-option-desc">
-                  When you close the main window, CoWork keeps running in the background. Turn off
-                  to make the close button quit the app (you can still quit from the {trayLabel}{" "}
-                  menu).
+                  {isMacOS || trayIconOn ? (
+                    <>
+                      When you close the main window, CoWork keeps running in the background. Turn
+                      off to make the close button quit the app.
+                    </>
+                  ) : (
+                    <>
+                      Needs the system tray icon, which is how you reopen a hidden window. Without
+                      it, the close button quits CoWork.
+                    </>
+                  )}
                 </p>
               </div>
               <label className="settings-toggle tray-settings-toggle">
                 <input
                   type="checkbox"
-                  checked={settings?.closeToTray ?? true}
+                  checked={isMacOS || trayIconOn ? (settings?.closeToTray ?? true) : false}
                   onChange={(e) => void handleSave({ closeToTray: e.target.checked })}
-                  disabled={saving}
+                  disabled={saving || (!isMacOS && !trayIconOn)}
                   aria-label="Close window hides app instead of quitting"
                 />
                 <span className="toggle-slider" />

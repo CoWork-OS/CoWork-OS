@@ -214,6 +214,40 @@ describe("macOS safeStorage legacy migration", () => {
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
+  it("probes channel configs with the async OS call, never the deprecated sync one", async () => {
+    const { setNativeSafeStorageForTests } = await import("../safe-storage");
+    // Only the async API answers; this config is readable by the current identity.
+    setNativeSafeStorageForTests({
+      decryptStringAsync: vi.fn(async () => ({ result: "{}" })),
+    });
+    const decryptString = vi.fn(() => "{}");
+    const spawnProcess = vi.fn();
+    try {
+      const migratedCount = await migrateLegacyMacSafeStorageChannels({
+        platform: "darwin",
+        database: {
+          prepare: vi.fn(() => ({
+            all: () => [
+              { id: "email-channel", config: `enc:${Buffer.from("x").toString("base64")}` },
+            ],
+            run: vi.fn(),
+          })),
+        },
+        safeStorage: { isEncryptionAvailable: () => true, encryptString: vi.fn(), decryptString },
+        executable: "electron",
+        appPath: ".",
+        logger: { info: vi.fn(), warn: vi.fn() },
+        spawnProcess: spawnProcess as never,
+      });
+
+      expect(migratedCount).toBe(0);
+      expect(spawnProcess).not.toHaveBeenCalled();
+      expect(decryptString).not.toHaveBeenCalled();
+    } finally {
+      setNativeSafeStorageForTests(undefined);
+    }
+  });
+
   it("does not run or touch the database outside macOS", async () => {
     const prepare = vi.fn();
     const spawnProcess = vi.fn();

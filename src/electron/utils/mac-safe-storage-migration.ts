@@ -5,7 +5,12 @@ import type {
   SecureSettingsRepository,
   SettingsCategory,
 } from "../database/SecureSettingsRepository";
-import type { SafeStorageLike } from "./safe-storage";
+import {
+  decryptOsSealedAsync,
+  hasAsyncSafeStorage,
+  isDataKeySealed,
+  type SafeStorageLike,
+} from "./safe-storage";
 import {
   LEGACY_MAC_SAFE_STORAGE_APP_NAME,
   LEGACY_MAC_SAFE_STORAGE_APP_NAMES,
@@ -53,6 +58,25 @@ interface MigrationLogger {
 }
 
 type SpawnProcess = typeof spawn;
+
+/**
+ * Whether the current identity can read a stored ciphertext. Data-key values always can;
+ * others are tried with the asynchronous OS call, so probing a value another keychain
+ * identity sealed never reaches the deprecated synchronous one.
+ */
+async function readableWithCurrentIdentity(
+  safeStorage: SafeStorageLike,
+  sealed: Buffer,
+): Promise<boolean> {
+  if (isDataKeySealed(sealed)) return true;
+  if (hasAsyncSafeStorage()) return (await decryptOsSealedAsync(sealed)) !== null;
+  try {
+    safeStorage.decryptString(sealed);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -333,26 +357,17 @@ export async function migrateLegacyMacSafeStorageChannels(options: {
   const rows = channels.list();
   if (rows.length === 0) return 0;
 
-  const canDecryptWithCurrentIdentity = (config: string): boolean => {
-    try {
-      safeStorage.decryptString(Buffer.from(config.slice("enc:".length), "base64"));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const encryptedRows: EncryptedSecureSettingRow[] = rows
-    .filter(
-      (row) =>
-        typeof row?.id === "string" &&
-        typeof row.config === "string" &&
-        row.config.startsWith("enc:") &&
-        !canDecryptWithCurrentIdentity(row.config),
-    )
-    .map((row) => {
-      const encrypted_data = `os:${row.config.slice("enc:".length)}`;
-      return { category: row.id, encrypted_data, checksum: checksum(encrypted_data) };
-    });
+  const unreadableRows: typeof rows = [];
+  for (const row of rows) {
+    if (typeof row?.id !== "string" || typeof row.config !== "string") continue;
+    if (!row.config.startsWith("enc:")) continue;
+    const sealed = Buffer.from(row.config.slice("enc:".length), "base64");
+    if (!(await readableWithCurrentIdentity(safeStorage, sealed))) unreadableRows.push(row);
+  }
+  const encryptedRows: EncryptedSecureSettingRow[] = unreadableRows.map((row) => {
+    const encrypted_data = `os:${row.config.slice("enc:".length)}`;
+    return { category: row.id, encrypted_data, checksum: checksum(encrypted_data) };
+  });
   if (encryptedRows.length === 0) return 0;
 
   let migratedCount = 0;
@@ -475,16 +490,11 @@ export async function migrateLegacyMacSafeStorageMailbox<Target extends string>(
     return 0;
   }
   const safeStorage = options.safeStorage;
-  const canDecrypt = (value: string): boolean => {
-    try {
-      safeStorage.decryptString(
-        Buffer.from(value.slice(MAILBOX_OS_CIPHER_PREFIX.length), "base64"),
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const canDecrypt = (value: string): Promise<boolean> =>
+    readableWithCurrentIdentity(
+      safeStorage,
+      Buffer.from(value.slice(MAILBOX_OS_CIPHER_PREFIX.length), "base64"),
+    );
 
   type Pending = { target: Target; key: string; value: string; row: EncryptedSecureSettingRow };
   const pending = new Map<string, Pending>();
@@ -497,7 +507,7 @@ export async function migrateLegacyMacSafeStorageMailbox<Target extends string>(
     }
     for (const { key, value } of rows) {
       if (typeof key !== "string" || typeof value !== "string") continue;
-      if (!value.startsWith(MAILBOX_OS_CIPHER_PREFIX) || canDecrypt(value)) continue;
+      if (!value.startsWith(MAILBOX_OS_CIPHER_PREFIX) || (await canDecrypt(value))) continue;
       const encrypted_data = `os:${value.slice(MAILBOX_OS_CIPHER_PREFIX.length)}`;
       const id = JSON.stringify([target, key]);
       pending.set(id, {

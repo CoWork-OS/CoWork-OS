@@ -139,6 +139,12 @@ export function getSafeStorage(): SafeStorageLike | null {
   return hasSyncApi(native) ? native : null;
 }
 
+/** Whether this Electron has the asynchronous safeStorage API (Electron 45 and later). */
+export function hasAsyncSafeStorage(): boolean {
+  const native = getNativeSafeStorage();
+  return !!native && typeof native.decryptStringAsync === "function";
+}
+
 /**
  * Decrypt a value sealed by the OS keychain directly, without the deprecated synchronous
  * call. Returns null when the OS keychain cannot read it (another keychain identity).

@@ -27,6 +27,8 @@ type TerminalPtyRuntime = {
   rows: number;
   closeRequested: boolean;
   cwdParseBuffer: string;
+  /** The end of the last output chunk when it may hold the start of a command mark. */
+  commandMarkBuffer: string;
   /** Secret in this tab's shell-integration marks, so command output cannot fake them. */
   markNonce: string;
   /** The task whose code block run opened this tab (TerminalBlockRunner), if one did. */
@@ -38,6 +40,18 @@ const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_REPLAY_BUFFER_LENGTH = 256 * 1024;
 const OSC7_PATTERN = /\x1b]7;file:\/\/([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+const ESC = String.fromCharCode(0x1b);
+/**
+ * The zsh integration's command mark, `ESC ] 133;E;<nonce>;<command line> BEL`, sent from
+ * preexec with the line the user typed, percent-encoded (see buildZshPromptSetup).
+ */
+const COMMAND_MARK_PREFIX = `${ESC}]133;E;`;
+const COMMAND_MARK_PATTERN = /\x1b]133;E;([^;\x07\x1b]*);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+/** Longest command line a mark reports, in bytes; zsh cuts longer lines. */
+const MAX_MARKED_COMMAND_BYTES = 2048;
+/** Longest unfinished command mark kept for the next chunk: up to three characters a byte. */
+const MAX_COMMAND_MARK_LENGTH = COMMAND_MARK_PREFIX.length + 128 + MAX_MARKED_COMMAND_BYTES * 3;
+const COMMAND_CONTROL_CHARS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 let nodePtyHelperChecked = false;
 let terminalZdotdir: string | null = null;
 
@@ -111,8 +125,14 @@ function buildZshSourceLine(filePath: string): string {
  * starts (C) and where it finished, with its exit status (D). Each mark carries the tab's
  * nonce, which the shell takes out of its environment so commands cannot print a valid
  * mark. The done mark runs first among the precmd hooks so it sees the command's status.
+ *
+ * Just before the start mark, preexec sends the command mark (E) with the line the user
+ * typed ($1, or the expanded command when history gave no line), percent-encoded byte by
+ * byte and cut at MAX_MARKED_COMMAND_BYTES, which becomes the tab's lastCommand. A line
+ * that HIST_IGNORE_SPACE keeps out of history is sent empty, so the tab reports no command.
+ * Exported for tests.
  */
-function buildZshPromptSetup(): string {
+export function buildZshPromptSetup(): string {
   return [
     "PROMPT='%1~ %# '",
     "PS1=$PROMPT",
@@ -125,7 +145,19 @@ function buildZshPromptSetup(): string {
     "  typeset -g __cowork_mark_nonce=$COWORK_TERMINAL_MARK_NONCE",
     "  unset COWORK_TERMINAL_MARK_NONCE",
     "fi",
+    "function __cowork_terminal_mark_command() {",
+    "  [[ -n ${__cowork_mark_nonce-} ]] || return 0",
+    "  local hidden=0",
+    "  [[ -o hist_ignore_space && ${1-} == [[:space:]]* ]] && hidden=1",
+    "  emulate -L zsh",
+    "  setopt extended_glob no_multibyte",
+    "  local line=${1:-${3-}} MATCH MBEGIN MEND",
+    "  (( hidden )) && line=",
+    `  (( \${#line} > ${MAX_MARKED_COMMAND_BYTES} )) && line=\${line[1,${MAX_MARKED_COMMAND_BYTES}]}`,
+    '  printf \'\\e]133;E;%s;%s\\a\' "$__cowork_mark_nonce" "${line//(#m)[^A-Za-z0-9._~\\/-]/%${(l:2::0:)$(( [##16] #MATCH ))}}"',
+    "}",
     "function __cowork_terminal_mark_start() {",
+    '  __cowork_terminal_mark_command "$@"',
     "  printf '\\e]133;C;%s\\a' \"$__cowork_mark_nonce\"",
     "}",
     "function __cowork_terminal_mark_done() {",
@@ -146,6 +178,12 @@ function buildZshPromptSetup(): string {
 /**
  * Bash has no preexec hook, so it only reports the done mark, from PROMPT_COMMAND. The
  * first prompt un-exports PROMPT_COMMAND so commands do not see the nonce.
+ *
+ * Bash sends no command mark, so lines typed in a bash tab do not become its lastCommand.
+ * A DEBUG trap is not a safe stand-in for preexec: it would replace, or be replaced by, the
+ * user's own DEBUG trap (bash-preexec, atuin, starship), and it sees only the first simple
+ * command of a line ($BASH_COMMAND) unless it reads history, which skips the lines
+ * HISTCONTROL=ignorespace drops and would then report the previous command.
  */
 function buildBashDoneMarkPromptCommand(markNonce: string): string {
   return `__cowork_ec=$?; export -n PROMPT_COMMAND 2>/dev/null; printf "\\033]133;D;${markNonce};%s\\007" "$__cowork_ec"; (exit $__cowork_ec)`;
@@ -198,6 +236,43 @@ function resolveOsc7Cwd(rawValue: string): string | null {
   } catch {
     return pathname;
   }
+}
+
+/** A command mark's payload as text: percent-encoded UTF-8, control characters dropped. */
+function decodeCommandMarkPayload(payload: string): string {
+  const bytes: number[] = [];
+  for (
+    let index = 0;
+    index < payload.length && bytes.length < MAX_MARKED_COMMAND_BYTES;
+    index += 1
+  ) {
+    const hex = payload[index] === "%" ? payload.slice(index + 1, index + 3) : "";
+    if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+      bytes.push(Number.parseInt(hex, 16));
+      index += 2;
+    } else {
+      bytes.push(...Buffer.from(payload[index], "utf8"));
+    }
+  }
+  return Buffer.from(bytes).toString("utf8").replace(COMMAND_CONTROL_CHARS, "").trim();
+}
+
+/**
+ * What to keep of the output's end for the next chunk: a command mark that has not ended yet
+ * (dropped once longer than any real mark), else enough to finish a mark prefix the chunk cut.
+ */
+function unfinishedCommandMark(rest: string): string {
+  const start = rest.lastIndexOf(COMMAND_MARK_PREFIX);
+  if (start >= 0) {
+    const mark = rest.slice(start);
+    const body = mark.slice(COMMAND_MARK_PREFIX.length);
+    const stop = body.search(/[\x07\x1b]/);
+    // A lone ESC at the very end may be the first half of the ST terminator.
+    if (stop < 0 || (stop === body.length - 1 && body[stop] === ESC)) {
+      return mark.length <= MAX_COMMAND_MARK_LENGTH ? mark : "";
+    }
+  }
+  return rest.slice(-(COMMAND_MARK_PREFIX.length - 1));
 }
 
 function appendBuffer(buffer: string, output: string): string {
@@ -285,6 +360,7 @@ export class TerminalPtyManager {
       rows: params.rows || DEFAULT_ROWS,
       closeRequested: false,
       cwdParseBuffer: "",
+      commandMarkBuffer: "",
       markNonce: crypto.randomBytes(12).toString("hex"),
       ...(params.codeBlockTaskId ? { codeBlockTaskId: params.codeBlockTaskId } : {}),
     };
@@ -473,6 +549,7 @@ export class TerminalPtyManager {
       runtime.outputOffset += output.length;
       runtime.buffer = appendBuffer(runtime.buffer, output);
       this.consumeCwd(runtime, output);
+      this.consumeCommandMarks(runtime, output);
       for (const listener of runtime.listeners.values()) {
         listener({
           stream: "stdout",
@@ -513,5 +590,25 @@ export class TerminalPtyManager {
       }
     }
     runtime.cwdParseBuffer = text.slice(Math.max(lastMatchEnd, text.length - 512));
+  }
+
+  /**
+   * Commands typed in a zsh tab: the integration's command mark sets lastCommand. Only marks
+   * with the tab's nonce count, so command output cannot change the tab's last command.
+   */
+  private consumeCommandMarks(runtime: TerminalPtyRuntime, output: string): void {
+    const text = `${runtime.commandMarkBuffer}${output}`;
+    if (!text.includes(ESC)) {
+      runtime.commandMarkBuffer = "";
+      return;
+    }
+    let lastMatchEnd = 0;
+    for (const match of text.matchAll(COMMAND_MARK_PATTERN)) {
+      lastMatchEnd = (match.index ?? 0) + match[0].length;
+      if (match[1] !== runtime.markNonce) continue;
+      const command = decodeCommandMarkPayload(match[2] ?? "");
+      this.updateInfo(runtime, { lastCommand: command || undefined, lastCommandAt: Date.now() });
+    }
+    runtime.commandMarkBuffer = unfinishedCommandMark(text.slice(lastMatchEnd));
   }
 }

@@ -369,7 +369,8 @@ export class TerminalTabTools {
 
   private describeTab(tab: ShellSessionInfo): Record<string, unknown> {
     const label = this.tabLabel(tab);
-    // lastCommand also holds the title a tab was opened with; only a run sets lastCommandAt.
+    // lastCommand also holds the title a tab was opened with; only a command sets lastCommandAt
+    // (a code block run, or a line typed in zsh, which TerminalPtyManager reads from its mark).
     const lastCommand =
       tab.lastCommandAt && tab.lastCommand
         ? redactTerminalText(tab.lastCommand, this.tabSecrets(tab.id))

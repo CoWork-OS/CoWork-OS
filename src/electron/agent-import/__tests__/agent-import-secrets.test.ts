@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../utils/safe-storage", () => ({
+// The rest of the module stays real (data key state: no key opened in this test).
+vi.mock("../../utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../utils/safe-storage")>()),
   getSafeStorage: () => ({
     isEncryptionAvailable: () => false,
     encryptString: (value: string) => Buffer.from(value, "utf8"),

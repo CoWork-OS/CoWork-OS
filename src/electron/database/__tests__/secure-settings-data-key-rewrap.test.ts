@@ -2,11 +2,10 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decryptOsSealedAsync,
   getSafeStorage,
-  initializeSafeStorageDataKey,
   isDataKeySealed,
   resetSafeStorageDataKeyForTests,
   setNativeSafeStorageForTests,
@@ -38,6 +37,12 @@ const native = {
   isAsyncEncryptionAvailable: async () => true,
   encryptStringAsync: async (text: string) => osSeal(text),
   decryptStringAsync: async (sealed: Buffer) => ({ result: osOpen(sealed) }),
+};
+/** An older Electron, as the previous CoWork version used it: sync API only. */
+const syncOnly = {
+  isEncryptionAvailable: () => true,
+  encryptString: osSeal,
+  decryptString: osOpen,
 };
 
 describeWithSqlite("secure settings data key rewrap", () => {
@@ -72,6 +77,7 @@ describeWithSqlite("secure settings data key rewrap", () => {
 
   it("moves a keychain-sealed row and its encrypted: values onto the data key", async () => {
     // Written before this version: the record and an inner value sealed by the keychain.
+    setNativeSafeStorageForTests(syncOnly);
     const before = new mod.SecureSettingsRepository(db);
     const innerLegacy = `encrypted:${osSeal("el-key").toString("base64")}`;
     before.save("voice", { provider: "elevenlabs", apiKey: innerLegacy });
@@ -79,8 +85,9 @@ describeWithSqlite("secure settings data key rewrap", () => {
     expect(isDataKeySealed(Buffer.from(stored().encrypted_data.slice(3), "base64"))).toBe(false);
     const revision = stored().revision;
 
-    await initializeSafeStorageDataKey(tmpDir);
+    setNativeSafeStorageForTests(native);
     const repo = new mod.SecureSettingsRepository(db);
+    await expect(repo.openDataKey(tmpDir)).resolves.toBe("created");
     await expect(repo.rewrapOsSealedRows(decryptOsSealedAsync)).resolves.toBe(1);
 
     const row = stored();
@@ -107,10 +114,85 @@ describeWithSqlite("secure settings data key rewrap", () => {
     await expect(repo.rewrapOsSealedRows(decryptOsSealedAsync)).resolves.toBe(0);
   });
 
-  it("does not overwrite a row another writer changed while it was decrypting", async () => {
-    new mod.SecureSettingsRepository(db).save("voice", { provider: "old" });
-    await initializeSafeStorageDataKey(tmpDir);
+  it("keeps the sealed key in the database and restores a lost key file from it", async () => {
     const repo = new mod.SecureSettingsRepository(db);
+    await expect(repo.openDataKey(tmpDir)).resolves.toBe("created");
+    repo.save("voice", { provider: "kept" });
+    const keyFile = path.join(tmpDir, "safe-storage-key.json");
+    const sealedInFile = JSON.parse(fs.readFileSync(keyFile, "utf8")).sealed;
+    const keyRow = db
+      .prepare(
+        "SELECT encrypted_data FROM secure_settings WHERE category = '__safe_storage_data_key__'",
+      )
+      .get() as { encrypted_data: string };
+    expect(keyRow.encrypted_data).toBe(`key:${sealedInFile}`);
+    // It is not a settings category.
+    expect(repo.listCategories()).not.toContain("__safe_storage_data_key__");
+
+    // The file is lost; the next start restores it from the database.
+    fs.rmSync(keyFile);
+    resetSafeStorageDataKeyForTests();
+    const next = new mod.SecureSettingsRepository(db);
+    await expect(next.openDataKey(tmpDir)).resolves.toBe("loaded");
+    expect(JSON.parse(fs.readFileSync(keyFile, "utf8")).sealed).toBe(sealedInFile);
+    expect(next.load<{ provider: string }>("voice")?.provider).toBe("kept");
+  });
+
+  it("never creates a new key while secrets are sealed with a lost one", async () => {
+    const repo = new mod.SecureSettingsRepository(db);
+    await repo.openDataKey(tmpDir);
+    repo.save("voice", { provider: "sealed" });
+    // Both copies are gone, but the data-key secret remains.
+    fs.rmSync(path.join(tmpDir, "safe-storage-key.json"));
+    db.prepare("DELETE FROM secure_settings WHERE category = '__safe_storage_data_key__'").run();
+    resetSafeStorageDataKeyForTests();
+
+    const next = new mod.SecureSettingsRepository(db);
+    await expect(next.openDataKey(tmpDir)).resolves.toBe("unreadable");
+    expect(fs.existsSync(path.join(tmpDir, "safe-storage-key.json"))).toBe(false);
+  });
+
+  it("re-seals a key only a former keychain identity can open", async () => {
+    const repo = new mod.SecureSettingsRepository(db);
+    await repo.openDataKey(tmpDir);
+    repo.save("voice", { provider: "before-rename" });
+    const keyFile = path.join(tmpDir, "safe-storage-key.json");
+    const formerSealed = JSON.parse(fs.readFileSync(keyFile, "utf8")).sealed;
+    const keyHex = osOpen(Buffer.from(formerSealed, "base64"));
+    resetSafeStorageDataKeyForTests();
+
+    // The app's keychain identity changed: the current keychain seals differently.
+    const renamedSeal = (text: string) => Buffer.from(`new|${text}`);
+    const renamedOpen = (sealed: Buffer) => {
+      const text = sealed.toString();
+      if (!text.startsWith("new|")) throw new Error("Error while decrypting the ciphertext");
+      return text.slice(4);
+    };
+    setNativeSafeStorageForTests({
+      isEncryptionAvailable: () => true,
+      encryptString: renamedSeal,
+      decryptString: renamedOpen,
+      isAsyncEncryptionAvailable: async () => true,
+      encryptStringAsync: async (text: string) => renamedSeal(text),
+      decryptStringAsync: async (sealed: Buffer) => ({ result: renamedOpen(sealed) }),
+    });
+    const recover = vi.fn(async (sealed: string) => (sealed === formerSealed ? keyHex : null));
+    const next = new mod.SecureSettingsRepository(db);
+    await expect(next.openDataKey(tmpDir, recover)).resolves.toBe("recovered");
+    expect(next.load<{ provider: string }>("voice")?.provider).toBe("before-rename");
+    // Re-sealed for the current identity, in both places.
+    const resealed = JSON.parse(fs.readFileSync(keyFile, "utf8")).sealed;
+    expect(Buffer.from(resealed, "base64").toString().startsWith("new|")).toBe(true);
+    resetSafeStorageDataKeyForTests();
+    await expect(new mod.SecureSettingsRepository(db).openDataKey(tmpDir)).resolves.toBe("loaded");
+  });
+
+  it("does not overwrite a row another writer changed while it was decrypting", async () => {
+    setNativeSafeStorageForTests(syncOnly);
+    new mod.SecureSettingsRepository(db).save("voice", { provider: "old" });
+    setNativeSafeStorageForTests(native);
+    const repo = new mod.SecureSettingsRepository(db);
+    await repo.openDataKey(tmpDir);
     const other = new mod.SecureSettingsRepository(new Database(path.join(tmpDir, "settings.db")));
 
     const rewrapped = await repo.rewrapOsSealedRows(async (sealed) => {

@@ -17,7 +17,9 @@ const nativeSqliteAvailable = await import("better-sqlite3")
 
 // A fake OS keychain whose key can be swapped to simulate an identity change.
 const keychain = { key: "identity-a", available: true };
-vi.mock("../../utils/safe-storage", () => ({
+// The rest of the module stays real (data key state: no key opened in this test).
+vi.mock("../../utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../utils/safe-storage")>()),
   getSafeStorage: () => ({
     isEncryptionAvailable: () => keychain.available,
     encryptString: (plaintext: string) => Buffer.from(`${keychain.key}|${plaintext}`),

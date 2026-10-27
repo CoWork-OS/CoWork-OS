@@ -382,12 +382,7 @@ import {
   primeMacSafeStorageContext,
   shouldAdoptNewKeychainKey,
 } from "./utils/mac-safe-storage-bootstrap";
-import {
-  decryptOsSealedAsync,
-  getSafeStorage,
-  hasSafeStorageDataKey,
-  initializeSafeStorageDataKey,
-} from "./utils/safe-storage";
+import { decryptOsSealedAsync, getSafeStorage, hasSafeStorageDataKey } from "./utils/safe-storage";
 import { rewrapChannelConfigs, rewrapMailboxValues } from "./utils/safe-storage-rewrap";
 import {
   keepDirectRunAliveWithoutWindows,
@@ -399,6 +394,7 @@ import {
   migrateLegacyMacSafeStorageMailbox,
   createMailboxMigrationAttemptStore,
   migrateLegacyMacSafeStorageSettings,
+  recoverDataKeyFromLegacyIdentity,
 } from "./utils/mac-safe-storage-migration";
 
 let mainWindow: BrowserWindow | null = null;
@@ -1791,15 +1787,25 @@ async function handleCliApprovalResponse(request: CliApprovalResponse): Promise<
 }
 
 /** Open (or create) the data key that seals secrets; see utils/safe-storage. */
-async function openSafeStorageDataKey(): Promise<void> {
+async function openSafeStorageDataKey(repository: SecureSettingsRepository): Promise<void> {
   try {
-    const status = await initializeSafeStorageDataKey(getUserDataDir());
+    const status = await repository.openDataKey(getUserDataDir(), (sealedKey) =>
+      recoverDataKeyFromLegacyIdentity({
+        platform: process.platform,
+        sealedKey,
+        executable: process.execPath,
+        appPath: app.getAppPath(),
+        logger,
+      }),
+    );
     if (status === "unreadable") {
       logger.warn(
-        "The secrets data key is sealed by an OS keychain this process cannot use; secrets stay sealed by the keychain directly.",
+        "The secrets data key is sealed by an OS keychain this process cannot use, or is missing; secrets stay sealed by the keychain directly.",
       );
     } else if (status === "created") {
       logger.info("Created the data key that seals secrets.");
+    } else if (status === "recovered") {
+      logger.info("Re-sealed the secrets data key with the current OS keychain.");
     }
   } catch (error) {
     logger.warn(
@@ -1856,7 +1862,6 @@ async function runCliDirectMode(): Promise<void> {
     if (await primeMacSafeStorageContext()) {
       logger.info("Initialized macOS Keychain context before loading secure settings.");
     }
-    await openSafeStorageDataKey();
     const directRunPath = path.join(app.getAppPath(), "dist", "cli", "cli", "direct-run.js");
     if (!fsSync.existsSync(directRunPath)) {
       throw new Error(
@@ -2288,7 +2293,6 @@ if (isMacSafeStorageMigrationWorker) {
       if (await primeMacSafeStorageContext()) {
         logger.info("Initialized macOS Keychain context before loading secure settings.");
       }
-      await openSafeStorageDataKey();
       getDesktopLocationService().installPermissionHandlers();
       installMcpInstallConfirmationHandler();
       const startupStartedAt = Date.now();
@@ -2482,7 +2486,7 @@ if (isMacSafeStorageMigrationWorker) {
 
       // Initialize secure settings repository for encrypted settings storage
       // This MUST be done before provider factories so they can migrate legacy settings
-      new SecureSettingsRepository(dbManager.getDatabase());
+      await openSafeStorageDataKey(new SecureSettingsRepository(dbManager.getDatabase()));
       logger.info("SecureSettingsRepository initialized");
       // Legacy remote app connections are retained for migration only; never start them.
       logStartupLane("blocking_startup", { event: "secure_settings_ready" });

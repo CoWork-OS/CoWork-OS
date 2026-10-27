@@ -1,17 +1,20 @@
 # 0.5.62 release validation
 
 Release preparation for PR #798, on macOS arm64 with Node 24.21.0. Nothing has
-been tagged, uploaded or published. The branch includes latest main
-`8446d348371a46a6d2fb842d64a1f5ce661f8838`, including #797. Runtime qualification
-was rebuilt after that merge; final retry-fix inputs are commit `4400e6a59`.
-The task-computer implementation in #774 is already merged.
+been tagged, uploaded or published. The branch includes main
+`ebfa473455a8eda1b1e2ac2c3a092bc6703ef49f`, including #797 and subsequent terminal
+and branding updates. The task-computer implementation in #774 is already merged.
+The packaged real-provider and viewer qualification below used retry-fix commit
+`4400e6a59` on main `8446d348371a46a6d2fb842d64a1f5ce661f8838`, before the later
+terminal and branding changes. See the PR checks for the latest merged candidate.
 
 ## Current checks
 
 | Check | Command or surface | Result |
 | --- | --- | --- |
-| Build | Explicit `npm run build` after the main merge and after the retry fix | Passed all renderer, web, location helper, Electron, daemon, CLI and connector builds. Locked dependency installation was also completed during candidate preparation. |
-| Full suite and bundled skills gates | `npm test` | 128 Node tests and 18,712 Vitest tests passed; five Vitest tests skipped. |
+| Build | Explicit `npm run build` after the main refresh | Passed all renderer, web, location helper, Electron, daemon, CLI and connector builds. Locked dependency installation was also completed during candidate preparation. |
+| Full suite and bundled skills gates | `npm test` | On the earlier main base, 128 Node tests and 18,712 Vitest tests passed; five Vitest tests skipped. |
+| Terminal and takeover regressions | Terminal command-mark and block-runner tests plus executor step-failure suite | 346 tests passed after merging the terminal and branding changes. |
 | Retry regression | Executor step-failure and computer-handoff suites | 323 tests passed, including two new cases that persist the failed tool result and pause before another provider call while human control blocks a required mutation. |
 | Keychain regressions | Six focused storage/identity suites | 41 tests passed. |
 | Installed launcher regression | Node dependency, setup cwd and CLI-help suites | Five tests passed; an installed import-only dependency no longer triggers an unnecessary npm reinstall. |
@@ -22,8 +25,8 @@ The task-computer implementation in #774 is already merged.
 | Cua | `task-computer-cua-smoke.cjs` | Passed Cua 0.9.0 owned Space, borrowed attachment without deletion, imports, commands/files, browser interaction, desktop capture, takeover, export and confirmed deletion. |
 | Bot/database upgrade | Published 0.5.61 → rebuilt current candidate | Passed two current daemon starts and current desktop startup; synthetic bots, teams, decisions, routines and history preserved. |
 | Memory upgrade | `release-upgrade-memory-smoke.mjs`, published 0.5.61 baseline | Passed previous desktop and daemon, two current daemon and two current desktop starts, previous daemon downgrade, and current daemon after downgrade. |
-| Clean npm install | Explicit pack → `release-smoke-install.mjs` | Retry-fix tarball passed install/setup without bootstrap fallback, Electron SQLite loading, browser-host workflow, CLI help, cold/warm local execution with clean exit, and authenticated desktop launcher startup. |
-| macOS artifacts | Ad hoc arm64 DMG/ZIP and packaged smoke | Retry-fix artifacts passed signature, mounted DMG launch, ZIP installation and metadata checks. The packaged executor, storage code and all 20 compiled connectors matched the rebuilt candidate. |
+| Clean npm install | Explicit pack → `release-smoke-install.mjs` | Earlier-base retry-fix tarball passed install/setup without bootstrap fallback, Electron SQLite loading, browser-host workflow, CLI help, cold/warm local execution with clean exit, and authenticated desktop launcher startup. |
+| macOS artifacts | Ad hoc arm64 DMG/ZIP and packaged smoke | Earlier-base retry-fix artifacts passed signature, mounted DMG launch, ZIP installation and metadata checks. The packaged executor, storage code and all 20 compiled connectors matched that candidate. |
 
 The Docker/Podman/Cua lifecycle runs preceded the final executor-only retry fix;
 the packaged viewer check exercises that fix separately. An upgrade run
@@ -115,10 +118,10 @@ allowances. Only task-owned synthetic resources were cleaned up.
   need their own exact-candidate platform checks.
 - Fresh install/upgrade fixtures use synthetic data; personal provider sign-ins
   and real channel delivery are not covered.
-- Final local artifacts are staged outside the checkout under
-  `/tmp/cowork-798-release/release/` and `/tmp/cowork-798-artifacts/`. Older files
-  under the checkout's `release/` are not current acceptance artifacts. SHA-256
-  sidecars belong outside the npm tarball.
+- Earlier-base local artifacts are staged outside the checkout under
+  `/tmp/cowork-798-release/release/` and `/tmp/cowork-798-artifacts/`. They
+  predate the later terminal and branding changes. Use a rebuilt release artifact;
+  SHA-256 sidecars belong outside the npm tarball.
 - Before publication, require review and green exact-head CI, merge the release
   preparation, rebuild from the clean release revision, and rerun release smoke.
   Merge, tagging, npm publication and installer deployment are separate actions.

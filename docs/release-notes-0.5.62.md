@@ -33,6 +33,9 @@ since 0.5.61, not only the task-computer feature.
 - **Result review and coordination** — Shared-change coordination, Build Compare,
   revision-aware annotations, connector write previews and receipts, memory-source
   freshness checks and an agent card extend the existing review flows.
+- **App identity and terminal tabs** — The app uses a refreshed snow leopard icon
+  and wordmark. Terminal tabs can show the latest command typed in a zsh session;
+  see [Terminal tabs](terminal-tabs.md) for the supported shell integration.
 
 ## Permissions and security
 

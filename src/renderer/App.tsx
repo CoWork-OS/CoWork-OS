@@ -671,7 +671,8 @@ function SnowLeopardLoadingLogo({ decorative = false }: { decorative?: boolean }
       aria-label={decorative ? undefined : "Loading main area"}
       aria-hidden={decorative ? true : undefined}
     >
-      <img src="./cowork-os-app-logo-light.png" alt="" aria-hidden="true" />
+      <img src="./cowork-os-mark-paper.svg" alt="" aria-hidden="true" className="logo-for-dark" />
+      <img src="./cowork-os-mark-ink.svg" alt="" aria-hidden="true" className="logo-for-light" />
     </div>
   );
 }

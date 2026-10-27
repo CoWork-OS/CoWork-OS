@@ -16,7 +16,6 @@ import {
   app,
   Tray,
   Menu,
-  nativeImage,
   BrowserWindow,
   shell as _shell,
   NativeImage,
@@ -61,6 +60,7 @@ import { showDesktopNotification } from "../notifications/desktop-delivery";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import { USER_TYPED_TASK_PROMPT } from "../agent/task-prompt-provenance";
+import { getTrayIconImage } from "../branding";
 
 const trayLogger = createLogger("TrayManager");
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
@@ -98,7 +98,7 @@ export interface TraySettings {
 }
 
 const DEFAULT_SETTINGS: TraySettings = {
-  enabled: true,
+  enabled: false,
   showDockIcon: true,
   startMinimized: false,
   closeToTray: true,
@@ -108,9 +108,30 @@ const DEFAULT_SETTINGS: TraySettings = {
 
 /**
  * Coerce persisted tray settings to valid booleans. Missing or invalid values
- * (e.g. `null` from corrupted JSON) fall back to defaults so `enabled` does not
- * silently become falsy and hide the menu bar / system tray icon.
+ * (e.g. `null` from corrupted JSON) fall back to defaults, so a corrupted
+ * `enabled` leaves the menu bar / system tray icon at its default (off).
  */
+/**
+ * Marks tray settings saved since the menu bar icon became opt-in. Settings
+ * stored before that carry `enabled: true` from the old default, not from a
+ * choice, so they load with the icon off until it is turned on again.
+ */
+const TRAY_ICON_OPT_IN_VERSION = 1;
+
+type StoredTraySettings = Partial<TraySettings> & { iconOptInVersion?: number };
+
+export function traySettingsFromStorage(stored: StoredTraySettings | null): TraySettings {
+  const settings = normalizeTraySettings(stored);
+  if (stored?.iconOptInVersion !== TRAY_ICON_OPT_IN_VERSION) {
+    settings.enabled = DEFAULT_SETTINGS.enabled;
+  }
+  return settings;
+}
+
+export function traySettingsForStorage(settings: TraySettings): StoredTraySettings {
+  return { ...settings, iconOptInVersion: TRAY_ICON_OPT_IN_VERSION };
+}
+
 export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefined): TraySettings {
   const merged = { ...DEFAULT_SETTINGS, ...raw };
   return {
@@ -154,6 +175,8 @@ export class TrayManager {
   private currentStepInfo: string = "";
   private legacySettingsPath: string;
   private statusUpdateTimer: ReturnType<typeof setInterval> | null = null;
+  /** Set by destroy() at quit so closing the window is no longer turned into hiding it. */
+  private shuttingDown = false;
 
   private static instance: TrayManager | null = null;
   private static migrationCompleted = false;
@@ -619,10 +642,7 @@ export class TrayManager {
     }
 
     try {
-      // Create tray icon (use template image for macOS)
-      const icon = this.getTrayIcon("idle");
-
-      this.tray = new Tray(icon);
+      this.tray = new Tray(getTrayIconImage());
       this.tray.setToolTip("CoWork OS");
 
       // Build and set context menu
@@ -635,169 +655,6 @@ export class TrayManager {
     } catch (error) {
       console.error("[TrayManager] Failed to create tray:", error);
     }
-  }
-
-  /**
-   * Get or create tray icon
-   */
-  private getTrayIcon(_state: "idle" | "active" | "error"): NativeImage {
-    return this.createProgrammaticIcon();
-  }
-
-  /**
-   * Create a programmatic tray icon — Mac Mini device icon
-   * Matches the icon used in notification overlays
-   */
-  private createProgrammaticIcon(): NativeImage {
-    const size = 18;
-    const scale = 2;
-    const s = size * scale; // 36px actual
-
-    const buffer = Buffer.alloc(s * s * 4);
-
-    // Helper to set a pixel with alpha blending
-    const setPixel = (x: number, y: number, alpha: number) => {
-      if (x < 0 || x >= s || y < 0 || y >= s) return;
-      const ix = Math.round(x);
-      const iy = Math.round(y);
-      if (ix < 0 || ix >= s || iy < 0 || iy >= s) return;
-      const idx = (iy * s + ix) * 4;
-      const a = Math.max(0, Math.min(255, Math.round(alpha)));
-      // Template image: use black with alpha (macOS inverts automatically)
-      if (a > buffer[idx + 3]) {
-        buffer[idx] = 0;
-        buffer[idx + 1] = 0;
-        buffer[idx + 2] = 0;
-        buffer[idx + 3] = a;
-      }
-    };
-
-    // Draw anti-aliased line (horizontal or vertical)
-    const drawHLine = (x1: number, x2: number, y: number, thickness: number) => {
-      for (let x = Math.floor(x1); x <= Math.ceil(x2); x++) {
-        for (let dy = -thickness / 2; dy < thickness / 2; dy++) {
-          const py = y + dy;
-          // Coverage-based alpha
-          const xCov = Math.min(x + 1, x2) - Math.max(x, x1);
-          const yCov = Math.min(py + 1, y + thickness / 2) - Math.max(py, y - thickness / 2);
-          setPixel(x, Math.floor(py), xCov * yCov * 255);
-        }
-      }
-    };
-
-    const drawVLine = (x: number, y1: number, y2: number, thickness: number) => {
-      for (let y = Math.floor(y1); y <= Math.ceil(y2); y++) {
-        for (let dx = -thickness / 2; dx < thickness / 2; dx++) {
-          const px = x + dx;
-          const yCov = Math.min(y + 1, y2) - Math.max(y, y1);
-          const xCov = Math.min(px + 1, x + thickness / 2) - Math.max(px, x - thickness / 2);
-          setPixel(Math.floor(px), y, xCov * yCov * 255);
-        }
-      }
-    };
-
-    // Draw stroked rounded rect
-    const strokeRoundedRect = (
-      rx: number,
-      ry: number,
-      rw: number,
-      rh: number,
-      radius: number,
-      strokeWidth: number,
-    ) => {
-      // Top and bottom edges
-      drawHLine(rx + radius, rx + rw - radius, ry, strokeWidth);
-      drawHLine(rx + radius, rx + rw - radius, ry + rh, strokeWidth);
-      // Left and right edges
-      drawVLine(rx, ry + radius, ry + rh - radius, strokeWidth);
-      drawVLine(rx + rw, ry + radius, ry + rh - radius, strokeWidth);
-
-      // Draw rounded corners
-      const cornerCenters = [
-        [rx + radius, ry + radius, Math.PI, Math.PI * 1.5],
-        [rx + rw - radius, ry + radius, Math.PI * 1.5, Math.PI * 2],
-        [rx + radius, ry + rh - radius, Math.PI * 0.5, Math.PI],
-        [rx + rw - radius, ry + rh - radius, 0, Math.PI * 0.5],
-      ];
-      for (const [cx, cy, startAngle, endAngle] of cornerCenters) {
-        const steps = Math.ceil(radius * 8);
-        for (let i = 0; i <= steps; i++) {
-          const angle = startAngle + (endAngle - startAngle) * (i / steps);
-          const px = cx + Math.cos(angle) * radius;
-          const py = cy + Math.sin(angle) * radius;
-          // Draw thick point
-          for (let dy = -strokeWidth / 2; dy < strokeWidth / 2; dy++) {
-            for (let dx = -strokeWidth / 2; dx < strokeWidth / 2; dx++) {
-              setPixel(Math.floor(px + dx), Math.floor(py + dy), 255);
-            }
-          }
-        }
-      }
-    };
-
-    // Draw filled circle
-    const fillCircle = (cx: number, cy: number, r: number) => {
-      for (let y = Math.floor(cy - r - 1); y <= Math.ceil(cy + r + 1); y++) {
-        for (let x = Math.floor(cx - r - 1); x <= Math.ceil(cx + r + 1); x++) {
-          const dx = x + 0.5 - cx;
-          const dy = y + 0.5 - cy;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist <= r + 0.5) {
-            const a = dist > r - 0.5 ? (r + 0.5 - dist) * 255 : 255;
-            setPixel(x, y, a);
-          }
-        }
-      }
-    };
-
-    // === Draw Mac Mini icon ===
-    // Scale from 24-unit viewBox to our 36px canvas
-    const sc = s / 24;
-
-    // Main body: rounded rectangle
-    const bodyX = 2.2 * sc;
-    const bodyY = 6.5 * sc;
-    const bodyW = 19.6 * sc;
-    const bodyH = 9.4 * sc;
-    const bodyR = 1.8 * sc;
-    const sw = 1.7 * sc; // stroke width
-
-    strokeRoundedRect(bodyX, bodyY, bodyW, bodyH, bodyR, sw);
-
-    // Stand/base: curved line beneath the body
-    // Draw as a filled arc shape
-    const baseY = bodyY + bodyH + 0.3 * sc;
-    const baseLeft = 6.5 * sc;
-    const baseRight = s - 6.5 * sc;
-    const baseSag = 2.2 * sc;
-    const baseStroke = 1.5 * sc;
-    const baseSteps = 40;
-    for (let i = 0; i <= baseSteps; i++) {
-      const t = i / baseSteps;
-      const x = baseLeft + (baseRight - baseLeft) * t;
-      const sag = Math.sin(t * Math.PI) * baseSag;
-      const py = baseY + sag;
-      for (let dy = -baseStroke / 2; dy < baseStroke / 2; dy++) {
-        for (let dx = -0.5; dx <= 0.5; dx++) {
-          setPixel(Math.floor(x + dx), Math.floor(py + dy), 255);
-        }
-      }
-    }
-
-    // Indicator dots (right side of body)
-    const dotR = 1.1 * sc;
-    const smallDotR = 0.55 * sc;
-    const dotY = 11.2 * sc;
-    fillCircle(17.0 * sc, dotY, dotR);
-    fillCircle(19.6 * sc, dotY, smallDotR);
-
-    const icon = nativeImage.createFromBuffer(buffer, {
-      width: s,
-      height: s,
-      scaleFactor: scale,
-    });
-    icon.setTemplateImage(true);
-    return icon;
   }
 
   /**
@@ -1046,25 +903,29 @@ export class TrayManager {
     if (!this.mainWindow) return;
 
     this.mainWindow.on("close", (event) => {
-      if (this.settings.closeToTray && this.tray) {
-        event.preventDefault();
-        this.mainWindow?.hide();
+      if (this.shuttingDown || !this.settings.closeToTray) return;
+      // Without a tray icon only macOS can bring a hidden window back (from the Dock),
+      // so elsewhere the window closes normally.
+      if (!this.tray && process.platform !== "darwin") return;
 
-        // On macOS, hide from dock when minimized to tray
-        if (process.platform === "darwin" && !this.settings.showDockIcon) {
-          app.dock?.hide();
-        }
+      event.preventDefault();
+      this.mainWindow?.hide();
+
+      // On macOS, hide from dock when minimized to tray
+      if (process.platform === "darwin" && !this.settings.showDockIcon && this.tray) {
+        app.dock?.hide();
       }
     });
   }
 
   /**
-   * Apply dock icon visibility setting (macOS only)
+   * Apply dock icon visibility setting (macOS only). The Dock icon stays while
+   * there is no menu bar icon, so a hidden window can always be reopened.
    */
   private applyDockIconSetting(): void {
     if (process.platform !== "darwin") return;
 
-    if (this.settings.showDockIcon) {
+    if (this.settings.showDockIcon || !this.tray) {
       void app.dock?.show();
     } else {
       app.dock?.hide();
@@ -1078,20 +939,7 @@ export class TrayManager {
     // Update every 5 seconds
     this.statusUpdateTimer = setInterval(() => {
       this.updateContextMenu();
-      this.updateTrayIcon();
     }, 5000);
-  }
-
-  /**
-   * Update tray icon based on status
-   */
-  private updateTrayIcon(): void {
-    if (!this.tray) return;
-
-    // Determine icon state based on app status
-    const state: "idle" | "active" | "error" = this.activeTaskCount > 0 ? "active" : "idle";
-    const icon = this.getTrayIcon(state);
-    this.tray.setImage(icon);
   }
 
   /**
@@ -1100,7 +948,6 @@ export class TrayManager {
   setActiveTaskCount(count: number): void {
     this.activeTaskCount = count;
     this.updateContextMenu();
-    this.updateTrayIcon();
   }
 
   /**
@@ -1169,9 +1016,9 @@ export class TrayManager {
     try {
       if (SecureSettingsRepository.isInitialized()) {
         const repository = SecureSettingsRepository.getInstance();
-        const stored = repository.load<TraySettings>("tray");
+        const stored = repository.load<StoredTraySettings>("tray");
         if (stored) {
-          this.settings = normalizeTraySettings(stored);
+          this.settings = traySettingsFromStorage(stored);
           console.log("[TrayManager] Loaded settings from encrypted database");
           return;
         }
@@ -1196,7 +1043,7 @@ export class TrayManager {
     try {
       if (SecureSettingsRepository.isInitialized()) {
         const repository = SecureSettingsRepository.getInstance();
-        repository.save("tray", this.settings);
+        repository.save("tray", traySettingsForStorage(this.settings));
         console.log("[TrayManager] Settings saved to encrypted database");
       } else {
         console.warn(
@@ -1204,17 +1051,13 @@ export class TrayManager {
         );
       }
 
-      // Apply settings immediately
-      this.applyDockIconSetting();
-
-      // Recreate tray if enabled status changed
-      if (settings.enabled !== undefined) {
-        if (settings.enabled && !this.tray) {
-          this.createTray();
-        } else if (!settings.enabled && this.tray) {
-          this.destroy();
-        }
+      // Apply settings immediately; the tray first, since the Dock depends on it.
+      if (this.settings.enabled && !this.tray) {
+        this.createTray();
+      } else if (!this.settings.enabled && this.tray) {
+        this.destroyTray();
       }
+      this.applyDockIconSetting();
     } catch (error) {
       console.error("[TrayManager] Failed to save settings:", error);
     }
@@ -1246,6 +1089,7 @@ export class TrayManager {
    * Destroy the tray
    */
   destroy(): void {
+    this.shuttingDown = true;
     if (this.statusUpdateTimer) {
       clearInterval(this.statusUpdateTimer);
       this.statusUpdateTimer = null;
@@ -1258,6 +1102,13 @@ export class TrayManager {
       this.quickInputWindow.destroy();
       this.quickInputWindow = null;
     }
+    this.destroyTray();
+  }
+
+  /**
+   * Remove only the menu bar / system tray icon; Quick Task and its shortcut stay.
+   */
+  private destroyTray(): void {
     if (this.tray) {
       this.tray.destroy();
       this.tray = null;

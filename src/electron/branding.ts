@@ -64,3 +64,43 @@ export function getDesktopIconImage(): NativeImage | undefined {
   const icon = nativeImage.createFromPath(iconPath);
   return icon.isEmpty() ? undefined : icon;
 }
+
+/** The leopard silhouette; trayTemplate@2x.png next to it loads with it. */
+const TRAY_TEMPLATE_ICON = path.join("assets", "tray", "trayTemplate.png");
+const TRAY_ICON_POINTS = 16;
+
+function getTrayTemplateIconImage(): NativeImage | undefined {
+  for (const root of appResourceRoots()) {
+    const resolved = path.join(root, TRAY_TEMPLATE_ICON);
+    if (!fs.existsSync(resolved)) continue;
+    const icon = nativeImage.createFromPath(resolved);
+    if (icon.isEmpty()) continue;
+    icon.setTemplateImage(true);
+    return icon;
+  }
+  return undefined;
+}
+
+/**
+ * The leopard icon for the menu bar / notification area. macOS gets the
+ * monochrome template so the menu bar can tint it for light and dark bars;
+ * Windows gets the color app icon at tray size.
+ */
+export function getTrayIconImage(platform: NodeJS.Platform = process.platform): NativeImage {
+  if (platform === "darwin") {
+    const template = getTrayTemplateIconImage();
+    if (template) return template;
+  }
+
+  const tray = nativeImage.createEmpty();
+  const appIcon = getDesktopIconImage();
+  if (!appIcon) return tray;
+  for (const scaleFactor of [1, 2]) {
+    const size = TRAY_ICON_POINTS * scaleFactor;
+    tray.addRepresentation({
+      scaleFactor,
+      buffer: appIcon.resize({ width: size, height: size, quality: "best" }).toPNG(),
+    });
+  }
+  return tray;
+}

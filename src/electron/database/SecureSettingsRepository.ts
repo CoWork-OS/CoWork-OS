@@ -16,7 +16,13 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { getUserDataDir } from "../utils/user-data-dir";
-import { getSafeStorage, type SafeStorageLike } from "../utils/safe-storage";
+import {
+  getSafeStorage,
+  hasSafeStorageDataKey,
+  isDataKeySealed,
+  type SafeStorageLike,
+} from "../utils/safe-storage";
+import { rewrapEncryptedValues, type OsSealedDecrypt } from "../utils/safe-storage-rewrap";
 import { createLogger } from "../utils/logger";
 import {
   commitSecureSettingsWrites,
@@ -473,6 +479,56 @@ export class SecureSettingsRepository {
   }
 
   /**
+   * Re-encrypt rows still sealed by the OS keychain directly, and the `encrypted:` values
+   * inside them, with the data key (utils/safe-storage). `decrypt` uses the asynchronous
+   * OS call. A row is replaced only at the revision it was read at; a row the keychain
+   * cannot read is left as it is. Returns how many rows were rewritten.
+   */
+  async rewrapOsSealedRows(decrypt: OsSealedDecrypt): Promise<number> {
+    const storage = this.safeStorage;
+    if (!storage || !this.encryptionAvailable || !hasSafeStorageDataKey()) return 0;
+    // The keychain identity canary moves too, or every start would read it the old way.
+    const canary = this.readKeychainCanary()?.encrypted_data;
+    if (canary?.startsWith("os:")) {
+      const sealed = Buffer.from(canary.slice(3), "base64");
+      if (!isDataKeySealed(sealed) && (await decrypt(sealed)) === KEYCHAIN_CANARY_VALUE) {
+        const next = this.encrypt(KEYCHAIN_CANARY_VALUE);
+        this.db.transaction(() => {
+          // Only if no other process replaced it while it was decrypting.
+          if (this.readKeychainCanary()?.encrypted_data === canary)
+            this.replaceKeychainCanary(next);
+        })();
+      }
+    }
+    const rows = this.listOsSealedRows();
+    let rewrapped = 0;
+    for (const row of rows) {
+      const outer = Buffer.from(row.encrypted_data.slice(3), "base64");
+      const outerSealed = isDataKeySealed(outer);
+      const plaintext = outerSealed ? storage.decryptString(outer) : await decrypt(outer);
+      if (plaintext === null) continue;
+      let next = plaintext;
+      try {
+        const inner = await rewrapEncryptedValues(JSON.parse(plaintext), decrypt, storage);
+        if (inner.changed) next = JSON.stringify(inner.value);
+      } catch {
+        // Not JSON: only the record itself is sealed.
+      }
+      if (outerSealed && next === plaintext) continue;
+      const encryptedData = "os:" + storage.encryptString(next).toString("base64");
+      const result = await this.commitWrites([
+        {
+          category: row.category,
+          expectedRevision: Number(row.revision ?? 0),
+          record: { encryptedData, checksum: this.computeChecksum(encryptedData) },
+        },
+      ]);
+      if (result.status === "committed") rewrapped += 1;
+    }
+    return rewrapped;
+  }
+
+  /**
    * Commit prepared writes atomically: in the database worker when this run routes
    * settings there, otherwise in one IMMEDIATE host transaction.
    */
@@ -638,9 +694,7 @@ export class SecureSettingsRepository {
   verifyKeychainIdentity(): KeychainIdentityStatus {
     if (!this.encryptionAvailable || !this.safeStorage) return "not_applicable";
 
-    const canary = this.db
-      .prepare("SELECT encrypted_data FROM secure_settings_keychain_canary WHERE id = 1")
-      .get() as { encrypted_data: string } | undefined;
+    const canary = this.readKeychainCanary();
 
     if (canary) {
       this.keychainIdentityMismatch =
@@ -673,6 +727,19 @@ export class SecureSettingsRepository {
     return this.keychainIdentityMismatch && this.encryptionAvailable;
   }
 
+  private readKeychainCanary(): { encrypted_data: string } | undefined {
+    return this.db
+      .prepare("SELECT encrypted_data FROM secure_settings_keychain_canary WHERE id = 1")
+      .get() as { encrypted_data: string } | undefined;
+  }
+
+  /** Every row sealed by the OS keychain (`os:`), with its revision. */
+  private listOsSealedRows(): SecureSettingsRow[] {
+    return this.db
+      .prepare("SELECT * FROM secure_settings WHERE encrypted_data LIKE 'os:%'")
+      .all() as SecureSettingsRow[];
+  }
+
   /**
    * Explicitly accept the current OS keychain key after a mismatch. Settings the
    * current key cannot read are moved to the unreadable backup table (ciphertext
@@ -680,9 +747,7 @@ export class SecureSettingsRepository {
    */
   adoptCurrentKeychainIdentity(): string[] {
     if (!this.encryptionAvailable || !this.safeStorage) return [];
-    const rows = this.db
-      .prepare("SELECT * FROM secure_settings WHERE encrypted_data LIKE 'os:%'")
-      .all() as SecureSettingsRow[];
+    const rows = this.listOsSealedRows();
     // Keychain calls happen before the transaction (DB5): it only moves rows.
     const unreadable = rows.filter((row) => this.tryDecryptOs(row.encrypted_data) === null);
     const canary = this.encrypt(KEYCHAIN_CANARY_VALUE);
@@ -703,12 +768,17 @@ export class SecureSettingsRepository {
         this.unreadableCategories.delete(row.category);
         archived.push(row.category);
       }
-      this.db.prepare("DELETE FROM secure_settings_keychain_canary WHERE id = 1").run();
-      this.writeKeychainCanary(canary);
+      this.replaceKeychainCanary(canary);
     })();
     this.keychainIdentityMismatch = false;
     this.refusedWriteCategories.clear();
     return archived;
+  }
+
+  /** Replace the canary; callers run it inside their transaction when they need one. */
+  private replaceKeychainCanary(encryptedCanary: string): void {
+    this.db.prepare("DELETE FROM secure_settings_keychain_canary WHERE id = 1").run();
+    this.writeKeychainCanary(encryptedCanary);
   }
 
   private writeKeychainCanary(encryptedCanary = this.encrypt(KEYCHAIN_CANARY_VALUE)): void {

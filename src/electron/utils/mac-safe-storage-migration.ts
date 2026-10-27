@@ -216,6 +216,58 @@ function runLegacyKeychainWorker(
  * Move settings readable with the former `cowork-os` Keychain identity into
  * the current `CoWork OS` identity. Existing current-keychain values win.
  */
+/**
+ * Unseal the secrets data key (utils/safe-storage) under a former macOS Keychain identity,
+ * for when the current identity cannot open it. Returns the key (hex) or null. The caller
+ * re-seals it with the current keychain, so nothing sealed with it has to be rewritten.
+ */
+export async function recoverDataKeyFromLegacyIdentity(options: {
+  platform: NodeJS.Platform;
+  sealedKey: string;
+  executable: string;
+  appPath: string;
+  logger: MigrationLogger;
+  legacyAppNames?: readonly string[];
+  spawnProcess?: SpawnProcess;
+  env?: NodeJS.ProcessEnv;
+}): Promise<string | null> {
+  if (options.platform !== "darwin") return null;
+  // The worker protocol carries it as a text row; nothing about it is a setting.
+  const encrypted_data = `os:${options.sealedKey}`;
+  const row: EncryptedSecureSettingRow = {
+    category: "data-key",
+    encrypted_data,
+    checksum: checksum(encrypted_data),
+    format: "text",
+  };
+  const legacyAppNames = [...new Set(options.legacyAppNames ?? LEGACY_MAC_SAFE_STORAGE_APP_NAMES)];
+  for (const legacyAppName of legacyAppNames) {
+    try {
+      const [opened] = await runLegacyKeychainWorker(
+        options.executable,
+        options.appPath,
+        [row],
+        options.spawnProcess,
+        options.env,
+        legacyAppName,
+      );
+      const text = opened?.settings?.text;
+      if (typeof text === "string" && /^[0-9a-f]{64}$/.test(text)) {
+        options.logger.info(
+          "Recovered the secrets data key from a legacy macOS Keychain identity.",
+          {
+            legacyAppName,
+          },
+        );
+        return text;
+      }
+    } catch {
+      // This identity cannot read it either; try the next.
+    }
+  }
+  return null;
+}
+
 export async function migrateLegacyMacSafeStorageSettings(options: {
   platform: NodeJS.Platform;
   database: MigrationDatabase;

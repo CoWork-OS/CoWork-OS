@@ -9,6 +9,7 @@ import {
   migrateLegacyMacSafeStorageChannels,
   migrateLegacyMacSafeStorageMailbox,
   migrateLegacyMacSafeStorageSettings,
+  recoverDataKeyFromLegacyIdentity,
   runMacSafeStorageMigrationWorker,
   type DecryptedSecureSetting,
   type EncryptedSecureSettingRow,
@@ -118,6 +119,47 @@ describe("macOS safeStorage legacy migration", () => {
       "Migrated encrypted settings from the legacy macOS Keychain identity.",
       expect.objectContaining({ migratedCount: 1 }),
     );
+  });
+
+  it("recovers the data key through the legacy worker, trying each former identity", async () => {
+    const keyHex = "ab".repeat(32);
+    const attemptedNames: string[] = [];
+    let sentRows: Array<{ encrypted_data: string; format?: string }> = [];
+    const spawnProcess = vi.fn((_executable: string, args: string[]) => {
+      const name = args.at(-1) || "";
+      attemptedNames.push(name);
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const child = new EventEmitter() as ChildProcess;
+      Object.assign(child, { stdin: input, stdout: output, kill: vi.fn() });
+      let received = "";
+      input.on("data", (chunk) => (received += chunk));
+      input.once("finish", () => {
+        sentRows = JSON.parse(received);
+        // Only the second identity sealed this key.
+        const result =
+          name === "cowork-os" ? [{ category: "data-key", settings: { text: keyHex } }] : [];
+        output.end(`${MAC_SAFE_STORAGE_MIGRATION_RESULT_PREFIX}${JSON.stringify(result)}\n`);
+        output.once("end", () => child.emit("close", 0));
+      });
+      return child;
+    });
+
+    await expect(
+      recoverDataKeyFromLegacyIdentity({
+        platform: "darwin",
+        sealedKey: "c2VhbGVk",
+        executable: "electron",
+        appPath: ".",
+        logger: { info: vi.fn(), warn: vi.fn() },
+        legacyAppNames: ["Electron", "cowork-os"],
+        spawnProcess: spawnProcess as never,
+      }),
+    ).resolves.toBe(keyHex);
+    expect(attemptedNames).toEqual(["Electron", "cowork-os"]);
+    expect(sentRows).toEqual([
+      expect.objectContaining({ encrypted_data: "os:c2VhbGVk", format: "text" }),
+    ]);
   });
 
   it("tries known legacy app names and migrates only data decrypted by a candidate", async () => {

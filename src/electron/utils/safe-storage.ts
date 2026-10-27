@@ -43,6 +43,7 @@ const TAG_BYTES = 16;
 export const SAFE_STORAGE_DATA_KEY_FILE = "safe-storage-key.json";
 
 let dataKey: Buffer | null = null;
+let dataKeyOpenAttempted = false;
 let nativeOverride: NativeSafeStorage | null | undefined;
 let dataKeyStorage: SafeStorageLike | null = null;
 let loggedLegacyRead = false;
@@ -181,12 +182,54 @@ function readDataKeyFile(file: string): DataKeyFile | null | "corrupt" {
 }
 
 /**
+ * A durable copy of the sealed data key kept with the secrets it protects (the settings
+ * database), so losing the key file never loses them.
+ */
+export interface DataKeyStore {
+  /** The sealed key (base64) stored with the data, or null when none is stored. */
+  readSealedKey(): string | null;
+  /** Store the sealed key (base64); a no-op when the same key is already stored. */
+  storeSealedKey(sealed: string): void;
+  /** Whether any stored secret is already sealed with a data key. */
+  hasDataKeySealedSecrets(): boolean;
+}
+
+function writeDataKeyFile(file: string, sealed: string, flag: "wx" | "w"): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const body = JSON.stringify({ version: 1, sealed } satisfies DataKeyFile);
+  if (flag === "wx") {
+    fs.writeFileSync(file, body, { flag: "wx", mode: 0o600 });
+    return;
+  }
+  // Replace atomically: a reader sees the old file or the new one, never half of it.
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, body, { mode: 0o600 });
+  fs.renameSync(temp, file);
+}
+
+async function openSealedKey(sealed: string): Promise<Buffer | null> {
+  const hex = await decryptOsSealedAsync(Buffer.from(sealed, "base64"));
+  const key = hex ? Buffer.from(hex, "hex") : null;
+  return key && key.length === 32 ? key : null;
+}
+
+/**
  * Open the data key, or create it on first use. Run once at startup, after the macOS
- * Keychain context is primed and before anything reads secure settings. Without the
- * async OS API, or when the key file is sealed by a keychain this process cannot use,
+ * Keychain context is primed and before anything reads secure settings.
+ *
+ * With a `store` (the settings database), its copy of the sealed key is authoritative for
+ * the secrets beside it: a missing or different key file is rewritten from it, and a file
+ * key is copied into it. A new key is created only when neither exists and no secret is
+ * sealed with a data key yet, so a lost file can never silently orphan secrets.
+ *
+ * Without the async OS API, or when the keychain cannot open the key ("unreadable"),
  * secrets stay sealed by the OS keychain directly, as before.
  */
-export async function initializeSafeStorageDataKey(userDataDir: string): Promise<DataKeyStatus> {
+export async function initializeSafeStorageDataKey(
+  userDataDir: string,
+  store?: DataKeyStore,
+): Promise<DataKeyStatus> {
+  dataKeyOpenAttempted = true;
   const native = getNativeSafeStorage();
   if (
     !native ||
@@ -199,6 +242,18 @@ export async function initializeSafeStorageDataKey(userDataDir: string): Promise
   if (!(await native.isAsyncEncryptionAvailable())) return "unavailable";
 
   const file = path.join(userDataDir, SAFE_STORAGE_DATA_KEY_FILE);
+  const stored = store?.readSealedKey() ?? null;
+  if (stored) {
+    const key = await openSealedKey(stored);
+    if (!key) return "unreadable";
+    const existing = readDataKeyFile(file);
+    if (!existing || existing === "corrupt" || existing.sealed !== stored) {
+      writeDataKeyFile(file, stored, "w");
+    }
+    setDataKey(key);
+    return "loaded";
+  }
+
   // Another process may be writing the file it just created; give it a moment.
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const existing = readDataKeyFile(file);
@@ -207,36 +262,68 @@ export async function initializeSafeStorageDataKey(userDataDir: string): Promise
       continue;
     }
     if (existing) {
-      const hex = await decryptOsSealedAsync(Buffer.from(existing.sealed, "base64"));
-      const key = hex ? Buffer.from(hex, "hex") : null;
+      const key = await openSealedKey(existing.sealed);
       // Never replace a key file that exists: values sealed with it would be lost.
-      if (!key || key.length !== 32) return "unreadable";
+      if (!key) return "unreadable";
+      store?.storeSealedKey(existing.sealed);
       setDataKey(key);
       return "loaded";
     }
+    // The key that sealed these secrets is gone (file lost, no stored copy): a new one
+    // would leave them unreadable and look like success. Keep the keychain path instead.
+    if (store?.hasDataKeySealedSecrets()) return "unreadable";
     const key = randomBytes(32);
-    const sealed = await native.encryptStringAsync(key.toString("hex"));
+    const sealed = (await native.encryptStringAsync(key.toString("hex"))).toString("base64");
     try {
-      fs.mkdirSync(userDataDir, { recursive: true });
       // Exclusive create: two processes starting at once must end up with one key.
-      fs.writeFileSync(
-        file,
-        JSON.stringify({ version: 1, sealed: sealed.toString("base64") } satisfies DataKeyFile),
-        { flag: "wx", mode: 0o600 },
-      );
+      writeDataKeyFile(file, sealed, "wx");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
       throw error;
     }
+    store?.storeSealedKey(sealed);
     setDataKey(key);
     return "created";
   }
   return "unreadable";
 }
 
+/**
+ * Adopt a data key another keychain identity sealed (recovered by the legacy-identity
+ * worker): re-seal it with the current keychain, store it in both places and use it. The
+ * secrets sealed with it become readable again without rewriting any of them.
+ */
+export async function adoptRecoveredDataKey(
+  userDataDir: string,
+  keyHex: string,
+  store?: DataKeyStore,
+): Promise<boolean> {
+  const native = getNativeSafeStorage();
+  const key = Buffer.from(keyHex, "hex");
+  if (!native || typeof native.encryptStringAsync !== "function" || key.length !== 32) {
+    return false;
+  }
+  const sealed = (await native.encryptStringAsync(keyHex)).toString("base64");
+  writeDataKeyFile(path.join(userDataDir, SAFE_STORAGE_DATA_KEY_FILE), sealed, "w");
+  store?.storeSealedKey(sealed);
+  setDataKey(key);
+  return true;
+}
+
+/** The sealed data key in the key file (base64), for a recovery attempt; null if none. */
+export function readSealedDataKeyFile(userDataDir: string): string | null {
+  const existing = readDataKeyFile(path.join(userDataDir, SAFE_STORAGE_DATA_KEY_FILE));
+  return existing && existing !== "corrupt" ? existing.sealed : null;
+}
+
 function setDataKey(key: Buffer): void {
   dataKey = key;
   dataKeyStorage = null;
+}
+
+/** Whether this process has tried to open the data key (whatever the outcome). */
+export function wasDataKeyOpenAttempted(): boolean {
+  return dataKeyOpenAttempted;
 }
 
 /** Whether `getSafeStorage()` seals with the data key in this process. */
@@ -251,6 +338,7 @@ export function setNativeSafeStorageForTests(native: NativeSafeStorage | null | 
 
 export function resetSafeStorageDataKeyForTests(): void {
   dataKey = null;
+  dataKeyOpenAttempted = false;
   dataKeyStorage = null;
   loggedLegacyRead = false;
 }

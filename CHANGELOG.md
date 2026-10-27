@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Secrets sealed with a data key**: API keys, tokens and other secrets are now encrypted with one random key that the OS keychain protects, instead of with the keychain directly for every value. Electron 45 deprecates, and Electron 46 removes, the synchronous keychain calls the old approach needed. Existing secrets are re-encrypted on the first start of this version. A sealed copy of the key is kept in the settings database as well as in `safe-storage-key.json`: a lost key file is restored, and a new key is never created while secrets need the old one. **Rolling back to 0.5.61 or earlier after this version has started cannot read the re-encrypted secrets**; re-enter them, or reinstall this version.
 - **Electron 45**: the desktop runtime moves from Electron 44 to Electron 45 (Chromium 156, Node.js 24.22). macOS 13 Ventura remains the minimum. `node-abi` is updated to 4.40.0 so native modules rebuild for Electron 45.
 
 ### Fixed

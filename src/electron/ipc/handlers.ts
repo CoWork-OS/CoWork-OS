@@ -153,6 +153,7 @@ import { AgentBuilderService, type AgentBuilderInventory } from "../managed/Agen
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
 import { setupVoiceActionHandlers } from "./voice-handlers";
 import { rendererPerfLogLevel, stringifyRendererPerfPayload } from "./renderer-perf-log";
+import { reuseDesktopViewer } from "./desktop-viewer-window";
 import type { RoutineService } from "../routines/service";
 import type { RoutineCreate, RoutineTrigger } from "../routines/types";
 
@@ -1850,12 +1851,7 @@ export async function setupIpcHandlers(
       }
       if (!url) return { opened: true };
       const origin = new URL(url).origin;
-      const existing = desktopViewers.get(botId);
-      if (existing && !existing.isDestroyed()) {
-        if (existing.webContents.getURL() !== url) await existing.loadURL(url);
-        existing.focus();
-        return { opened: true };
-      }
+      if (await reuseDesktopViewer(desktopViewers.get(botId), url)) return { opened: true };
       const viewer = new BrowserWindow({
         width: 1300,
         height: 860,

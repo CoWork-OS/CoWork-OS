@@ -25,6 +25,8 @@ export type SafeStorageLike = {
   isEncryptionAvailable: () => boolean;
   encryptString: (plaintext: string) => Buffer;
   decryptString: (ciphertext: Buffer) => string;
+  /** Linux only: the OS secret store Electron picked ("basic_text" when there is none). */
+  getSelectedStorageBackend?: () => string;
 };
 
 /** Electron's safeStorage, including the async API from Electron 45 on. */
@@ -104,8 +106,28 @@ function open(key: Buffer, ciphertext: Buffer): string {
   ]).toString("utf8");
 }
 
+/**
+ * Linux without a Secret Service: Electron falls back to a fixed, built-in key
+ * ("basic_text"), which protects nothing, and a key sealed with it is lost when a keyring
+ * appears later. The synchronous probe reported no encryption there and the asynchronous
+ * one does, so this keeps the old meaning: no OS keychain.
+ */
+function usesFixedKeyFallback(native: NativeSafeStorage): boolean {
+  try {
+    const backend = native.getSelectedStorageBackend?.();
+    return backend === "basic_text" || backend === "unknown";
+  } catch {
+    return false;
+  }
+}
+
 function dataKeySafeStorage(native: NativeSafeStorage, key: Buffer): SafeStorageLike {
+  const getSelectedStorageBackend = native.getSelectedStorageBackend;
   return {
+    // Callers that refuse the fixed-key fallback (the browser vault) still see the backend.
+    ...(typeof getSelectedStorageBackend === "function"
+      ? { getSelectedStorageBackend: () => getSelectedStorageBackend.call(native) }
+      : {}),
     isEncryptionAvailable: () => true,
     encryptString: (plaintext) => seal(key, plaintext),
     decryptString: (ciphertext) => {
@@ -137,7 +159,17 @@ export function getSafeStorage(): SafeStorageLike | null {
   }
   // Before the data key is open (or in a process that never opens it), the OS keychain
   // seals values directly; the next start re-encrypts them with the data key.
-  return hasSyncApi(native) ? native : null;
+  if (!hasSyncApi(native)) return null;
+  if (usesFixedKeyFallback(native)) {
+    // No OS keychain: answer as the synchronous probe does there, without calling it.
+    return {
+      getSelectedStorageBackend: () => native.getSelectedStorageBackend?.() ?? "unknown",
+      isEncryptionAvailable: () => false,
+      encryptString: (plaintext) => native.encryptString(plaintext),
+      decryptString: (ciphertext) => native.decryptString(ciphertext),
+    };
+  }
+  return native;
 }
 
 /** Whether this Electron has the asynchronous safeStorage API (Electron 45 and later). */
@@ -222,8 +254,8 @@ async function openSealedKey(sealed: string): Promise<Buffer | null> {
  * key is copied into it. A new key is created only when neither exists and no secret is
  * sealed with a data key yet, so a lost file can never silently orphan secrets.
  *
- * Without the async OS API, or when the keychain cannot open the key ("unreadable"),
- * secrets stay sealed by the OS keychain directly, as before.
+ * Without the async OS API, on Linux's fixed-key fallback ("unavailable"), or when the
+ * keychain cannot open the key ("unreadable"), secrets are sealed as before the data key.
  */
 export async function initializeSafeStorageDataKey(
   userDataDir: string,
@@ -243,6 +275,11 @@ export async function initializeSafeStorageDataKey(
 
   const file = path.join(userDataDir, SAFE_STORAGE_DATA_KEY_FILE);
   const stored = store?.readSealedKey() ?? null;
+  // No new key on the fixed-key fallback. One that already exists still opens, so the
+  // secrets sealed with it stay readable.
+  if (usesFixedKeyFallback(native) && !stored && readDataKeyFile(file) === null) {
+    return "unavailable";
+  }
   if (stored) {
     const key = await openSealedKey(stored);
     if (!key) return "unreadable";

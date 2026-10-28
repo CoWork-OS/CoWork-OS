@@ -123,6 +123,7 @@ export default defineConfig({
           { text: "Best Practices", link: "/security/best-practices" },
           { text: "Configuration Guide", link: "/security/configuration-guide" },
           { text: "Security Hardening Record", link: "/security-hardening" },
+          { text: "Secrets Encryption", link: "/secrets-encryption" },
           { text: "Release Signing", link: "/release-signing" },
           { text: "Agent Security with Numbat", link: "/agent-security-numbat" },
         ],

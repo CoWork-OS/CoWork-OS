@@ -9741,6 +9741,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "mistral",
   "github-copilot",
   "nano-gpt",
+  "obscurify",
   "qwen-portal",
   "minimax",
   "minimax-portal",
@@ -9793,6 +9794,7 @@ export const LLM_PROVIDER_DISPLAY: Record<string, { name: string; icon: string; 
   "atomic-chat": { name: "Atomic Chat", icon: "\u{269B}\uFE0F", color: "#0f766e" },
   moa: { name: "Mixture of Agents", icon: "\u{2699}\uFE0F", color: "#0f766e" },
   "nano-gpt": { name: "NanoGPT", icon: "\u{2728}", color: "#22c55e" },
+  obscurify: { name: "Obscurify.ai", icon: "\u{1F512}", color: "#475569" },
   opencode: { name: "OpenCode Zen", icon: "\u{1F517}", color: "#111827" },
   "opencode-go": { name: "OpenCode Go", icon: "\u{1F517}", color: "#111827" },
 };

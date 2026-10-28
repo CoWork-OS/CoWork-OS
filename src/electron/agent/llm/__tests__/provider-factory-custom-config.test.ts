@@ -315,6 +315,33 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     );
   });
 
+  it("routes Obscurify.ai through its named OpenAI-compatible provider", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      }),
+    } as Response);
+
+    const provider = LLMProviderFactory.createProviderFromConfig({
+      type: "obscurify",
+      model: "",
+      providerApiKey: " sk-obs1_test\r\n",
+    } as Any);
+
+    await expect(provider.testConnection()).resolves.toEqual({ success: true });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://obscurify.ai/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer sk-obs1_test",
+        }),
+      }),
+    );
+  });
+
   it("uses a documented OpenCode Go chat completions endpoint without appending the path twice", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,

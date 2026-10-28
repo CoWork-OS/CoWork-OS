@@ -1059,6 +1059,7 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "kimi",
         "nano-gpt",
         "nanogpt",
+        "obscurify",
         "bedrock",
         "pi",
       ],

@@ -7,12 +7,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { waitForFirstWindow } from "./qa/desktop-smoke-readiness.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DEFAULT_RELEASE_DIR = path.join(ROOT, "release");
 const MIN_DMG_BYTES = 50 * 1024 * 1024;
 const MIN_EXE_BYTES = 100 * 1024 * 1024;
-const MAC_LAUNCH_MS = 8_000;
+const MAC_LAUNCH_MS = 60_000;
 const WINDOWS_LAUNCH_MS = 20_000;
 const PLATFORM_SUPPORT = JSON.parse(
   readFileSync(path.join(ROOT, "src", "shared", "platform-support.json"), "utf8"),
@@ -428,8 +429,6 @@ function assertMacCodeSignature(appPath, allowUnsigned) {
 }
 
 async function smokeLaunchMac(executablePath) {
-  let spawnError = null;
-  let output = "";
   const profile = await disposableProfile();
   const child = spawn(executablePath, [], {
     env: {
@@ -440,35 +439,31 @@ async function smokeLaunchMac(executablePath) {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  child.on("error", (error) => {
-    spawnError = error;
-  });
-  child.stdout.on("data", (chunk) => {
-    output += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    output += chunk;
-  });
-
-  await new Promise((resolve) => setTimeout(resolve, MAC_LAUNCH_MS));
-  if (spawnError) {
-    throw spawnError;
+  try {
+    await waitForFirstWindow(child, MAC_LAUNCH_MS);
+  } finally {
+    const waitForExit = (timeoutMs) =>
+      new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+        const onExit = () => {
+          clearTimeout(timer);
+          resolve(true);
+        };
+        const timer = setTimeout(() => {
+          child.off("exit", onExit);
+          resolve(false);
+        }, timeoutMs);
+        child.once("exit", onExit);
+      });
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      if (!(await waitForExit(500))) {
+        child.kill("SIGKILL");
+        await waitForExit(2000);
+      }
+    }
+    await fs.rm(profile, { recursive: true, force: true }).catch(() => undefined);
   }
-  if (child.exitCode !== null && child.exitCode !== 0) {
-    throw new Error(
-      `macOS app exited during smoke launch with code ${child.exitCode}:\n${output.trim()}`,
-    );
-  }
-  if (child.exitCode === 0) {
-    return;
-  }
-
-  child.kill("SIGTERM");
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  if (child.exitCode === null) {
-    child.kill("SIGKILL");
-  }
-  await fs.rm(profile, { recursive: true, force: true }).catch(() => undefined);
 }
 
 async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {

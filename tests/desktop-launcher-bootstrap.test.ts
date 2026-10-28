@@ -41,7 +41,11 @@ describe("adversarial CLI regressions", () => {
             existsSync: (file: string) => file.endsWith("package.json"),
             readFileSync: () => JSON.stringify({ version: "0.5.60", dependencies: {} }),
           };
-        if (name.includes("npm_install_mode")) return { getRuntimeDependencyRepairArgs: () => [] };
+        if (name.includes("npm_install_mode"))
+          return {
+            getRuntimeDependencyRepairArgs: () => [],
+            listMissingRuntimeDependencies: () => [],
+          };
         if (name.includes("platform-support"))
           return { getLauncherPlatformCompatibility: () => ({ supported: true }) };
         if (name === "electron") return "/synthetic/Electron";

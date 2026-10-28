@@ -19289,7 +19289,8 @@ ${transcript}
     if (
       nativeGuiStepGuard.nativeGuiIntent &&
       opts.toolName === "run_command" &&
-      !nativeGuiStepGuard.explicitShellIntent
+      !nativeGuiStepGuard.explicitShellIntent &&
+      this.toolRegistry?.isTaskComputerSelected?.() !== true
     ) {
       return {
         blockedResult: {
@@ -35208,6 +35209,7 @@ Return ONLY a JSON object:
       let awaitingUserInputReason: string | null = null;
       let pauseAfterNextAssistantMessage = false;
       let pauseAfterNextAssistantMessageReason: string | null = null;
+      let humanControlPauseReason: string | null = null;
       let hadRunCommandFailure = false;
       let hadToolSuccessAfterRunCommandFailure = false;
       // Test/build commands whose latest run failed, by kind (see
@@ -35290,6 +35292,18 @@ Return ONLY a JSON object:
           typeof errorMessage === "string" ? errorMessage : String(errorMessage || "");
         const lower = message.toLowerCase();
         if (!message) return null;
+
+        // Dismissing a takeover leaves the person's lease in place. Stop before
+        // another provider call instead of nudging a blocked mutation to retry.
+        if (
+          (toolName === "request_takeover" &&
+            lower.includes("structured input request dismissed")) ||
+          lower.includes("the person has taken over this computer")
+        ) {
+          humanControlPauseReason =
+            "Action required: Finish the human step, hand the computer back, then send a follow-up to continue.";
+          return humanControlPauseReason;
+        }
 
         const accessBoundaryPauseReason = this.getAccessBoundaryPauseReason(message);
         if (accessBoundaryPauseReason) {
@@ -35427,6 +35441,11 @@ Return ONLY a JSON object:
           if (this.wrapUpRequested) {
             logger.info(`${this.logTag} Step loop wrap-up requested: finishing current step`);
             return { stop: true, reason: "wrap_up_requested" };
+          }
+          if (humanControlPauseReason) {
+            awaitingUserInput = true;
+            awaitingUserInputReason = humanControlPauseReason;
+            return { stop: true, reason: "awaiting_user_input" };
           }
           if (
             stepSoftDeadlineWrapUpIteration > 0 &&

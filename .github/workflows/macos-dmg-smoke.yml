@@ -16,6 +16,9 @@ jobs:
     name: Build and smoke macOS DMG
     runs-on: macos-latest
     timeout-minutes: 90
+    env:
+      # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
+      NODE_OPTIONS: --max-old-space-size=4096
 
     steps:
       - name: Checkout code

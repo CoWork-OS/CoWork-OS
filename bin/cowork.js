@@ -3,7 +3,10 @@
 const { spawn, spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const { getRuntimeDependencyRepairArgs } = require("../scripts/npm_install_mode.cjs");
+const {
+  getRuntimeDependencyRepairArgs,
+  listMissingRuntimeDependencies,
+} = require("../scripts/npm_install_mode.cjs");
 const { getLauncherPlatformCompatibility } = require("../scripts/platform-support.cjs");
 
 const packageDir = path.resolve(__dirname, "..");
@@ -69,34 +72,8 @@ if (fs.existsSync(mainPath) && fs.existsSync(rendererIndexPath)) {
   buildAppAndLaunch();
 }
 
-function listMissingRuntimeDeps() {
-  if (!fs.existsSync(packageJsonPath)) return [];
-
-  let pkg;
-  try {
-    pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-  } catch {
-    return [];
-  }
-
-  const deps =
-    pkg && pkg.dependencies && typeof pkg.dependencies === "object" ? pkg.dependencies : {};
-
-  const missing = [];
-  for (const dep of Object.keys(deps)) {
-    if (dep.startsWith("@types/")) continue;
-    try {
-      require.resolve(dep, { paths: [packageDir] });
-    } catch {
-      missing.push({ name: dep, version: deps[dep] });
-    }
-  }
-
-  return missing;
-}
-
 function ensureRuntimeDeps() {
-  const missing = listMissingRuntimeDeps();
+  const missing = listMissingRuntimeDependencies(packageDir);
   if (missing.length === 0) return true;
 
   const installArgs = [

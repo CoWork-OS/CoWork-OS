@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.62] - Unreleased
+
+See [Release Notes 0.5.62](release-notes-0.5.62.md) for upgrade notes and validation scope.
+
 ### Added
+
+- **Task computers**: opt-in Linux guest execution for commands, code, files, browser and desktop tools, with explicit imports/exports, human takeover, durable operation recovery and completion cleanup. Docker/Podman reuse the bot-desktop backend; Cua uses its installed Linux runtime. Existing task routes remain the default. See [Task computers](task-computers.md). (#774)
+- **Recovery and review**: background jobs, queued follow-ups, event waits, unknown-outcome records, handoff packages, shared-change coordination, Build Compare, revision-aware annotations, connector write previews/receipts and memory-source freshness checks.
 
 - **Open CoWork OS in any browser**: turn on **Settings > Web Access > Full app in the browser**, then choose **Open in browser**. The whole app opens signed in, with your workspace, chats, files, Git and terminal. No environment variable is needed any more.
   - `cowork web` does the same from a terminal; `cowork web link` prints a sign-in link for another device.
@@ -33,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skill proposals ask you**: approving a `skill_proposal` shows the exact draft in an approval prompt and saves nothing without a yes, so the agent can no longer approve its own proposal. Writes to `.cowork/skills/**` and workspace skill files (`skills/*.json`) need approval even where ordinary edits are allowed. `add_behavioral_rule` and `set_expertise` are admin-only like the other persona tools. (#723)
 
 ### Changed
+
+- **Credential storage and runtime**: OS-keychain-protected data keys and asynchronous identity checks replace synchronous safeStorage calls for secret encryption; the desktop runtime moves to Electron 45. Saved sign-ins still require upgrade-path validation. (#789, #795, #796)
 
 - **OpenAI-compatible video provider replaces Sora**: OpenAI shut down its Videos API and the Sora 2 models on 24 September 2026, so the **OpenAI Sora 2** and **Azure OpenAI Sora 2** video providers are gone and an OpenAI API key no longer counts as a video provider. Settings > AI & Models > Video Model gains an **OpenAI-compatible** provider instead: point it at any service that speaks the OpenAI Videos API (base URL, model name, API key) for text-to-video and image-to-video. Saved Sora settings are ignored; Gemini Veo, Vertex AI Veo, Kling and the local model are unchanged.
 

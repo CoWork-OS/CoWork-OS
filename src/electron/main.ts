@@ -224,6 +224,10 @@ import {
 } from "./chronicle";
 import { revealWindow } from "./utils/window-visibility";
 import { StartupActionGate } from "./utils/startup-action-gate";
+import {
+  showKeychainStartupNotice,
+  withKeychainStartupNotice,
+} from "./utils/keychain-startup-notice";
 import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
 import { MailboxAutomationHub } from "./mailbox/MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./mailbox/MailboxAutomationRegistry";
@@ -2486,7 +2490,14 @@ if (isMacSafeStorageMigrationWorker) {
 
       // Initialize secure settings repository for encrypted settings storage
       // This MUST be done before provider factories so they can migrate legacy settings
-      await openSafeStorageDataKey(new SecureSettingsRepository(dbManager.getDatabase()));
+      await withKeychainStartupNotice(
+        () => openSafeStorageDataKey(new SecureSettingsRepository(dbManager.getDatabase())),
+        {
+          enabled: process.platform === "darwin" && !HEADLESS,
+          show: showKeychainStartupNotice,
+          onError: (error) => logger.warn("Could not open the Keychain startup notice:", error),
+        },
+      );
       logger.info("SecureSettingsRepository initialized");
       // Legacy remote app connections are retained for migration only; never start them.
       logStartupLane("blocking_startup", { event: "secure_settings_ready" });

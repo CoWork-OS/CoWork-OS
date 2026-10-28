@@ -477,6 +477,10 @@ function main() {
   const attempt = (attemptJobs) => {
     const env = baseEnvWithJobs(attemptJobs);
     const installRootDir = getInstallRootDir();
+    // Recover optional packages first. npm may reify Electron while installing SQLite,
+    // removing its downloaded dist/ directory even if the binary existed before setup.
+    const ensureBetterRes = ensureBetterSqlite3(env, installRootDir);
+    if (ensureBetterRes.status !== 0) return ensureBetterRes;
     const electronInstallScript = resolvePackageFile("electron", "install.js");
     const electronRebuildCli = resolveElectronRebuildCli();
     const electronBinary = getElectronBinaryPath();
@@ -495,10 +499,6 @@ function main() {
       const installRes = run(process.execPath, [electronInstallScript], { env });
       if (installRes.status !== 0) return installRes;
     }
-
-    // If optional dependency install was skipped/failed earlier, recover here.
-    const ensureBetterRes = ensureBetterSqlite3(env, installRootDir);
-    if (ensureBetterRes.status !== 0) return ensureBetterRes;
 
     const electronVersion = getElectronVersion();
     const electronAbi = getElectronModulesAbi(env);

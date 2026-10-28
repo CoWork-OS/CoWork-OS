@@ -689,7 +689,7 @@ export class BotDesktopManager {
     this.records.clear();
   }
 
-  /** Stops bot desktops left running by an earlier CoWork session (it quit or crashed). */
+  /** Stops leftovers owned by this profile; another profile may still be using its desktops. */
   async stopLeftovers(): Promise<void> {
     const runtime = await this.detectRuntime();
     if (!runtime) return;
@@ -706,6 +706,8 @@ export class BotDesktopManager {
         "ps",
         "--filter",
         "label=cowork.bot-desktop",
+        "--filter",
+        `label=cowork.profile=${this.profileKey()}`,
         "--format",
         "{{.Names}}",
       ]).catch(() => null);
@@ -1034,6 +1036,12 @@ export class BotDesktopManager {
     await pending;
   }
 
+  private profileKey(): string {
+    const folder = this.deps.dataDir();
+    const canonical = existsSync(folder) ? realpathSync(folder) : path.resolve(folder);
+    return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
+  }
+
   private async start(botId: string): Promise<void> {
     const runtime = await this.detectRuntime();
     if (!runtime) {
@@ -1067,6 +1075,8 @@ export class BotDesktopManager {
         "bot-desktop",
         "--label",
         `cowork.bot-desktop=${botDesktopKey(botId)}`,
+        "--label",
+        `cowork.profile=${this.profileKey()}`,
         "--cap-drop",
         "ALL",
         "--security-opt",

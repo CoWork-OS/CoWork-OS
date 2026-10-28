@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
+import { randomUUID } from "node:crypto";
 import { setMaintenanceStateValue } from "./post-startup-maintenance";
 
 /**
@@ -123,7 +124,15 @@ export function acquireMigrationLock(
   for (;;) {
     const record: LockRecord = { pid: process.pid, host, acquiredAt: now() };
     try {
-      fs.writeFileSync(lockPath, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+      // Publish the complete record atomically. Creating lockPath and then writing its
+      // JSON exposes an empty file that another startup can mistake for an abandoned lock.
+      const candidate = `${lockPath}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        fs.writeFileSync(candidate, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+        fs.linkSync(candidate, lockPath);
+      } finally {
+        fs.rmSync(candidate, { force: true });
+      }
       let released = false;
       return () => {
         if (released) return;

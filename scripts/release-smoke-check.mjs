@@ -67,3 +67,14 @@ if (browserSmoke.stderr) process.stderr.write(browserSmoke.stderr);
 if (browserSmoke.error || browserSmoke.status !== 0) {
   throw browserSmoke.error || new Error("Installed browser workflow smoke failed.");
 }
+
+const cliSmoke = spawnSync(
+  process.execPath,
+  [path.join(pkgDir, "scripts", "qa", "release-cli-surface-smoke.mjs"), pkgDir],
+  { cwd: pkgDir, env: process.env, encoding: "utf8", timeout: 330000, maxBuffer: 1024 * 1024 },
+);
+if (cliSmoke.stdout) process.stdout.write(cliSmoke.stdout);
+if (cliSmoke.stderr) process.stderr.write(cliSmoke.stderr);
+if (cliSmoke.error || cliSmoke.status !== 0) {
+  throw cliSmoke.error || new Error("Installed CLI workflow smoke failed.");
+}

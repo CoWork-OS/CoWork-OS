@@ -8364,10 +8364,14 @@ export function App() {
     handleNavigateHistory(-1);
   }, [closeSettings, currentView, handleNavigateHistory, navigationAvailability.canGoBack]);
 
-  // An automation focused for Settings shouldn't refocus on the next visit,
-  // however Settings was left.
+  // An automation focused for Settings, or a connector a notice asked it to
+  // open, is a one-shot request: clear both however Settings was left, so the
+  // next visit neither refocuses the automation nor reopens the connector.
   useEffect(() => {
-    if (currentView !== "settings") setFocusAutomationOwner(null);
+    if (currentView !== "settings") {
+      setFocusAutomationOwner(null);
+      setSettingsConnector(undefined);
+    }
   }, [currentView]);
 
   if (!hasElectronAPI) {

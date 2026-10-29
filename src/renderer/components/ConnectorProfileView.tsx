@@ -5,6 +5,7 @@ import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
 import type { MCPLaunchPlanPreview } from "./MCPLaunchPlanReview";
+import { ModalDialog } from "./ModalDialog";
 import type { ConnectorProvider } from "./ConnectorSetupModal";
 import type { ConnectorEnvField } from "./ConnectorEnvModal";
 
@@ -261,7 +262,12 @@ export function ConnectorProfileView({
 
   return (
     <div className="mcp-modal-overlay" onClick={onClose}>
-      <div className="cm-profile-modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog
+        onClose={onClose}
+        aria-label={connector.name}
+        className="cm-profile-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Top nav: Back + Close */}
         <div className="cm-profile-nav">
           <button type="button" className="cm-profile-back" onClick={onClose} aria-label="Back">
@@ -543,7 +549,7 @@ export function ConnectorProfileView({
             )}
           </div>
         )}
-      </div>
+      </ModalDialog>
       {pendingUpdate && (
         <MCPLaunchPlanReview
           plan={pendingUpdate.plan}

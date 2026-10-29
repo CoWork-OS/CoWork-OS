@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { InstallSecurityOutcome } from "../../shared/types";
 import { isGitPluginUrl } from "../utils/plugin-store-install";
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
+import { ModalDialog } from "./ModalDialog";
 
 interface PackRegistryEntry {
   id: string;
@@ -67,6 +68,9 @@ export function PluginStore({
   const [scaffoldCategory, setScaffoldCategory] = useState("Custom");
   const [scaffoldIcon, setScaffoldIcon] = useState("📦");
   const focusedPackId = useRef<string | null>(null);
+  // A press that starts on the backdrop; a drag that ends there (selecting
+  // text in a field) still clicks the overlay but must not close the store.
+  const backdropPressed = useRef(false);
   const canInstallFromGit = hasHostMethod("installPluginPackFromGit");
   const canInstallFromUrl = hasHostMethod("installPluginPackFromUrl");
   const canImportFromUrl = hasHostMethods("installPluginPackFromGit", "installPluginPackFromUrl");
@@ -293,8 +297,18 @@ export function PluginStore({
   };
 
   return (
-    <div className="ps-overlay">
-      <div className="ps-container">
+    <div
+      className="ps-overlay"
+      onMouseDown={(event) => {
+        backdropPressed.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        const pressedBackdrop = backdropPressed.current;
+        backdropPressed.current = false;
+        if (pressedBackdrop && event.target === event.currentTarget) onClose();
+      }}
+    >
+      <ModalDialog onClose={onClose} aria-label="Plugin Store" className="ps-container">
         {/* Header */}
         <div className="ps-header">
           <h2>Plugin Store</h2>
@@ -321,7 +335,7 @@ export function PluginStore({
             >
               Install from URL
             </button>
-            <button className="ps-close" onClick={onClose}>
+            <button className="ps-close" onClick={onClose} aria-label="Close">
               &times;
             </button>
           </div>
@@ -582,7 +596,7 @@ export function PluginStore({
             </div>
           )}
         </div>
-      </div>
+      </ModalDialog>
 
       <style>{`
         .ps-overlay {

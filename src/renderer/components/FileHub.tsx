@@ -156,7 +156,7 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
       if (searchQuery.trim()) {
         const results = await (window as Any).electronAPI.searchHubFiles(
           searchQuery,
-          [activeSource],
+          availableSources,
           workspaceId,
         );
         next = (results || []).map((r: Any) => r.file);
@@ -176,7 +176,7 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
     } catch {
       if (requestId === loadRequestSeqRef.current) setFiles([]);
     }
-  }, [activeSource, searchQuery, currentFolderPath, workspaceId]);
+  }, [activeSource, availableSources, searchQuery, currentFolderPath, workspaceId]);
 
   useEffect(() => {
     loadFiles();
@@ -368,11 +368,21 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
           </div>
         ) : (
           visibleFiles.map((file) => (
-            <div
+            <button
               key={file.id}
+              type="button"
               onClick={() => handleFileClick(file)}
+              aria-label={`${file.isDirectory ? "Open folder" : "Open file"} ${file.name}`}
               title={file.isDirectory ? `Open folder ${file.name}` : undefined}
-              style={desktopFileRowStyle}
+              style={{
+                ...desktopFileRowStyle,
+                width: "100%",
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                textAlign: "left",
+              }}
               onMouseEnter={highlightDesktopRow}
               onMouseLeave={clearDesktopRowHighlight}
             >
@@ -391,7 +401,7 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
               <div style={{ fontSize: 11, color: "var(--text-tertiary, #666)", flexShrink: 0 }}>
                 {formatDate(file.modifiedAt)}
               </div>
-            </div>
+            </button>
           ))
         )}
       </div>

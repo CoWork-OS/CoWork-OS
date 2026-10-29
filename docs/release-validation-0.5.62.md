@@ -9,6 +9,11 @@ real-provider walkthrough below used the earlier retry-fix commit `4400e6a59` on
 main `8446d348371a46a6d2fb842d64a1f5ce661f8838`; the deterministic packaged viewer
 retest was repeated on the merged candidate. See the PR checks for the latest head.
 
+#798 merged into main as `6ed0bea47`, together with #801 (data key on Linux
+without a keyring, secrets upgrade smoke) and #803 (Open desktop restores a
+minimized viewer). [Requalification on main](#requalification-on-main-6ed0bea47)
+repeats the release checks on that revision.
+
 ## Current checks
 
 | Check | Command or surface | Result |
@@ -36,6 +41,29 @@ under simultaneous build/packaging load missed its shutdown deadline; the quiet
 repeat passed without changing the timeout. An attempted memory run while the
 failed build had removed daemon output is excluded and was restarted after a
 successful full build.
+
+## Requalification on main `6ed0bea47`
+
+Run on 2026-10-28 after #798, #801 and #803 merged. The earlier table describes
+`3e9624082`; these results replace it for the release revision.
+
+| Check | Result |
+| --- | --- |
+| Build and static checks | `npm run build`, type check, lint, formatting, docs versions, release surfaces, positioning copy and `git diff --check` passed. The #801 and #803 suites (`safe-storage-data-key`, `desktop-viewer-window`) passed 12/12. |
+| Clean npm install | The tarball (SHA-256 `c441307f9ba3c6ffffe667941fc6e976a4d838f0c44d5f4185e5c2cbb20338e1`) contains the required entrypoints, including `ipc/desktop-viewer-window.js`, and passed the same install, setup, SQLite, browser-host, CLI and launcher checks without bootstrap fallback. |
+| macOS artifacts | Ad hoc arm64 DMG/ZIP built from a staging tree whose shipped sources match `6ed0bea47`. Updater names aligned; signature, mounted-DMG first-window load, ZIP installation, `hdiutil verify` and `unzip -t` passed. DMG `e193c75e488006a27039d01e690e6a33bac6df06f239500fc817b469686da93e`, ZIP `27462dda546d2f50613fad6749477bbea2b4c032f7cc78e4eae39cf0827d05a3`. |
+| Packaged viewer | With real Keychain access, a fresh synthetic profile created its data key and loaded the first window 483 ms into startup. The task read **Ready** and requested takeover. After Take over, a real pointer click on Verify in the native viewer changed the page to **Verified**. The viewer was then minimized, and **Open desktop** brought it back on screen still showing **Verified** (#803). Done was submitted; the fresh snapshot observed **Verified**, the task wrote `report.txt`, stopped the process and finished `completed` / `ok`. The 50-byte export matches its receipt (`f6eef934240fdb77d07fd25c3443a4f595eb788f0c24059e289176ceaf16593a`), the binding is `released` with no processes, and the container and private folder are absent. |
+| CI | [Run 40764993519](https://github.com/CoWork-OS/CoWork-OS/actions/runs/40764993519) on `6ed0bea47`: every job passed, including the macOS and Windows builds. On the first attempt Tests (macOS) failed `execution-environment.test.ts` "recovers a lost background handle and stops it during completion" (1 of 18,749), the same timing-sensitive test that failed locally under load; the rerun of that job passed. #798 did not change this stop path, and earlier main runs passed it. On a macOS host there is no `/proc`, so `stop_process` relies on the cancel file and waits at most two seconds for the supervisor to exit. |
+
+Two attempts are excluded. The first started while Docker Desktop was not running,
+so the guest could not start. In the second, the post-Done snapshot still read
+**Ready** because the Verify click had not reached the guest page; the task failed
+closed (`failed`, binding `cleanup_pending`, "Invalid output transfer") rather than
+reporting success. That fixture advanced past its failed check and returned scripted
+text claiming a written report, so the fixture now stops at the first failed check.
+The external GUI automation tool would not start, so the accepted run used guarded
+native pointer events: each click was refused unless the test app's window was
+topmost at that point, and only that app's windows were captured.
 
 ## Native Keychain startup and recovery
 
@@ -152,15 +180,17 @@ allowances. Only task-owned synthetic resources were cleaned up.
   release workflow rebuilds all of these; nothing was uploaded.
 - Fresh install/upgrade fixtures use synthetic data; personal provider sign-ins
   and real channel delivery are not covered.
-- Local qualification artifacts for `3e9624082` are staged outside the checkout
+- Local qualification artifacts are staged outside the checkout: `3e9624082`
   under `/tmp/cowork-798-upstream-stage/release-merge/` and
-  `/tmp/cowork-798-merge-artifacts/`. They are not release artifacts: rebuild from
+  `/tmp/cowork-798-merge-artifacts/`; `6ed0bea47` under
+  `/tmp/cowork-798-upstream-stage/release-main/` and `/tmp/cowork-798-main-artifacts/`. They are not release artifacts: rebuild from
   the clean release revision. SHA-256 sidecars belong outside the npm tarball.
 - During the merged-head viewer run, the app window twice stopped repainting
   while its page kept updating, and resizing the window restored it once. Both
   windows were behind another app or Space at the time, so this is recorded as
   an observation, not a confirmed defect. **Open desktop** also did not restore a
-  minimized viewer window.
+  minimized viewer window; #803 fixed this, and the packaged check on `6ed0bea47`
+  confirms it.
 - Before publication, require review and green exact-head CI, merge the release
   preparation, rebuild from the clean release revision, and rerun release smoke.
   Merge, tagging, npm publication and installer deployment are separate actions.

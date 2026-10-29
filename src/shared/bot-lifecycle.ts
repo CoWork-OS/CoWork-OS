@@ -514,6 +514,24 @@ function getAttention(
 }
 
 /** Derive a compact, human-facing collaboration state from durable events. */
+/**
+ * A bot chat goes back to "pending" after each reply while it waits for the next
+ * message. Once the latest message has its answer the bot is idle, not working.
+ */
+function latestMessageAnswered(events: TaskEvent[]): boolean {
+  const ordered = [...events].sort(compareEventOrder);
+  let latestUserMessage = -1;
+  ordered.forEach((event, index) => {
+    if (getEventType(event) === "user_message") latestUserMessage = index;
+  });
+  if (latestUserMessage < 0) return false;
+  return ordered
+    .slice(latestUserMessage + 1)
+    .some((event) =>
+      ["assistant_message", "follow_up_completed", "task_completed"].includes(getEventType(event)),
+    );
+}
+
 export function deriveBotConversationProjection(input: {
   task: Pick<Task, "status" | "error" | "resultSummary" | "terminalStatus"> & { id?: string };
   botName?: string;
@@ -717,7 +735,8 @@ export function deriveBotConversationProjection(input: {
 
   const hasActivity = parentEvents.length > 0 || childEvents.length > 0 || handoffs.length > 0;
   const baseState =
-    !hasActivity && (input.task.status === "pending" || input.task.status === "queued")
+    (!hasActivity && (input.task.status === "pending" || input.task.status === "queued")) ||
+    (input.task.status === "pending" && latestMessageAnswered(input.events || []))
       ? "ready"
       : stateFromTask(input.task);
   const pendingBotHandoff = getPendingBotHandoff(input.events || [], handoffScope);

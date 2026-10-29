@@ -4619,6 +4619,20 @@ export function App() {
         (event.payload?.terminalTask === true ||
           isTerminalTaskStatus(tasksRef.current.find((t) => t.id === event.taskId)?.status));
       const nextStatus = newStatus as Task["status"] | undefined;
+      // The failure reason travels with the error event (live as "timeline_error").
+      // Waiting for a refetch left a task that failed at once showing only "Failed"
+      // until it was reopened.
+      const failureReason =
+        event.type === "error" || event.type === "timeline_error"
+          ? [event.payload?.error, event.payload?.message].find(
+              (value): value is string => typeof value === "string" && value.trim().length > 0,
+            )
+          : undefined;
+      if (failureReason) {
+        const withFailureReason = (t: Task): Task =>
+          t.error ? t : mergeTaskPreservingIdentity(t, { error: failureReason.trim() });
+        setTasks((prev) => updateTaskPreservingIdentity(prev, event.taskId, withFailureReason));
+      }
       if (newStatus && !skipBlockedStateForAutoApproval && !hasOtherPendingApproval) {
         const updateTaskStatus = (t: Task): Task => {
           if (isTerminalInputResolution && isTerminalTaskStatus(t.status)) {

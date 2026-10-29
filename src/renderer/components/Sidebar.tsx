@@ -332,6 +332,10 @@ export interface TaskTreeNode {
   displayTitle?: string;
 }
 
+function taskTreeContains(nodes: readonly TaskTreeNode[], taskId: string): boolean {
+  return nodes.some((node) => node.task.id === taskId || taskTreeContains(node.children, taskId));
+}
+
 const GENERIC_SESSION_TITLES = new Set([
   "...",
   "new session",
@@ -611,10 +615,14 @@ export type SidebarVirtualRow =
       /** Calm: opens Work, which lists every session the short Recent list leaves out. */
       kind: "work-link";
       id: string;
-      /** Sessions not listed here: older recents and automated sessions. */
+      /** Sessions past the short Recent list: older recents and automated sessions. */
       hidden: number;
       /** Whether one of those waits on the user. */
       needsYou: boolean;
+      /** Work is open. */
+      active: boolean;
+      /** Those sessions are listed under the link. */
+      expanded: boolean;
     };
 
 function TaskTitleSelect({
@@ -1703,6 +1711,29 @@ function SidebarComponent({
   );
   const workTakesOverSessions =
     isCalm && Boolean(onNavigate) && !hasSessionSearch && !hasSessionStateFilter;
+  // With Work open, "All work" also lists the rest of the sessions here. It stays open while
+  // one of them is the open session, so the row the user picked doesn't vanish.
+  const allWorkExpanded = useMemo(() => {
+    if (!workTakesOverSessions) return false;
+    if (activeDestinationId === "work") return true;
+    if (!highlightSelection || !selectedTaskId) return false;
+    return taskTreeContains(
+      [
+        ...workspaceGroups.recentNodes.slice(CALM_RECENT_SESSION_LIMIT),
+        ...unpinnedAutomatedTaskTree,
+      ],
+      selectedTaskId,
+    );
+  }, [
+    activeDestinationId,
+    highlightSelection,
+    selectedTaskId,
+    unpinnedAutomatedTaskTree,
+    workTakesOverSessions,
+    workspaceGroups.recentNodes,
+  ]);
+  const showAutomatedDrawer =
+    unpinnedAutomatedTaskTree.length > 0 && (!workTakesOverSessions || allWorkExpanded);
   const sidebarVirtualRows = useMemo(() => {
     const rows: SidebarVirtualRow[] = [];
 
@@ -1721,6 +1752,32 @@ function SidebarComponent({
         })),
       );
       return taskRows.length;
+    };
+
+    // Recents read as a timeline: one label per day bucket.
+    const appendRecentTimeline = (nodes: TaskTreeNode[]) => {
+      const now = new Date();
+      let bucket = "";
+      let bucketNodes: TaskTreeNode[] = [];
+      const flushBucket = () => {
+        if (bucketNodes.length === 0) return;
+        const expanded =
+          hasSessionSearch ||
+          hasSessionStateFilter ||
+          !workspaceNavSettings.collapsedRecentGroups?.includes(bucket);
+        rows.push({ kind: "date-header", id: `recents:${bucket}`, label: bucket, expanded });
+        if (expanded) appendTaskRows(bucketNodes, "user");
+        bucketNodes = [];
+      };
+      for (const node of nodes) {
+        const nodeBucket = getSidebarRecencyBucket(node.task, now);
+        if (nodeBucket !== bucket) {
+          flushBucket();
+          bucket = nodeBucket;
+        }
+        bucketNodes.push(node);
+      }
+      flushBucket();
     };
 
     const appendWorkspaceGroup = (group: SidebarWorkspaceGroup) => {
@@ -1783,52 +1840,29 @@ function SidebarComponent({
     }
 
     // In Calm, Work is where every session lives: the sidebar keeps pinned items, projects and
-    // a short Recent list, then hands over to Work. Searching or filtering still lists
-    // everything, so nothing is out of reach.
+    // a short Recent list, then hands over to Work. Opening All work also lists the rest here,
+    // under the link. Searching or filtering still lists everything, so nothing is out of reach.
     if (workTakesOverSessions) {
       const recentNodes = workspaceGroups.recentNodes;
       if (recentNodes.length > 0) {
         rows.push({ kind: "date-header", id: "recents:Recent", label: "Recent" });
         appendTaskRows(recentNodes.slice(0, CALM_RECENT_SESSION_LIMIT), "user");
       }
-      const hiddenNodes = [
-        ...recentNodes.slice(CALM_RECENT_SESSION_LIMIT),
-        ...unpinnedAutomatedTaskTree,
-      ];
+      const olderNodes = recentNodes.slice(CALM_RECENT_SESSION_LIMIT);
+      const hiddenNodes = [...olderNodes, ...unpinnedAutomatedTaskTree];
       rows.push({
         kind: "work-link",
         id: "work-link",
         hidden: hiddenNodes.length,
         needsYou: hiddenNodes.some((node) => activityOf(node.task)?.category === "needs-you"),
+        active: activeDestinationId === "work",
+        expanded: allWorkExpanded,
       });
-      return rows;
-    }
-
-    const hasRecentContent = workspaceGroups.recentNodes.length > 0;
-    if (hasRecentContent) {
-      // Recents read as a timeline: one label per day bucket.
-      const now = new Date();
-      let bucket = "";
-      let bucketNodes: TaskTreeNode[] = [];
-      const flushBucket = () => {
-        if (bucketNodes.length === 0) return;
-        const expanded =
-          hasSessionSearch ||
-          hasSessionStateFilter ||
-          !workspaceNavSettings.collapsedRecentGroups?.includes(bucket);
-        rows.push({ kind: "date-header", id: `recents:${bucket}`, label: bucket, expanded });
-        if (expanded) appendTaskRows(bucketNodes, "user");
-        bucketNodes = [];
-      };
-      for (const node of workspaceGroups.recentNodes) {
-        const nodeBucket = getSidebarRecencyBucket(node.task, now);
-        if (nodeBucket !== bucket) {
-          flushBucket();
-          bucket = nodeBucket;
-        }
-        bucketNodes.push(node);
-      }
-      flushBucket();
+      // Automated sessions keep their own drawer below the list.
+      if (!allWorkExpanded) return rows;
+      appendRecentTimeline(olderNodes);
+    } else {
+      appendRecentTimeline(workspaceGroups.recentNodes);
     }
 
     if (hasMoreTasks) {
@@ -1836,6 +1870,8 @@ function SidebarComponent({
     }
     return rows;
   }, [
+    activeDestinationId,
+    allWorkExpanded,
     effectiveCollapsedTasks,
     hasMoreTasks,
     hasSessionSearch,
@@ -2965,8 +3001,9 @@ function SidebarComponent({
       return (
         <button
           type="button"
-          className="sidebar-work-link"
+          className={`sidebar-work-link${row.active ? " active" : ""}`}
           onClick={() => onNavigate?.("work")}
+          aria-current={row.active ? "page" : undefined}
           aria-label={`All work${row.hidden > 0 ? `, ${more}` : ""}${row.needsYou ? ", some need you" : ""}`}
         >
           <Layers size={15} aria-hidden="true" />
@@ -2982,7 +3019,11 @@ function SidebarComponent({
               aria-hidden="true"
             />
           )}
-          <ChevronRight size={13} aria-hidden="true" />
+          {row.expanded ? (
+            <ChevronDown size={13} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={13} aria-hidden="true" />
+          )}
         </button>
       );
     }
@@ -3612,7 +3653,7 @@ function SidebarComponent({
               {/* Sidebar notification area: add new notices in sidebar/SidebarNotices.tsx. */}
               <SidebarNotices />
 
-              {unpinnedAutomatedTaskTree.length > 0 && !workTakesOverSessions && (
+              {showAutomatedDrawer && (
                 <section className="sidebar-automated-section" aria-label="Automated sessions">
                   <button
                     type="button"

@@ -151,6 +151,74 @@ describe("Sidebar top-level destinations", () => {
       expect(markup).not.toContain("automated-folder-header");
     });
 
+    describe("All work open", () => {
+      const renderAllWork = (props: {
+        activeDestinationId: "work" | "home";
+        selectedTaskId?: string;
+      }) => {
+        vi.stubGlobal("document", {
+          documentElement: { classList: { contains: (name: string) => name === "visual-calm" } },
+        });
+        const now = Date.now();
+        const session = (index: number) => ({
+          id: `s${index}`,
+          title: `Session number ${index}`,
+          prompt: "Work",
+          status: "completed",
+          workspaceId: "ws-1",
+          createdAt: now - index * 60_000,
+          updatedAt: now - index * 60_000,
+        });
+        return renderToStaticMarkup(
+          React.createElement(Sidebar, {
+            workspace: null,
+            tasks: [
+              ...Array.from({ length: 7 }, (_, index) => session(index + 1)),
+              {
+                id: "cron-1",
+                title: "Scheduled digest",
+                prompt: "Digest",
+                source: "cron",
+                status: "completed",
+                workspaceId: "ws-1",
+                createdAt: now,
+                updatedAt: now,
+              },
+            ] as Any,
+            selectedTaskId: props.selectedTaskId ?? null,
+            activeDestinationId: props.activeDestinationId,
+            onNavigate: () => {},
+            onSelectTask: () => {},
+            onTasksChanged: () => {},
+          }),
+        );
+      };
+
+      it("lists every session under the link while Work is open", () => {
+        const markup = renderAllWork({ activeDestinationId: "work" });
+        expect(markup).toContain('class="sidebar-work-link active"');
+        expect(markup).toContain('aria-current="page"');
+        expect(markup).toContain("Session number 7");
+        expect(markup.indexOf("sidebar-work-link")).toBeLessThan(
+          markup.indexOf("Session number 6"),
+        );
+        expect(markup).toContain("automated-folder-header");
+      });
+
+      it("stays open while one of the listed sessions is the open one", () => {
+        const markup = renderAllWork({ activeDestinationId: "home", selectedTaskId: "s7" });
+        expect(markup).toContain('class="sidebar-work-link"');
+        expect(markup).not.toContain('aria-current="page"');
+        expect(markup).toContain("Session number 7");
+      });
+
+      it("folds back once the open session is in the short Recent list", () => {
+        const markup = renderAllWork({ activeDestinationId: "home", selectedTaskId: "s2" });
+        expect(markup).not.toContain("Session number 6");
+        expect(markup).not.toContain("automated-folder-header");
+      });
+    });
+
     it("stays out of the modern theme", () => {
       const markup = renderToStaticMarkup(
         React.createElement(Sidebar, {

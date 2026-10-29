@@ -166,6 +166,7 @@ import {
 import {
   discoverDocumentForAnalysis,
   extractDocumentForAnalysis,
+  DOCUMENT_ANALYSIS_SEGMENT_CHARS,
   splitDocumentForAnalysis,
   type DocumentAnalysisChunk,
 } from "./document-analysis-pipeline";
@@ -2550,6 +2551,15 @@ export class TaskExecutor {
     // regular tools so a complete review does not silently omit other inputs.
     const sourceReferences = new Set(normalized.match(/[\w./~-]+\.(?:docx|pdf|md|txt)\b/g) || []);
     if (sourceReferences.size > 1) return false;
+    // An explicit manuscript review ("character continuity", "kitap") keeps the pipeline
+    // whatever the length; anything else about a short text file reads it directly.
+    const hasManuscriptReviewCue =
+      /(?:book|manuscript|novel|chapter|character|continuity|kitap|bölüm|karakter|devamlılık)/.test(
+        normalized,
+      );
+    if (!hasManuscriptReviewCue && this.namesShortTextSource(`${taskTitle}\n${rawTaskPrompt}`)) {
+      return false;
+    }
     const hasDocumentScope =
       /\.(?:docx|pdf|md|txt)\b/.test(normalized) ||
       /(?:book|manuscript|document|chapter|character|kitap|metin|belge|doküman|bölüm|karakter)/.test(
@@ -2593,6 +2603,24 @@ export class TaskExecutor {
       !requestsFileMutation &&
       !hasScopedExcerptCue
     );
+  }
+
+  /**
+   * The pipeline exists for documents too long to read in one pass (it splits them into
+   * 24,000-character segments). A short text file such as a README fits in one segment;
+   * routing "Summarize README.md" through it ran a manuscript review ("gaps,
+   * contradictions, character continuity") on a few lines.
+   */
+  private namesShortTextSource(request: string): boolean {
+    const [source] = request.match(/[\w./~-]+\.(?:md|txt)\b/i) || [];
+    if (!source || !this.workspace?.path) return false;
+    try {
+      const absolute = path.resolve(this.workspace.path, source);
+      if (!this.canReadWorkspacePath(absolute)) return false;
+      return fs.statSync(absolute).size < DOCUMENT_ANALYSIS_SEGMENT_CHARS;
+    } catch {
+      return false;
+    }
   }
 
   private buildBoundedDocumentAnalysisPlan(): Plan {
@@ -29549,15 +29577,35 @@ You are continuing a previous conversation. The context from the previous conver
       return true;
     }
 
-    // Create or update a scheduled task.
-    const scheduleKind = sub;
+    // Create or update a scheduled task. Everyday phrasing maps onto the forms above:
+    // "every weekday at 9am …", "every day at 18:30 …", "every monday at 9am …".
+    let scheduleKind = sub;
+    if (scheduleKind === "every") {
+      const unit = String(tokens[0] || "").toLowerCase();
+      if (unit === "weekday" || unit === "weekdays") {
+        scheduleKind = "weekdays";
+        tokens.shift();
+      } else if (unit === "day") {
+        scheduleKind = "daily";
+        tokens.shift();
+      } else if (parseWeekday(unit) !== null) {
+        scheduleKind = "weekly";
+      }
+    }
+    if (
+      (scheduleKind === "daily" || scheduleKind === "weekdays") &&
+      /^at$/i.test(tokens[0] || "")
+    ) {
+      tokens.shift();
+    }
+    if (scheduleKind === "weekly" && /^at$/i.test(tokens[1] || "")) tokens.splice(1, 1);
     let scheduleInput: Any | null = null;
     let promptParts: string[] = [];
 
     if (scheduleKind === "daily" || scheduleKind === "weekdays") {
       const time = parseTimeOfDay(tokens[0] || "");
       if (!time) {
-        throw new Error("Invalid time. Examples: 9am, 09:00, 18:30");
+        throw new Error("Invalid time. Examples: 9am, 09:00, 18:30. See `/schedule help`.");
       }
       const expr =
         scheduleKind === "weekdays"
@@ -29577,7 +29625,9 @@ You are continuing a previous conversation. The context from the previous conver
       const interval = String(tokens[0] || "").trim();
       const everyMs = interval ? parseIntervalToMs(interval) : null;
       if (!everyMs || !Number.isFinite(everyMs) || everyMs < 60_000) {
-        throw new Error("Invalid interval. Examples: 30m, 6h, 1d (minimum 1m)");
+        throw new Error(
+          "Invalid interval. Examples: 30m, 6h, 1d (minimum 1m), or every weekday at 9am. See `/schedule help`.",
+        );
       }
       scheduleInput = { type: "interval", every: interval };
       promptParts = tokens.slice(1);

@@ -157,13 +157,16 @@ export async function extractDocumentForAnalysis(
   };
 }
 
+/** Characters per analysis segment; a source shorter than this is read in one pass. */
+export const DOCUMENT_ANALYSIS_SEGMENT_CHARS = 24_000;
+
 /**
  * Split source text into stable, overlapping windows. Boundaries prefer paragraph
  * breaks, then line breaks, and never create a gap in source coverage.
  */
 export function splitDocumentForAnalysis(
   text: string,
-  maxChars = 24_000,
+  maxChars = DOCUMENT_ANALYSIS_SEGMENT_CHARS,
   overlapChars = 400,
 ): DocumentAnalysisChunk[] {
   const source = String(text || "");

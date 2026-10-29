@@ -394,6 +394,29 @@ describe("TaskExecutor plan parsing", () => {
     expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
   });
 
+  it("reads a short text file with the regular plan, not the full-document pipeline", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-short-doc-"));
+    try {
+      fs.writeFileSync(path.join(directory, "README.md"), "# QA project\n\nA small project.\n");
+      fs.writeFileSync(path.join(directory, "novel.md"), "Chapter one.\n".repeat(3_000));
+      const executor = createPlanExecutor({ content: [] });
+      executor.workspace.path = directory;
+      executor.task.title = "Summarize README";
+      executor.task.rawPrompt = "Summarize README.md";
+      executor.task.userPrompt = executor.task.rawPrompt;
+      executor.task.prompt = executor.task.rawPrompt;
+      expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
+
+      executor.task.title = "Review the novel";
+      executor.task.rawPrompt = "Review novel.md for contradictions and character continuity.";
+      executor.task.userPrompt = executor.task.rawPrompt;
+      executor.task.prompt = executor.task.rawPrompt;
+      expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(true);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps verifier workers out of the full-document pipeline", () => {
     const executor = createPlanExecutor({ content: [] });
     executor.task.title = "Verify: Review the release checklist...";

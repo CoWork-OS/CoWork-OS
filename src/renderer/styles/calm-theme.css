@@ -1254,7 +1254,10 @@ html.visual-calm .calm-sidebar .sidebar-notice-label {
 
 /* ---------- Library / Build views ---------- */
 
-html.visual-calm .calm-view {
+/* The main-content card rule (`.app .app-layout > .main-content`) sets
+   overflow: hidden and outranks a bare `.calm-view`, so match its weight. */
+html.visual-calm .calm-view,
+html.visual-calm .app .app-layout > .main-content.calm-view {
   overflow-y: auto;
 }
 

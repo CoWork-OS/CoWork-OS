@@ -1309,6 +1309,14 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   background: var(--sidebar-panel-row-hover);
 }
 
+/* Work is open: the same raised chip as the selected session. */
+.sidebar-panel .sidebar-work-link.active {
+  background: var(--sidebar-panel-chip-bg);
+  box-shadow:
+    0 0 0 1px var(--sidebar-panel-border),
+    var(--sidebar-panel-chip-shadow);
+}
+
 .sidebar-panel .sidebar-work-link:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;

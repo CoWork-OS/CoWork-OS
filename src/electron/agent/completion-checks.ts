@@ -123,6 +123,8 @@ const SHORT_REQUEST_MAX_CHARS = 80;
 const SUBSTANTIAL_OUTPUT_REQUEST_REGEX =
   /\b(?:write|draft|compose|create|generate|build|implement|fix|research|summari[sz]e|explain|describe|plan|outline|list|analy[sz]e|review|compare|report|essay|article|story|poem|code)\b/i;
 
+const SUMMARY_REQUEST_REGEX = /\b(?:summari[sz]e|summary|recap|tl;?dr|overview)\b/i;
+
 function isShortSimpleRequest(intent: string): boolean {
   // taskIntent is "title\nprompt"; judge the prompt, which the title only abbreviates.
   const lines = intent
@@ -295,7 +297,15 @@ export function evaluateDomainCompletion(input: DomainCompletionInput): DomainCo
     // A direct answer can contain concrete totals/comparisons without using
     // research boilerplate such as "findings" or "according to". Respect the
     // requested answer format while retaining the substantive-content floor.
-    if (text.length < 60 || (!hasResearchSignal && !contextIndicatesDirectResult(input))) {
+    // A requested summary is the deliverable even without research words such as
+    // "found" or "according to" ("README.md describes a small QA project…").
+    const summaryRequested = SUMMARY_REQUEST_REGEX.test(
+      `${input.stepDescription || ""}\n${input.taskIntent || ""}`,
+    );
+    if (
+      text.length < 60 ||
+      (!hasResearchSignal && !contextIndicatesDirectResult(input) && !summaryRequested)
+    ) {
       return {
         failed: true,
         reason:

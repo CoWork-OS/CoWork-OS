@@ -279,6 +279,18 @@ describe("evaluateDomainCompletion", () => {
     expect(result.failed).toBe(true);
   });
 
+  it("accepts a plain summary of a file in the research domain", () => {
+    const result = evaluateDomainCompletion({
+      domain: "research",
+      isLastStep: true,
+      assistantText: "The README says this is a small QA project with a short setup section.",
+      hadAnyToolSuccess: true,
+      taskIntent: "Summarize README\nSummarize README.md",
+      stepDescription: "Read README.md",
+    });
+    expect(result.failed).toBe(false);
+  });
+
   it("still rejects a bare acknowledgement to a short question", () => {
     const result = evaluateDomainCompletion({
       domain: "general",

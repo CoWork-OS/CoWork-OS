@@ -492,6 +492,64 @@ function toneForState(state: TaskStatusStripState): TaskStatusStripViewModel["to
   return "neutral";
 }
 
+// Stage labels that describe work in progress. Next to "Paused" or "Cancelled" they
+// read as if the task were still running ("Paused · Applying fixes").
+const IN_PROGRESS_STAGE_LABELS = new Set([
+  "Working",
+  "Planning the approach",
+  "Working on your request",
+  "Checking results",
+  "Applying fixes",
+  "Preparing final response",
+]);
+
+// Anything after a retry that shows the model answered or the run moved on.
+const MODEL_PROGRESS_EVENT_TYPES = new Set([
+  "llm_usage",
+  "llm_streaming",
+  "assistant_message",
+  "tool_call",
+  "tool_result",
+  "tool_error",
+  "plan_created",
+  "step_completed",
+  "step_failed",
+  "task_completed",
+  "task_cancelled",
+  "error",
+  "user_message",
+]);
+
+/**
+ * While the latest model call is being retried and nothing has answered since, say so:
+ * otherwise a failing provider shows only "Thinking" for minutes.
+ */
+export function deriveModelRetryLabel(events: TaskEvent[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const type = getEffectiveTaskEventType(events[index]);
+    if (MODEL_PROGRESS_EVENT_TYPES.has(type)) return undefined;
+    if (type !== "llm_retry") continue;
+    const payload = asObject(events[index].payload);
+    const attempt = Number(payload.attempt);
+    const max = Number(payload.maxRetries);
+    return attempt > 0 && max > 0
+      ? `Model provider isn't responding. Retrying (${attempt} of ${max})`
+      : "Model provider isn't responding. Retrying";
+  }
+  return undefined;
+}
+
+// The daemon's wording for a task waiting to rerun after a provider error (daemon.ts).
+const TASK_PROVIDER_RETRY_RE =
+  /^Transient provider error\.\s*Retry\s+(\d+)\/(\d+)\s+in\s+(\d+)s\./i;
+
+function taskProviderRetryLabel(task: Task | null | undefined): string | undefined {
+  if (task?.status !== "queued" || typeof task.error !== "string") return undefined;
+  const match = TASK_PROVIDER_RETRY_RE.exec(task.error.trim());
+  if (!match) return undefined;
+  return `Model provider error. Trying again in ${match[3]}s (retry ${match[1]} of ${match[2]})`;
+}
+
 function verificationLabel(events: TaskEvent[]): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const type = getEffectiveTaskEventType(events[index]);
@@ -510,9 +568,14 @@ export function deriveTaskStatusStrip(args: {
   activityGroups: ActivityGroupViewModel[];
   outcomeMetrics: TaskImpactMetric[];
   outputSummary: TaskOutputSummary | null;
+  /** Full event history to look for a pending model retry in; defaults to `events`. */
+  retryEvents?: TaskEvent[];
 }): TaskStatusStripViewModel {
   const blocking = deriveBlockingState(args.events);
   let state = stripState(args.task);
+  // A task queued to rerun after a provider error is still the user's running work.
+  const taskRetryLabel = taskProviderRetryLabel(args.task);
+  if (taskRetryLabel) state = "working";
   if (blocking?.state === "approval") state = "waiting_for_approval";
   if (blocking?.state === "input") state = "waiting_for_input";
   const failureLabel =
@@ -563,6 +626,9 @@ export function deriveTaskStatusStrip(args: {
     primaryLabel = `Step ${ordinalIndex + 1} / ${totalPlanSteps}`;
   }
 
+  const retryLabel =
+    taskRetryLabel ??
+    (state === "working" ? deriveModelRetryLabel(args.retryEvents ?? args.events) : undefined);
   const updatedAt = Math.max(
     args.task?.updatedAt ?? 0,
     ...args.events.map((event) => event.timestamp || 0),
@@ -577,12 +643,21 @@ export function deriveTaskStatusStrip(args: {
     // group whose latest event resolves to "Working") would print the state twice.
     ...(failureLabel
       ? {}
-      : currentGroup?.latestActivityLabel &&
-          !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel)
-        ? { phaseLabel: currentGroup.latestActivityLabel }
-        : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
-          ? { phaseLabel: planStepLabel(activeStep.description) }
-          : {}),
+      : retryLabel
+        ? { phaseLabel: retryLabel }
+        : currentGroup?.latestActivityLabel &&
+            !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel) &&
+            (state === "working" || !IN_PROGRESS_STAGE_LABELS.has(currentGroup.latestActivityLabel))
+          ? { phaseLabel: currentGroup.latestActivityLabel }
+          : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
+            ? {
+                phaseLabel:
+                  state === "working"
+                    ? planStepLabel(activeStep.description)
+                    : // "Running …" would read as still running next to "Paused".
+                      activeStep.description.replace(/[*_`]/g, "").trim(),
+              }
+            : {}),
     compactMetricSlots: selectTaskStatusMetricSlots(args.outcomeMetrics, 2),
     planSteps: args.planSteps,
     ...(activeStep ? { activeStepId: activeStep.id } : {}),

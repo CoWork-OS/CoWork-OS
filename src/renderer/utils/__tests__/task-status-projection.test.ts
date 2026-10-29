@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TaskEvent } from "../../../shared/types";
 import {
   deriveActivityGroups,
+  deriveModelRetryLabel,
   deriveRevisionAwarePlanSteps,
   deriveTaskStatusStrip,
 } from "../task-status-projection";
@@ -353,5 +354,72 @@ describe("activity and status projections", () => {
     });
 
     expect(model.phaseLabel).toBe("Running a command");
+  });
+});
+
+describe("model provider retries", () => {
+  const strip = (task: Record<string, unknown>, retryEvents: TaskEvent[]) =>
+    deriveTaskStatusStrip({
+      task: { id: "task-1", updatedAt: 1_000, ...task } as Any,
+      events: [],
+      planSteps: [],
+      activityGroups: [],
+      outcomeMetrics: [],
+      outputSummary: null,
+      retryEvents,
+    });
+
+  it("says the provider is being retried while nothing has answered since", () => {
+    const events = [
+      event("route", 1, "llm_routing_changed"),
+      event("retry", 2, "llm_retry", { attempt: 2, maxRetries: 5, delayMs: 4000 }),
+      event("route-2", 3, "llm_routing_changed"),
+    ];
+    expect(deriveModelRetryLabel(events)).toBe(
+      "Model provider isn't responding. Retrying (2 of 5)",
+    );
+    const model = strip({ status: "planning" }, events);
+    expect(model.state).toBe("working");
+    expect(model.phaseLabel).toBe("Model provider isn't responding. Retrying (2 of 5)");
+  });
+
+  it("drops the retry note once the model answers", () => {
+    const events = [
+      event("retry", 1, "llm_retry", { attempt: 1, maxRetries: 5 }),
+      event("answer", 2, "assistant_message", { message: "Hi" }),
+    ];
+    expect(deriveModelRetryLabel(events)).toBeUndefined();
+  });
+
+  it("keeps a task queued to rerun after a provider error visible", () => {
+    const model = strip(
+      { status: "queued", error: "Transient provider error. Retry 2/2 in 30s." },
+      [],
+    );
+    expect(model.visible).toBe(true);
+    expect(model.state).toBe("working");
+    expect(model.phaseLabel).toBe("Model provider error. Trying again in 30s (retry 2 of 2)");
+  });
+});
+
+describe("status strip detail for stopped tasks", () => {
+  it("does not pair Paused with an in-progress stage", () => {
+    const model = deriveTaskStatusStrip({
+      task: { id: "task-1", status: "paused", updatedAt: 1_000 } as Any,
+      events: [],
+      planSteps: [{ id: "one", description: "Run ls in the workspace", status: "in_progress" }],
+      activityGroups: [
+        {
+          id: "g",
+          status: "running",
+          summary: "Working",
+          latestActivityLabel: "Applying fixes",
+        } as Any,
+      ],
+      outcomeMetrics: [],
+      outputSummary: null,
+    });
+    expect(model.primaryLabel).toBe("Paused");
+    expect(model.phaseLabel).toBe("Run ls in the workspace");
   });
 });

@@ -246,6 +246,29 @@ describe("quoted predecessor results in ordered team lanes", () => {
   });
 });
 
+describe("detectReadOnlyConstraint everyday phrasing", () => {
+  it.each([
+    "Tell me what's in README.md, notes.txt and data.csv. Don't change anything.",
+    "Don't make any changes, just explain data.csv",
+    "Just look, don't touch anything",
+    "Don't edit anything, explain index.ts",
+    "Don't modify the files, just explain them",
+    "Explain index.ts. Don’t change anything.",
+    "Don't change anything in this repo, just review it",
+  ])("reads %j as read-only", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(true);
+  });
+
+  it.each([
+    "Fix the parser but don't change anything else",
+    "Rename the variable but don't change anything",
+    "Update the docs, don't change anything in src/",
+    "Fix the bug, don't make any changes to the API",
+  ])("keeps %j a change request", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(false);
+  });
+});
+
 describe("teamSynthesisPromptHasMemberOutput", () => {
   const synthesisTask = [
     "Your task:",

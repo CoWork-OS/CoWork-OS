@@ -789,6 +789,9 @@ html.visual-calm .studio-library-search > span {
 
 .studio-catalog-scroll section > button {
   display: grid;
+  /* Override the global button centering, which shrank each row to its text. */
+  justify-content: stretch;
+  justify-items: start;
   width: 100%;
   gap: 2px;
   padding: 8px 7px;
@@ -1646,7 +1649,9 @@ html.visual-calm .studio-library-search > span {
   }
 }
 
-@media (max-width: 1180px) {
+/* The content column, not the window: the window is never under 1200px, but with the
+   sidebar open the three Builder columns (236 + 420 + 300) overflowed the card. */
+@container (max-width: 1080px) {
   .studio-builder-shell {
     grid-template-columns: 210px minmax(380px, 1fr);
     grid-template-areas:

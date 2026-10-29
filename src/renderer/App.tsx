@@ -4619,6 +4619,20 @@ export function App() {
         (event.payload?.terminalTask === true ||
           isTerminalTaskStatus(tasksRef.current.find((t) => t.id === event.taskId)?.status));
       const nextStatus = newStatus as Task["status"] | undefined;
+      // The failure reason travels with the error event (live as "timeline_error").
+      // Waiting for a refetch left a task that failed at once showing only "Failed"
+      // until it was reopened.
+      const failureReason =
+        event.type === "error" || event.type === "timeline_error"
+          ? [event.payload?.error, event.payload?.message].find(
+              (value): value is string => typeof value === "string" && value.trim().length > 0,
+            )
+          : undefined;
+      if (failureReason) {
+        const withFailureReason = (t: Task): Task =>
+          t.error ? t : mergeTaskPreservingIdentity(t, { error: failureReason.trim() });
+        setTasks((prev) => updateTaskPreservingIdentity(prev, event.taskId, withFailureReason));
+      }
       if (newStatus && !skipBlockedStateForAutoApproval && !hasOtherPendingApproval) {
         const updateTaskStatus = (t: Task): Task => {
           if (isTerminalInputResolution && isTerminalTaskStatus(t.status)) {
@@ -7285,6 +7299,32 @@ export function App() {
       console.error("Failed to switch to temp workspace for new session:", error);
     }
   };
+
+  // App menu (⌘N, ⌘,) and tray menu commands. The handlers change every render;
+  // the listeners stay subscribed once and call the latest ones.
+  const handleNewSessionRef = useRef(handleNewSession);
+  handleNewSessionRef.current = handleNewSession;
+  useEffect(() => {
+    const api = window.electronAPI;
+    const unsubscribers = [
+      api?.onTrayNewTask?.(() => void handleNewSessionRef.current()),
+      api?.onTrayOpenSettings?.(() => setCurrentView("settings")),
+      api?.onTraySelectWorkspace?.((_event, workspaceId) => {
+        void (async () => {
+          const workspaces = await window.electronAPI.listWorkspaces();
+          const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+          if (!workspace) return;
+          await handleNewSessionRef.current();
+          setCurrentWorkspace(workspace);
+        })().catch((error: unknown) => console.error("Could not open the project:", error));
+      }),
+    ];
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        if (typeof unsubscribe === "function") unsubscribe();
+      }
+    };
+  }, []);
 
   const handleClearTaskView = () => {
     setCurrentView("main");

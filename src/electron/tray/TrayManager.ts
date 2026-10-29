@@ -564,11 +564,8 @@ export class TrayManager {
 
       this.currentQuickTaskId = task.id;
 
-      // Start task execution
+      // Start task execution. The main window lists it from the task_created event.
       await this.agentDaemon.startTask(task);
-
-      // Also notify main window so it updates the task list
-      this.mainWindow?.webContents.send("tray:task-created", { taskId: task.id });
     } catch (error) {
       console.error("[TrayManager] Failed to create quick task:", error);
       const question = this.quickInputWindow?.getCurrentQuestion() || "";
@@ -699,7 +696,7 @@ export class TrayManager {
         accelerator: "CmdOrCtrl+N",
         click: () => {
           this.showMainWindow();
-          this.mainWindow?.webContents.send("tray:new-task");
+          this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_NEW_TASK);
         },
       },
       { type: "separator" },
@@ -713,7 +710,7 @@ export class TrayManager {
                 label: ws.name,
                 click: () => {
                   this.showMainWindow();
-                  this.mainWindow?.webContents.send("tray:select-workspace", ws.id);
+                  this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, ws.id);
                 },
               }))
             : [{ label: "No workspaces", enabled: false }],
@@ -737,7 +734,7 @@ export class TrayManager {
         accelerator: "CmdOrCtrl+,",
         click: () => {
           this.showMainWindow();
-          this.mainWindow?.webContents.send("tray:open-settings");
+          this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_OPEN_SETTINGS);
         },
       },
       ...(this.buildChronicleMenuItems().length > 0
@@ -749,7 +746,7 @@ export class TrayManager {
         label: "About CoWork OS",
         click: () => {
           this.showMainWindow();
-          this.mainWindow?.webContents.send("tray:open-about");
+          this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_OPEN_ABOUT);
         },
       },
       {

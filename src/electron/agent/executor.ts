@@ -166,6 +166,7 @@ import {
 import {
   discoverDocumentForAnalysis,
   extractDocumentForAnalysis,
+  DOCUMENT_ANALYSIS_SEGMENT_CHARS,
   splitDocumentForAnalysis,
   type DocumentAnalysisChunk,
 } from "./document-analysis-pipeline";
@@ -638,6 +639,7 @@ import {
   hasArtifactExtensionMention,
   isReadOnlyConstraintOnlyStep,
   isReadOnlyInspectionStep,
+  requestAsksForWorkspaceChange,
   stripNegatedClauses,
   type StepContractEnforcementLevel,
   type StepContractMode,
@@ -2549,6 +2551,15 @@ export class TaskExecutor {
     // regular tools so a complete review does not silently omit other inputs.
     const sourceReferences = new Set(normalized.match(/[\w./~-]+\.(?:docx|pdf|md|txt)\b/g) || []);
     if (sourceReferences.size > 1) return false;
+    // An explicit manuscript review ("character continuity", "kitap") keeps the pipeline
+    // whatever the length; anything else about a short text file reads it directly.
+    const hasManuscriptReviewCue =
+      /(?:book|manuscript|novel|chapter|character|continuity|kitap|bölüm|karakter|devamlılık)/.test(
+        normalized,
+      );
+    if (!hasManuscriptReviewCue && this.namesShortTextSource(`${taskTitle}\n${rawTaskPrompt}`)) {
+      return false;
+    }
     const hasDocumentScope =
       /\.(?:docx|pdf|md|txt)\b/.test(normalized) ||
       /(?:book|manuscript|document|chapter|character|kitap|metin|belge|doküman|bölüm|karakter)/.test(
@@ -2592,6 +2603,24 @@ export class TaskExecutor {
       !requestsFileMutation &&
       !hasScopedExcerptCue
     );
+  }
+
+  /**
+   * The pipeline exists for documents too long to read in one pass (it splits them into
+   * 24,000-character segments). A short text file such as a README fits in one segment;
+   * routing "Summarize README.md" through it ran a manuscript review ("gaps,
+   * contradictions, character continuity") on a few lines.
+   */
+  private namesShortTextSource(request: string): boolean {
+    const [source] = request.match(/[\w./~-]+\.(?:md|txt)\b/i) || [];
+    if (!source || !this.workspace?.path) return false;
+    try {
+      const absolute = path.resolve(this.workspace.path, source);
+      if (!this.canReadWorkspacePath(absolute)) return false;
+      return fs.statSync(absolute).size < DOCUMENT_ANALYSIS_SEGMENT_CHARS;
+    } catch {
+      return false;
+    }
   }
 
   private buildBoundedDocumentAnalysisPlan(): Plan {
@@ -26560,6 +26589,19 @@ You are continuing a previous conversation. The context from the previous conver
     const hasReadOnlyIntent = descriptionHasReadOnlyIntent(desc);
     if (hasReadOnlyIntent && !hasWriteVerb) return false;
 
+    // "Explain what README.md covers", "`notes.txt` lists the action items": with
+    // no write verb, files that already exist are the step's inputs. Unless the
+    // request asks for a change, requiring a write here pushed the model to
+    // overwrite the user's file or write a stub over it.
+    if (
+      !hasWriteVerb &&
+      hasConcreteTargetPath &&
+      this.stepNamesOnlyExistingFiles(step) &&
+      !this.taskAsksForWorkspaceChange()
+    ) {
+      return false;
+    }
+
     // Discovery/inspection steps are about finding what exists, not producing artifacts,
     // even if the description mentions file paths or extensions as targets to look for.
     // Exception: if the step also carries concrete write intent and a concrete target path,
@@ -26771,6 +26813,28 @@ You are continuing a previous conversation. The context from the previous conver
       return "artifact_presence_required";
     }
     return "artifact_write_required";
+  }
+
+  /** Every file the step names already exists and is readable in the workspace. */
+  private stepNamesOnlyExistingFiles(step: PlanStep): boolean {
+    const candidates = this.extractStepPathCandidates(step);
+    if (candidates.length === 0 || !this.workspace?.path) return false;
+    return candidates.every((candidate) => {
+      const absolute = path.isAbsolute(candidate)
+        ? candidate
+        : path.resolve(this.workspace.path, candidate);
+      try {
+        return this.canReadWorkspacePath(absolute) && fs.statSync(absolute).isFile();
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /** The request asks for a file or any other change, not only about files. */
+  private taskAsksForWorkspaceChange(): boolean {
+    if (!this.task || this.buildCompletionContract().requiresArtifactEvidence) return true;
+    return requestAsksForWorkspaceChange(`${this.task?.title || ""}\n${this.getContractPrompt()}`);
   }
 
   private stepReferencesExistingArtifact(step: PlanStep): boolean {
@@ -29513,15 +29577,35 @@ You are continuing a previous conversation. The context from the previous conver
       return true;
     }
 
-    // Create or update a scheduled task.
-    const scheduleKind = sub;
+    // Create or update a scheduled task. Everyday phrasing maps onto the forms above:
+    // "every weekday at 9am …", "every day at 18:30 …", "every monday at 9am …".
+    let scheduleKind = sub;
+    if (scheduleKind === "every") {
+      const unit = String(tokens[0] || "").toLowerCase();
+      if (unit === "weekday" || unit === "weekdays") {
+        scheduleKind = "weekdays";
+        tokens.shift();
+      } else if (unit === "day") {
+        scheduleKind = "daily";
+        tokens.shift();
+      } else if (parseWeekday(unit) !== null) {
+        scheduleKind = "weekly";
+      }
+    }
+    if (
+      (scheduleKind === "daily" || scheduleKind === "weekdays") &&
+      /^at$/i.test(tokens[0] || "")
+    ) {
+      tokens.shift();
+    }
+    if (scheduleKind === "weekly" && /^at$/i.test(tokens[1] || "")) tokens.splice(1, 1);
     let scheduleInput: Any | null = null;
     let promptParts: string[] = [];
 
     if (scheduleKind === "daily" || scheduleKind === "weekdays") {
       const time = parseTimeOfDay(tokens[0] || "");
       if (!time) {
-        throw new Error("Invalid time. Examples: 9am, 09:00, 18:30");
+        throw new Error("Invalid time. Examples: 9am, 09:00, 18:30. See `/schedule help`.");
       }
       const expr =
         scheduleKind === "weekdays"
@@ -29541,7 +29625,9 @@ You are continuing a previous conversation. The context from the previous conver
       const interval = String(tokens[0] || "").trim();
       const everyMs = interval ? parseIntervalToMs(interval) : null;
       if (!everyMs || !Number.isFinite(everyMs) || everyMs < 60_000) {
-        throw new Error("Invalid interval. Examples: 30m, 6h, 1d (minimum 1m)");
+        throw new Error(
+          "Invalid interval. Examples: 30m, 6h, 1d (minimum 1m), or every weekday at 9am. See `/schedule help`.",
+        );
       }
       scheduleInput = { type: "interval", every: interval };
       promptParts = tokens.slice(1);
@@ -34448,8 +34534,13 @@ Return ONLY a JSON object:
           hasFailures: true,
         });
 
+        // Recovery steps the runtime added ("Try an alternative toolchain…") restate the
+        // user's steps in planner terms; name the user's own steps when there are any.
+        const userFailedSteps = unrecoveredFailedSteps.filter((s) => s.kind !== "recovery");
+        const listedFailedSteps =
+          userFailedSteps.length > 0 ? userFailedSteps : unrecoveredFailedSteps;
         throw new Error(
-          `Task failed: ${unrecoveredFailedSteps.length} step(s) failed - ${unrecoveredFailedSteps.map((s) => s.description).join("; ")}`,
+          `Task failed: ${listedFailedSteps.length} step(s) failed - ${listedFailedSteps.map((s) => s.description).join("; ")}`,
         );
       }
     }
@@ -35222,6 +35313,10 @@ Return ONLY a JSON object:
       // Nudges for turns that describe an action without making the tool call.
       let unexecutedActionNudgeCount = 0;
       let intentOnlyNudgeInjected = false;
+      // "A file write is still required" reminders after text-only turns. A model
+      // that answers in text three times will not write on the next nudge either;
+      // without a cap every remaining iteration became another model call.
+      let textOnlyMutationNudgeCount = 0;
       const expectsImageVerification = stepContract.verificationMode === "image_file";
       const imageVerificationSince =
         typeof this.task.createdAt === "number"
@@ -36112,8 +36207,10 @@ Return ONLY a JSON object:
             !responseHasToolUse &&
             !mutationSatisfiedForAssistantText &&
             !priorMutationReuseAfterAssistantText.satisfied &&
-            !assistantAskedQuestion
+            !assistantAskedQuestion &&
+            textOnlyMutationNudgeCount < 3
           ) {
+            textOnlyMutationNudgeCount += 1;
             const preferredTarget = this.getPreferredMutationTargetPath(step, stepContract) || ".";
             const pendingRequiredTools = this.getPendingRequiredMutationTools(
               stepContract,
@@ -36780,7 +36877,9 @@ Return ONLY a JSON object:
                     const runCommandShellHint =
                       content.name === "run_command" && !this.workspace.permissions.shell
                         ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
-                        : undefined;
+                        : content.name === "delete_file" && !this.workspace.permissions.delete
+                          ? "Deleting files is not allowed in this project. Tell the user plainly that the file was not deleted for that reason; do not retry the deletion another way."
+                          : undefined;
                     hasUnavailableToolAttempt = true;
                     const unavailableToolRepeated =
                       unavailableToolsAttempted.has(canonicalContentName);
@@ -43597,7 +43696,9 @@ Return ONLY a JSON object:
                     const runCommandShellHint =
                       content.name === "run_command" && !this.workspace.permissions.shell
                         ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
-                        : undefined;
+                        : content.name === "delete_file" && !this.workspace.permissions.delete
+                          ? "Deleting files is not allowed in this project. Tell the user plainly that the file was not deleted for that reason; do not retry the deletion another way."
+                          : undefined;
                     hasUnavailableToolAttempt = true;
                     if (isExecutionToolCall) {
                       lastExecutionToolError =

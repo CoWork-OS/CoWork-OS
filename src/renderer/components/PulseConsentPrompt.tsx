@@ -58,10 +58,11 @@ export function PulseConsentPrompt({ tasks }: { tasks: Task[] }) {
     <div
       role="dialog"
       aria-label="Help improve CoWork"
+      // Top right, where app toasts appear: at the bottom it covered the composer's Send button.
       style={{
         position: "fixed",
-        right: 20,
-        bottom: 20,
+        top: 48,
+        right: 16,
         zIndex: 1000,
         maxWidth: 360,
         padding: "14px 16px",

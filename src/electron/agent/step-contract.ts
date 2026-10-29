@@ -387,6 +387,21 @@ export function stripNegatedClauses(text: string): string {
   return String(text || "").replace(NEGATED_CLAUSE_REGEX, " ");
 }
 
+// Broader than the step write verbs on purpose: any of these in the user's
+// request keeps file-writing steps enforced ("Clean up notes.txt").
+const WORKSPACE_CHANGE_REQUEST_VERB_REGEX =
+  /\b(add|adjust|append|apply|build|change|clean(?:\s+up)?|configure|convert|create|delete|draft|edit|extend|fix|format|generate|implement|improve|insert|install|make|migrate|modify|move|optimi[sz]e|polish|produce|refactor|refine|remove|rename|reorgani[sz]e|replace|restructure|rewrite|save|sort|translate|tweak|update|upgrade|write)\b/;
+
+/**
+ * True when the user's request asks for any change to the workspace. A request
+ * that only asks about files ("Summarize the README", "Tell me what's in
+ * data.csv. Don't change anything.") is false; negated clauses do not count.
+ */
+export function requestAsksForWorkspaceChange(text: string): boolean {
+  const request = stripNegatedClauses(String(text || "").toLowerCase());
+  return descriptionHasWriteIntent(request) || WORKSPACE_CHANGE_REQUEST_VERB_REGEX.test(request);
+}
+
 export function descriptionHasStrongWriteIntent(text: string): boolean {
   const desc = removePathTokens(String(text || "").toLowerCase())
     // In inspection steps, "the build scripts" and "or build scripts" name

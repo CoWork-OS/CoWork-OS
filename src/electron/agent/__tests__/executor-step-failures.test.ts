@@ -966,6 +966,50 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect((executor as Any).resolveStepExecutionContract(editStep).mode).toBe("mutation_required");
   });
 
+  it("treats existing files a question names as inputs, not write targets", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ws-"));
+    fs.writeFileSync(path.join(workspaceDir, "README.md"), "# Project\n");
+    fs.writeFileSync(path.join(workspaceDir, "notes.txt"), "- ship the sidebar\n");
+    (executor as Any).workspace.path = workspaceDir;
+    (executor as Any).task.title = "Read my project files";
+    (executor as Any).task.prompt = "Tell me what's in README.md and notes.txt.";
+    const explain: Any = {
+      id: "explain",
+      status: "pending",
+      description: "Explain what README.md covers",
+    };
+    const pullOut: Any = {
+      id: "pull-out",
+      status: "pending",
+      description: "Go through notes.txt and pull out action items",
+    };
+    const newFile: Any = {
+      id: "new",
+      status: "pending",
+      description: "Explain the plan in plan.md",
+    };
+    (executor as Any).plan = { description: "Read files", steps: [explain, pullOut, newFile] };
+
+    try {
+      expect((executor as Any).stepRequiresArtifactEvidence(explain)).toBe(false);
+      expect((executor as Any).resolveStepExecutionContract(explain).mode).not.toBe(
+        "mutation_required",
+      );
+      expect((executor as Any).resolveStepExecutionContract(pullOut).mode).not.toBe(
+        "mutation_required",
+      );
+      // A file that does not exist yet is still a deliverable.
+      expect((executor as Any).stepRequiresArtifactEvidence(newFile)).toBe(true);
+
+      // A request that asks for a change keeps the write contract.
+      (executor as Any).task.prompt = "Clean up README.md.";
+      expect((executor as Any).stepRequiresArtifactEvidence(explain)).toBe(true);
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("never bootstraps a stub for a write target outside the workspace", async () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ws-"));
@@ -4269,6 +4313,7 @@ relationship_memory:
     );
     const tempDir = fs.mkdtempSync("/tmp/cowork-prior-mutation-");
     (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = "Refine the landing page styles.";
     fs.writeFileSync(path.join(tempDir, "styles.css"), "/* previous */");
     const normalizedTarget = path.resolve(tempDir, "styles.css").replace(/\\/g, "/").toLowerCase();
     (executor as Any).artifactMutationLedger = {

@@ -1425,7 +1425,7 @@ function installNativeApplicationMenu(): void {
         {
           label: "Settings...",
           accelerator: "Command+,",
-          click: () => sendToMainWindow("tray:open-settings"),
+          click: () => sendToMainWindow(IPC_CHANNELS.TRAY_OPEN_SETTINGS),
         },
         { type: "separator" },
         { role: "services" },
@@ -1443,7 +1443,7 @@ function installNativeApplicationMenu(): void {
         {
           label: "New Task",
           accelerator: "Command+N",
-          click: () => sendToMainWindow("tray:new-task"),
+          click: () => sendToMainWindow(IPC_CHANNELS.TRAY_NEW_TASK),
         },
         { role: "close" },
       ],
@@ -3076,7 +3076,7 @@ if (isMacSafeStorageMigrationWorker) {
         const forwardCronEvent = async (evt: CronEvent): Promise<void> => {
           // Forward cron events to renderer
           if (mainWindow?.webContents) {
-            mainWindow.webContents.send("cron:event", evt);
+            mainWindow.webContents.send(IPC_CHANNELS.CRON_EVENT, evt);
           }
           console.log("[Cron] Event:", evt.action, evt.jobId);
           try {

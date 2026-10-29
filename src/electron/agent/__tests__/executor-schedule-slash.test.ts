@@ -162,6 +162,39 @@ describe("TaskExecutor /schedule slash command handling", () => {
     );
   });
 
+  it.each([
+    ["/schedule every weekday at 9am Summarize my sessions", "0 9 * * 1-5"],
+    ["/schedule every day at 18:30 Summarize my sessions", "30 18 * * *"],
+    ["/schedule every monday at 9am Summarize my sessions", "0 9 * * 1"],
+    ["/schedule weekdays at 09:00 Summarize my sessions", "0 9 * * 1-5"],
+  ])("understands everyday phrasing: %s", async (prompt, cron) => {
+    const calls: Any[] = [];
+    const executor = createExecutor(prompt, (input) => {
+      calls.push(input);
+      if (input.action === "list") return [];
+      return {
+        success: true,
+        job: {
+          id: "job-1",
+          name: input.name,
+          enabled: true,
+          schedule: { kind: "cron", expr: cron },
+          state: {},
+        },
+      };
+    });
+
+    const handled = await (TaskExecutor as Any).prototype.maybeHandleScheduleSlashCommand.call(
+      executor,
+    );
+    expect(handled).toBe(true);
+    expect(calls[1]).toMatchObject({
+      action: "create",
+      prompt: "Summarize my sessions",
+      schedule: { type: "cron", cron },
+    });
+  });
+
   it("rejects too-small intervals for `/schedule every`", async () => {
     const executor = createExecutor("/schedule every 10s Too fast", (input) => {
       if (input.action === "list") return [];

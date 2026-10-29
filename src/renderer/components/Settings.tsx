@@ -103,6 +103,7 @@ import {
 } from "../../shared/model-access";
 import { getLlmModelReasoningEfforts } from "../../shared/llm-model-selection";
 import { getLLMProviderIcon } from "./llm-provider-icons";
+import { providerBaseUrlProblem } from "../utils/provider-base-url";
 import {
   buildClaudeCredentialInput,
   resolveOpenAIReasoningEffort,
@@ -4091,6 +4092,26 @@ export function Settings({
       if (shouldValidateOpenRouterParetoScore && openrouterParetoScore.error) {
         setSettingsSaveError(openrouterParetoScore.error);
         setTestResult({ success: false, error: openrouterParetoScore.error });
+        return;
+      }
+      // Only the provider being set up: an old value for another provider must not
+      // block saving this one.
+      const activeBaseUrl: Partial<Record<string, [string, string]>> = {
+        "openai-compatible": ["OpenAI-Compatible", openaiCompatBaseUrl],
+        ollama: ["Ollama", ollamaBaseUrl],
+        openrouter: ["OpenRouter", openrouterBaseUrl],
+        groq: ["Groq", groqBaseUrl],
+        xai: ["xAI", xaiBaseUrl],
+        deepseek: ["DeepSeek", deepseekBaseUrl],
+        kimi: ["Kimi", kimiBaseUrl],
+      };
+      const activeBaseUrlEntry = activeBaseUrl[currentSettings.providerType];
+      const baseUrlProblem = activeBaseUrlEntry
+        ? providerBaseUrlProblem(activeBaseUrlEntry[0], activeBaseUrlEntry[1])
+        : null;
+      if (baseUrlProblem) {
+        setSettingsSaveError(baseUrlProblem);
+        setTestResult({ success: false, error: baseUrlProblem });
         return;
       }
 

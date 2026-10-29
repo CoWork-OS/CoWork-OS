@@ -139,6 +139,32 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.collaborationSummary).toBe("No teammates involved");
   });
 
+  it("shows a chat that answered its latest message as ready, not working", () => {
+    const at = (type: string, timestamp: number, payload: Record<string, unknown> = {}) =>
+      ({ id: `${type}-${timestamp}`, taskId: "atlas-task", timestamp, type, payload }) as Any;
+    const answered = deriveBotConversationProjection({
+      task: { status: "pending", error: null, resultSummary: undefined },
+      botName: "Atlas",
+      events: [
+        at("user_message", 1, { message: "Hi" }),
+        at("assistant_message", 2, { message: "Hello!" }),
+        at("follow_up_completed", 3),
+      ],
+    });
+    expect(answered.state).toBe("ready");
+
+    const waiting = deriveBotConversationProjection({
+      task: { status: "pending", error: null, resultSummary: undefined },
+      botName: "Atlas",
+      events: [
+        at("user_message", 1, { message: "Hi" }),
+        at("assistant_message", 2, { message: "Hello!" }),
+        at("user_message", 3, { message: "Another?" }),
+      ],
+    });
+    expect(waiting.state).toBe("working");
+  });
+
   it("aggregates teammate statuses without exposing their execution trace", () => {
     const projection = deriveBotConversationProjection({
       task: { ...baseTask, id: "atlas-task" },

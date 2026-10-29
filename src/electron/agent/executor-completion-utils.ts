@@ -579,7 +579,10 @@ export function buildCompletionGuidancePrompt(opts: {
 export function detectReadOnlyConstraint(prompt: string): boolean {
   // "This read-only review..." quoted from a predecessor describes that agent,
   // not a constraint on the agent receiving it.
-  const lower = stripEmbeddedAgentOutputs(String(prompt || "")).toLowerCase();
+  // Typographic apostrophes ("don’t") read the same as straight ones.
+  const lower = stripEmbeddedAgentOutputs(String(prompt || ""))
+    .toLowerCase()
+    .replace(new RegExp("[\\u2018\\u2019]", "g"), "'");
 
   // A boundary such as "do not access any other files" protects inputs and
   // unrelated workspace content; it does not prohibit an output that the
@@ -614,7 +617,9 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
     new RegExp(
       String.raw`\b(?:do\s+not|don'?t)\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?\b${unscoped}`,
     ).test(lower) ||
-    new RegExp(String.raw`\bdo\s+not\s+make\s+(?:any\s+)?changes\b${unscoped}`).test(lower) ||
+    new RegExp(String.raw`\b(?:do\s+not|don'?t)\s+make\s+(?:any\s+)?changes\b${unscoped}`).test(
+      lower,
+    ) ||
     new RegExp(String.raw`\bno\s+file\s+changes\b${unscoped}`).test(lower) ||
     new RegExp(
       String.raw`\bwithout\s+(?:editing|modifying|creating)(?:\s*(?:[.!?;,\n]|$)|\s+anything\b(?!\s+else\b)|\s+(?:any\s+|the\s+)?files?\b${unscoped}|\s+${wholeWorkspace})`,
@@ -636,6 +641,14 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
       withoutNegatedClauses,
     );
   if (hasNegatedFileOperationList && !requestsChangeOutsideProhibition) return true;
+
+  // "Don't change anything", "don't touch anything", "don't modify the files",
+  // when nothing else in the request asks for a change ("rename it but don't
+  // change anything" means anything else). "Anything else" never counts.
+  const hasBroadNoChangeRequest = new RegExp(
+    String.raw`\b(?:do\s+not|don'?t)\s+(?:change|modify|edit|touch|alter)\s+(?:anything(?!\s+else\b)|the\s+files\b)${unscoped}`,
+  ).test(lower);
+  if (hasBroadNoChangeRequest && !requestsChangeOutsideProhibition) return true;
 
   // A mixed prohibition such as "do not contact anyone, reserve, pay, or
   // create files" lists non-file actions first, so the file-only verb list

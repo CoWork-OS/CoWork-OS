@@ -38,6 +38,11 @@ import {
   ZapIcon,
 } from "./LineIcons";
 import { pluralize } from "../utils/plural";
+import {
+  builderFlowSignature,
+  keepUnsavedBuilderDraft,
+  takeUnsavedBuilderDraft,
+} from "./automation-builder-draft";
 import "./automation-studio.css";
 
 type StudioView = "discover" | "library" | "builder" | "activity";
@@ -154,7 +159,9 @@ export default function AutomationStudioPanel({
   focusRoutineId?: string | null;
   onOpenAdvanced?: (owner: AutomationOwner, id?: string) => void;
 }) {
-  const [view, setView] = useState<StudioView>("library");
+  // An unsaved flow kept from the last visit comes back in the Builder.
+  const [restoredDraft] = useState(takeUnsavedBuilderDraft);
+  const [view, setView] = useState<StudioView>(restoredDraft ? "builder" : "library");
   const [capabilities, setCapabilities] = useState<WorkflowCapabilities | null>(null);
   const [routines, setRoutines] = useState<RoutineSummary[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
@@ -184,12 +191,22 @@ export default function AutomationStudioPanel({
   const [activityNeedsAttention, setActivityNeedsAttention] = useState(false);
   const [steps, setSteps] = useState<RoutineWorkflowStepRecord[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
-  const [workflow, setWorkflow] = useState<RoutineWorkflowDefinition>(() => createBlankWorkflow());
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [routineName, setRoutineName] = useState("Untitled flow");
-  const [routineDescription, setRoutineDescription] = useState("");
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId || "");
+  const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(
+    restoredDraft?.selectedRoutineId ?? null,
+  );
+  const [workflow, setWorkflow] = useState<RoutineWorkflowDefinition>(
+    () => restoredDraft?.workflow ?? createBlankWorkflow(),
+  );
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+    restoredDraft?.selectedNodeId ?? null,
+  );
+  const [routineName, setRoutineName] = useState(restoredDraft?.routineName ?? "Untitled flow");
+  const [routineDescription, setRoutineDescription] = useState(
+    restoredDraft?.routineDescription ?? "",
+  );
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
+    restoredDraft?.selectedWorkspaceId ?? (workspaceId || ""),
+  );
   const [prompt, setPrompt] = useState("");
   const [sampleJson, setSampleJson] = useState(
     '{\n  "source": "test",\n  "subject": "Quarterly review",\n  "body": "Please prepare the action list."\n}',
@@ -199,7 +216,9 @@ export default function AutomationStudioPanel({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(
+    restoredDraft ? "Your unsaved flow is still here. Save it to keep it." : null,
+  );
   const [catalogQuery, setCatalogQuery] = useState("");
   const [inspectorField, setInspectorField] = useState<string | null>(null);
   const [newSecretName, setNewSecretName] = useState("");
@@ -532,8 +551,50 @@ export default function AutomationStudioPanel({
     [workflow, capabilities],
   );
 
+  // Unsaved changes: the flow differs from how it was last loaded or saved. Leaving
+  // Automations keeps such a flow for the next visit instead of dropping it.
+  const flowSignature = useMemo(
+    () => builderFlowSignature({ workflow, routineName, routineDescription, selectedWorkspaceId }),
+    [workflow, routineName, routineDescription, selectedWorkspaceId],
+  );
+  const flowBaselineRef = useRef(restoredDraft?.baseline ?? "");
+  const resetFlowBaselineRef = useRef(!restoredDraft);
+  useEffect(() => {
+    if (!resetFlowBaselineRef.current) return;
+    resetFlowBaselineRef.current = false;
+    flowBaselineRef.current = flowSignature;
+  }, [flowSignature]);
+  const latestFlowRef = useRef({
+    workflow,
+    routineName,
+    routineDescription,
+    selectedWorkspaceId,
+    selectedRoutineId,
+    selectedNodeId,
+    flowSignature,
+  });
+  latestFlowRef.current = {
+    workflow,
+    routineName,
+    routineDescription,
+    selectedWorkspaceId,
+    selectedRoutineId,
+    selectedNodeId,
+    flowSignature,
+  };
+  useEffect(
+    () => () => {
+      const { flowSignature: signature, ...flow } = latestFlowRef.current;
+      if (signature !== flowBaselineRef.current) {
+        keepUnsavedBuilderDraft({ ...flow, baseline: flowBaselineRef.current });
+      }
+    },
+    [],
+  );
+
   function openWorkflow(routine: RoutineSummary) {
     if (!routine.workflow) return;
+    resetFlowBaselineRef.current = true;
     setSelectedRoutineId(routine.id);
     setWorkflow(structuredClone(routine.workflow));
     setRoutineName(routine.name);
@@ -631,6 +692,7 @@ export default function AutomationStudioPanel({
   }
 
   function openTemplate(template: RoutineWorkflowTemplate) {
+    resetFlowBaselineRef.current = true;
     const draft = structuredClone(template.workflow);
     setSelectedRoutineId(null);
     setWorkflow(draft);
@@ -644,6 +706,7 @@ export default function AutomationStudioPanel({
   }
 
   function newBlankWorkflow() {
+    resetFlowBaselineRef.current = true;
     const draft = createBlankWorkflow();
     setSelectedRoutineId(null);
     setWorkflow(draft);
@@ -797,6 +860,7 @@ export default function AutomationStudioPanel({
         workspaceId: selectedWorkspaceId,
       });
       const saved = await window.electronAPI.saveRoutineWorkflowDraft(selectedRoutineId, workflow);
+      flowBaselineRef.current = flowSignature;
       return { routineId: selectedRoutineId, versionId: saved.version.id };
     }
     const created = (await window.electronAPI.createRoutine({
@@ -816,6 +880,7 @@ export default function AutomationStudioPanel({
     const draftVersion = versions.find((version: Any) => version.status === "draft") || versions[0];
     if (!draftVersion) throw new Error("The workflow draft version was not created.");
     setSelectedRoutineId(created.id);
+    flowBaselineRef.current = flowSignature;
     return { routineId: created.id, versionId: draftVersion.id };
   }
 

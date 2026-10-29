@@ -666,7 +666,8 @@ function buildStructuredInputSelectionMessage(
   const answerMap =
     answers && typeof answers === "object" && !Array.isArray(answers) ? answers : {};
 
-  const lines = ["User selected structured input options:"];
+  // Shown in the transcript as the record of the user's choice, so it reads to them.
+  const lines = ["You chose:"];
   for (const question of request.questions) {
     const label = normalizeText(question.header) || normalizeText(question.question) || "Question";
     const answer = answerMap[question.id];

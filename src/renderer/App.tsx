@@ -7286,6 +7286,32 @@ export function App() {
     }
   };
 
+  // App menu (⌘N, ⌘,) and tray menu commands. The handlers change every render;
+  // the listeners stay subscribed once and call the latest ones.
+  const handleNewSessionRef = useRef(handleNewSession);
+  handleNewSessionRef.current = handleNewSession;
+  useEffect(() => {
+    const api = window.electronAPI;
+    const unsubscribers = [
+      api?.onTrayNewTask?.(() => void handleNewSessionRef.current()),
+      api?.onTrayOpenSettings?.(() => setCurrentView("settings")),
+      api?.onTraySelectWorkspace?.((_event, workspaceId) => {
+        void (async () => {
+          const workspaces = await window.electronAPI.listWorkspaces();
+          const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+          if (!workspace) return;
+          await handleNewSessionRef.current();
+          setCurrentWorkspace(workspace);
+        })().catch((error: unknown) => console.error("Could not open the project:", error));
+      }),
+    ];
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        if (typeof unsubscribe === "function") unsubscribe();
+      }
+    };
+  }, []);
+
   const handleClearTaskView = () => {
     setCurrentView("main");
     void selectTaskAfterDraftFlush(null);

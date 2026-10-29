@@ -235,6 +235,9 @@ describe("browser host bridge", () => {
     expect(api.detectHardware).toBeUndefined();
     expect(api.getVoiceSettings).toBeUndefined();
     expect(api.onTrayOpenAbout).toBeUndefined();
+    expect(api.onTrayNewTask).toBeUndefined();
+    expect(api.onTrayOpenSettings).toBeUndefined();
+    expect(api.onTraySelectWorkspace).toBeUndefined();
     expect(typeof api.createTask).toBe("function");
     dispose();
   });

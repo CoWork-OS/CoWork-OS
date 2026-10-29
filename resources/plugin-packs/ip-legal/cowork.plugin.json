@@ -1,6 +1,6 @@
 {
   "name": "ip-legal-pack",
-  "displayName": "Ip Legal",
+  "displayName": "IP Legal",
   "version": "1.0.1",
   "description": "Runs first-pass trademark clearance and freedom-to-operate triage, screens invention disclosures for initial patentability, drafts and triages cease-and-desist letters and DMCA takedowns (send and respond), checks open source compliance, reviews IP clauses, and tracks registrations and renewal deadlines.",
   "type": "pack",
@@ -19,16 +19,16 @@
     "Solve Intelligence"
   ],
   "tryAsking": [
-    "Use Ip Legal Cease Desist for this legal workflow",
-    "Use Ip Legal Clearance for this legal workflow",
-    "Use Ip Legal Cold Start Interview for this legal workflow",
-    "Use Ip Legal Customize for this legal workflow",
-    "Use Ip Legal Fto Triage for this legal workflow"
+    "Use IP Legal Cease Desist for this legal workflow",
+    "Use IP Legal Clearance for this legal workflow",
+    "Use IP Legal Cold Start Interview for this legal workflow",
+    "Use IP Legal Customize for this legal workflow",
+    "Use IP Legal FTO Triage for this legal workflow"
   ],
   "skills": [
     {
       "id": "ip-legal-legal-guardrails",
-      "name": "Ip Legal Guardrails",
+      "name": "IP Legal Guardrails",
       "description": "Apply legal workflow safeguards: attorney review, citation verification, privilege caution, and confirmation before irreversible actions.",
       "icon": "⚖️",
       "category": "Legal",
@@ -155,7 +155,7 @@
     },
     {
       "id": "ip-legal-fto-triage",
-      "name": "Fto Triage",
+      "name": "FTO Triage",
       "description": "Freedom-to-operate triage — a structured first look at potentially blocking patents, not an FTO opinion. Use when a product, process, or feature is being evaluated for blocking patents, when asked whether anything stops a launch, or to build a claim-chart first pass against the most plausible patents before patent counsel review. This skill never concludes a product is clear to launch.",
       "icon": "⚖️",
       "category": "Legal",
@@ -236,7 +236,7 @@
     },
     {
       "id": "ip-legal-ip-clause-review",
-      "name": "Ip Clause Review",
+      "name": "IP Clause Review",
       "description": "Review the IP clauses in an agreement — assignment, ownership, license grants, warranties, indemnities. Use when reviewing IP terms in employment, consulting, SOW, vendor, or licensing agreements, when asked to check the assignment language or license scope, or when an agreement with IP provisions is pasted or attached.",
       "icon": "⚖️",
       "category": "Legal",
@@ -290,7 +290,7 @@
     },
     {
       "id": "ip-legal-oss-review",
-      "name": "Oss Review",
+      "name": "OSS Review",
       "description": "Open source license compliance check for a dependency list, a single library, or outbound code. Use when reviewing a manifest, SBOM, or repo for copyleft obligations and license compatibility, when asked whether a library can ship, or when preparing code to be open-sourced.",
       "icon": "⚖️",
       "category": "Legal",
@@ -435,7 +435,7 @@
   "agentRoles": [
     {
       "name": "ip-legal-assistant",
-      "displayName": "Ip Legal Assistant",
+      "displayName": "IP Legal Assistant",
       "description": "Runs first-pass trademark clearance and freedom-to-operate triage, screens invention disclosures for initial patentability, drafts and triages cease-and-desist letters and DMCA takedowns (send and respond), checks open source compliance, reviews IP clauses, and tracks registrations and renewal deadlines.",
       "icon": "⚖️",
       "color": "#2563eb",
@@ -444,7 +444,7 @@
     },
     {
       "name": "ip-legal-ip-renewal-watcher",
-      "displayName": "Ip Renewal Watcher",
+      "displayName": "IP Renewal Watcher",
       "description": "Scheduled agent that reads the IP portfolio register, computes what's due, and posts a ranked deadline report. Runs weekly by default. Posts to the channel named in `~/.claude/plugins/config/claude-for-legal/ip-legal/CLAUDE.md` → Renewal alerts. Trigger phrases: \"what's renewing\", \"IP deadlines\", \"portfolio check\", \"IP renewal report\", or on schedule.",
       "icon": "⚖️",
       "color": "#2563eb",

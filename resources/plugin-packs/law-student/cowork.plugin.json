@@ -229,7 +229,7 @@
     },
     {
       "id": "law-student-irac-practice",
-      "name": "Irac Practice",
+      "name": "IRAC Practice",
       "description": "Grade an IRAC essay for structure, issue-spotting, rule accuracy, analysis depth, and organization. Does NOT rewrite the essay or show a model answer; tracks patterns across sessions. Use when the user says \"grade my IRAC\", \"check my essay\", or \"I wrote this, give me feedback\".",
       "icon": "⚖️",
       "category": "Legal",

@@ -526,7 +526,7 @@
     },
     {
       "id": "employment-legal-wage-hour-qa",
-      "name": "Wage Hour Qa",
+      "name": "Wage Hour QA",
       "description": "Jurisdiction-aware wage/hour and employment Q&A — classification, overtime, meal/rest breaks, leave, final pay — answered for the specific state/country with the controlling rule researched and cited rather than stated from memory. Use when the user asks any employment law question, or says \"what's the rule in [state]\", \"is this exempt\", \"do we have to pay overtime for\", or \"can we classify this as\".",
       "icon": "⚖️",
       "category": "Legal",

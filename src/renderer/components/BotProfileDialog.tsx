@@ -7,6 +7,8 @@ import { normalizeBotFileAccess } from "../../shared/bot-containment";
 import { describeDesktopHostError } from "./BotFormDialog";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 import { AgentRoleEditorDialog } from "./AgentRoleEditorDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { formatCount } from "../utils/plural";
 
 export const BOT_PROFILE_UPDATED_EVENT = "cowork:bot-profile-updated";
 export const BOT_PROFILE_DELETED_EVENT = "cowork:bot-profile-deleted";
@@ -27,6 +29,21 @@ async function botMemoryEntryCount(botId: string): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+/** What Delete bot asks first. The bot's own memory is kept unless the user opts in. */
+export function botDeleteConfirmation(
+  name: string,
+  savedFacts: number,
+): { title: string; message: string; memoryLabel: string | null } {
+  return {
+    title: `Delete ${name}?`,
+    message: "Existing conversations and history will be kept.",
+    memoryLabel:
+      savedFacts > 0
+        ? `Also delete what ${name} remembers (${formatCount(savedFacts, "saved fact")}). Otherwise it stays in your memory folder.`
+        : null,
+  };
 }
 
 export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProfileDialogProps) {
@@ -50,6 +67,11 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
   const [loadFailed, setLoadFailed] = useState(false);
   /** The agent's full settings replace this form until they are saved or closed. */
   const [moreSettings, setMoreSettings] = useState(false);
+  /** Delete bot is waiting on its confirmation dialog. */
+  const [deleteRequest, setDeleteRequest] = useState<{ name: string; savedFacts: number } | null>(
+    null,
+  );
+  const [dropMemory, setDropMemory] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,30 +164,31 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     }
   };
 
-  const deleteBot = async () => {
+  const requestDelete = async () => {
     if (!role || role.isSystem || saving) return;
     if (!window.electronAPI?.deleteAgentRole) {
       setError("Bot deletion is unavailable in this session.");
       return;
     }
     const name = values.displayName.trim() || "this bot";
-    if (!window.confirm(`Delete ${name}? Existing conversations and history will be kept.`)) {
-      return;
-    }
     // Its own memory (a file in the memory folder) is kept unless the user drops it too.
     const savedFacts = await botMemoryEntryCount(role.id);
-    const dropMemory =
-      savedFacts > 0 &&
-      window.confirm(
-        `Also delete what ${name} remembers (${savedFacts} saved ${savedFacts === 1 ? "fact" : "facts"})? Cancel keeps it in your memory folder.`,
-      );
+    setDropMemory(false);
+    setDeleteRequest({ name, savedFacts });
+  };
+
+  const deleteBot = async () => {
+    const request = deleteRequest;
+    setDeleteRequest(null);
+    if (!role || role.isSystem || saving || !request) return;
+    const removeMemory = request.savedFacts > 0 && dropMemory;
 
     setSaving(true);
     setError(null);
     try {
       const deleted = await window.electronAPI.deleteAgentRole(role.id);
       if (!deleted) throw new Error("Could not delete this bot.");
-      if (dropMemory) {
+      if (removeMemory) {
         const removed = await window.electronAPI.deleteBotMemory?.({ botId: role.id });
         if (removed && !removed.ok) {
           throw new Error(`The bot was deleted, but its memory was not: ${removed.error ?? ""}`);
@@ -194,22 +217,49 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     );
   }
 
+  const confirmation = deleteRequest
+    ? botDeleteConfirmation(deleteRequest.name, deleteRequest.savedFacts)
+    : null;
+
   return (
-    <BotFormDialog
-      title="Edit bot"
-      subtitle="Changes apply from its next run."
-      values={values}
-      onChange={setValues}
-      onSubmit={() => void save()}
-      onClose={onClose}
-      submitLabel="Save"
-      busyLabel="Saving…"
-      loading={loading}
-      unavailable={loadFailed}
-      busy={saving}
-      error={error}
-      onDelete={role && !role.isSystem ? () => void deleteBot() : undefined}
-      onMoreSettings={() => setMoreSettings(true)}
-    />
+    <>
+      <BotFormDialog
+        title="Edit bot"
+        subtitle="Changes apply from its next run."
+        values={values}
+        onChange={setValues}
+        onSubmit={() => void save()}
+        onClose={onClose}
+        submitLabel="Save"
+        busyLabel="Saving…"
+        loading={loading}
+        unavailable={loadFailed}
+        busy={saving}
+        error={error}
+        onDelete={role && !role.isSystem ? () => void requestDelete() : undefined}
+        onMoreSettings={() => setMoreSettings(true)}
+      />
+      {confirmation ? (
+        <ConfirmDialog
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmLabel="Delete bot"
+          danger
+          onConfirm={() => void deleteBot()}
+          onCancel={() => setDeleteRequest(null)}
+        >
+          {confirmation.memoryLabel ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={dropMemory}
+                onChange={(event) => setDropMemory(event.target.checked)}
+              />
+              <span>{confirmation.memoryLabel}</span>
+            </label>
+          ) : null}
+        </ConfirmDialog>
+      ) : null}
+    </>
   );
 }

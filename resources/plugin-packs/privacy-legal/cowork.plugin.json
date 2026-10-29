@@ -14,8 +14,8 @@
   "tryAsking": [
     "Use Privacy Legal Cold Start Interview for this legal workflow",
     "Use Privacy Legal Customize for this legal workflow",
-    "Use Privacy Legal Dpa Review for this legal workflow",
-    "Use Privacy Legal Dsar Response for this legal workflow",
+    "Use Privacy Legal DPA Review for this legal workflow",
+    "Use Privacy Legal DSAR Response for this legal workflow",
     "Use Privacy Legal Matter Workspace for this legal workflow"
   ],
   "skills": [
@@ -94,7 +94,7 @@
     },
     {
       "id": "privacy-legal-dpa-review",
-      "name": "Dpa Review",
+      "name": "DPA Review",
       "description": "Review a Data Processing Agreement against your DPA playbook — auto-detects whether you're processor or controller and applies the right half of the playbook. Use when the user says \"review this DPA\", \"check this data processing addendum\", \"customer sent their DPA\", \"is this DPA okay\", or attaches a DPA.",
       "icon": "⚖️",
       "category": "Legal",
@@ -121,7 +121,7 @@
     },
     {
       "id": "privacy-legal-dsar-response",
-      "name": "Dsar Response",
+      "name": "DSAR Response",
       "description": "Walk through a Data Subject Access Request (or deletion, portability, correction request) and draft the response — verify identity, locate data system-by-system, assess exemptions, draft the acknowledgment and substantive response letters. Use when a DSAR comes in, the user pastes an access/deletion/portability/correction request, or says \"DSAR came in\", \"access request\", \"right to be forgotten\", or \"someone wants their data\".",
       "icon": "⚖️",
       "category": "Legal",
@@ -175,7 +175,7 @@
     },
     {
       "id": "privacy-legal-pia-generation",
-      "name": "Pia Generation",
+      "name": "PIA Generation",
       "description": "Generate a Privacy Impact Assessment in house format for a new feature, product, or processing activity, using the structure learned from your seed PIA. Use when the user says \"write a PIA\", \"privacy impact assessment for\", \"do we need a PIA for this\", \"privacy review this feature\", or describes a new data processing activity.",
       "icon": "⚖️",
       "category": "Legal",

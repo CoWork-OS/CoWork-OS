@@ -1692,6 +1692,11 @@ html.theme-light .ibx-avatar {
   gap: 2px;
 }
 
+/* Longer labels ("Review follow-ups") get a full row so a narrow rail never cuts them off. */
+.ibx-action-grid.is-stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .ibx-action {
   appearance: none;
   display: flex;

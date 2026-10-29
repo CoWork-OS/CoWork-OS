@@ -1641,7 +1641,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "smartsheet",
       name: "Smartsheet",
-      description: "Analyze and manage Smartsheet data with Claude. Requires SMARTSHEET_API_KEY.",
+      description: "Analyze and manage Smartsheet data. Requires SMARTSHEET_API_KEY.",
       version: "1.6.0",
       author: "Smartsheet",
       homepage: "https://smartsheet.com",
@@ -1696,7 +1696,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "airtable",
       name: "Airtable",
-      description: "Bring your structured data to Claude. Requires AIRTABLE_API_KEY.",
+      description: "Bring your Airtable bases into your sessions. Requires AIRTABLE_API_KEY.",
       version: "1.13.0",
       author: "Adam Jones",
       homepage: "https://airtable.com",
@@ -1780,7 +1780,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "attio",
       name: "Attio",
-      description: "Search, manage, and update your Attio CRM from Claude. Requires ATTIO_API_KEY.",
+      description: "Search, manage, and update your Attio CRM. Requires ATTIO_API_KEY.",
       version: "0.0.2",
       author: "Attio",
       homepage: "https://attio.com",

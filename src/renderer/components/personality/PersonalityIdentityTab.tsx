@@ -1,4 +1,5 @@
 import type { PersonalityConfigV2, RelationshipData } from "../../../shared/types";
+import { pluralize } from "../../utils/plural";
 
 interface PersonalityIdentityTabProps {
   config: PersonalityConfigV2;
@@ -81,15 +82,21 @@ export function PersonalityIdentityTab({
           <div className="stats-grid">
             <div className="stat-card">
               <div className="stat-value">{relationshipStats.tasksCompleted}</div>
-              <div className="stat-label">Tasks Completed</div>
+              <div className="stat-label">
+                {pluralize(relationshipStats.tasksCompleted, "Task Completed", "Tasks Completed")}
+              </div>
             </div>
             <div className="stat-card">
               <div className="stat-value">{relationshipStats.projectsCount}</div>
-              <div className="stat-label">Projects</div>
+              <div className="stat-label">
+                {pluralize(relationshipStats.projectsCount, "Project")}
+              </div>
             </div>
             <div className="stat-card">
               <div className="stat-value">{relationshipStats.daysTogether}</div>
-              <div className="stat-label">Days Together</div>
+              <div className="stat-label">
+                {pluralize(relationshipStats.daysTogether, "Day Together", "Days Together")}
+              </div>
             </div>
           </div>
           {relationshipStats.nextMilestone && (

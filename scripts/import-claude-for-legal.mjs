@@ -88,11 +88,37 @@ function normalizeCommandName(value) {
     .toLowerCase();
 }
 
+// Slug words that plain capitalization would mangle ("Ai", "Cocounsel", "Saas").
+const DISPLAY_WORD_CASING = new Map([
+  ["ai", "AI"],
+  ["aia", "AIA"],
+  ["cocounsel", "CoCounsel"],
+  ["dpa", "DPA"],
+  ["dsar", "DSAR"],
+  ["fto", "FTO"],
+  ["ip", "IP"],
+  ["irac", "IRAC"],
+  ["msa", "MSA"],
+  ["nda", "NDA"],
+  ["oc", "OC"],
+  ["oss", "OSS"],
+  ["pia", "PIA"],
+  ["qa", "QA"],
+  ["saas", "SaaS"],
+]);
+const DISPLAY_MINOR_WORDS = new Set(["a", "an", "and", "of", "or", "the", "to"]);
+
 function titleCaseSlug(slug) {
   return String(slug || "")
     .split(/[-_]+/)
     .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part, index) => {
+      const lower = part.toLowerCase();
+      const fixed = DISPLAY_WORD_CASING.get(lower);
+      if (fixed) return fixed;
+      if (index > 0 && DISPLAY_MINOR_WORDS.has(lower)) return lower;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
     .join(" ");
 }
 

@@ -138,6 +138,9 @@ export function BotFormDialog({
       dialog.querySelector<HTMLElement>(".bot-form-icon-button")?.focus();
     }
     const onKeyDown = (event: KeyboardEvent) => {
+      // A dialog opened on top of this one (the delete confirmation) handles its own keys.
+      const target = event.target;
+      if (target instanceof Node && target !== document.body && !dialog.contains(target)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         requestCloseRef.current();

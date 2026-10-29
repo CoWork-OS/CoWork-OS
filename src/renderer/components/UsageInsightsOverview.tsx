@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatCount } from "../utils/plural";
+import { pickBookComparison } from "./usageInsightsFormatting";
 
 interface RequestDayRow {
   dateKey: string;
@@ -25,18 +27,6 @@ const HEATMAP_MODES: Array<{ value: HeatmapMode; label: string }> = [
 ];
 
 const MIN_HEATMAP_MONTHS = 12;
-
-// Roughly the word count of Moby-Dick (~210k words ≈ ~270k tokens).
-const MOBY_DICK_TOKENS = 270_000;
-
-// A few well-known works to cycle through for a fun comparison.
-const BOOK_COMPARISONS: Array<{ name: string; tokens: number }> = [
-  { name: "Moby-Dick", tokens: 270_000 },
-  { name: "the Harry Potter series", tokens: 1_400_000 },
-  { name: "the Lord of the Rings trilogy", tokens: 620_000 },
-  { name: "War and Peace", tokens: 780_000 },
-  { name: "the complete works of Shakespeare", tokens: 1_100_000 },
-];
 
 function formatBigNumber(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
@@ -233,26 +223,6 @@ function computeStreaks(requestsByDay: RequestDayRow[]): {
   return { activeDays, currentStreak, longestStreak };
 }
 
-function pickBookComparison(totalTokens: number): string | null {
-  if (totalTokens <= 0) return null;
-  // Pick the book whose multiple lands closest to an impressive-but-readable number.
-  let best: { name: string; multiple: number } | null = null;
-  for (const book of BOOK_COMPARISONS) {
-    const multiple = totalTokens / book.tokens;
-    if (multiple < 0.1) continue;
-    if (!best || Math.abs(Math.log10(multiple) - 0.7) < Math.abs(Math.log10(best.multiple) - 0.7)) {
-      best = { name: book.name, multiple };
-    }
-  }
-  if (!best) {
-    const multiple = totalTokens / MOBY_DICK_TOKENS;
-    best = { name: "Moby-Dick", multiple };
-  }
-  const mult = best.multiple;
-  const rendered = mult >= 10 ? `~${Math.round(mult)}\u00D7` : `~${mult.toFixed(1)}\u00D7`;
-  return `You've used ${rendered} more tokens than ${best.name}.`;
-}
-
 function heatmapTitle(cell: HeatmapCell, mode: HeatmapMode): string {
   const value = formatBigNumber(cell.count);
   const raw = formatBigNumber(cell.rawCount);
@@ -299,8 +269,8 @@ export function UsageInsightsOverview(props: OverviewProps) {
         <StatCard label="Total tokens" value={formatBigNumber(totalTokens)} />
         <StatCard label="Peak tokens" value={formatBigNumber(peakTokens)} />
         <StatCard label="Avg task" value={formatShortDuration(avgTaskTimeMs)} />
-        <StatCard label="Current streak" value={`${currentStreak} days`} />
-        <StatCard label="Longest streak" value={`${longestStreak} days`} />
+        <StatCard label="Current streak" value={formatCount(currentStreak, "day")} />
+        <StatCard label="Longest streak" value={formatCount(longestStreak, "day")} />
       </div>
 
       {weeks.length > 0 && (

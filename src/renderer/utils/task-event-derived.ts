@@ -1195,6 +1195,7 @@ export function deriveSharedTaskEventUiState(
     activityGroups,
     outcomeMetrics,
     outputSummary,
+    retryEvents: params.rawEvents,
   });
 
   return {

@@ -80,7 +80,7 @@ describe("AgentDaemon structured input requests", () => {
       "task-1",
       "assistant_message",
       expect.objectContaining({
-        message: expect.stringContaining("User selected structured input options:"),
+        message: expect.stringContaining("You chose:"),
       }),
     );
     // Permission evaluation reads storage before the approval row is created (DB6).

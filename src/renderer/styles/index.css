@@ -23727,8 +23727,9 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   bottom: calc(100% + 8px);
   left: 0;
   min-width: 220px;
-  width: min(720px, calc(100vw - 64px));
-  max-width: min(720px, calc(100vw - 64px));
+  /* --composer-menu-max-width: room left in the chat column (composer-menu-fit.ts). */
+  width: min(720px, var(--composer-menu-max-width, calc(100vw - 64px)));
+  max-width: min(720px, var(--composer-menu-max-width, calc(100vw - 64px)));
   max-height: min(calc((var(--mention-option-row-height) * 8) + 76px), calc(100vh - 180px));
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);

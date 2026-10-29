@@ -20,6 +20,7 @@ import {
 } from "../../shared/types";
 import { DocumentAwareFileModal } from "./DocumentAwareFileModal";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { useThrottledValue } from "../hooks/useThrottledValue";
 import {
   deriveTaskOutputSummaryFromEvents,
   hasTaskOutputs,
@@ -1964,6 +1965,10 @@ function RightPanelComponent({
     planSteps,
     deferredProgressMaterialSignature,
   );
+  // The session cards refetch progress, members, previews and credential requests
+  // over IPC. Keyed to every event, a running task made several calls per event;
+  // once every 1.5 s still shows changes promptly.
+  const sessionCardsRefreshKey = useThrottledValue(events.length, 1500);
 
   const checklistState = useMemo((): SessionChecklistState | null => {
     if (sharedTaskEventUi) return sharedTaskEventUi.checklistState;
@@ -2517,18 +2522,22 @@ function RightPanelComponent({
   return (
     <div className="right-panel cli-panel">
       {showSessionRecovery && task?.status !== "interrupted" ? (
-        <SessionProgressCard task={task} onSelectTask={onSelectTask} refreshKey={events.length} />
+        <SessionProgressCard
+          task={task}
+          onSelectTask={onSelectTask}
+          refreshKey={sessionCardsRefreshKey}
+        />
       ) : null}
       <SessionDashboardCard
         task={task}
         events={events}
-        refreshKey={events.length}
+        refreshKey={sessionCardsRefreshKey}
         showSummary={showExecutionSummary}
         onSelectTask={onSelectTask}
         onOpenFile={openFileFromFilesSection}
         workspacePath={workspace?.path}
       />
-      <SessionMembersCard task={task} refreshKey={events.length} />
+      <SessionMembersCard task={task} refreshKey={sessionCardsRefreshKey} />
       {showExecutionSummary ? (
         <ProgressSection
           expanded={expandedSections.progress}

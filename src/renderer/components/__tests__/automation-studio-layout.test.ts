@@ -21,4 +21,19 @@ describe("Automation Studio layout", () => {
     expect(styles).toMatch(/\.studio-template\s*\{[^}]*width:\s*100%;/s);
     expect(styles).not.toContain(".studio-template:nth-child(odd)");
   });
+
+  it("drops the Builder to two columns by content width, not window width", () => {
+    // The window is never narrower than 1200px, so a viewport breakpoint never
+    // fired while the three columns overflowed the card next to the sidebar.
+    expect(styles).toMatch(
+      /@container \(max-width: 1080px\) \{\s*\.studio-builder-shell \{\s*grid-template-columns: 210px minmax\(380px, 1fr\);/,
+    );
+    expect(styles).not.toMatch(/@media \(max-width: 1180px\)/);
+  });
+
+  it("keeps Builder action rows full width and left-aligned", () => {
+    expect(styles).toMatch(
+      /\.studio-catalog-scroll section > button \{[^}]*justify-content:\s*stretch;[^}]*justify-items:\s*start;/s,
+    );
+  });
 });

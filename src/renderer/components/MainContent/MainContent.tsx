@@ -306,6 +306,7 @@ import {
 } from "../timeline/parallel-group-projection";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { BotEarlierConversations } from "./BotEarlierConversations";
+import { fitComposerMenuWidth } from "./composer-menu-fit";
 import { BrowserProfileNotice } from "./BrowserProfileNotice";
 import { InteractionModePicker } from "./InteractionModePicker";
 import { ModelDropdown } from "./ModelDropdown";
@@ -5737,6 +5738,19 @@ function MainContentComponent({
       includeOnboarding: Boolean(onStartOnboarding),
     });
   }, [slashOpen, slashQuery, customSkills, pluginSlashCommands, onStartOnboarding]);
+
+  const mentionMenuShown = mentionOpen && mentionOptions.length > 0;
+  const slashMenuShown = slashOpen && slashOptions.length > 0;
+  useLayoutEffect(() => {
+    if (!mentionMenuShown && !slashMenuShown) return;
+    const fit = () => {
+      fitComposerMenuWidth(mentionDropdownRef.current);
+      fitComposerMenuWidth(slashDropdownRef.current);
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [mentionMenuShown, slashMenuShown]);
 
   const effectiveSlashSelectedIndex = resolveSlashSelectedIndex(
     slashOptions.length,

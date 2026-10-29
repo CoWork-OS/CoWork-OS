@@ -1,0 +1,226 @@
+/* AgentMail setup (Settings > Add tools > AgentMail). Uses the shared settings
+   form blocks (.settings-form-grid, .settings-field, .settings-input/select,
+   .settings-toggle) and only adds the spacing, toggle rows and item cards here.
+   Colours come from the theme tokens, so light, dark and Calm all follow. */
+
+.agentmail-settings {
+  padding: 18px 20px 22px;
+}
+
+.agentmail-settings .settings-section {
+  margin: 0;
+  padding: 0 0 22px;
+}
+
+.agentmail-settings .settings-section + .settings-section {
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.agentmail-settings .settings-section:last-child {
+  padding-bottom: 0;
+}
+
+.agentmail-settings .settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.agentmail-settings .settings-section-header h3 {
+  margin: 0;
+}
+
+.agentmail-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agentmail-settings .settings-description {
+  margin: 0;
+}
+
+/* Action rows sit under their fields with no divider (the shared rule draws one
+   above every row, which reads heavy when a section has several). */
+.agentmail-settings .settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.agentmail-message {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.agentmail-message-error {
+  border-color: color-mix(in srgb, var(--color-error) 28%, transparent);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  color: var(--color-error);
+}
+
+.agentmail-settings .test-result {
+  margin-top: 12px;
+}
+
+.agentmail-toggles {
+  display: grid;
+  margin: 14px 0;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.agentmail-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.agentmail-toggles .agentmail-toggle-row + .agentmail-toggle-row {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* A toggle inside a field grid lines up with the inputs beside it. */
+.agentmail-toggle-inline {
+  align-self: end;
+  min-height: 38px;
+  padding: 0 2px;
+}
+
+.agentmail-fields {
+  gap: 14px 16px;
+  margin-top: 12px;
+}
+
+.agentmail-field-full {
+  grid-column: 1 / -1;
+}
+
+.agentmail-settings .settings-form-grid .settings-field > :is(input, select) {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.agentmail-settings .settings-form-grid .settings-field > input[type="number"] {
+  max-width: 220px;
+}
+
+.agentmail-readonly {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.agentmail-readonly.is-empty {
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.agentmail-status-line {
+  margin: 14px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agentmail-item-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.agentmail-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.agentmail-item.is-selected {
+  border-color: var(--color-border);
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.agentmail-item-main {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agentmail-item-title {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.agentmail-item-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.agentmail-records {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.agentmail-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agentmail-empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.agentmail-subsection {
+  margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .agentmail-settings {
+    padding-inline: 14px;
+  }
+}

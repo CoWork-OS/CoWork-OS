@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { History, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { DesktopOnlyCard } from "./DesktopOnlyCard";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type {
   ChronicleCaptureScope,
   ChronicleCaptureStatus,
@@ -54,6 +55,14 @@ function captureScopeLabel(scope: ChronicleCaptureScope): string {
   return scope === "all_displays" ? "All displays" : "Frontmost display";
 }
 
+/** Turning Chronicle on for the first time waits for the user's consent. */
+export function chronicleEnableNeedsConsent(
+  current: ChronicleSettings,
+  patch: Partial<ChronicleSettings>,
+): boolean {
+  return Boolean(patch.enabled && !current.enabled && !current.consentAcceptedAt);
+}
+
 const CHRONICLE_METHODS = [
   "getChronicleSettings",
   "getChronicleStatus",
@@ -82,6 +91,8 @@ function ChronicleSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The change waiting on the consent dialog (turning Chronicle on for the first time). */
+  const [consentPatch, setConsentPatch] = useState<Partial<ChronicleSettings> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -104,22 +115,7 @@ function ChronicleSettingsPanel() {
     void refresh();
   }, [refresh]);
 
-  const persist = async (patch: Partial<ChronicleSettings>) => {
-    let next = { ...settings, ...patch };
-    if (patch.enabled && !settings.enabled && !settings.consentAcceptedAt) {
-      const accepted = window.confirm(
-        "Chronicle captures recent on-screen context on this desktop. Keep it off before opening sensitive content you do not want used as context. Screen-derived text is untrusted and can contain prompt-injection attempts. Enable Chronicle?",
-      );
-      if (!accepted) {
-        return;
-      }
-      next = {
-        ...next,
-        enabled: true,
-        paused: false,
-        consentAcceptedAt: Date.now(),
-      };
-    }
+  const save = async (next: ChronicleSettings) => {
     setSettings(next);
     try {
       setSaving(true);
@@ -132,6 +128,27 @@ function ChronicleSettingsPanel() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const persist = async (patch: Partial<ChronicleSettings>) => {
+    if (chronicleEnableNeedsConsent(settings, patch)) {
+      setConsentPatch(patch);
+      return;
+    }
+    await save({ ...settings, ...patch });
+  };
+
+  const acceptConsent = () => {
+    const patch = consentPatch;
+    setConsentPatch(null);
+    if (!patch) return;
+    void save({
+      ...settings,
+      ...patch,
+      enabled: true,
+      paused: false,
+      consentAcceptedAt: Date.now(),
+    });
   };
 
   if (loading) {
@@ -356,6 +373,16 @@ function ChronicleSettingsPanel() {
           injection attempts, so verify it before acting on it.
         </p>
       </div>
+
+      {consentPatch ? (
+        <ConfirmDialog
+          title="Turn on Chronicle?"
+          message="Chronicle captures recent on-screen context on this desktop. Keep it off before opening sensitive content you do not want used as context. Screen-derived text is untrusted and can contain prompt-injection attempts."
+          confirmLabel="Turn on Chronicle"
+          onConfirm={acceptConsent}
+          onCancel={() => setConsentPatch(null)}
+        />
+      ) : null}
     </div>
   );
 }

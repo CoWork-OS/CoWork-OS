@@ -174,14 +174,7 @@ export function MCTopBar({ data, onOpenAgents, agentsLabel = "Bots" }: MCTopBarP
           <button className="mc-v2-icon-btn" onClick={onOpenAgents}>
             {agentsLabel}
           </button>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 500,
-              fontFamily: "var(--font-mono)",
-              color: "var(--color-text-primary)",
-            }}
-          >
+          <span className="mc-v2-clock">
             {currentTime.toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",

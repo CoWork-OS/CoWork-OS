@@ -29,6 +29,7 @@ import {
   normalizeTaskTraceMarkdownDisplay,
 } from "../utils/task-trace-debugger";
 import { createRendererLogger } from "../utils/logger";
+import { formatCount } from "../utils/plural";
 
 interface TaskTraceDebuggerPanelProps {
   workspaceId?: string;
@@ -355,7 +356,7 @@ export function TaskTraceDebuggerPanel({
         <aside className="task-trace-debugger-runs">
           <div className="task-trace-pane-header">
             <h3>Runs</h3>
-            <span>{listLoading ? "Loading…" : `${runs.length} sessions`}</span>
+            <span>{listLoading ? "Loading…" : formatCount(runs.length, "session")}</span>
           </div>
           <div className="task-trace-run-list">
             {runs.map((run) => {

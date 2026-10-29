@@ -7333,7 +7333,7 @@ function MainContentComponent({
           {renderWelcomeTaskDomainRow()}
           <div className="overflow-menu-item" role="none">
             <button
-              className="goal-mode-toggle menu-tooltip-target"
+              className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
               style={{ margin: 0 }}
               onClick={() => {
                 setOverflowSubmenu(null);
@@ -7344,14 +7344,22 @@ function MainContentComponent({
               aria-checked={verificationAgentEnabled}
               data-overflow-menu-item
             >
-              <span className="goal-mode-label">
-                Verify {verificationAgentEnabled ? "ON" : "OFF"}
+              <span className="goal-mode-toggle-switch-content">
+                <span className="goal-mode-toggle-text">
+                  <span className="goal-mode-label">Verify</span>
+                </span>
+                <span
+                  className={`goal-mode-switch-track ${verificationAgentEnabled ? "on" : ""}`}
+                  aria-hidden="true"
+                >
+                  <span className="goal-mode-switch-thumb" />
+                </span>
               </span>
             </button>
           </div>
           <div className="overflow-menu-item" role="none">
             <button
-              className="goal-mode-toggle menu-tooltip-target"
+              className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
               style={{ margin: 0 }}
               onClick={() => {
                 setOverflowSubmenu(null);
@@ -7362,8 +7370,16 @@ function MainContentComponent({
               aria-checked={chronicleEnabledForTask}
               data-overflow-menu-item
             >
-              <span className="goal-mode-label">
-                Chronicle {chronicleEnabledForTask ? "ON" : "OFF"}
+              <span className="goal-mode-toggle-switch-content">
+                <span className="goal-mode-toggle-text">
+                  <span className="goal-mode-label">Chronicle</span>
+                </span>
+                <span
+                  className={`goal-mode-switch-track ${chronicleEnabledForTask ? "on" : ""}`}
+                  aria-hidden="true"
+                >
+                  <span className="goal-mode-switch-thumb" />
+                </span>
               </span>
             </button>
           </div>

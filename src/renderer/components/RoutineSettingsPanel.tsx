@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
-import { Cable, Clock3, Link2, Pencil, Play, Plus, Save, Trash2, Workflow } from "lucide-react";
+import { Link2, Pencil, Play, Plus, Save, Trash2 } from "lucide-react";
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import { validateCronExpression } from "../../electron/cron/schedule";
 import {
@@ -765,9 +765,8 @@ export function RoutineSettingsPanel({
           <div>
             <h3>Routines</h3>
             <p className="settings-description">
-              Routines are CoWork&apos;s saved automations: one set of instructions, one execution
-              target, and one or more triggers. Comparable to Claude Routines, but designed for
-              CoWork&apos;s local-first runtime.
+              A routine is a saved automation: one set of instructions, one place to run them, and
+              one or more triggers that start it.
             </p>
           </div>
           <button
@@ -783,21 +782,6 @@ export function RoutineSettingsPanel({
             <Plus size={16} />
             New Routine
           </button>
-        </div>
-
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
-          <span style={chipStyle}>
-            <Workflow size={14} />
-            Routines first
-          </span>
-          <span style={chipStyle}>
-            <Clock3 size={14} />
-            Scheduled Tasks, Webhooks, and Event Triggers remain as generated infrastructure
-          </span>
-          <span style={chipStyle}>
-            <Cable size={14} />
-            Connector allowlists can now be enforced, not just hinted
-          </span>
         </div>
 
         {error && (

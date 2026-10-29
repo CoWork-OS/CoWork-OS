@@ -4,6 +4,7 @@ import {
   TEXT_MEMORY_IMPORT_CATEGORIES,
   type TextMemoryImportCategory,
 } from "../../shared/memory-import-prompt";
+import { ModalDialog } from "./ModalDialog";
 
 interface TextMemoryImportResult {
   success: boolean;
@@ -122,10 +123,9 @@ export function PromptMemoryImportWizard({
 
   return (
     <div className="mcp-modal-overlay" onClick={onClose}>
-      <div
+      <ModalDialog
+        onClose={onClose}
         className="mcp-modal memory-text-import-modal"
-        role="dialog"
-        aria-modal="true"
         aria-labelledby="memory-text-import-title"
         onClick={(e) => e.stopPropagation()}
       >
@@ -313,7 +313,7 @@ export function PromptMemoryImportWizard({
             </div>
           )}
         </div>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

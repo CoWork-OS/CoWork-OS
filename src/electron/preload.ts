@@ -6122,8 +6122,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // File Hub
   listHubFiles: (options: Any) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_LIST, options),
-  searchHubFiles: (query: string, sources?: string[]) =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SEARCH, { query, sources }),
+  searchHubFiles: (query: string, sources?: string[], workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SEARCH, { query, sources, workspaceId }),
   getRecentHubFiles: (limit?: number) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_RECENT, limit),
   getHubSources: () => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SOURCES),
 
@@ -6642,6 +6642,7 @@ export interface ElectronAPI {
   searchHubFiles: (
     query: string,
     sources?: import("./file-hub/types").FileHubSource[],
+    workspaceId?: string,
   ) => Promise<import("./file-hub/types").FileHubSearchResult[]>;
   getRecentHubFiles: (limit?: number) => Promise<import("./file-hub/types").UnifiedFile[]>;
   getHubSources: () => Promise<import("./file-hub/types").FileHubSource[]>;

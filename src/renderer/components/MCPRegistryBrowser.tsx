@@ -2,6 +2,7 @@ import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useRef } from "react";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
+import { formatCount } from "../utils/plural";
 
 // Types (matching electron mcp types)
 type MCPInstallMethod = "npm" | "pip" | "binary" | "docker" | "manual";
@@ -285,7 +286,9 @@ export function MCPRegistryBrowser({
                 <span className="registry-author">by {normalizeAuthor(entry.author)}</span>
                 {/* Hosted servers list their tools only after sign-in. */}
                 {entry.tools.length > 0 && (
-                  <span className="registry-tools-count">{entry.tools.length} tools</span>
+                  <span className="registry-tools-count">
+                    {formatCount(entry.tools.length, "tool")}
+                  </span>
                 )}
                 {entry.category && <span className="registry-category">{entry.category}</span>}
               </div>

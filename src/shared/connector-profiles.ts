@@ -506,7 +506,7 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     ],
   },
   airtable: {
-    tagline: "Bring your structured data to Claude",
+    tagline: "Bring your Airtable bases into your sessions",
     longDescription:
       "Connect Airtable to list bases and tables, read and write records, search data, and manage your structured databases. The agent can inspect schemas and perform CRUD operations.",
     keyFeatures: [
@@ -564,7 +564,7 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     ],
   },
   attio: {
-    tagline: "Search, manage, and update your Attio CRM from Claude",
+    tagline: "Search, manage, and update your Attio CRM",
     longDescription:
       "Connect Attio to read company records, manage notes, and update your AI-native CRM. The agent can search and interact with your Attio data.",
     keyFeatures: [
@@ -709,7 +709,7 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     ],
   },
   smartsheet: {
-    tagline: "Analyze and manage Smartsheet data with Claude",
+    tagline: "Analyze and manage Smartsheet data",
     longDescription:
       "Connect Smartsheet to get sheet details, create and update rows, and manage your spreadsheets. The agent can query and modify Smartsheet data programmatically.",
     keyFeatures: [
@@ -825,7 +825,7 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     ],
   },
   tldraw: {
-    tagline: "Let Claude sketch, draw, and diagram with you",
+    tagline: "Sketch, draw, and diagram together",
     longDescription:
       "Manage local tldraw canvas files (.tldr) from CoWork. The agent can read, write, search, and create diagrams that sync with tldraw desktop or VS Code.",
     keyFeatures: [

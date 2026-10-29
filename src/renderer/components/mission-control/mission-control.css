@@ -143,6 +143,14 @@
   cursor: not-allowed;
 }
 
+.mc-v2-clock {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
 .mc-v2-online-dot {
   width: 8px;
   height: 8px;
@@ -2438,4 +2446,94 @@ button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
   .mc-v2-task-summary-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Calm theme ──
+   Align the header with the other Calm pages (Work, Team): a serif display title
+   in sentence case, quiet pill controls, and a UI-font clock. Calm's generic
+   `[class*="-icon-btn"] { padding: 0 }` reset (meant for square icon buttons)
+   strips these text buttons to bare labels, so they set their own padding here
+   with one more class of specificity. Other themes are unchanged. */
+html.visual-calm .mc-v2-topbar {
+  padding-top: 24px;
+}
+
+html.visual-calm .mc-v2-topbar h1 {
+  font-family: var(--calm-font-display);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--calm-text);
+  text-transform: lowercase;
+}
+
+/* The copy is "MISSION CONTROL"; lowercase plus a capital first letter reads
+   "Mission control" without changing the shared copy other themes use. */
+html.visual-calm .mc-v2-topbar h1::first-letter {
+  text-transform: uppercase;
+}
+
+html.visual-calm .mc-v2-brief-hero h1,
+html.visual-calm .mc-v2-intelligence-header h1 {
+  font-family: var(--calm-font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .mc-v2-selector {
+  height: 32px;
+  padding: 0 12px;
+  border-color: var(--calm-border-strong);
+  border-radius: var(--calm-radius-pill);
+}
+
+html.visual-calm .mc-v2-selector-label {
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .mc-v2-selector select {
+  color: var(--calm-text);
+  font-size: 13px;
+}
+
+html.visual-calm .mc-v2-stat-pill {
+  border-color: var(--calm-border);
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text-secondary);
+  font-size: 12px;
+}
+
+html.visual-calm .mc-v2-stat-pill strong {
+  color: var(--calm-text);
+  font-variant-numeric: tabular-nums;
+}
+
+html.visual-calm .mc-v2 .mc-v2-icon-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text);
+  font: 500 13px/1 var(--font-ui);
+}
+
+html.visual-calm .mc-v2 .mc-v2-icon-btn:hover:not(:disabled) {
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+}
+
+html.visual-calm .mc-v2-clock {
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .mc-v2-tab.active::after {
+  background: var(--calm-ink);
 }

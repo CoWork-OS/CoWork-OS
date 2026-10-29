@@ -423,6 +423,8 @@ html.visual-calm .work-view-section h3 {
   color: var(--calm-text-secondary);
 }
 
+/* The result is markdown (WorkResultMarkdown). Blocks sit flush so the five-line
+   clamp counts text lines, and headings, tables and code stay quiet. */
 html.visual-calm .work-view-result {
   display: -webkit-box;
   margin: 0;
@@ -432,7 +434,62 @@ html.visual-calm .work-view-result {
   font-size: 14px;
   line-height: 1.5;
   color: var(--calm-text);
+  overflow-wrap: anywhere;
+}
+
+html.visual-calm .work-view-result :is(p, ul, ol, li, pre, blockquote, table) {
+  margin: 0;
+}
+
+html.visual-calm .work-view-result :is(ul, ol) {
+  padding-left: 1.25em;
+}
+
+html.visual-calm .work-view-result strong {
+  font-weight: 600;
+}
+
+html.visual-calm .work-view-result .work-view-result-heading {
+  font-weight: 600;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .work-view-result code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--calm-surface-muted);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+html.visual-calm .work-view-result pre {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--calm-surface-muted);
   white-space: pre-wrap;
+}
+
+html.visual-calm .work-view-result pre code {
+  padding: 0;
+  background: none;
+}
+
+html.visual-calm .work-view-result blockquote {
+  padding-left: 10px;
+  border-left: 2px solid var(--calm-border-strong);
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .work-view-result table {
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .work-view-result :is(th, td) {
+  padding: 0 10px 0 0;
+  text-align: left;
+  font-weight: 400;
 }
 
 html.visual-calm .work-view-outputs,

@@ -13,8 +13,10 @@ import {
   Code,
   Archive,
   ChevronRight,
+  CornerLeftUp,
   X,
 } from "lucide-react";
+import { isTempWorkspaceId } from "../../shared/types";
 import { hasHostMethod } from "../host/browser-capabilities";
 import { triggerBrowserBlobDownload } from "../host/browser-download";
 import { DocumentAwareFileModal } from "./DocumentAwareFileModal";
@@ -76,41 +78,115 @@ function formatDate(ms: number): string {
   return d.toLocaleDateString();
 }
 
+function lastPathSegment(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
+}
+
+function isPathInsideFolder(filePath: string, folder: string): boolean {
+  const normalizedFolder = folder.replace(/[\\/]+$/, "");
+  if (!normalizedFolder) return false;
+  return (
+    filePath.startsWith(`${normalizedFolder}/`) || filePath.startsWith(`${normalizedFolder}\\`)
+  );
+}
+
+function parentFolderOf(filePath: string): string | undefined {
+  const cut = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  if (cut < 0) return undefined;
+  if (cut === 0) return filePath.slice(0, 1);
+  const parent = filePath.slice(0, cut);
+  // Keep the separator after a Windows drive letter ("C:\").
+  return parent.endsWith(":") ? `${parent}${filePath[cut]}` : parent;
+}
+
+/**
+ * The workspace root to open a Library file under. The file viewer only opens files inside
+ * a registered workspace, so prefer the root the main process listed the file under, then
+ * the innermost known workspace that contains it, then the file's own folder.
+ */
+export function resolveViewerWorkspacePath(
+  file: Pick<UnifiedFile, "path" | "metadata">,
+  workspaceRoots: string[],
+): string | undefined {
+  const listedUnder = file.metadata?.workspacePath;
+  if (typeof listedUnder === "string" && listedUnder.trim()) return listedUnder;
+  const containing = workspaceRoots
+    .filter((root) => isPathInsideFolder(file.path, root))
+    .sort((a, b) => b.length - a.length)[0];
+  return containing || parentFolderOf(file.path);
+}
+
 export const FileHub: React.FC<{ workspaceId?: string }> = (props) => {
   if (typeof window !== "undefined" && window.coworkBrowserHost === true) {
     return <BrowserFileHub workspaceId={props.workspaceId} />;
   }
-  return <DesktopFileHub />;
+  return <DesktopFileHub workspaceId={props.workspaceId} />;
 };
 
-function DesktopFileHub() {
+function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: string }) {
+  // With no folder chosen the app sits in a scratch workspace; list the default project instead.
+  const workspaceId =
+    selectedWorkspaceId && !isTempWorkspaceId(selectedWorkspaceId)
+      ? selectedWorkspaceId
+      : undefined;
   const [activeSource, setActiveSource] = useState("local");
   const [files, setFiles] = useState<UnifiedFile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [recentFiles, setRecentFiles] = useState<UnifiedFile[]>([]);
   const [showRecent, setShowRecent] = useState(false);
   const [availableSources, setAvailableSources] = useState<string[]>(["local", "artifacts"]);
-  const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
+  const [viewerTarget, setViewerTarget] = useState<{
+    filePath: string;
+    workspacePath?: string;
+  } | null>(null);
+  // Local folders opened below the workspace root, outermost first; empty at the root.
+  const [folderTrail, setFolderTrail] = useState<UnifiedFile[]>([]);
+  const [workspaceRoots, setWorkspaceRoots] = useState<string[]>([]);
+  // Root of the selected workspace as the main process resolved it for the Local listing.
+  const [listedRoot, setListedRoot] = useState<string | null>(null);
+  const loadRequestSeqRef = useRef(0);
+  const currentFolder = folderTrail[folderTrail.length - 1];
+  const currentFolderPath = currentFolder?.path;
+  const browsingFolders = !showRecent && activeSource === "local" && !searchQuery.trim();
 
   const loadFiles = useCallback(async () => {
+    const requestId = ++loadRequestSeqRef.current;
     try {
+      let next: UnifiedFile[];
       if (searchQuery.trim()) {
-        const results = await (window as Any).electronAPI.searchHubFiles(searchQuery, [
-          activeSource,
-        ]);
-        setFiles((results || []).map((r: Any) => r.file));
+        const results = await (window as Any).electronAPI.searchHubFiles(
+          searchQuery,
+          [activeSource],
+          workspaceId,
+        );
+        next = (results || []).map((r: Any) => r.file);
       } else {
-        const result = await (window as Any).electronAPI.listHubFiles({ source: activeSource });
-        setFiles(result || []);
+        const result: UnifiedFile[] | null = await (window as Any).electronAPI.listHubFiles({
+          source: activeSource,
+          ...(activeSource === "local" && workspaceId ? { workspaceId } : {}),
+          ...(activeSource === "local" && currentFolderPath ? { path: currentFolderPath } : {}),
+        });
+        next = result || [];
+        const root = next
+          .map((file) => file.metadata?.workspacePath)
+          .find((value): value is string => typeof value === "string");
+        if (root && requestId === loadRequestSeqRef.current) setListedRoot(root);
       }
+      if (requestId === loadRequestSeqRef.current) setFiles(next);
     } catch {
-      setFiles([]);
+      if (requestId === loadRequestSeqRef.current) setFiles([]);
     }
-  }, [activeSource, searchQuery]);
+  }, [activeSource, searchQuery, currentFolderPath, workspaceId]);
 
   useEffect(() => {
     loadFiles();
   }, [loadFiles]);
+
+  // Folders opened in one workspace mean nothing in another.
+  useEffect(() => {
+    setFolderTrail([]);
+    setListedRoot(null);
+  }, [workspaceId]);
 
   useEffect(() => {
     (async () => {
@@ -122,16 +198,39 @@ function DesktopFileHub() {
       } catch {
         // API not available yet
       }
+      try {
+        const workspaces = await window.electronAPI.listWorkspaces();
+        setWorkspaceRoots((workspaces || []).map((workspace) => workspace.path).filter(Boolean));
+      } catch {
+        // Without the list, files open under the root they were listed with or their folder.
+      }
     })();
   }, []);
 
   const handleFileClick = (file: UnifiedFile) => {
     if (file.isDirectory) {
-      // Navigate into directory
+      if (file.source !== "local") return;
+      // Search and Recent rows come from the workspace root, so they start a new trail.
+      setFolderTrail((trail) => (browsingFolders ? [...trail, file] : [file]));
+      setSearchQuery("");
+      setShowRecent(false);
+      setActiveSource("local");
       return;
     }
-    setViewerFilePath(file.path);
+    setViewerTarget({
+      filePath: file.path,
+      workspacePath: resolveViewerWorkspacePath(
+        file,
+        listedRoot ? [listedRoot, ...workspaceRoots] : workspaceRoots,
+      ),
+    });
   };
+
+  const visibleFiles = showRecent ? recentFiles : files;
+  const parentFolderName =
+    folderTrail.length > 1
+      ? folderTrail[folderTrail.length - 2].name
+      : lastPathSegment(String(currentFolder?.metadata?.workspacePath || "")) || "Workspace";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -199,6 +298,7 @@ function DesktopFileHub() {
             onClick={() => {
               setActiveSource(tab.key);
               setShowRecent(false);
+              setFolderTrail([]);
             }}
             style={{
               display: "flex",
@@ -225,7 +325,33 @@ function DesktopFileHub() {
 
       {/* File list */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-        {(showRecent ? recentFiles : files).length === 0 ? (
+        {browsingFolders && currentFolder && (
+          <button
+            type="button"
+            onClick={() => setFolderTrail((trail) => trail.slice(0, -1))}
+            title={`Back to ${parentFolderName}`}
+            style={{
+              width: "100%",
+              border: "none",
+              background: "transparent",
+              color: "inherit",
+              font: "inherit",
+              textAlign: "left",
+              ...desktopFileRowStyle,
+            }}
+            onMouseEnter={highlightDesktopRow}
+            onMouseLeave={clearDesktopRowHighlight}
+          >
+            <CornerLeftUp size={16} style={{ color: "var(--text-tertiary, #666)" }} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ ...desktopFileNameStyle, display: "block" }}>{parentFolderName}</span>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary, #666)" }}>
+                Up from {currentFolder.name}
+              </span>
+            </span>
+          </button>
+        )}
+        {visibleFiles.length === 0 ? (
           <div
             style={{
               textAlign: "center",
@@ -234,48 +360,31 @@ function DesktopFileHub() {
               fontSize: 13,
             }}
           >
-            {searchQuery ? "No files match your search" : "No files found"}
+            {searchQuery
+              ? "No files match your search"
+              : browsingFolders && currentFolder
+                ? "This folder is empty"
+                : "No files found"}
           </div>
         ) : (
-          (showRecent ? recentFiles : files).map((file) => (
+          visibleFiles.map((file) => (
             <div
               key={file.id}
               onClick={() => handleFileClick(file)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 16px",
-                cursor: "pointer",
-                borderBottom: "1px solid var(--border-color, #1a1a1a)",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.background =
-                  "var(--surface-secondary, #1a1a1a)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.background = "";
-              }}
+              title={file.isDirectory ? `Open folder ${file.name}` : undefined}
+              style={desktopFileRowStyle}
+              onMouseEnter={highlightDesktopRow}
+              onMouseLeave={clearDesktopRowHighlight}
             >
               {getFileIcon(file.mimeType, file.isDirectory)}
 
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    color: "var(--text-primary, #e5e5e5)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {file.name}
-                </div>
+                <div style={desktopFileNameStyle}>{file.name}</div>
                 <div style={{ fontSize: 11, color: "var(--text-tertiary, #666)" }}>
                   {file.source !== "local" && (
                     <span style={{ marginRight: 8 }}>{file.source.replace("_", " ")}</span>
                   )}
-                  {!file.isDirectory && formatSize(file.size)}
+                  {file.isDirectory ? "Folder" : formatSize(file.size)}
                 </div>
               </div>
 
@@ -286,11 +395,39 @@ function DesktopFileHub() {
           ))
         )}
       </div>
-      {viewerFilePath && (
-        <DocumentAwareFileModal filePath={viewerFilePath} onClose={() => setViewerFilePath(null)} />
+      {viewerTarget && (
+        <DocumentAwareFileModal
+          filePath={viewerTarget.filePath}
+          workspacePath={viewerTarget.workspacePath}
+          onClose={() => setViewerTarget(null)}
+        />
       )}
     </div>
   );
+}
+
+const desktopFileRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "8px 16px",
+  cursor: "pointer",
+  borderBottom: "1px solid var(--border-color, #1a1a1a)",
+};
+const desktopFileNameStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "var(--text-primary, #e5e5e5)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+function highlightDesktopRow(event: React.MouseEvent<HTMLElement>) {
+  event.currentTarget.style.background = "var(--surface-secondary, #1a1a1a)";
+}
+
+function clearDesktopRowHighlight(event: React.MouseEvent<HTMLElement>) {
+  event.currentTarget.style.background = "transparent";
 }
 
 type BrowserPreview = { name: string; mimeType: string; blob: Blob };

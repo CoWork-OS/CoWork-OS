@@ -247,7 +247,7 @@ CoWork OS bundles the Claude-for-Legal practice packs from `resources/plugin-pac
 Bundled legal packs include:
 
 - AI Governance Legal
-- Cocounsel Legal
+- CoCounsel Legal
 - Commercial Legal
 - Corporate Legal
 - Employment Legal

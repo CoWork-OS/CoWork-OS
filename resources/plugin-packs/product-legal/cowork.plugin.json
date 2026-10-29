@@ -22,7 +22,7 @@
     "Use Product Legal Cold Start Interview for this legal workflow",
     "Use Product Legal Customize for this legal workflow",
     "Use Product Legal Feature Risk Assessment for this legal workflow",
-    "Use Product Legal Is This A Problem for this legal workflow",
+    "Use Product Legal Is This a Problem for this legal workflow",
     "Use Product Legal Launch Review for this legal workflow"
   ],
   "skills": [
@@ -128,7 +128,7 @@
     },
     {
       "id": "product-legal-is-this-a-problem",
-      "name": "Is This A Problem",
+      "name": "Is This a Problem",
       "description": "Fast \"is this a problem?\" answer for the quick Slack question — pattern-matches against your calibration. Use when the user says \"is this a problem\", \"quick question\", \"can we do X\", \"do I need legal review for\", \"sanity check\", or pastes a PM's question that needs a same-minute fine / needs a look / hold call.",
       "icon": "⚖️",
       "category": "Legal",

@@ -3001,7 +3001,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
 
       <section className="ibx-section">
         <SectionLabel>Inbox</SectionLabel>
-        <div className="ibx-action-grid">
+        <div className="ibx-action-grid is-stacked">
           <RailAction
             onClick={() => void reviewQueue("cleanup")}
             icon={<Trash2 size={14} />}

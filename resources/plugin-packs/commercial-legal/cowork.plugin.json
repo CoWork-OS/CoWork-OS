@@ -184,7 +184,7 @@
     },
     {
       "id": "commercial-legal-nda-review",
-      "name": "Nda Review",
+      "name": "NDA Review",
       "description": "Reference: fast triage of inbound NDAs into GREEN / YELLOW / RED so the team only spends lawyer time on the ones that need it. Built for sales and BD to self-serve before pinging legal. Loaded by /commercial-legal:review when an NDA is detected.",
       "icon": "⚖️",
       "category": "Legal",
@@ -292,7 +292,7 @@
     },
     {
       "id": "commercial-legal-saas-msa-review",
-      "name": "Saas Msa Review",
+      "name": "SaaS MSA Review",
       "description": "Reference: review of SaaS subscription agreements with attention to the terms that matter most in subscription deals — auto-renewal mechanics, price escalation, data portability, uptime SLAs, and subprocessor rights. Loaded by /commercial-legal:review when a SaaS or subscription agreement is detected.",
       "icon": "⚖️",
       "category": "Legal",

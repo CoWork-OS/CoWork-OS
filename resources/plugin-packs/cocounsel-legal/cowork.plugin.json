@@ -1,6 +1,6 @@
 {
   "name": "cocounsel-legal-pack",
-  "displayName": "Cocounsel Legal",
+  "displayName": "CoCounsel Legal",
   "version": "0.1.0",
   "description": "CoCounsel Legal delivers comprehensive Westlaw Deep Research reports with inline, linked citations to Westlaw and Practical Law sources.",
   "type": "pack",
@@ -11,11 +11,11 @@
   "icon": "⚖️",
   "category": "Legal",
   "recommendedConnectors": ["cocounsel-legal"],
-  "tryAsking": ["Use Cocounsel Legal Deep Research for this legal workflow"],
+  "tryAsking": ["Use CoCounsel Legal Deep Research for this legal workflow"],
   "skills": [
     {
       "id": "cocounsel-legal-legal-guardrails",
-      "name": "Cocounsel Legal Guardrails",
+      "name": "CoCounsel Legal Guardrails",
       "description": "Apply legal workflow safeguards: attorney review, citation verification, privilege caution, and confirmation before irreversible actions.",
       "icon": "⚖️",
       "category": "Legal",
@@ -70,7 +70,7 @@
   "agentRoles": [
     {
       "name": "cocounsel-legal-assistant",
-      "displayName": "Cocounsel Legal Assistant",
+      "displayName": "CoCounsel Legal Assistant",
       "description": "CoCounsel Legal delivers comprehensive Westlaw Deep Research reports with inline, linked citations to Westlaw and Practical Law sources.",
       "icon": "⚖️",
       "color": "#2563eb",

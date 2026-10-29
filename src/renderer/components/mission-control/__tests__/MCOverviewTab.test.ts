@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { MCOverviewTab } from "../MCOverviewTab";
+import { MCOverviewTab, briefMetricClass } from "../MCOverviewTab";
 import type { MissionControlData } from "../useMissionControlData";
 
 const stylesPath = fileURLToPath(new URL("../mission-control.css", import.meta.url));
@@ -145,6 +145,63 @@ describe("MCOverviewTab", () => {
     expect(markup).toContain("need attention");
     expect(markup).toContain("Needs Attention");
     expect(markup).not.toContain("Needs You");
+  });
+
+  it("marks the need-you metric red only while something waits", () => {
+    expect(briefMetricClass(0)).toBe("mc-v2-brief-metric");
+    expect(briefMetricClass(2)).toBe("mc-v2-brief-metric attention");
+
+    const empty = renderOverview({ needsYouItems: [] } as Partial<MissionControlData>);
+    expect(empty).toMatch(
+      /<button class="mc-v2-brief-metric"[^>]*><strong>0<\/strong><span>need you/,
+    );
+    expect(empty).not.toContain('class="mc-v2-brief-metric attention"');
+
+    const waiting = renderOverview({
+      needsYouItems: [
+        {
+          id: "a1",
+          kind: "approval",
+          state: "Approval needed",
+          title: "Send report",
+          createdAt: Date.UTC(2026, 4, 26, 10, 0, 0),
+          urgent: true,
+          actor: { kind: "agent", name: "Ops bot" },
+          origin: { kind: "you", label: "You started it" },
+          place: { kind: "local", label: "This Mac" },
+          workspaceId: "ws-1",
+          taskId: "task-a1",
+          ref: { type: "approval", approvalId: "a1", taskId: "task-a1" },
+        },
+      ],
+    } as unknown as Partial<MissionControlData>);
+    expect(waiting).toMatch(
+      /<button class="mc-v2-brief-metric attention"[^>]*><strong>1<\/strong><span>need you/,
+    );
+  });
+
+  it("keeps the brief's zero attention count neutral without the queue", () => {
+    const markup = renderOverview({ needsYouItems: null } as Partial<MissionControlData>);
+
+    expect(markup).toMatch(
+      /<button class="mc-v2-brief-metric"[^>]*><strong>0<\/strong><span>need attention/,
+    );
+  });
+
+  it("gives the header Calm's serif title and pill buttons only under visual-calm", () => {
+    const styles = readFileSync(stylesPath, "utf8");
+
+    expect(styles).toMatch(
+      /html\.visual-calm \.mc-v2-topbar h1\s*\{[^}]*font-family:\s*var\(--calm-font-display\)/s,
+    );
+    expect(styles).toMatch(
+      /html\.visual-calm \.mc-v2 \.mc-v2-icon-btn\s*\{[^}]*padding:\s*0 14px;[^}]*border-radius:\s*var\(--calm-radius-pill\)/s,
+    );
+    // The clock reads in the UI font in Calm and keeps the mono face elsewhere.
+    expect(styles).toMatch(/\.mc-v2-clock\s*\{[^}]*font-family:\s*var\(--font-mono\)/s);
+    expect(styles).toMatch(
+      /html\.visual-calm \.mc-v2-clock\s*\{[^}]*font-family:\s*var\(--font-ui\)/s,
+    );
   });
 
   it("stacks metric values and labels despite the shared button flex rule", () => {

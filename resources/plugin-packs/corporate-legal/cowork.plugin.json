@@ -20,7 +20,7 @@
     "TopCounsel"
   ],
   "tryAsking": [
-    "Use Corporate Legal Ai Tool Handoff for this legal workflow",
+    "Use Corporate Legal AI Tool Handoff for this legal workflow",
     "Use Corporate Legal Board Minutes for this legal workflow",
     "Use Corporate Legal Closing Checklist for this legal workflow",
     "Use Corporate Legal Cold Start Interview for this legal workflow",
@@ -48,7 +48,7 @@
     },
     {
       "id": "corporate-legal-ai-tool-handoff",
-      "name": "Ai Tool Handoff",
+      "name": "AI Tool Handoff",
       "description": "Detects when Luminance, Kira, or a similar bulk-review tool is in use, hands off the high-volume clause extraction to it, and QAs its output per the trust level in `~/.claude/plugins/config/claude-for-legal/corporate-legal/CLAUDE.md`. Use when user says \"send to Luminance\", \"bulk review\", \"AI extraction\", or when diligence-issue-extraction hits a high-volume category.",
       "icon": "⚖️",
       "category": "Legal",

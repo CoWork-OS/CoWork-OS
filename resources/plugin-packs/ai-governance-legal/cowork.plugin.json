@@ -1,6 +1,6 @@
 {
   "name": "ai-governance-legal-pack",
-  "displayName": "Ai Governance Legal",
+  "displayName": "AI Governance Legal",
   "version": "1.0.1",
   "description": "Triages proposed AI use cases against your registry, runs impact assessments across the regimes in scope, reviews vendor AI terms for training-on-data and liability gaps, and keeps your AI policy current with practice.",
   "type": "pack",
@@ -12,16 +12,16 @@
   "category": "Legal",
   "recommendedConnectors": ["Google Drive", "Lexis+ Protégé", "Slack"],
   "tryAsking": [
-    "Use Ai Governance Legal Ai Inventory for this legal workflow",
-    "Use Ai Governance Legal Aia Generation for this legal workflow",
-    "Use Ai Governance Legal Cold Start Interview for this legal workflow",
-    "Use Ai Governance Legal Customize for this legal workflow",
-    "Use Ai Governance Legal Matter Workspace for this legal workflow"
+    "Use AI Governance Legal AI Inventory for this legal workflow",
+    "Use AI Governance Legal AIA Generation for this legal workflow",
+    "Use AI Governance Legal Cold Start Interview for this legal workflow",
+    "Use AI Governance Legal Customize for this legal workflow",
+    "Use AI Governance Legal Matter Workspace for this legal workflow"
   ],
   "skills": [
     {
       "id": "ai-governance-legal-legal-guardrails",
-      "name": "Ai Governance Legal Guardrails",
+      "name": "AI Governance Legal Guardrails",
       "description": "Apply legal workflow safeguards: attorney review, citation verification, privilege caution, and confirmation before irreversible actions.",
       "icon": "⚖️",
       "category": "Legal",
@@ -40,7 +40,7 @@
     },
     {
       "id": "ai-governance-legal-ai-inventory",
-      "name": "Ai Inventory",
+      "name": "AI Inventory",
       "description": "EU AI Act per-system inventory — track each AI system's role (provider, deployer, importer, distributor, authorized representative, product manufacturer) and risk tier (prohibited, high-risk, limited, minimal, GPAI, GPAI+systemic). Role and tier are assessed per system, not per company. Use when the user says \"ai inventory\", \"add an ai system\", \"what systems do we have\", \"classify this ai system\", \"eu ai act register\", or \"ai system registry\".",
       "icon": "⚖️",
       "category": "Legal",
@@ -67,7 +67,7 @@
     },
     {
       "id": "ai-governance-legal-aia-generation",
-      "name": "Aia Generation",
+      "name": "AIA Generation",
       "description": "Run an AI impact assessment — structured intake, risk analysis, regulatory classification per regime in scope, policy consistency diff, and recommendation with conditions. Uses the house-style structure learned from the seed impact assessment in `~/.claude/plugins/config/claude-for-legal/ai-governance-legal/CLAUDE.md`. Use when user says \"impact assessment for\", \"assess this AI use case\", \"run an AIA\", \"generate an AIA\", \"we need to document this AI system\", \"AI risk assessment for X\", or follows a conditional triage result.",
       "icon": "⚖️",
       "category": "Legal",
@@ -283,7 +283,7 @@
     },
     {
       "id": "ai-governance-legal-vendor-ai-review",
-      "name": "Vendor Ai Review",
+      "name": "Vendor AI Review",
       "description": "Review vendor AI terms — agreement, addendum, or ToS AI provisions — against your governance positions; flag training-on-data, liability, model changes, and AI policy consistency. Use when user says \"review this AI agreement\", \"check OpenAI terms\", \"what did we agree to with [vendor]\", \"vendor sent an AI addendum\", \"is this AI contract okay\", or attaches vendor AI terms.",
       "icon": "⚖️",
       "category": "Legal",
@@ -364,7 +364,7 @@
   "agentRoles": [
     {
       "name": "ai-governance-legal-assistant",
-      "displayName": "Ai Governance Legal Assistant",
+      "displayName": "AI Governance Legal Assistant",
       "description": "Triages proposed AI use cases against your registry, runs impact assessments across the regimes in scope, reviews vendor AI terms for training-on-data and liability gaps, and keeps your AI policy current with practice.",
       "icon": "⚖️",
       "color": "#2563eb",

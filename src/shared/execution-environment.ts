@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HOST_COMPUTER_TOOL_NAMES } from "./bot-computer";
 import { isSpaceRelativePath } from "./space-sandbox";
 
 /** Selection is user configuration; the binding is written only by the host. */
@@ -120,6 +121,78 @@ export function isEnvironmentTool(name: string): boolean {
     ENVIRONMENT_COMMAND_TOOLS.has(name) ||
     ENVIRONMENT_DESKTOP_TOOLS.has(name) ||
     name === "computer_environment"
+  );
+}
+
+const HOST_FILE_TOOLS = new Set([
+  "create_document",
+  "edit_document",
+  "create_spreadsheet",
+  "create_presentation",
+  "parse_document",
+  "edit_pdf_region",
+  "read_pdf_visual",
+  "organize_folder",
+  "batch_image_process",
+  "monty_run",
+  "monty_transform_file",
+  "monty_run_transform",
+  "git_status",
+  "git_diff",
+  "git_commit",
+  "git_merge_to_base",
+  "get_env",
+  "find_macos_app_processes",
+  "terminate_macos_app_processes",
+  "list_macos_launch_agents",
+  "disable_macos_launch_agents",
+  "native_application_inspect",
+  "count_text",
+  "text_metrics",
+]);
+const SERVICE_TOOLS = new Set([
+  "web_search",
+  "web_fetch",
+  "http_request",
+  "tool_search",
+  "request_user_input",
+  "request_takeover",
+  "revise_plan",
+  "task_list_create",
+  "task_list_update",
+  "task_list_list",
+  "task_history",
+  "spawn_agent",
+  "wait_for_agent",
+  "orchestrate_agents",
+  "send_agent_message",
+  "list_agents",
+]);
+const SERVICE_ACTION_TOOLS = new Set([
+  "notion_action",
+  "box_action",
+  "onedrive_action",
+  "google_drive_action",
+  "gmail_action",
+  "mailbox_action",
+  "calendar_action",
+  "dropbox_action",
+  "sharepoint_action",
+]);
+
+/** Whether a tool can run while a task computer is selected (guest tools plus host services). */
+export function isToolSupportedInEnvironment(name: string): boolean {
+  if (name.startsWith("browser_")) return ENVIRONMENT_BROWSER_TOOLS.has(name);
+  if (isEnvironmentTool(name)) return true;
+  if (name.startsWith("desktop_")) return false;
+  if (HOST_COMPUTER_TOOL_NAMES.includes(name) || HOST_FILE_TOOLS.has(name)) return false;
+  // Generic local MCP drivers and filesystem servers cannot be safely relocated implicitly.
+  if (name.startsWith("mcp_")) return false;
+  return (
+    SERVICE_TOOLS.has(name) ||
+    SERVICE_ACTION_TOOLS.has(name) ||
+    name.startsWith("memory_") ||
+    name.startsWith("task_list_")
   );
 }
 

@@ -430,6 +430,50 @@ remain queue-oriented and are addressed by task ID; bot-team conversations are
 persistent named peers. See [Agent messaging](agent-messaging.md) for delivery
 receipts, retry identity, and worker-task semantics.
 
+## What a bot can do
+
+The top of a bot's details panel, **What it can do**, sums up the bot's setup in
+six rows. Each row opens to its details:
+
+| Row | What it says |
+| --- | --- |
+| **Works on** | Where its tasks may act: apps on this Mac, the in-app browser, its own desktop (host, shared name, network), and whether all its work runs in a task computer |
+| **Files** | Chats you start use your project; where runs nobody started by hand work (its own folder, its desktop's work folder, or the given project) |
+| **Services** | Connected services and connectors it may use, which ones work only in chats you start, and channels that hand messages to it |
+| **Schedules** | Active responsibilities, scheduled items, check-ins and the next run, or that the scheduler isn't running |
+| **Memory** | How many facts it saved and whether it searches its past chats |
+| **Needs your OK** | What it asks before doing, its **May do alone** limit, its turned-off tools, and the guarantees that hold for every bot |
+
+The panel reads it through `bot:capabilities:get` (`getBotCapabilities`), which
+validates `{ workspaceId, agentRoleId }` and starts nothing. The main process
+builds it with the checks that enforce each limit, so the card can't claim more
+than the bot's tasks may do:
+
+- **Works on** and the services a setting takes away use `isComputerToolBlocked`
+  and `computerToolKind`, as the tool registry does.
+- **Only in chats you start** uses `toolBoundaryClass` and
+  `isToolBoundaryAllowedForContainedRun` for runs in its own folder; a connector
+  that runs as a program on this computer (stdio) is refused there.
+- **Turned off** uses `isToolDeniedByRestrictions`, the registry's own parser for
+  the bot's denied tools (`*`, tool groups, exact names).
+- **Not while its work runs in its computer** uses `isToolSupportedInEnvironment`,
+  the task computer's own check.
+- **Needs your OK** lists `EXPLICIT_CONSENT_KINDS`, the reasons the permission
+  engine reports per call (`PermissionEngine.explicitConsentKinds`), and resolves
+  the bot's limit with `resolveEffectiveAccessProfile`: an access profile that never
+  asks turns those steps into refusals.
+
+Some facts depend on the run, so the card states both cases instead of guessing:
+whether a run is contained depends on who started it, and a saved rule or a
+connector's own setting can allow a step that would otherwise ask. The card
+never presents **Seniority** (`autonomyLevel`) as a limit, because it grants no
+access, and shows no live desktop status; the **Computer** section does that.
+
+A failed read marks only its row ("Couldn't read this right now"). The card
+re-reads after a profile edit (including **May do alone** in the Team view), when
+the work dialog closes and after each turn; the memory count follows the Memory
+section after **Forget** or **Undo**.
+
 ## A bot's own memory
 
 Each bot keeps its own memory as a file in the memory folder: `bots/<name>.md`, mapped to the
@@ -794,6 +838,11 @@ The bot implementation is intentionally split by responsibility:
 - `src/renderer/components/BotDetailsRail.tsx` renders identity, status,
   notifications, history and link copying; `BotComputerSection.tsx` (with
   `useComputerView`) shows where the bot works, the live view and take-over.
+- `src/renderer/components/BotCapabilitySection.tsx` (with `useBotCapabilities`
+  and `utils/bot-capabilities-copy.ts`) renders **What it can do**;
+  `src/electron/agents/bot-capability-summary.ts` computes it from the enforcing
+  checks, `BotCapabilityService.ts` reads its inputs (`bot-capability-runtime.ts`
+  wires the live sources), and `src/shared/bot-capabilities.ts` holds the contract.
 - `src/shared/bot-computer.ts` defines the **Works on** values and which tools
   act on this computer, the browser or the bot's own desktop; the tool registry
   enforces it.

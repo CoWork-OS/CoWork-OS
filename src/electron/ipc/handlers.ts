@@ -24,6 +24,8 @@ import {
 import { BotNotificationService } from "../notifications/BotNotificationService";
 import { BotWorkResultService } from "../agents/BotWorkResultService";
 import { BotOutcomeMetricsService } from "../agents/BotOutcomeMetricsService";
+import { BotCapabilityService } from "../agents/BotCapabilityService";
+import { createBotCapabilityDeps } from "../agents/bot-capability-runtime";
 import { getAutomationRuntime } from "../automation/AutomationRuntime";
 import { BotWorkControlService } from "../automation/BotWorkControlService";
 import { BotResponsibilityService } from "../automation/BotResponsibilityService";
@@ -1226,6 +1228,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_FORK_SESSION, RATE_LIMIT_CONFIGS.limited
 rateLimiter.configure(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.BOT_CAPABILITIES_GET, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, RATE_LIMIT_CONFIGS.standard);
@@ -6062,6 +6065,24 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.BOT_METRICS_SUMMARY, async (_, request: unknown) => {
     checkRateLimit(IPC_CHANNELS.BOT_METRICS_SUMMARY);
     return botOutcomeMetricsService.summary(request);
+  });
+  // "What it can do" in a bot's details panel, computed with the checks that enforce each limit.
+  // The request is validated by the service's zod schema; reading it starts nothing.
+  const botCapabilityService = new BotCapabilityService(
+    createBotCapabilityDeps({
+      findRole: async (id) => (await agentRoleRepo.findById(id)) ?? undefined,
+      workspaceExists: async (id) => Boolean(await workspaceRepo.findById(id)),
+      listBotWork: (query) => botWorkQueryService.list(query),
+      listResponsibilities: (scope) => botResponsibilityService.list(scope),
+      listChannels: async () =>
+        (gateway
+          ? (await gateway.getChannels()).map((ch) => toPublicChannel(ch))
+          : []) as NonNullable<Parameters<typeof listIntegrationMentionOptions>[0]>,
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_CAPABILITIES_GET, async (_, request: unknown) => {
+    checkRateLimit(IPC_CHANNELS.BOT_CAPABILITIES_GET);
+    return botCapabilityService.describe(request);
   });
 
   ipcMain.handle(

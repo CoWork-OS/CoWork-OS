@@ -13,6 +13,7 @@ import { BotComputerSection } from "./BotComputerSection";
 import { BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
 import { normalizeBotWorksOn } from "../../shared/bot-computer";
 import { BotMemorySection } from "./BotMemorySection";
+import { BotCapabilitySection } from "./BotCapabilitySection";
 import { BOT_NOTIFICATION_POLICY_UPDATED_EVENT } from "./BotNotificationPanel";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { BotMascot } from "./bot-mascot/BotMascot";
@@ -25,6 +26,7 @@ import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
 import { botAttentionItems, withQueueNeedsYou } from "../utils/bot-attention";
 import { useAttentionSnapshot } from "../hooks/useAttentionSnapshot";
 import { formatBotUsage, useBotUsage } from "../hooks/useBotUsage";
+import { useBotCapabilities } from "../hooks/useBotCapabilities";
 import type { BotNotificationPolicy, BotWorkView, Task, TaskStatus } from "../../shared/types";
 import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import type { AgentRoleData } from "../../electron/preload";
@@ -218,6 +220,13 @@ export function BotDetailsRail({
   const workAvailable = Boolean(onSelectTask && task.workspaceId && hasHostMethods("listBotWork"));
   const usage = useBotUsage(task.workspaceId, roleId || undefined, task.updatedAt);
   const usageLine = usage ? formatBotUsage(usage) : null;
+  // What it can do: re-read after a profile edit, a closed work dialog or a finished turn.
+  const capabilities = useBotCapabilities(
+    task.workspaceId,
+    roleId || undefined,
+    `${role?.updatedAt ?? 0}:${workToken}:${task.updatedAt}`,
+  );
+  const [memorySaved, setMemorySaved] = useState<number | undefined>(undefined);
   useEffect(() => {
     if (!workAvailable || !roleId) return;
     let cancelled = false;
@@ -376,6 +385,14 @@ export function BotDetailsRail({
         </div>
       ) : null}
 
+      {roleId ? (
+        <BotCapabilitySection
+          summary={capabilities.summary}
+          failed={capabilities.failed}
+          memorySaved={memorySaved}
+        />
+      ) : null}
+
       {workAvailable && roleId ? (
         <section className="bot-details-section">
           <h3 className="bot-details-section-heading">
@@ -446,7 +463,13 @@ export function BotDetailsRail({
         )}
       </section>
 
-      {roleId ? <BotMemorySection botId={roleId} refreshKey={task.updatedAt} /> : null}
+      {roleId ? (
+        <BotMemorySection
+          botId={roleId}
+          refreshKey={task.updatedAt}
+          onCountChange={setMemorySaved}
+        />
+      ) : null}
 
       <section className="bot-details-section">
         <h3 className="bot-details-section-heading">

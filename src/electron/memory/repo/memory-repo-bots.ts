@@ -57,6 +57,22 @@ export async function botMemoryReport(
   };
 }
 
+/** How many current entries the bot's file holds; skips the history read of the full report. */
+export async function botMemoryCount(
+  service: Pick<MemoryRepoBotPort, "isReady" | "botFile" | "readFile"> | null,
+  botId: string,
+  now: number = Date.now(),
+): Promise<{ available: boolean; saved: number }> {
+  if (!service?.isReady()) return { available: false, saved: 0 };
+  const path = await service.botFile(botId);
+  if (!path) return { available: true, saved: 0 };
+  const today = isoDay(now);
+  const saved = parseMemoryRepoEntries((await service.readFile(path)) ?? "").filter(
+    (entry) => !isMemoryRepoMarker(entry) && !isExpiredMemoryRepoEntry(entry, today),
+  ).length;
+  return { available: true, saved };
+}
+
 /** Forget one entry of the bot's file; a ref outside that file is refused. */
 export async function forgetBotMemoryEntry(
   service: MemoryRepoBotPort | null,

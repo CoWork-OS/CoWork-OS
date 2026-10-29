@@ -54,6 +54,7 @@ import {
   type AccessFilesystemOperation,
 } from "../../security/access-profile-paths";
 import { ENVIRONMENT_BROWSER_TOOLS } from "../../../shared/execution-environment";
+import { EXPLICIT_CONSENT_KINDS, type ExplicitConsentKind } from "../../../shared/explicit-consent";
 
 const SOURCE_PRECEDENCE: Record<string, number> = {
   session: 600,
@@ -116,6 +117,7 @@ type PermissionFacts = {
   isMcp: boolean;
   isLocationAccess: boolean;
   isExplicitConsentRequired: boolean;
+  explicitConsentKinds: ExplicitConsentKind[];
 };
 
 type RuntimeAccessProfile = {
@@ -1363,6 +1365,11 @@ export class PermissionEngine {
     }
   }
 
+  /** Why this call would need explicit consent at the access boundary (empty when it would not). */
+  static explicitConsentKinds(request: PermissionEngineRequest): ExplicitConsentKind[] {
+    return this.buildFacts(request).explicitConsentKinds;
+  }
+
   private static buildFacts(request: PermissionEngineRequest): PermissionFacts {
     const toolName = canonicalizeToolName(String(request.toolName || "").trim());
     const approvalType = request.approvalType;
@@ -1406,26 +1413,28 @@ export class PermissionEngine {
       ((toolName === "web_fetch" || toolName === "http_request") &&
         typeof credentialId === "string" &&
         credentialId.trim().length > 0);
-    const isExplicitConsentRequired =
-      (isShell &&
+    const consentKinds: Record<ExplicitConsentKind, boolean> = {
+      dangerous_shell:
+        isShell &&
         (DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(normalizedCommand)) ||
           DISK_FORMAT_COMMAND_PATTERN.test(rawCommand) ||
-          /(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(normalizedCommand))) ||
-      approvalType === "risk_gate" ||
-      approvalType === "delete_file" ||
-      approvalType === "delete_multiple" ||
-      approvalType === "memory_delete" ||
-      approvalType === "data_export" ||
-      (approvalType === "external_service" && !request.mcpToolPolicy) ||
-      approvalType === "location_access" ||
-      approvalType === "protected_credential" ||
-      isDeleteLike ||
-      isDataExport ||
-      isProtectedCredential ||
-      isLocationAccess ||
-      (!isMcp && toolName.endsWith("_action")) ||
-      toolName === "voice_call" ||
-      (isMcp && !request.mcpToolPolicy);
+          /(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(normalizedCommand)),
+      risk_gate: approvalType === "risk_gate",
+      delete:
+        approvalType === "delete_file" ||
+        approvalType === "delete_multiple" ||
+        approvalType === "memory_delete" ||
+        isDeleteLike,
+      data_export: approvalType === "data_export" || isDataExport,
+      external_service: approvalType === "external_service" && !request.mcpToolPolicy,
+      location: approvalType === "location_access" || isLocationAccess,
+      protected_credential: approvalType === "protected_credential" || isProtectedCredential,
+      app_action: !isMcp && toolName.endsWith("_action"),
+      voice_call: toolName === "voice_call",
+      unconfigured_connector: isMcp && !request.mcpToolPolicy,
+    };
+    const explicitConsentKinds = EXPLICIT_CONSENT_KINDS.filter((kind) => consentKinds[kind]);
+    const isExplicitConsentRequired = explicitConsentKinds.length > 0;
     // A video job on the local provider renders on this machine; it reads and
     // writes only workspace files and makes no network request.
     const isLocalVideoCall =
@@ -1518,6 +1527,7 @@ export class PermissionEngine {
       isMcp,
       isLocationAccess,
       isExplicitConsentRequired,
+      explicitConsentKinds,
     };
   }
 

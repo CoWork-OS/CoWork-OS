@@ -19,6 +19,11 @@ import {
   isToolBoundaryAllowedForContainedRun,
   toolBoundaryClass,
 } from "../../../shared/tool-boundaries";
+import {
+  isToolDeniedByRestrictions,
+  parseToolRestrictions,
+  type ParsedToolRestrictions,
+} from "../../../shared/tool-restrictions";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -43,7 +48,6 @@ import {
   Task,
   TaskEvent,
   TOOL_GROUPS,
-  ToolGroupName,
   RuntimeToolApprovalKind,
   RuntimeToolSideEffectLevel,
   WorkspacePathAliasPolicy,
@@ -787,11 +791,9 @@ export class ToolRegistry {
   private gatewayContext?: GatewayContextType;
   private _deepWorkMode = false;
   private _codeExecTools?: CodeExecTools;
-  private deniedTools: Set<string> = new Set();
+  private toolRestrictionSet: ParsedToolRestrictions = parseToolRestrictions();
   /** MCP servers whose tools are deferred to tool_search (see getMCPToolDefinitions). */
   private deferredMcpServers: Array<{ name: string; toolCount: number }> = [];
-  private deniedGroups: Set<ToolGroupName> = new Set();
-  private denyAllTools = false;
   private shadowedToolsLogged = false;
   private semanticsInvariantLogged = false;
   private cachedToolDefinitionsKey: string | null = null;
@@ -893,30 +895,10 @@ export class ToolRegistry {
   }
 
   private applyToolRestrictions(restrictions?: string[]): void {
-    this.deniedTools = new Set();
-    this.deniedGroups = new Set();
-    this.denyAllTools = false;
+    // Context policies may specify "*", tool group names (e.g., "group:memory") or
+    // individual tool names (e.g., "read_clipboard").
+    this.toolRestrictionSet = parseToolRestrictions(restrictions);
     this.invalidateToolCaches();
-    if (!restrictions || restrictions.length === 0) return;
-
-    for (const raw of restrictions) {
-      const value = typeof raw === "string" ? raw.trim() : "";
-      if (!value) continue;
-
-      // Special marker meaning "deny all tools" (used as a safe default on corrupted policy data).
-      if (value === "*") {
-        this.denyAllTools = true;
-        continue;
-      }
-
-      // Context policies may specify tool group names (e.g., "group:memory") or
-      // individual tool names (e.g., "read_clipboard").
-      if (Object.prototype.hasOwnProperty.call(TOOL_GROUPS, value)) {
-        this.deniedGroups.add(value as ToolGroupName);
-      } else {
-        this.deniedTools.add(value);
-      }
-    }
   }
 
   private invalidateToolCaches(): void {
@@ -987,9 +969,9 @@ export class ToolRegistry {
         workspaceId: this.workspace.id,
         shellEnabled: this.workspace.permissions.shell,
         gatewayContext: this.gatewayContext || null,
-        deniedTools: Array.from(this.deniedTools.values()).sort(),
-        deniedGroups: Array.from(this.deniedGroups.values()).sort(),
-        denyAllTools: this.denyAllTools,
+        deniedTools: Array.from(this.toolRestrictionSet.tools.values()).sort(),
+        deniedGroups: Array.from(this.toolRestrictionSet.groups.values()).sort(),
+        denyAllTools: this.toolRestrictionSet.denyAll,
         executionEnvironment: this.environmentController?.().selection() ?? null,
         botWorksOn: this.currentBotWorksOn() ?? null,
         headless: isHeadlessMode(),
@@ -1029,9 +1011,9 @@ export class ToolRegistry {
       workspaceId: this.workspace.id,
       shellEnabled: this.workspace.permissions.shell,
       gatewayContext: this.gatewayContext || null,
-      deniedTools: Array.from(this.deniedTools.values()).sort(),
-      deniedGroups: Array.from(this.deniedGroups.values()).sort(),
-      denyAllTools: this.denyAllTools,
+      deniedTools: Array.from(this.toolRestrictionSet.tools.values()).sort(),
+      deniedGroups: Array.from(this.toolRestrictionSet.groups.values()).sort(),
+      denyAllTools: this.toolRestrictionSet.denyAll,
       executionEnvironment: this.environmentController?.().selection() ?? null,
       botWorksOn: this.currentBotWorksOn() ?? null,
       headless: isHeadlessMode(),
@@ -1590,7 +1572,7 @@ export class ToolRegistry {
 
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
-    if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
+    if (isToolDeniedByRestrictions(toolName, this.toolRestrictionSet)) return true;
     try {
       if (this.isBlockedByBotWorksOn(toolName)) return true;
       if (this.isBlockedByBotContainment(toolName)) return true;
@@ -1599,10 +1581,6 @@ export class ToolRegistry {
       return true;
     }
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
-    for (const groupName of this.deniedGroups) {
-      const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
-      if (tools && tools.includes(toolName)) return true;
-    }
     return false;
   }
 
@@ -1633,17 +1611,8 @@ export class ToolRegistry {
     )
       return false;
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return false;
-    if (this.denyAllTools) {
+    if (isToolDeniedByRestrictions(toolName, this.toolRestrictionSet)) {
       return false;
-    }
-    if (this.deniedTools.has(toolName)) {
-      return false;
-    }
-    for (const groupName of this.deniedGroups) {
-      const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
-      if (tools && tools.includes(toolName)) {
-        return false;
-      }
     }
     if (this.isBlockedByBotWorksOn(toolName)) {
       return false;

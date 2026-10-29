@@ -1,6 +1,6 @@
 # Public Adoption Stats
 
-Generated at: 2026-10-28T09:36:29.927Z
+Generated at: 2026-10-29T09:55:00.183Z
 
 These numbers are acquisition and download-intent signals for CoWork OS. They do **not** measure active users, first launch, successful task completion, model configuration, retention, prompts, files, emails, or any in-app content.
 
@@ -9,37 +9,37 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 | Metric | Value |
 |---|---:|
 | GitHub stars | 514 |
-| GitHub forks | 94 |
+| GitHub forks | 95 |
 | GitHub watchers | 3 |
 | GitHub open issues | 20 |
 | Latest release | v0.5.61 |
 | Latest release date | 2026-10-18 |
-| Installer/server downloads, lifetime | 2,227 |
-| Installer/server downloads, since previous snapshot | 44 |
+| Installer/server downloads, lifetime | 2,249 |
+| Installer/server downloads, since previous snapshot | 22 |
 | npm latest version | 0.5.61 |
-| npm downloads, last day | 16 |
-| npm downloads, last week | 65 |
-| npm downloads, last month | 734 |
-| npm downloads, all time | 10,001 |
-| GitHub views, last 14-ish days | 890 total / 531 unique |
-| GitHub clones, last 14-ish days | 31,996 total / 1,648 unique |
+| npm downloads, last day | 23 |
+| npm downloads, last week | 88 |
+| npm downloads, last month | 749 |
+| npm downloads, all time | 10,024 |
+| GitHub views, last 14-ish days | 980 total / 588 unique |
+| GitHub clones, last 14-ish days | 31,766 total / 1,617 unique |
 
 ## Release Downloads By Platform
 
 | Platform | Lifetime downloads | Delta |
 |---|---:|---:|
-| macos | 1,115 | +15 |
-| server | 125 | +1 |
-| windows | 987 | +28 |
+| macos | 1,118 | +3 |
+| server | 126 | +1 |
+| windows | 1,005 | +18 |
 
 ## Recent Release Assets
 
 | Release | Asset | Platform | Downloads | Delta |
 |---|---|---|---:|---:|
-| v0.5.61 | CoWork-OS-0.5.61-arm64-mac.zip | macos | 61 | +9 |
-| v0.5.61 | CoWork-OS-0.5.61-arm64.dmg | macos | 70 | +6 |
-| v0.5.61 | cowork-os-server-linux-x64-v0.5.61.tar.gz | server | 6 | +1 |
-| v0.5.61 | CoWork-OS-Setup-0.5.61.exe | windows | 145 | +28 |
+| v0.5.61 | CoWork-OS-0.5.61-arm64-mac.zip | macos | 62 | +1 |
+| v0.5.61 | CoWork-OS-0.5.61-arm64.dmg | macos | 72 | +2 |
+| v0.5.61 | cowork-os-server-linux-x64-v0.5.61.tar.gz | server | 7 | +1 |
+| v0.5.61 | CoWork-OS-Setup-0.5.61.exe | windows | 163 | +18 |
 | v0.5.61 | registry-packages-0.5.61-b753cb10d1c74a755d2efed3e8643ee78833f0bf.tar.gz | server | 14 | +0 |
 | v0.5.60 | CoWork-OS-0.5.60-arm64-mac.zip | macos | 33 | +0 |
 | v0.5.60 | CoWork-OS-0.5.60-arm64.dmg | macos | 36 | +0 |
@@ -61,31 +61,31 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | Google | 100 | 90 |
-| 2 | github.com | 75 | 55 |
-| 3 | aocr.org | 65 | 65 |
+| 1 | Google | 107 | 96 |
+| 2 | github.com | 79 | 58 |
+| 3 | aocr.org | 71 | 71 |
 | 4 | t.co | 22 | 18 |
 | 5 | Bing | 8 | 7 |
 | 6 | search.brave.com | 8 | 5 |
-| 7 | DuckDuckGo | 4 | 4 |
-| 8 | coworkosapp.com | 4 | 3 |
-| 9 | perplexity.ai | 4 | 3 |
-| 10 | aviagames.feishu.cn | 3 | 1 |
+| 7 | DuckDuckGo | 5 | 5 |
+| 8 | Baidu | 4 | 3 |
+| 9 | coworkosapp.com | 4 | 3 |
+| 10 | yandex.ru | 4 | 3 |
 
 ## Top GitHub Paths
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | /CoWork-OS/CoWork-OS | 188 | 136 |
-| 2 | /cowork-os/cowork-os | 112 | 93 |
-| 3 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.61 | 21 | 15 |
+| 1 | /CoWork-OS/CoWork-OS | 201 | 148 |
+| 2 | /cowork-os/cowork-os | 120 | 101 |
+| 3 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.61 | 26 | 19 |
 | 4 | /CoWork-OS/CoWork-OS/issues | 17 | 10 |
-| 5 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.60 | 16 | 12 |
-| 6 | /CoWork-OS/CoWork-OS/discussions | 14 | 6 |
-| 7 | /CoWork-OS/CoWork-OS/blob/69d8569c/docs/project-status.md | 11 | 11 |
-| 8 | /CoWork-OS/CoWork-OS/blob/main/screenshots/macos-install/05-keychain-safe-storage.png | 11 | 3 |
-| 9 | /CoWork-OS/CoWork-OS/blob/69d8569c/README.md | 9 | 9 |
-| 10 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/readme-today.webp | 9 | 8 |
+| 5 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/readme-today.webp | 13 | 10 |
+| 6 | /CoWork-OS/CoWork-OS/blob/main/docs/windows-installation.md | 12 | 6 |
+| 7 | /CoWork-OS/CoWork-OS/discussions | 12 | 6 |
+| 8 | /CoWork-OS/CoWork-OS/blob/69d8569c/docs/project-status.md | 11 | 11 |
+| 9 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.60 | 11 | 10 |
+| 10 | /CoWork-OS/CoWork-OS/releases | 10 | 9 |
 
 ## Data Policy
 

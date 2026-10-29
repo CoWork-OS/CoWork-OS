@@ -4,6 +4,7 @@
  */
 
 import { serviceStatements } from "../database/service-statements";
+import { isResolvedPathInsideRoot } from "../ipc/viewer-path-security";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -78,20 +79,33 @@ export class FileHubService {
   }
 
   private listLocalFiles(options: FileHubListOptions): UnifiedFile[] {
-    const workspacePath = options.path || this.deps.getWorkspacePath("");
+    const workspacePath = this.deps.getWorkspacePath(options.workspaceId || "");
     if (!workspacePath || !fs.existsSync(workspacePath)) return [];
 
+    const target = this.resolveLocalFolder(workspacePath, options.path);
+    if (!target) return [];
+    const { root, realRoot, folder } = target;
+
     try {
-      const entries = fs.readdirSync(workspacePath, { withFileTypes: true });
+      const entries = fs.readdirSync(folder, { withFileTypes: true });
       const files: UnifiedFile[] = [];
 
       for (const entry of entries.slice(0, options.limit || 100)) {
         // Skip hidden files and common noise
         if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 
-        const fullPath = path.join(workspacePath, entry.name);
+        const fullPath = path.join(folder, entry.name);
         try {
+          // A symlink can point outside the workspace; leave it out rather than list
+          // something the viewer and folder navigation would refuse to open.
+          if (
+            entry.isSymbolicLink() &&
+            !isResolvedPathInsideRoot(fs.realpathSync(fullPath), realRoot)
+          ) {
+            continue;
+          }
           const stat = fs.statSync(fullPath);
+          const isDirectory = stat.isDirectory();
           const ext = path.extname(entry.name).toLowerCase();
 
           files.push({
@@ -99,12 +113,13 @@ export class FileHubService {
             name: entry.name,
             path: fullPath,
             source: "local",
-            mimeType: entry.isDirectory()
+            mimeType: isDirectory
               ? "inode/directory"
               : MIME_EXTENSIONS[ext] || "application/octet-stream",
             size: stat.size,
             modifiedAt: stat.mtimeMs,
-            isDirectory: entry.isDirectory(),
+            isDirectory,
+            metadata: { workspacePath: root },
           });
         } catch {
           // Inaccessible file, skip
@@ -114,6 +129,31 @@ export class FileHubService {
       return files.sort((a, b) => b.modifiedAt - a.modifiedAt);
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Picks the folder to list: the workspace root, or a folder the renderer asked for. The
+   * request comes from the renderer, so it is honoured only when it resolves (after
+   * following symlinks) to a directory inside the workspace root; otherwise null.
+   */
+  private resolveLocalFolder(
+    workspacePath: string,
+    requestedPath: string | undefined,
+  ): { root: string; realRoot: string; folder: string } | null {
+    try {
+      const root = path.resolve(workspacePath);
+      const realRoot = fs.realpathSync(root);
+      if (!requestedPath) return { root, realRoot, folder: root };
+
+      const realFolder = fs.realpathSync(path.resolve(root, requestedPath));
+      if (!isResolvedPathInsideRoot(realFolder, realRoot)) return null;
+      if (!fs.statSync(realFolder).isDirectory()) return null;
+      // List under the root as the workspace knows it, so entry paths stay inside it.
+      const relative = path.relative(realRoot, realFolder);
+      return { root, realRoot, folder: relative ? path.join(root, relative) : root };
+    } catch {
+      return null;
     }
   }
 
@@ -133,12 +173,20 @@ export class FileHubService {
 
   // ── Search ──────────────────────────────────────────────────────
 
-  async searchFiles(query: string, sources?: FileHubSource[]): Promise<FileHubSearchResult[]> {
+  async searchFiles(
+    query: string,
+    sources?: FileHubSource[],
+    workspaceId?: string,
+  ): Promise<FileHubSearchResult[]> {
     const results: FileHubSearchResult[] = [];
     const targetSources = sources || ["local", "artifacts"];
 
     for (const source of targetSources) {
-      const files = await this.listFiles({ source: source as FileHubSource, limit: 200 });
+      const files = await this.listFiles({
+        source: source as FileHubSource,
+        limit: 200,
+        workspaceId,
+      });
       const lowerQuery = query.toLowerCase();
 
       for (const file of files) {

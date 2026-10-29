@@ -85,6 +85,194 @@ describe("FileHubService", () => {
     expect(dir!.isDirectory).toBe(true);
   });
 
+  // ── Selected workspace ───────────────────────────────────────
+
+  describe("selected workspace", () => {
+    let otherDir: string;
+
+    beforeEach(() => {
+      otherDir = fs.mkdtempSync(path.join(os.tmpdir(), "filehub-other-"));
+      fs.writeFileSync(path.join(tmpDir, "default.txt"), "default");
+      fs.mkdirSync(path.join(otherDir, "docs"));
+      fs.writeFileSync(path.join(otherDir, "selected.txt"), "selected");
+      fs.writeFileSync(path.join(otherDir, "docs", "report.md"), "# Report");
+    });
+
+    afterEach(() => {
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    });
+
+    // Mirrors the main-process dep: a known id picks its workspace, anything else the default.
+    const depsFor = () =>
+      makeDeps({
+        getWorkspacePath: (workspaceId) => (workspaceId === "ws-other" ? otherDir : tmpDir),
+      });
+
+    it("lists the root of the workspace the id selects", async () => {
+      const service = new FileHubService(depsFor());
+      const files = await service.listFiles({ source: "local", workspaceId: "ws-other" });
+
+      expect(files.map((f) => f.name).sort()).toEqual(["docs", "selected.txt"]);
+      for (const file of files) {
+        expect(file.metadata?.workspacePath).toBe(path.resolve(otherDir));
+      }
+    });
+
+    it("falls back to the default workspace for a missing or unknown id", async () => {
+      const service = new FileHubService(depsFor());
+      for (const workspaceId of [undefined, "", "ws-unknown"]) {
+        const files = await service.listFiles({ source: "local", workspaceId });
+        expect(files.map((f) => f.name)).toEqual(["default.txt"]);
+      }
+    });
+
+    it("checks folder requests against the selected workspace root", async () => {
+      const service = new FileHubService(depsFor());
+
+      const inside = await service.listFiles({
+        source: "local",
+        workspaceId: "ws-other",
+        path: path.join(otherDir, "docs"),
+      });
+      expect(inside.map((f) => f.name)).toEqual(["report.md"]);
+
+      // A folder of another workspace is outside the selected root.
+      expect(
+        await service.listFiles({ source: "local", workspaceId: "ws-other", path: tmpDir }),
+      ).toEqual([]);
+      expect(
+        await service.listFiles({ source: "local", path: path.join(otherDir, "docs") }),
+      ).toEqual([]);
+    });
+
+    it("searches the selected workspace", async () => {
+      const service = new FileHubService(depsFor());
+      const selected = await service.searchFiles("selected", ["local"], "ws-other");
+      expect(selected.map((r) => r.file.name)).toEqual(["selected.txt"]);
+      expect(await service.searchFiles("selected", ["local"])).toEqual([]);
+    });
+  });
+
+  // ── Workspace root + folder navigation ───────────────────────
+
+  describe("folder navigation inside the workspace", () => {
+    let outsideDir: string;
+
+    beforeEach(() => {
+      outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "filehub-outside-"));
+      fs.writeFileSync(path.join(outsideDir, "secret.txt"), "outside");
+    });
+
+    afterEach(() => {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+
+    it("tags every local entry with the workspace root it was listed under", async () => {
+      fs.writeFileSync(path.join(tmpDir, "notes.md"), "# Notes");
+      fs.mkdirSync(path.join(tmpDir, "docs"));
+
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+      const files = await service.listFiles({ source: "local" });
+
+      expect(files).toHaveLength(2);
+      for (const file of files) {
+        expect(file.metadata?.workspacePath).toBe(path.resolve(tmpDir));
+      }
+    });
+
+    it("lists a subfolder by absolute or workspace-relative path", async () => {
+      fs.mkdirSync(path.join(tmpDir, "docs", "drafts"), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, "docs", "plan.md"), "# Plan");
+      fs.writeFileSync(path.join(tmpDir, "top.txt"), "top");
+
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+
+      const absolute = await service.listFiles({
+        source: "local",
+        path: path.join(tmpDir, "docs"),
+      });
+      expect(absolute.map((f) => f.name).sort()).toEqual(["drafts", "plan.md"]);
+      const plan = absolute.find((f) => f.name === "plan.md")!;
+      expect(plan.path).toBe(path.join(path.resolve(tmpDir), "docs", "plan.md"));
+      expect(plan.metadata?.workspacePath).toBe(path.resolve(tmpDir));
+      expect(absolute.find((f) => f.name === "drafts")!.isDirectory).toBe(true);
+
+      const relative = await service.listFiles({ source: "local", path: "docs" });
+      expect(relative.map((f) => f.name).sort()).toEqual(["drafts", "plan.md"]);
+    });
+
+    it("refuses a folder outside the workspace root", async () => {
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+      const files = await service.listFiles({ source: "local", path: outsideDir });
+      expect(files).toEqual([]);
+    });
+
+    it("refuses '..' escapes out of the workspace root", async () => {
+      fs.mkdirSync(path.join(tmpDir, "docs"));
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+
+      expect(await service.listFiles({ source: "local", path: path.join(tmpDir, "..") })).toEqual(
+        [],
+      );
+      expect(
+        await service.listFiles({
+          source: "local",
+          path: `${tmpDir}/docs/../../${path.basename(outsideDir)}`,
+        }),
+      ).toEqual([]);
+      expect(await service.listFiles({ source: "local", path: "../" })).toEqual([]);
+    });
+
+    it("refuses a symlinked folder that points outside, and leaves it out of listings", async () => {
+      fs.writeFileSync(path.join(tmpDir, "inside.txt"), "inside");
+      fs.symlinkSync(outsideDir, path.join(tmpDir, "escape"), "dir");
+      fs.symlinkSync(path.join(outsideDir, "secret.txt"), path.join(tmpDir, "secret-link.txt"));
+
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+
+      const root = await service.listFiles({ source: "local" });
+      expect(root.map((f) => f.name)).toEqual(["inside.txt"]);
+
+      const escaped = await service.listFiles({
+        source: "local",
+        path: path.join(tmpDir, "escape"),
+      });
+      expect(escaped).toEqual([]);
+    });
+
+    it("keeps a symlinked folder that stays inside the workspace navigable", async () => {
+      fs.mkdirSync(path.join(tmpDir, "real"));
+      fs.writeFileSync(path.join(tmpDir, "real", "file.txt"), "hello");
+      fs.symlinkSync(path.join(tmpDir, "real"), path.join(tmpDir, "alias"), "dir");
+
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+
+      const root = await service.listFiles({ source: "local" });
+      const alias = root.find((f) => f.name === "alias");
+      expect(alias?.isDirectory).toBe(true);
+
+      const inside = await service.listFiles({ source: "local", path: alias!.path });
+      expect(inside.map((f) => f.name)).toEqual(["file.txt"]);
+      expect(inside[0].metadata?.workspacePath).toBe(path.resolve(tmpDir));
+    });
+
+    it("lists nothing when the requested path is a file, missing, or there is no workspace", async () => {
+      fs.writeFileSync(path.join(tmpDir, "file.txt"), "hello");
+
+      const service = new FileHubService(makeDeps({ getWorkspacePath: () => tmpDir }));
+      expect(
+        await service.listFiles({ source: "local", path: path.join(tmpDir, "file.txt") }),
+      ).toEqual([]);
+      expect(
+        await service.listFiles({ source: "local", path: path.join(tmpDir, "missing") }),
+      ).toEqual([]);
+
+      // A renderer-supplied path never stands in for a missing workspace root.
+      const noWorkspace = new FileHubService(makeDeps({ getWorkspacePath: () => "" }));
+      expect(await noWorkspace.listFiles({ source: "local", path: tmpDir })).toEqual([]);
+    });
+  });
+
   // ── Artifact listing ──────────────────────────────────────────
 
   it("lists task artifacts", async () => {

@@ -101,16 +101,19 @@ export class BotWorkStore {
           ORDER BY CASE WHEN w.kind IN ('approval', 'input') THEN 0 ELSE 1 END, w.updated_at DESC, w.id DESC LIMIT 1) waiting_reason
       FROM tasks t JOIN owned o ON o.id = t.id
     ), classified AS (
-      SELECT *, CASE
+      SELECT * FROM (SELECT *, CASE
         WHEN status IN ('completed', 'failed', 'cancelled') THEN 'results'
         WHEN waiting_kind IN ('approval', 'input') OR terminal_status IN ('awaiting_approval', 'needs_user_action')
           OR NULLIF(awaiting_user_input_reason_code, '') IS NOT NULL THEN 'needs_you'
         WHEN waiting_kind IN ('child', 'external', 'reconnect') THEN 'working'
         WHEN status IN ('paused', 'interrupted') OR waiting_kind = 'paused' THEN 'needs_you'
+        -- A bot chat is created without starting, so a pending one is waiting for a message, not work.
+        WHEN status = 'pending' AND conversation = 1 THEN NULL
         WHEN status IN ('pending', 'queued') THEN 'scheduled'
         ELSE 'working' END view
       FROM summaries
-      WHERE NOT (conversation = 1 AND status = 'completed' AND COALESCE(result_summary, '') = '')
+      WHERE NOT (conversation = 1 AND status = 'completed' AND COALESCE(result_summary, '') = ''))
+      WHERE view IS NOT NULL
     )`;
     const now = Date.now();
     const args = [...owned.args, now, now];

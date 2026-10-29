@@ -250,6 +250,35 @@ describe("evaluateDomainCompletion", () => {
     expect(result.failed).toBe(false);
   });
 
+  it.each([
+    ["Say hello\nSay hello.", "Hello there."],
+    ["What is 2+2\nWhat is 2+2", "4"],
+    ["Capital\nCapital of France", "Paris."],
+    ["Translate cat\nTranslate 'cat' to French", "Chat."],
+    ["Pick a number\nPick a random number between 1 and 10", "7"],
+  ])("accepts a short reply to the short request %j", (taskIntent, assistantText) => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText,
+      hadAnyToolSuccess: false,
+      taskIntent,
+      stepDescription: taskIntent.split("\n")[1],
+    });
+    expect(result.failed).toBe(false);
+  });
+
+  it("still rejects a too-short reply to a short request that needs substance", () => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText: "Cats are nice.",
+      hadAnyToolSuccess: false,
+      taskIntent: "Cat poem\nWrite a poem about cats",
+    });
+    expect(result.failed).toBe(true);
+  });
+
   it("still rejects a bare acknowledgement to a short question", () => {
     const result = evaluateDomainCompletion({
       domain: "general",

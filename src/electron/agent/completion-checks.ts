@@ -116,6 +116,26 @@ const BRIEF_ANSWER_INTENT_PATTERNS = [
 // A short standalone question ("what is 2+2?") is answered by a short fact.
 const SHORT_FACTUAL_QUESTION_MAX_CHARS = 160;
 
+// A one-line request this short ("Say hello.", "Capital of France", "Translate 'cat'
+// to French") is answered by a short reply even without a question mark, unless it
+// asks for something that needs substance.
+const SHORT_REQUEST_MAX_CHARS = 80;
+const SUBSTANTIAL_OUTPUT_REQUEST_REGEX =
+  /\b(?:write|draft|compose|create|generate|build|implement|fix|research|summari[sz]e|explain|describe|plan|outline|list|analy[sz]e|review|compare|report|essay|article|story|poem|code)\b/i;
+
+function isShortSimpleRequest(intent: string): boolean {
+  // taskIntent is "title\nprompt"; judge the prompt, which the title only abbreviates.
+  const lines = intent
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0 || lines.length > 2) return false;
+  const request = lines[lines.length - 1];
+  return (
+    request.length <= SHORT_REQUEST_MAX_CHARS && !SUBSTANTIAL_OUTPUT_REQUEST_REGEX.test(request)
+  );
+}
+
 function contextRequestsBriefAnswer(input: DomainCompletionInput): boolean {
   const context = `${input.stepDescription || ""}\n${input.taskIntent || ""}`.trim();
   if (!context) return false;
@@ -124,6 +144,7 @@ function contextRequestsBriefAnswer(input: DomainCompletionInput): boolean {
   // question ("what is 2+2?") is answered by a short fact.
   const intent = String(input.taskIntent || "").trim();
   if (!intent || intent.length > SHORT_FACTUAL_QUESTION_MAX_CHARS * 2) return false;
+  if (isShortSimpleRequest(intent)) return true;
   const lines = intent
     .split("\n")
     .map((line) => line.trim())

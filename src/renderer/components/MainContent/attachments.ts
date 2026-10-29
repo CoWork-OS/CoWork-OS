@@ -193,7 +193,9 @@ export const composeMessageWithAttachments = async (
     }
   }
 
-  const base = text.trim() || "Please review the attached files.";
+  // Only attachments need a stand-in request. Commands sent without text (/doctor,
+  // /compact, /undo) carry their own fallback context.
+  const base = text.trim() || (attachments.length > 0 ? "Please review the attached files." : "");
   const attachmentSummaryLines = attachments.map((attachment) => {
     const lines = [`- ${attachment.fileName} (${attachment.relativePath})`];
     const extracted = extractedByPath[attachment.relativePath];

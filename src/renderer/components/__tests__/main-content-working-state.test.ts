@@ -819,6 +819,12 @@ describe("isTaskActivelyWorking", () => {
     expect(result.message).toContain("Untrusted PDF content follows");
   });
 
+  it("adds no attachment stand-in text when nothing is attached", async () => {
+    const result = await composeMessageWithAttachments("/workspace", "", []);
+    expect(result.message).toBe("");
+    expect(result.extractionWarnings).toEqual([]);
+  });
+
   it("classifies generated html outputs as live html previews", () => {
     expect(
       getInlinePreviewKindForGeneratedFile({

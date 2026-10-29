@@ -13,6 +13,7 @@ import {
   isReadOnlyInspectionStep,
   isArtifactPathLikeToken,
   isLikelyCommandSnippet,
+  requestAsksForWorkspaceChange,
 } from "../step-contract";
 
 describe("step-contract path extraction", () => {
@@ -116,6 +117,26 @@ describe("step-contract token classification", () => {
     expect(isArtifactPathLikeToken("scripts/main.js")).toBe(true);
     expect(isArtifactPathLikeToken("index.html")).toBe(true);
     expect(isArtifactPathLikeToken("python3 -m http.server")).toBe(false);
+  });
+});
+
+describe("requestAsksForWorkspaceChange", () => {
+  it.each([
+    "Summarize the README. Keep it short.",
+    "Review index.ts",
+    "Tell me what's in README.md. Don't change anything.",
+  ])("reads %j as a question", (request) => {
+    expect(requestAsksForWorkspaceChange(request)).toBe(false);
+  });
+
+  it.each([
+    "Fix the parser",
+    "Clean up notes.txt",
+    "Translate README.md into French",
+    "Make data.csv sorted by count",
+    "Update the README with install steps",
+  ])("reads %j as a change request", (request) => {
+    expect(requestAsksForWorkspaceChange(request)).toBe(true);
   });
 });
 

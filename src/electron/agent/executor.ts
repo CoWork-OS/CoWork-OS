@@ -638,6 +638,7 @@ import {
   hasArtifactExtensionMention,
   isReadOnlyConstraintOnlyStep,
   isReadOnlyInspectionStep,
+  requestAsksForWorkspaceChange,
   stripNegatedClauses,
   type StepContractEnforcementLevel,
   type StepContractMode,
@@ -26560,6 +26561,19 @@ You are continuing a previous conversation. The context from the previous conver
     const hasReadOnlyIntent = descriptionHasReadOnlyIntent(desc);
     if (hasReadOnlyIntent && !hasWriteVerb) return false;
 
+    // "Explain what README.md covers", "`notes.txt` lists the action items": with
+    // no write verb, files that already exist are the step's inputs. Unless the
+    // request asks for a change, requiring a write here pushed the model to
+    // overwrite the user's file or write a stub over it.
+    if (
+      !hasWriteVerb &&
+      hasConcreteTargetPath &&
+      this.stepNamesOnlyExistingFiles(step) &&
+      !this.taskAsksForWorkspaceChange()
+    ) {
+      return false;
+    }
+
     // Discovery/inspection steps are about finding what exists, not producing artifacts,
     // even if the description mentions file paths or extensions as targets to look for.
     // Exception: if the step also carries concrete write intent and a concrete target path,
@@ -26771,6 +26785,28 @@ You are continuing a previous conversation. The context from the previous conver
       return "artifact_presence_required";
     }
     return "artifact_write_required";
+  }
+
+  /** Every file the step names already exists and is readable in the workspace. */
+  private stepNamesOnlyExistingFiles(step: PlanStep): boolean {
+    const candidates = this.extractStepPathCandidates(step);
+    if (candidates.length === 0 || !this.workspace?.path) return false;
+    return candidates.every((candidate) => {
+      const absolute = path.isAbsolute(candidate)
+        ? candidate
+        : path.resolve(this.workspace.path, candidate);
+      try {
+        return this.canReadWorkspacePath(absolute) && fs.statSync(absolute).isFile();
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /** The request asks for a file or any other change, not only about files. */
+  private taskAsksForWorkspaceChange(): boolean {
+    if (!this.task || this.buildCompletionContract().requiresArtifactEvidence) return true;
+    return requestAsksForWorkspaceChange(`${this.task?.title || ""}\n${this.getContractPrompt()}`);
   }
 
   private stepReferencesExistingArtifact(step: PlanStep): boolean {
@@ -35222,6 +35258,10 @@ Return ONLY a JSON object:
       // Nudges for turns that describe an action without making the tool call.
       let unexecutedActionNudgeCount = 0;
       let intentOnlyNudgeInjected = false;
+      // "A file write is still required" reminders after text-only turns. A model
+      // that answers in text three times will not write on the next nudge either;
+      // without a cap every remaining iteration became another model call.
+      let textOnlyMutationNudgeCount = 0;
       const expectsImageVerification = stepContract.verificationMode === "image_file";
       const imageVerificationSince =
         typeof this.task.createdAt === "number"
@@ -36112,8 +36152,10 @@ Return ONLY a JSON object:
             !responseHasToolUse &&
             !mutationSatisfiedForAssistantText &&
             !priorMutationReuseAfterAssistantText.satisfied &&
-            !assistantAskedQuestion
+            !assistantAskedQuestion &&
+            textOnlyMutationNudgeCount < 3
           ) {
+            textOnlyMutationNudgeCount += 1;
             const preferredTarget = this.getPreferredMutationTargetPath(step, stepContract) || ".";
             const pendingRequiredTools = this.getPendingRequiredMutationTools(
               stepContract,

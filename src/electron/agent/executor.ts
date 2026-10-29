@@ -34484,8 +34484,13 @@ Return ONLY a JSON object:
           hasFailures: true,
         });
 
+        // Recovery steps the runtime added ("Try an alternative toolchain…") restate the
+        // user's steps in planner terms; name the user's own steps when there are any.
+        const userFailedSteps = unrecoveredFailedSteps.filter((s) => s.kind !== "recovery");
+        const listedFailedSteps =
+          userFailedSteps.length > 0 ? userFailedSteps : unrecoveredFailedSteps;
         throw new Error(
-          `Task failed: ${unrecoveredFailedSteps.length} step(s) failed - ${unrecoveredFailedSteps.map((s) => s.description).join("; ")}`,
+          `Task failed: ${listedFailedSteps.length} step(s) failed - ${listedFailedSteps.map((s) => s.description).join("; ")}`,
         );
       }
     }
@@ -36822,7 +36827,9 @@ Return ONLY a JSON object:
                     const runCommandShellHint =
                       content.name === "run_command" && !this.workspace.permissions.shell
                         ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
-                        : undefined;
+                        : content.name === "delete_file" && !this.workspace.permissions.delete
+                          ? "Deleting files is not allowed in this project. Tell the user plainly that the file was not deleted for that reason; do not retry the deletion another way."
+                          : undefined;
                     hasUnavailableToolAttempt = true;
                     const unavailableToolRepeated =
                       unavailableToolsAttempted.has(canonicalContentName);
@@ -43639,7 +43646,9 @@ Return ONLY a JSON object:
                     const runCommandShellHint =
                       content.name === "run_command" && !this.workspace.permissions.shell
                         ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
-                        : undefined;
+                        : content.name === "delete_file" && !this.workspace.permissions.delete
+                          ? "Deleting files is not allowed in this project. Tell the user plainly that the file was not deleted for that reason; do not retry the deletion another way."
+                          : undefined;
                     hasUnavailableToolAttempt = true;
                     if (isExecutionToolCall) {
                       lastExecutionToolError =

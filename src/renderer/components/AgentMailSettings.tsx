@@ -10,16 +10,21 @@ import type {
   AgentMailWorkspaceBinding,
   Workspace,
 } from "../../shared/types";
+import { formatCount } from "../utils/plural";
+import {
+  agentMailApiKeyConfigured,
+  agentMailErrorMessage,
+  loadAgentMailInboxApiKeys,
+  loadAgentMailListEntries,
+  loadAgentMailPods,
+} from "./agentmail-settings-model";
+import "./agentmail-settings.css";
 
 const DEFAULT_TIMEOUT_MS = 20000;
 
 function formatTimestamp(value?: number): string {
   if (!value) return "Never";
   return new Date(value).toLocaleString();
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function AgentMailSettings() {
@@ -76,25 +81,36 @@ export function AgentMailSettings() {
     void loadWorkspace(selectedWorkspaceId);
   }, [selectedWorkspaceId]);
 
+  // Lists, inbox keys and pods come from the AgentMail API, so they wait for a saved
+  // org API key instead of failing with "API key is not configured" on first open.
+  const apiKeyConfigured = agentMailApiKeyConfigured(status);
+
   useEffect(() => {
-    if (!selectedWorkspaceId) return;
+    if (!selectedWorkspaceId || !apiKeyConfigured) {
+      setListEntries([]);
+      setApiKeys([]);
+      return;
+    }
     void loadLists(selectedWorkspaceId, selectedInboxId || undefined);
     if (selectedInboxId) {
       void loadApiKeys(selectedWorkspaceId, selectedInboxId);
     } else {
       setApiKeys([]);
     }
-  }, [selectedWorkspaceId, selectedInboxId]);
+  }, [selectedWorkspaceId, selectedInboxId, apiKeyConfigured]);
 
   const loadBootstrap = async () => {
     setError(null);
     try {
-      const [loadedSettings, loadedStatus, loadedPods, loadedWorkspaces] = await Promise.all([
+      const [loadedSettings, loadedStatus, loadedWorkspaces] = await Promise.all([
         window.electronAPI.getAgentMailSettings(),
         window.electronAPI.getAgentMailStatus(),
-        window.electronAPI.listAgentMailPods().catch(() => []),
         window.electronAPI.listWorkspaces(),
       ]);
+      const loadedPods = await loadAgentMailPods(
+        window.electronAPI,
+        agentMailApiKeyConfigured(loadedStatus),
+      );
       setSettings(loadedSettings);
       setStatus(loadedStatus);
       setPods(loadedPods);
@@ -103,7 +119,7 @@ export function AgentMailSettings() {
       const preferredWorkspaceId = stableWorkspaces[0]?.id || "";
       setSelectedWorkspaceId((current) => current || preferredWorkspaceId);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(agentMailErrorMessage(err));
     }
   };
 
@@ -125,25 +141,31 @@ export function AgentMailSettings() {
           : loadedInboxes[0]?.inboxId || "",
       );
     } catch (err) {
-      setError(errorMessage(err));
+      setError(agentMailErrorMessage(err));
     }
   };
 
   const loadLists = async (workspaceId: string, inboxId?: string) => {
     try {
-      const entries = await window.electronAPI.listAgentMailListEntries({ workspaceId, inboxId });
+      const entries = await loadAgentMailListEntries(window.electronAPI, apiKeyConfigured, {
+        workspaceId,
+        inboxId,
+      });
       setListEntries(entries);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(agentMailErrorMessage(err));
     }
   };
 
   const loadApiKeys = async (workspaceId: string, inboxId: string) => {
     try {
-      const keys = await window.electronAPI.listAgentMailInboxApiKeys({ workspaceId, inboxId });
+      const keys = await loadAgentMailInboxApiKeys(window.electronAPI, apiKeyConfigured, {
+        workspaceId,
+        inboxId,
+      });
       setApiKeys(keys);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(agentMailErrorMessage(err));
     }
   };
 
@@ -153,7 +175,7 @@ export function AgentMailSettings() {
     try {
       await task();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(agentMailErrorMessage(err));
     } finally {
       setBusy(null);
     }
@@ -351,8 +373,8 @@ export function AgentMailSettings() {
     <div className="agentmail-settings">
       <div className="settings-section">
         <div className="settings-section-header">
-          <h3>AgentMail</h3>
-          <div className="settings-actions">
+          <h3>Connect AgentMail</h3>
+          <div className="agentmail-header-actions">
             <button
               className="btn-secondary btn-sm"
               onClick={testConnection}
@@ -369,68 +391,95 @@ export function AgentMailSettings() {
           Native AgentMail support for workspace pods, inbox provisioning, domains, lists,
           inbox-scoped API keys, REST sync, and realtime event streaming.
         </p>
-        {error && <p className="settings-hint">Error: {error}</p>}
-        {testResult && (
-          <p className="settings-hint">
-            {testResult.success
-              ? `Connected. ${testResult.podCount || 0} pod(s), ${testResult.inboxCount || 0} inbox(es).`
-              : `Connection failed: ${testResult.error || "Unknown error"}`}
+        {error && (
+          <p className="agentmail-message agentmail-message-error" role="alert">
+            {error}
           </p>
         )}
+        {!apiKeyConfigured && (
+          <p className="agentmail-message">
+            Add your org API key and save to load pods, lists, and inbox keys.
+          </p>
+        )}
+        {testResult && (
+          <div className={`test-result ${testResult.success ? "success" : "error"}`}>
+            <span>
+              {testResult.success
+                ? `Connected. ${formatCount(testResult.podCount || 0, "pod")}, ${formatCount(
+                    testResult.inboxCount || 0,
+                    "inbox",
+                    "inboxes",
+                  )}.`
+                : `Connection failed: ${testResult.error || "Unknown error"}`}
+            </span>
+          </div>
+        )}
         {createdApiKey && (
-          <p className="settings-hint">
+          <p className="agentmail-message">
             New inbox key: <code>{createdApiKey}</code> (shown once only)
           </p>
         )}
-        <div className="settings-grid">
-          <div className="setting-item">
-            <label>Enable AgentMail</label>
+        <div className="agentmail-toggles">
+          <label className="agentmail-toggle-row">
+            <span>Enable AgentMail</span>
+            <span className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={settings.enabled}
+                onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })}
+              />
+              <span className="toggle-slider" />
+            </span>
+          </label>
+          <label className="agentmail-toggle-row">
+            <span>Enable realtime WebSocket sync</span>
+            <span className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.realtimeEnabled)}
+                onChange={(event) =>
+                  setSettings({ ...settings, realtimeEnabled: event.target.checked })
+                }
+              />
+              <span className="toggle-slider" />
+            </span>
+          </label>
+        </div>
+        <div className="settings-form-grid two-columns agentmail-fields">
+          <label className="settings-field agentmail-field-full">
+            <span>Org API key</span>
             <input
-              type="checkbox"
-              checked={settings.enabled}
-              onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })}
-            />
-          </div>
-          <div className="setting-item">
-            <label>Enable realtime WebSocket sync</label>
-            <input
-              type="checkbox"
-              checked={Boolean(settings.realtimeEnabled)}
-              onChange={(event) =>
-                setSettings({ ...settings, realtimeEnabled: event.target.checked })
-              }
-            />
-          </div>
-          <div className="setting-item">
-            <label>Org API Key</label>
-            <input
+              className="settings-input"
               type="password"
               value={settings.apiKey || ""}
               onChange={(event) => setSettings({ ...settings, apiKey: event.target.value })}
               placeholder="am_..."
             />
-          </div>
-          <div className="setting-item">
-            <label>Base URL</label>
+          </label>
+          <label className="settings-field">
+            <span>Base URL</span>
             <input
+              className="settings-input"
               type="text"
               value={settings.baseUrl || ""}
               onChange={(event) => setSettings({ ...settings, baseUrl: event.target.value })}
               placeholder="https://api.agentmail.to/v0"
             />
-          </div>
-          <div className="setting-item">
-            <label>WebSocket URL</label>
+          </label>
+          <label className="settings-field">
+            <span>WebSocket URL</span>
             <input
+              className="settings-input"
               type="text"
               value={settings.websocketUrl || ""}
               onChange={(event) => setSettings({ ...settings, websocketUrl: event.target.value })}
               placeholder="wss://api.agentmail.to/v0/websocket"
             />
-          </div>
-          <div className="setting-item">
-            <label>Timeout (ms)</label>
+          </label>
+          <label className="settings-field">
+            <span>Timeout (ms)</span>
             <input
+              className="settings-input"
               type="number"
               value={settings.timeoutMs || DEFAULT_TIMEOUT_MS}
               onChange={(event) =>
@@ -440,18 +489,18 @@ export function AgentMailSettings() {
                 })
               }
             />
-          </div>
+          </label>
         </div>
-        <div className="settings-hint">
+        <p className="agentmail-status-line">
           Status: {status?.connected ? "Connected" : "Not connected"} · Realtime:{" "}
           {status?.connectionState || "disconnected"} · Last event:{" "}
           {formatTimestamp(status?.lastEventAt)}
-        </div>
+        </p>
       </div>
 
       <div className="settings-section">
         <div className="settings-section-header">
-          <h3>Workspace Pod Binding</h3>
+          <h3>Workspace pod</h3>
           <button
             className="btn-secondary btn-sm"
             onClick={refreshWorkspace}
@@ -460,10 +509,11 @@ export function AgentMailSettings() {
             {busy === "refresh-workspace" ? "Refreshing..." : "Refresh Workspace"}
           </button>
         </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <label>Workspace</label>
+        <div className="settings-form-grid two-columns agentmail-fields">
+          <label className="settings-field">
+            <span>Workspace</span>
             <select
+              className="settings-select"
               value={selectedWorkspaceId}
               onChange={(event) => setSelectedWorkspaceId(event.target.value)}
             >
@@ -473,36 +523,40 @@ export function AgentMailSettings() {
                 </option>
               ))}
             </select>
-          </div>
-          <div className="setting-item">
-            <label>Bound pod</label>
-            <div>
+          </label>
+          <div className="settings-field">
+            <span>Bound pod</span>
+            <div className={`agentmail-readonly${binding ? "" : " is-empty"}`}>
               {binding ? `${binding.podName || binding.podId} (${binding.podId})` : "Not bound"}
             </div>
           </div>
-          <div className="setting-item">
-            <label>Bind existing pod</label>
+          <label className="settings-field">
+            <span>Bind existing pod</span>
             <select
+              className="settings-select"
               value={workspacePodChoice}
               onChange={(event) => setWorkspacePodChoice(event.target.value)}
             >
-              <option value="">Select pod...</option>
+              <option value="">
+                {apiKeyConfigured ? "Select pod..." : "Add an API key to list pods"}
+              </option>
               {pods.map((pod) => (
                 <option key={pod.podId} value={pod.podId}>
                   {pod.name || pod.podId}
                 </option>
               ))}
             </select>
-          </div>
-          <div className="setting-item">
-            <label>New pod name</label>
+          </label>
+          <label className="settings-field">
+            <span>New pod name</span>
             <input
+              className="settings-input"
               type="text"
               value={workspacePodName}
               onChange={(event) => setWorkspacePodName(event.target.value)}
               placeholder="Acme workspace"
             />
-          </div>
+          </label>
         </div>
         <div className="settings-actions">
           <button
@@ -525,38 +579,41 @@ export function AgentMailSettings() {
       <div className="settings-section">
         <div className="settings-section-header">
           <h3>Inboxes</h3>
-          <div className="settings-hint">
-            Provider badge in Inbox Agent will show `agentmail` for these threads.
-          </div>
         </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <label>Username</label>
+        <p className="settings-description">
+          Inbox Agent shows the <code>agentmail</code> provider badge on threads from these inboxes.
+        </p>
+        <div className="settings-form-grid two-columns agentmail-fields">
+          <label className="settings-field">
+            <span>Username</span>
             <input
+              className="settings-input"
               type="text"
               value={inboxForm.username}
               onChange={(event) => setInboxForm({ ...inboxForm, username: event.target.value })}
               placeholder="support"
             />
-          </div>
-          <div className="setting-item">
-            <label>Domain</label>
+          </label>
+          <label className="settings-field">
+            <span>Domain</span>
             <input
+              className="settings-input"
               type="text"
               value={inboxForm.domain}
               onChange={(event) => setInboxForm({ ...inboxForm, domain: event.target.value })}
               placeholder="example.com"
             />
-          </div>
-          <div className="setting-item">
-            <label>Display name</label>
+          </label>
+          <label className="settings-field">
+            <span>Display name</span>
             <input
+              className="settings-input"
               type="text"
               value={inboxForm.displayName}
               onChange={(event) => setInboxForm({ ...inboxForm, displayName: event.target.value })}
               placeholder="Support"
             />
-          </div>
+          </label>
         </div>
         <div className="settings-actions">
           <button
@@ -567,22 +624,19 @@ export function AgentMailSettings() {
             {busy === "create-inbox" ? "Creating..." : "Create Inbox"}
           </button>
         </div>
-        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+        <div className="agentmail-item-list">
           {inboxes.map((inbox) => (
             <div
               key={inbox.inboxId}
-              className="setting-item"
-              style={{
-                border: "1px solid var(--color-border-subtle)",
-                padding: 12,
-                borderRadius: 10,
-              }}
+              className={`agentmail-item${selectedInboxId === inbox.inboxId ? " is-selected" : ""}`}
             >
-              <div style={{ fontWeight: 600 }}>
-                {inbox.displayName || inbox.email || inbox.inboxId}
+              <div className="agentmail-item-main">
+                <div className="agentmail-item-title">
+                  {inbox.displayName || inbox.email || inbox.inboxId}
+                </div>
+                <div className="agentmail-item-meta">{inbox.inboxId}</div>
               </div>
-              <div className="settings-hint">{inbox.inboxId}</div>
-              <div className="settings-actions">
+              <div className="agentmail-item-actions">
                 <button
                   className="btn-secondary btn-sm"
                   onClick={() => renameInbox(inbox)}
@@ -607,7 +661,7 @@ export function AgentMailSettings() {
             </div>
           ))}
           {inboxes.length === 0 && (
-            <div className="settings-hint">No inboxes yet for this workspace pod.</div>
+            <p className="agentmail-empty">No inboxes yet for this workspace pod.</p>
           )}
         </div>
       </div>
@@ -616,26 +670,30 @@ export function AgentMailSettings() {
         <div className="settings-section-header">
           <h3>Domains</h3>
         </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <label>Domain</label>
+        <div className="settings-form-grid two-columns agentmail-fields">
+          <label className="settings-field">
+            <span>Domain</span>
             <input
+              className="settings-input"
               type="text"
               value={domainForm.domain}
               onChange={(event) => setDomainForm({ ...domainForm, domain: event.target.value })}
               placeholder="example.com"
             />
-          </div>
-          <div className="setting-item">
-            <label>Feedback enabled</label>
-            <input
-              type="checkbox"
-              checked={domainForm.feedbackEnabled}
-              onChange={(event) =>
-                setDomainForm({ ...domainForm, feedbackEnabled: event.target.checked })
-              }
-            />
-          </div>
+          </label>
+          <label className="agentmail-toggle-row agentmail-toggle-inline">
+            <span>Feedback enabled</span>
+            <span className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={domainForm.feedbackEnabled}
+                onChange={(event) =>
+                  setDomainForm({ ...domainForm, feedbackEnabled: event.target.checked })
+                }
+              />
+              <span className="toggle-slider" />
+            </span>
+          </label>
         </div>
         <div className="settings-actions">
           <button
@@ -646,30 +704,26 @@ export function AgentMailSettings() {
             {busy === "create-domain" ? "Creating..." : "Create Domain"}
           </button>
         </div>
-        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+        <div className="agentmail-item-list">
           {domains.map((domain) => (
-            <div
-              key={domain.domainId}
-              className="setting-item"
-              style={{
-                border: "1px solid var(--color-border-subtle)",
-                padding: 12,
-                borderRadius: 10,
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>
-                {domain.domain}{" "}
-                <span className="settings-hint">({domain.status || "unknown"})</span>
-              </div>
-              <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-                {domain.records.map((record, index) => (
-                  <div key={`${domain.domainId}-${index}`} className="settings-hint">
-                    {record.type} {record.name} → {record.value}{" "}
-                    {record.status ? `(${record.status})` : ""}
+            <div key={domain.domainId} className="agentmail-item">
+              <div className="agentmail-item-main">
+                <div className="agentmail-item-title">
+                  {domain.domain}{" "}
+                  <span className="agentmail-item-meta">({domain.status || "unknown"})</span>
+                </div>
+                {domain.records.length > 0 && (
+                  <div className="agentmail-records">
+                    {domain.records.map((record, index) => (
+                      <div key={`${domain.domainId}-${index}`} className="agentmail-item-meta">
+                        {record.type} {record.name} → {record.value}{" "}
+                        {record.status ? `(${record.status})` : ""}
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-              <div className="settings-actions">
+              <div className="agentmail-item-actions">
                 <button
                   className="btn-secondary btn-sm"
                   onClick={() => verifyDomain(domain)}
@@ -687,18 +741,19 @@ export function AgentMailSettings() {
               </div>
             </div>
           ))}
-          {domains.length === 0 && <div className="settings-hint">No custom domains yet.</div>}
+          {domains.length === 0 && <p className="agentmail-empty">No custom domains yet.</p>}
         </div>
       </div>
 
       <div className="settings-section">
         <div className="settings-section-header">
-          <h3>Lists And Inbox Keys</h3>
+          <h3>Lists and inbox keys</h3>
         </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <label>Inbox scope</label>
+        <div className="settings-form-grid two-columns agentmail-fields">
+          <label className="settings-field">
+            <span>Inbox scope</span>
             <select
+              className="settings-select"
               value={selectedInboxId}
               onChange={(event) => setSelectedInboxId(event.target.value)}
             >
@@ -709,10 +764,11 @@ export function AgentMailSettings() {
                 </option>
               ))}
             </select>
-          </div>
-          <div className="setting-item">
-            <label>Direction</label>
+          </label>
+          <label className="settings-field">
+            <span>Direction</span>
             <select
+              className="settings-select"
               value={listForm.direction}
               onChange={(event) =>
                 setListForm({
@@ -721,14 +777,15 @@ export function AgentMailSettings() {
                 })
               }
             >
-              <option value="receive">receive</option>
-              <option value="reply">reply</option>
-              <option value="send">send</option>
+              <option value="receive">Receive</option>
+              <option value="reply">Reply</option>
+              <option value="send">Send</option>
             </select>
-          </div>
-          <div className="setting-item">
-            <label>Type</label>
+          </label>
+          <label className="settings-field">
+            <span>Type</span>
             <select
+              className="settings-select"
               value={listForm.listType}
               onChange={(event) =>
                 setListForm({
@@ -737,53 +794,52 @@ export function AgentMailSettings() {
                 })
               }
             >
-              <option value="allow">allow</option>
-              <option value="block">block</option>
+              <option value="allow">Allow</option>
+              <option value="block">Block</option>
             </select>
-          </div>
-          <div className="setting-item">
-            <label>Entry</label>
+          </label>
+          <label className="settings-field">
+            <span>Entry</span>
             <input
+              className="settings-input"
               type="text"
               value={listForm.entry}
               onChange={(event) => setListForm({ ...listForm, entry: event.target.value })}
               placeholder="vip@example.com or example.com"
             />
-          </div>
-          <div className="setting-item">
-            <label>Reason</label>
+          </label>
+          <label className="settings-field">
+            <span>Reason</span>
             <input
+              className="settings-input"
               type="text"
               value={listForm.reason}
               onChange={(event) => setListForm({ ...listForm, reason: event.target.value })}
               placeholder="Optional"
             />
-          </div>
+          </label>
         </div>
         <div className="settings-actions">
           <button className="btn-primary btn-sm" onClick={createListEntry} disabled={busy !== null}>
             {busy === "create-list-entry" ? "Saving..." : "Add List Entry"}
           </button>
         </div>
-        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <div className="agentmail-item-list">
           {listEntries.map((entry) => (
             <div
               key={`${entry.inboxId || "org"}:${entry.direction}:${entry.listType}:${entry.entry}`}
-              className="setting-item"
-              style={{
-                border: "1px solid var(--color-border-subtle)",
-                padding: 10,
-                borderRadius: 10,
-              }}
+              className="agentmail-item"
             >
-              <div style={{ fontWeight: 600 }}>
-                {entry.entry}{" "}
-                <span className="settings-hint">
-                  ({entry.direction}/{entry.listType})
-                </span>
+              <div className="agentmail-item-main">
+                <div className="agentmail-item-title">
+                  {entry.entry}{" "}
+                  <span className="agentmail-item-meta">
+                    ({entry.direction}/{entry.listType})
+                  </span>
+                </div>
+                {entry.reason && <div className="agentmail-item-meta">{entry.reason}</div>}
               </div>
-              {entry.reason && <div className="settings-hint">{entry.reason}</div>}
-              <div className="settings-actions">
+              <div className="agentmail-item-actions">
                 <button
                   className="btn-secondary btn-sm"
                   onClick={() => deleteListEntry(entry)}
@@ -795,21 +851,26 @@ export function AgentMailSettings() {
             </div>
           ))}
           {listEntries.length === 0 && (
-            <div className="settings-hint">No list entries for this scope.</div>
+            <p className="agentmail-empty">
+              {apiKeyConfigured
+                ? "No list entries for this scope."
+                : "Add your API key to manage allow and block lists."}
+            </p>
           )}
         </div>
 
-        <div style={{ marginTop: 18 }}>
-          <div className="settings-grid">
-            <div className="setting-item">
-              <label>New inbox API key name</label>
+        <div className="agentmail-subsection">
+          <div className="settings-form-grid two-columns agentmail-fields">
+            <label className="settings-field">
+              <span>New inbox API key name</span>
               <input
+                className="settings-input"
                 type="text"
                 value={apiKeyName}
                 onChange={(event) => setApiKeyName(event.target.value)}
                 placeholder="support-agent-key"
               />
-            </div>
+            </label>
           </div>
           <div className="settings-actions">
             <button
@@ -820,22 +881,16 @@ export function AgentMailSettings() {
               {busy === "create-api-key" ? "Creating..." : "Create Inbox API Key"}
             </button>
           </div>
-          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          <div className="agentmail-item-list">
             {apiKeys.map((apiKey) => (
-              <div
-                key={apiKey.apiKeyId}
-                className="setting-item"
-                style={{
-                  border: "1px solid var(--color-border-subtle)",
-                  padding: 10,
-                  borderRadius: 10,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{apiKey.name || apiKey.prefix}</div>
-                <div className="settings-hint">
-                  {apiKey.prefix} · {formatTimestamp(apiKey.createdAt)}
+              <div key={apiKey.apiKeyId} className="agentmail-item">
+                <div className="agentmail-item-main">
+                  <div className="agentmail-item-title">{apiKey.name || apiKey.prefix}</div>
+                  <div className="agentmail-item-meta">
+                    {apiKey.prefix} · {formatTimestamp(apiKey.createdAt)}
+                  </div>
                 </div>
-                <div className="settings-actions">
+                <div className="agentmail-item-actions">
                   <button
                     className="btn-secondary btn-sm"
                     onClick={() => deleteApiKey(apiKey)}
@@ -847,7 +902,11 @@ export function AgentMailSettings() {
               </div>
             ))}
             {selectedInboxId && apiKeys.length === 0 && (
-              <div className="settings-hint">No inbox-scoped API keys for the selected inbox.</div>
+              <p className="agentmail-empty">
+                {apiKeyConfigured
+                  ? "No inbox-scoped API keys for the selected inbox."
+                  : "Add your API key to manage inbox keys."}
+              </p>
             )}
           </div>
         </div>

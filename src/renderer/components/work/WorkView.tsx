@@ -20,6 +20,7 @@ import {
   type WorkRow,
   type WorkStatusFilter,
 } from "../../utils/work-view";
+import { WorkResultMarkdown } from "./WorkResultMarkdown";
 import "./work-view.css";
 
 /** Rows shown per project before "Show all". */
@@ -422,7 +423,7 @@ function WorkDetail({
       {result && (
         <section className="work-view-section">
           <h3>Result</h3>
-          <p className="work-view-result">{result}</p>
+          <WorkResultMarkdown className="work-view-result" text={result} />
         </section>
       )}
 

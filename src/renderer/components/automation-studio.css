@@ -79,6 +79,19 @@
   background: color-mix(in srgb, var(--color-bg-input) 68%, transparent);
 }
 
+/* The main column can be narrow on a wide window (sidebar open), so stack the
+   title and the view tabs by column width, not only by window width. */
+@container (max-width: 700px) {
+  .studio-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-view-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
+
 .studio-view-tabs button {
   border: 0;
   border-radius: 999px;
@@ -352,6 +365,185 @@
   justify-self: end;
 }
 
+/* Library search: a pill field with the scope hint as helper text below. */
+.studio-library-search {
+  display: grid;
+  gap: 6px;
+  padding: 18px 2px 14px;
+}
+
+.studio-library-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 420px);
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--studio-line);
+  border-radius: 999px;
+  background: var(--color-bg-input);
+  color: var(--color-text-muted);
+  cursor: text;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.studio-library-search-field:focus-within {
+  border-color: color-mix(in srgb, var(--studio-accent) 64%, transparent);
+}
+
+.studio-library-search-field svg {
+  flex: none;
+}
+
+.automation-studio .studio-library-search-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.studio-library-search-field input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.studio-library-search > span {
+  padding-left: 15px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+html.visual-calm .studio-library-search-field {
+  border-color: var(--calm-border-strong);
+  background: var(--calm-surface);
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .studio-library-search-field:focus-within {
+  border-color: var(--calm-text-muted);
+}
+
+html.visual-calm .automation-studio .studio-library-search-field input {
+  color: var(--calm-text);
+}
+
+html.visual-calm .studio-library-search > span {
+  color: var(--calm-text-muted);
+}
+
+/* List and detail sit side by side when there is room and stack otherwise, so
+   the list never forces the page wider than the main column. */
+.studio-library-layout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.studio-library-detail {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 18px;
+  border: 1px solid var(--studio-line);
+  border-radius: 12px;
+  background: var(--studio-surface);
+  overflow-wrap: anywhere;
+}
+
+.studio-library-detail > h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.studio-library-detail > p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.studio-library-detail > .studio-empty {
+  min-height: 160px;
+  padding: 8px 4px;
+}
+
+.studio-library-detail dl {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.studio-library-detail dl > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 120px) minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--studio-line);
+}
+
+.studio-library-detail dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.studio-library-detail dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.studio-library-detail code {
+  overflow-wrap: anywhere;
+}
+
+.studio-linked-children {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.studio-linked-children code {
+  color: var(--color-text-secondary);
+}
+
+.studio-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.studio-muted {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.studio-source-warning {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--color-warning);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--color-warning) 9%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .studio-routine-source-details {
   display: grid;
   gap: 12px;
@@ -405,14 +597,19 @@
 }
 
 .studio-flow-list {
+  flex: 999 1 560px;
+  min-width: 0;
   display: grid;
+  align-content: start;
 }
 
 .studio-flow-row {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) 90px 130px 90px;
+  grid-template-columns: auto minmax(0, 1fr) 90px 130px 90px;
   gap: 14px;
   align-items: center;
+  width: 100%;
+  min-width: 0;
   padding: 15px 12px;
   border: 0;
   border-bottom: 1px solid var(--studio-line);
@@ -433,16 +630,63 @@
   font-size: 12px;
 }
 
-.studio-flow-row > div p {
-  margin-top: 3px;
+.studio-flow-row > div {
+  min-width: 0;
 }
 
+.studio-flow-row > div strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-flow-row > div p {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.studio-flow-row.selected {
+  background: var(--color-bg-hover);
+}
+
+/* The label is already sentence case ("No recent run"). */
 .studio-run-state {
+  max-width: 100%;
   width: max-content;
   border: 1px solid var(--studio-line);
   border-radius: 999px;
   padding: 4px 8px;
-  text-transform: capitalize;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Narrow main column (sidebar open on a small window): keep the name and the
+   run state, drop the kind and the time so the row never overflows. */
+@container (max-width: 760px) {
+  .studio-flow-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .studio-flow-row > .studio-kind-label,
+  .studio-flow-row time {
+    display: none;
+  }
+}
+
+@container (max-width: 520px) {
+  .studio-flow-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .studio-flow-row > .studio-run-state {
+    display: none;
+  }
 }
 
 .studio-builder-shell {
@@ -1474,7 +1718,7 @@
   }
 
   .studio-flow-row {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .studio-flow-row > span:not(.studio-status-dot),

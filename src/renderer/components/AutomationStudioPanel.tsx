@@ -32,10 +32,12 @@ import {
   FileIcon,
   MessageIcon,
   PlayIcon,
+  SearchIcon,
   SlidersIcon,
   TrashIcon,
   ZapIcon,
 } from "./LineIcons";
+import { pluralize } from "../utils/plural";
 import "./automation-studio.css";
 
 type StudioView = "discover" | "library" | "builder" | "activity";
@@ -122,6 +124,13 @@ function automationKindLabel(kind: AutomationLibraryItem["kind"]): string {
     event: "Event trigger",
     webhook: "Webhook rule",
   }[kind];
+}
+
+/** Sentence-case label for a Library row's latest run, e.g. "Needs attention". */
+export function libraryRunStateLabel(execution?: string | null): string {
+  const words = (execution || "").replace(/_/g, " ").trim();
+  if (!words) return "No recent run";
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function taskIdFromSavedDeepLink(value: string): string | null {
@@ -1106,11 +1115,11 @@ export default function AutomationStudioPanel({
           <div className="studio-library-summary">
             <div>
               <strong>{libraryItems.length}</strong>
-              <span>automations</span>
+              <span>{pluralize(libraryItems.length, "automation")}</span>
             </div>
             <div>
               <strong>{libraryItems.filter((item) => item.enabled).length}</strong>
-              <span>triggers on</span>
+              <span>with triggers on</span>
             </div>
             <button className="studio-primary" onClick={newBlankWorkflow}>
               New flow
@@ -1130,13 +1139,20 @@ export default function AutomationStudioPanel({
             </div>
           )}
           <div className="studio-library-search">
-            <input
-              value={libraryQuery}
-              onChange={(event) => setLibraryQuery(event.target.value)}
-              placeholder="Find an automation"
-              aria-label="Find an automation"
-            />
-            <span>Prompt Routines, flows, schedules, events, and webhooks</span>
+            <label className="studio-library-search-field">
+              <SearchIcon size={15} />
+              <input
+                type="search"
+                value={libraryQuery}
+                onChange={(event) => setLibraryQuery(event.target.value)}
+                placeholder="Find an automation"
+                aria-label="Find an automation"
+                aria-describedby="studio-library-search-hint"
+              />
+            </label>
+            <span id="studio-library-search-hint">
+              Searches Prompt Routines, flows, schedules, events, and webhooks
+            </span>
           </div>
           {libraryItems.length === 0 ? (
             <StudioEmpty
@@ -1163,7 +1179,7 @@ export default function AutomationStudioPanel({
                       </div>
                       <span className="studio-kind-label">{automationKindLabel(item.kind)}</span>
                       <span className={`studio-run-state state-${recent?.execution || "idle"}`}>
-                        {recent?.execution?.replace(/_/g, " ") || "No recent run"}
+                        {libraryRunStateLabel(recent?.execution)}
                       </span>
                       <time>{item.updatedAt ? formatRelativeTime(item.updatedAt) : ""}</time>
                     </button>

@@ -21,6 +21,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   evidence: "Evidence",
 };
 
+/** The brief metric's class: red attention only while something is actually waiting. */
+export function briefMetricClass(attentionCount: number): string {
+  return attentionCount > 0 ? "mc-v2-brief-metric attention" : "mc-v2-brief-metric";
+}
+
 function itemTone(item: MissionControlItem): string {
   if (item.severity === "failed") return "danger";
   if (item.severity === "action_needed") return "attention";
@@ -305,7 +310,7 @@ export function MCOverviewTab({ data, onOpenAttention }: MCOverviewTabProps) {
         </button>
         {needsYouItems ? (
           <button
-            className="mc-v2-brief-metric attention"
+            className={briefMetricClass(needsYouItems.length)}
             onClick={focusNeedsYou}
             title="Approvals, questions and paused sessions waiting on you in this scope. Today, Bots and the bell count the same decisions."
           >
@@ -313,7 +318,10 @@ export function MCOverviewTab({ data, onOpenAttention }: MCOverviewTabProps) {
             <span>need you</span>
           </button>
         ) : (
-          <button className="mc-v2-brief-metric attention" onClick={() => setActiveTab("feed")}>
+          <button
+            className={briefMetricClass(brief?.attentionCount ?? 0)}
+            onClick={() => setActiveTab("feed")}
+          >
             <strong>{brief?.attentionCount ?? 0}</strong>
             <span>need attention</span>
           </button>

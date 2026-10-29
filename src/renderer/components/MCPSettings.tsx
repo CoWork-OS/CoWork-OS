@@ -7,6 +7,7 @@ import type { MCPLaunchPlanPreview } from "./MCPLaunchPlanReview";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { useAgentContext } from "../hooks/useAgentContext";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
+import { formatCommandArgs, parseCommandArgs } from "../utils/command-args";
 import type { AddToolsSelection } from "./AddToolsPanel";
 import type { RemoteOAuthAuthorizeResult } from "../../shared/types";
 import {
@@ -334,7 +335,7 @@ export function MCPSettings({
 
     try {
       setSaving(true);
-      const args = newServerArgs ? newServerArgs.split(" ").filter((a) => a.trim()) : [];
+      const args = parseCommandArgs(newServerArgs);
       const env: Record<string, string> = {};
 
       if (newServerEnv) {
@@ -658,15 +659,15 @@ export function MCPSettings({
       setEditServerPaths([]);
     }
 
-    // Convert args array to space-separated string (excluding filesystem paths for that server)
+    // Show args as editable text, quoting any with spaces (filesystem paths are edited separately)
     if (isFilesystemServer(config)) {
       // For filesystem server, only show non-path args
       const nonPathArgs = (config.args || []).filter(
         (arg) => !arg.startsWith("/") || arg.includes("server-filesystem"),
       );
-      setEditServerArgs(nonPathArgs.join(" "));
+      setEditServerArgs(formatCommandArgs(nonPathArgs));
     } else {
-      setEditServerArgs(config.args?.join(" ") || "");
+      setEditServerArgs(formatCommandArgs(config.args));
     }
 
     // Convert env object to KEY=VALUE format
@@ -687,8 +688,8 @@ export function MCPSettings({
     try {
       const config = settings?.servers.find((s) => s.id === editingServer);
 
-      // Parse args from space-separated string
-      let args = editServerArgs ? editServerArgs.split(" ").filter((a) => a.trim()) : [];
+      // Parse args; quotes keep an argument with spaces whole
+      let args = parseCommandArgs(editServerArgs);
 
       // For Filesystem server, append the paths to args
       if (isFilesystemServer(config)) {
@@ -1258,14 +1259,17 @@ export function MCPSettings({
                       <p className="settings-hint">The command to start the MCP server</p>
                     </div>
                     <div className="settings-field">
-                      <label>Arguments (space-separated)</label>
+                      <label>Arguments</label>
                       <input
                         type="text"
                         className="settings-input"
-                        placeholder="e.g., /Users/me/Documents"
+                        placeholder={'e.g., "/Users/me/My Documents"'}
                         value={newServerArgs}
                         onChange={(e) => setNewServerArgs(e.target.value)}
                       />
+                      <p className="settings-hint">
+                        Separate arguments with spaces. Put one that contains spaces in quotes.
+                      </p>
                     </div>
                     <div className="settings-field">
                       <label>Environment Variables (KEY=value, one per line)</label>
@@ -2067,8 +2071,8 @@ export function MCPSettings({
                     placeholder="e.g., postgresql://user:pass@localhost/db"
                   />
                   <p className="settings-description">
-                    Space-separated arguments passed to the server command. For PostgreSQL, enter
-                    the database URL here.
+                    Arguments passed to the server command, separated by spaces. Put one that
+                    contains spaces in quotes. For PostgreSQL, enter the database URL here.
                   </p>
                 </div>
               )}

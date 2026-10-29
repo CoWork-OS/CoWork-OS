@@ -16,6 +16,7 @@ import {
   type TeamRoutine,
 } from "../../utils/team-view";
 import { AgentRoleEditorDialog } from "../AgentRoleEditorDialog";
+import { BOT_PROFILE_UPDATED_EVENT } from "../BotProfileDialog";
 import "./team-view.css";
 
 const LOCAL_LABEL = navigator.userAgent.includes("Mac") ? "This Mac" : "This computer";
@@ -213,7 +214,13 @@ export function TeamView({
     setSavingAccess(true);
     setAccessError(null);
     try {
-      await window.electronAPI.updateAgentRole({ id: roleId, accessProfileId: profileId || null });
+      const updated = await window.electronAPI.updateAgentRole({
+        id: roleId,
+        accessProfileId: profileId || null,
+      });
+      // An open bot panel follows the new limit without a reload.
+      if (updated)
+        window.dispatchEvent(new CustomEvent(BOT_PROFILE_UPDATED_EVENT, { detail: updated }));
       await reloadRoles();
     } catch {
       setAccessError("The limit could not be changed. Try again.");

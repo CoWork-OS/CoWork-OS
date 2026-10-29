@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BookOpen, Undo2, X } from "lucide-react";
 import { useBotMemory } from "../hooks/useBotMemory";
 import type { MemoryRepoBotChange } from "../../shared/memory-repo-types";
@@ -26,10 +26,23 @@ function shortDate(at: number): string {
  * The bot's own memory in its details panel: what it saved about its job and the user's
  * wishes for it, with Forget per entry and a history of changes with Undo.
  */
-export function BotMemorySection({ botId, refreshKey }: { botId: string; refreshKey?: unknown }) {
+export function BotMemorySection({
+  botId,
+  refreshKey,
+  onCountChange,
+}: {
+  botId: string;
+  refreshKey?: unknown;
+  /** The number of saved entries whenever it is read, for the panel's summary. */
+  onCountChange?: (count: number) => void;
+}) {
   const { report, loading, error, busy, forget, undo } = useBotMemory(botId, refreshKey);
   const [showAll, setShowAll] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const savedCount = report?.available ? report.entries.length : undefined;
+  useEffect(() => {
+    if (savedCount !== undefined) onCountChange?.(savedCount);
+  }, [savedCount, onCountChange]);
 
   if (!report?.available && !loading) return null;
   const entries = report?.entries ?? [];

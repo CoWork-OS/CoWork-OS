@@ -609,3 +609,109 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- What it can do ---- */
+
+.bot-capability-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bot-capability-row {
+  display: grid;
+  min-width: 0;
+}
+
+.bot-capability-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 4px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-capability-toggle:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.bot-capability-toggle:disabled {
+  cursor: default;
+}
+
+.bot-capability-toggle:focus-visible {
+  outline: 2px solid var(--bot-accent);
+  outline-offset: 1px;
+}
+
+.bot-capability-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+}
+
+.bot-capability-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+
+.bot-capability-label {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bot-capability-summary {
+  overflow-wrap: anywhere;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bot-capability-chevron {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  transition: transform 160ms ease;
+}
+
+.bot-capability-chevron.open {
+  transform: rotate(90deg);
+}
+
+.bot-capability-details {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 6px;
+  padding: 0 4px 0 26px;
+  color: var(--color-text-secondary, var(--color-text-muted));
+  font-size: 11px;
+  line-height: 1.45;
+  list-style: none;
+}
+
+.bot-capability-sublist {
+  display: grid;
+  gap: 2px;
+  margin: 3px 0 0;
+  padding-left: 14px;
+  list-style: disc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-capability-chevron {
+    transition: none;
+  }
+}

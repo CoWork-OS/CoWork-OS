@@ -29,6 +29,7 @@ import {
 import * as net from "net";
 import * as path from "path";
 import {
+  BOT_DESKTOP_LIMITS,
   isValidDesktopGroup,
   isValidDesktopHost,
   normalizeBotDesktopNetwork,
@@ -1082,9 +1083,9 @@ export class BotDesktopManager {
         "--security-opt",
         "no-new-privileges",
         "--memory",
-        "4g",
+        `${BOT_DESKTOP_LIMITS.memoryGb}g`,
         "--cpus",
-        "2",
+        String(BOT_DESKTOP_LIMITS.cpus),
         "--pids-limit",
         "512",
         "--shm-size",

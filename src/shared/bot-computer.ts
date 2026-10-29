@@ -81,6 +81,9 @@ export function normalizeBotDesktopNetwork(value: unknown): BotDesktopNetwork {
   return isBotDesktopNetwork(value) ? value : "internet";
 }
 
+/** Resource limits of a bot's own desktop container; the bot's details panel states them too. */
+export const BOT_DESKTOP_LIMITS = { memoryGb: 4, cpus: 2 } as const;
+
 /** An SSH host alias or user@host from your SSH config: no spaces, no leading dash, no options. */
 export const DESKTOP_HOST_PATTERN = /^(?!-)[A-Za-z0-9._@-]{1,100}$/;
 

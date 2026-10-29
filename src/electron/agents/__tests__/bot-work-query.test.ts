@@ -333,6 +333,28 @@ describe("workspace-scoped bot work query", () => {
     expect(second.nextCursor).toBeUndefined();
   });
 
+  it("does not count a chat waiting for a message as scheduled work", async () => {
+    create({ status: "pending", agentConfig: { botConversation: true } });
+    const queuedChat = create({ status: "queued", agentConfig: { botConversation: true } });
+    const pendingTask = create({ status: "pending" });
+    const page = await service.list(query("scheduled"));
+    expect(page.counts).toEqual({ needs_you: 0, working: 0, scheduled: 2, results: 0 });
+    expect(page.items.map((item) => item.taskId).sort()).toEqual(
+      [queuedChat.id, pendingTask.id].sort(),
+    );
+
+    const askingChat = create({ status: "pending", agentConfig: { botConversation: true } });
+    manager
+      .getDatabase()
+      .prepare(
+        "INSERT INTO approvals (id, task_id, type, description, details, status, requested_at) VALUES (?, ?, 'network', 'Allow?', '{}', 'pending', 1)",
+      )
+      .run(randomUUID(), askingChat.id);
+    expect((await service.list(query("needs_you"))).items).toMatchObject([
+      { taskId: askingChat.id },
+    ]);
+  });
+
   it("lists schedules owned by the bot's responsibility routines", async () => {
     const db = manager.getDatabase();
     db.exec(`CREATE TABLE IF NOT EXISTS automation_routines (

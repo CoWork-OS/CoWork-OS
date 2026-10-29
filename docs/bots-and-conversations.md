@@ -35,7 +35,8 @@ saved workspace. Opening the view does not create a conversation or execute a ta
 - **Working** includes assigned tasks and their delegated descendants, including
   persisted child, external, and reconnect waits. Delegated rows are labeled separately.
 - **Scheduled** includes queued tasks, enabled saved cron jobs directly assigned to the
-  bot in this workspace, and the schedules of its responsibilities. A schedule that
+  bot in this workspace, and the schedules of its responsibilities. A bot chat that is
+  only waiting for your next message is not work and is not counted. A schedule that
   would be skipped because the bot or the responsibility is paused is labeled
   **Paused** instead of showing a next run. **Manage** opens it in Setup. Saved jobs show their recorded next run time. The
   view distinguishes an available scheduler from a disabled or stopped runtime;

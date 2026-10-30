@@ -40,6 +40,17 @@ const FileHubSearchSchema = z.object({
 });
 
 const FileHubRecentLimitSchema = z.number().int().min(1).max(200).optional();
+const FileHubAccessSchema = z.object({
+  id: z.string().min(1).max(4096),
+  name: z.string().min(1).max(512),
+  path: z.string().max(4096),
+  source: FileHubSourceSchema,
+  mimeType: z.string().max(256),
+  size: z.number().finite().nonnegative(),
+  modifiedAt: z.number().finite(),
+  isDirectory: z.literal(false).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
 
 export function setupFileHubHandlers(fileHubService: FileHubService): void {
   ipcMain.handle(IPC_CHANNELS.FILEHUB_LIST, async (_, options: unknown): Promise<UnifiedFile[]> => {
@@ -62,6 +73,12 @@ export function setupFileHubHandlers(fileHubService: FileHubService): void {
   ipcMain.handle(IPC_CHANNELS.FILEHUB_RECENT, async (_, limit: unknown): Promise<UnifiedFile[]> => {
     return fileHubService.getRecentFiles(
       validateInput(FileHubRecentLimitSchema, limit, "file hub recent limit"),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FILEHUB_TRACK_ACCESS, async (_, file: unknown): Promise<void> => {
+    await fileHubService.trackAccess(
+      validateInput(FileHubAccessSchema, file, "file hub accessed file"),
     );
   });
 

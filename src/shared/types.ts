@@ -9689,6 +9689,7 @@ export const IPC_CHANNELS = {
   FILEHUB_LIST: "filehub:list",
   FILEHUB_SEARCH: "filehub:search",
   FILEHUB_RECENT: "filehub:recent",
+  FILEHUB_TRACK_ACCESS: "filehub:track-access",
   FILEHUB_SOURCES: "filehub:sources",
 
   // Web Access

@@ -19,6 +19,7 @@ function setup() {
     listFiles: vi.fn(async () => []),
     searchFiles: vi.fn(async () => []),
     getRecentFiles: vi.fn(async () => []),
+    trackAccess: vi.fn(async () => undefined),
     getAvailableSources: vi.fn(() => ["local", "artifacts"]),
   };
   setupFileHubHandlers(service as unknown as FileHubService);
@@ -100,5 +101,30 @@ describe("file hub IPC handlers", () => {
     await expect(invoke(IPC_CHANNELS.FILEHUB_RECENT, "ten")).rejects.toThrow(
       /Invalid file hub recent limit/,
     );
+  });
+
+  it("records a viewed file and rejects malformed access records", async () => {
+    const { service, invoke } = setup();
+    const file = {
+      id: "local:/workspace/README.md",
+      name: "README.md",
+      path: "/workspace/README.md",
+      source: "local",
+      mimeType: "text/markdown",
+      size: 100,
+      modifiedAt: 1234,
+      metadata: { workspacePath: "/workspace" },
+    };
+
+    await invoke(IPC_CHANNELS.FILEHUB_TRACK_ACCESS, { ...file, injected: true });
+    expect(service.trackAccess).toHaveBeenCalledWith(file);
+
+    await expect(
+      invoke(IPC_CHANNELS.FILEHUB_TRACK_ACCESS, { ...file, source: "invalid" }),
+    ).rejects.toThrow(/Invalid file hub accessed file/);
+    await expect(
+      invoke(IPC_CHANNELS.FILEHUB_TRACK_ACCESS, { ...file, isDirectory: true }),
+    ).rejects.toThrow(/Invalid file hub accessed file/);
+    expect(service.trackAccess).toHaveBeenCalledTimes(1);
   });
 });

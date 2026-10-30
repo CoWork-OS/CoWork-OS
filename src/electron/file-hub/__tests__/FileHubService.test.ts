@@ -369,7 +369,7 @@ describe("FileHubService", () => {
       modifiedAt: Date.now(),
     };
 
-    service.trackAccess(file);
+    await service.trackAccess(file);
     const recent = await service.getRecentFiles(10);
     expect(recent).toHaveLength(1);
     expect(recent[0].name).toBe("test.md");

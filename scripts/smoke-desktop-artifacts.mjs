@@ -450,7 +450,17 @@ async function smokeLaunchMac(executablePath, mockKeychain) {
       COWORK_USER_DATA_DIR: profile,
     },
     stdio: ["ignore", "pipe", "pipe"],
+    // Its own process group, so stopping it also stops the helpers. A renderer helper
+    // outliving a killed main process kept these pipes open, and the smoke never exited.
+    detached: true,
   });
+  const signalApp = (signal) => {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      // The group is already gone.
+    }
+  };
 
   try {
     console.log(`[desktop-smoke] Launching ${executablePath}`);
@@ -470,13 +480,16 @@ async function smokeLaunchMac(executablePath, mockKeychain) {
         }, timeoutMs);
         child.once("exit", onExit);
       });
-    if (child.pid && child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGTERM");
-      if (!(await waitForExit(500))) {
-        child.kill("SIGKILL");
-        await waitForExit(2000);
+    if (child.pid) {
+      if (child.exitCode === null && child.signalCode === null) {
+        signalApp("SIGTERM");
+        await waitForExit(5000);
       }
+      signalApp("SIGKILL");
+      await waitForExit(2000);
     }
+    child.stdout?.destroy();
+    child.stderr?.destroy();
     await fs.rm(profile, { recursive: true, force: true }).catch(() => undefined);
   }
 }

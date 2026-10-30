@@ -49,7 +49,8 @@ export function isCanonicalLocalFileUrl(value: string): boolean {
 export function isLoopbackHttpUrl(value: string): boolean {
   const parsed = parseUrl(value);
   if (!parsed || parsed.protocol !== "http:") return false;
-  if (parsed.username || parsed.password || !parsed.port) return false;
+  // The default port counts too (http://localhost/): it needs the same approval as a dev server.
+  if (parsed.username || parsed.password) return false;
   return (
     parsed.hostname === "localhost" ||
     parsed.hostname === "127.0.0.1" ||

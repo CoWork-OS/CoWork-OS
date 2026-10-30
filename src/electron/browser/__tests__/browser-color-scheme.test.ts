@@ -54,6 +54,7 @@ class Guest extends EventEmitter {
       this.attached = true;
     }),
     sendCommand: vi.fn(async (_method: string, _params: unknown) => ({})),
+    on: vi.fn(),
   };
 
   constructor(id: number) {
@@ -75,11 +76,23 @@ class Guest extends EventEmitter {
 let guests: Guest[];
 
 function createGuest(
-  overrides: { apply?: (scheme: BrowserColorScheme | null) => Promise<void> } = {},
+  overrides: {
+    apply?: (scheme: BrowserColorScheme | null) => Promise<void>;
+    /** The page is a registered workbench tab (the user's own browsing). */
+    registered?: boolean;
+  } = {},
 ) {
   const contents = new Guest(guests.length + 1);
   guests.push(contents);
   const manager = new BrowserSessionManager();
+  if (overrides.registered) {
+    vi.spyOn(manager as Any, "findSessionByWebContentsId").mockReturnValue({
+      taskId: "task",
+      sessionId: "default",
+      tabId: "tab",
+      webContentsId: contents.id,
+    });
+  }
   const apply = vi.fn(
     overrides.apply ??
       ((scheme: BrowserColorScheme | null) => manager.setContentsColorScheme(contents, scheme)),
@@ -231,6 +244,19 @@ describe("browser guest appearance lifecycle", () => {
       expect(first.contents.debugger.sendCommand).toHaveBeenCalledTimes(3);
     },
   );
+
+  it("sends only the emulation command to a workbench tab, never Runtime or other domains", async () => {
+    // Bot checks such as Cloudflare's read Runtime.enable on a page as automation.
+    mocks.stored.set("appearance", appearance("dark"));
+    const { contents } = createGuest({ registered: true });
+    await vi.waitFor(() => expectScheme(contents, "dark"));
+    contents.emit("did-navigate");
+    contents.emit("dom-ready");
+    await vi.waitFor(() => expect(contents.debugger.sendCommand).toHaveBeenCalledTimes(3));
+    const methods = contents.debugger.sendCommand.mock.calls.map(([method]) => method);
+    expect(new Set(methods)).toEqual(new Set(["Emulation.setEmulatedMedia"]));
+    expect(contents.debugger.on).not.toHaveBeenCalled();
+  });
 
   it.each(["light", "dark", "system"] as const)(
     "leaves the global app theme %s unchanged when switching browser appearance",

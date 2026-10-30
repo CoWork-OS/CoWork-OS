@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.62] - Unreleased
+## [0.5.62] - 2026-10-30
 
 See [Release Notes 0.5.62](release-notes-0.5.62.md) for upgrade notes and validation scope.
 
@@ -33,11 +33,13 @@ See [Release Notes 0.5.62](release-notes-0.5.62.md) for upgrade notes and valida
   A **3D gallery** lists recent generations and the models on this machine. Any `.glb` saved into the workspace shows the same card, and the bundled `meshy-3d` skill carries Meshy's workflow rules. See [3D Models with Meshy](meshy-3d.md). (#763, #764)
 
 - **Credit costs on MCP approvals**: a connector whose tools spend credits can declare their prices. Meshy is the first. The approval card then leads with the call's estimated cost and what the task has spent. A call that would pass the per-task limit (200 credits for Meshy), or a tool with no listed price, asks again even under **Always allow**. (#763)
+- **What a bot can do**: a bot's details panel has a **What it can do** card that lists where the bot works, the files it uses on its own, the services it may use, its schedules, what it remembers and what needs your OK. Each row opens to its details. The card is built from the same checks that enforce each limit, so it can't claim more than the bot's tasks are allowed to do. See [What a bot can do](bots-and-conversations.md#what-a-bot-can-do). (#807)
 
 ### Security
 
 - **Only you can change the agent's persona, rules and skills**: the admin-lane tools are offered only when text you typed asks for them, never because agent output, a plan step, an automation, a heartbeat, another agent, page code, an answer button or in-app browser page content mentions them. The admin lane covers persona, quirks, vibes, response style, names, lore, behavioral rules, expertise, heartbeat and integration setup. Your typed text means a task prompt or follow-up from the desktop app, a remote device's view, Web Access or a channel message from the verified owner. The tools no longer stay offered from an earlier turn, and a skill's tool allowlist no longer skips the check. Text from attached files and quoted channel replies never counts, even inside a typed message, and neither does the model-generated task title. Tasks created before this release don't count their original prompt; your next typed message does. See [Agent Self-Modification Gates](security/self-modification-gates.md). (#723, #724, #725, #730, #732)
 - **Skill proposals ask you**: approving a `skill_proposal` shows the exact draft in an approval prompt and saves nothing without a yes, so the agent can no longer approve its own proposal. Writes to `.cowork/skills/**` and workspace skill files (`skills/*.json`) need approval even where ordinary edits are allowed. `add_behavioral_rule` and `set_expertise` are admin-only like the other persona tools. (#723)
+- **Library file access stays in its workspace**: Library opens, reveals and lists files only inside the workspace root they were listed under, and the file hub validates every request from the app window. (#809, #812)
 
 ### Changed
 
@@ -46,6 +48,17 @@ See [Release Notes 0.5.62](release-notes-0.5.62.md) for upgrade notes and valida
 - **OpenAI-compatible video provider replaces Sora**: OpenAI shut down its Videos API and the Sora 2 models on 24 September 2026, so the **OpenAI Sora 2** and **Azure OpenAI Sora 2** video providers are gone and an OpenAI API key no longer counts as a video provider. Settings > AI & Models > Video Model gains an **OpenAI-compatible** provider instead: point it at any service that speaks the OpenAI Videos API (base URL, model name, API key) for text-to-video and image-to-video. Saved Sora settings are ignored; Gemini Veo, Vertex AI Veo, Kling and the local model are unchanged.
 
 - **Waiting decisions no longer lapse after 5 minutes**: an approval card (in a session, on Today or in a chat channel) now stays answerable for 24 hours, and the task waits for you instead of being denied and carrying on without the action. Time spent waiting for your decision no longer counts against a tool's time limit or the task watchdog. A granted approval still has to be used within 5 minutes, unattended runs still deny instead of waiting, and high-impact requests still fail closed if the app restarts before you answer.
+### Fixed
+
+- **Read-only requests stay read-only**: a question that names an existing file, such as "Explain what README.md covers", no longer makes the model write that file; before, the task could fail after more than 100 model calls. "Don't make any changes", "don't touch anything" and similar wording now count as read-only, and reminders to write a required file stop after three. (#810)
+- **Short correct answers complete**: a reply under 20 characters, such as "4" for "What is 2+2", no longer fails the task. Requests that need substance, like a poem, still do. (#810)
+- **Provider errors are visible**: when the model provider returns an error, is unreachable or rate-limits, the session says so and shows the retry count instead of only "Thinking". A task that fails at once shows its reason without being reopened. (#810)
+- **Shortcuts and menus**: ⌘, and ⌘N work again, and so do the menu bar icon's New Task, Settings, About and Workspaces items. Escape closes the connector profile window, the Plugin Store and the memory import wizard. The "/" and "@" composer menus fit the chat column, and the CoWork Pulse prompt no longer covers Send. (#809, #810)
+- **Library**: local files and folders open again, as do Show in Finder and Open with Default App. Search covers every source, file rows work from the keyboard, and Recent lists files you opened, across restarts. (#809, #811, #812)
+- **Calm and the sidebar**: Work, Team, Library and Build scroll in the Calm theme, and **All work** lists every session in the sidebar. (#806)
+- **Bots**: an idle bot chat no longer counts as scheduled work, and reads "Ready for another message" instead of "Working on the latest request". (#808, #810)
+- **Settings and automations**: MCP server arguments that contain spaces survive Save. AI & Models refuses a base URL that isn't an http(s) address. The Automation Builder fits 1200–1280 px windows and keeps an unsaved flow when you leave the page. `/schedule` understands "every weekday at 9am". The Meshy tip no longer reopens with Settings, and AgentMail setup no longer shows a raw error. (#809, #810)
+- **Smaller fixes**: correct plurals, Markdown results on the Work page, short .md and .txt files skip the manuscript review, slash commands sent without text get no stand-in "attached files" context, and confirmations use in-app dialogs. (#809, #810)
 
 ## [0.5.61] - 2026-10-18
 

@@ -1,6 +1,6 @@
 # Release Notes 0.5.62
 
-Release candidate: prepared for validation; not yet published.
+Release `0.5.62`, 2026-10-30.
 
 CoWork 0.5.62 adds opt-in Linux task computers, browser access to the full app,
 and 3D generation with Meshy. It also strengthens bot boundaries, interrupted-task
@@ -36,6 +36,15 @@ since 0.5.61, not only the task-computer feature.
 - **App identity and terminal tabs** — The app uses a refreshed snow leopard icon
   and wordmark. Terminal tabs can show the latest command typed in a zsh session;
   see [Terminal tabs](terminal-tabs.md) for the supported shell integration.
+- **What a bot can do** — A bot's details panel lists where it works, the files
+  and services it may use, its schedules, what it remembers and what needs your
+  OK, built from the same checks that enforce each limit. See [What a bot can
+  do](bots-and-conversations.md#what-a-bot-can-do).
+- **Fixes from four UI sweeps** — Read-only questions no longer push the model to
+  write files, short correct answers complete, provider errors and retries are
+  visible, ⌘, ⌘N and the menu bar items work, Library opens files and searches
+  every source, Calm pages scroll, and an idle bot chat no longer counts as
+  scheduled work. See the [changelog](changelog.md) for the full list.
 
 ## Permissions and security
 

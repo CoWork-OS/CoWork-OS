@@ -319,7 +319,8 @@ describe("Playbook evidence privacy", () => {
       ["read_file"],
     );
     const ledger = JSON.stringify(db.prepare("SELECT * FROM playbook_success_evidence").all());
-    expect(ledger).not.toMatch(/Reconcile|ledger export|4411/);
+    // "account 4411", not bare "4411": the ledger holds random UUIDs, which can contain those digits.
+    expect(ledger).not.toMatch(/Reconcile|ledger export|account 4411/);
     const entry = db.prepare("SELECT request, content, is_private FROM playbook_entries").get() as {
       request: string;
       content: string;

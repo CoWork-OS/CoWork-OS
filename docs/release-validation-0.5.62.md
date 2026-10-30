@@ -14,6 +14,10 @@ without a keyring, secrets upgrade smoke) and #803 (Open desktop restores a
 minimized viewer). [Requalification on main](#requalification-on-main-6ed0bea47)
 repeats the release checks on that revision.
 
+The UI fixes in #806–#812 then merged on top. [Requalification on main
+`303f17551`](#requalification-on-main-303f17551) repeats the checks on the
+release head.
+
 ## Current checks
 
 | Check | Command or surface | Result |
@@ -64,6 +68,25 @@ text claiming a written report, so the fixture now stops at the first failed che
 The external GUI automation tool would not start, so the accepted run used guarded
 native pointer events: each click was refused unless the test app's window was
 topmost at that point, and only that app's windows were captured.
+
+## Requalification on main `303f17551`
+
+Run on 2026-10-30 after #806–#812 merged (131 source files since `6ed0bea47`, no
+schema, lockfile or dependency changes), from a clean worktree of `303f17551`.
+
+| Check | Result |
+| --- | --- |
+| Build and static checks | `npm ci`, setup, `npm run build`, `build:daemon`, `build:cli`, type check, lint, formatting, release surfaces, positioning copy and `git diff --check` passed. |
+| Full suite | `npm run test`: 18,915 Vitest tests passed and one failed, `browser-network-proxy.test.ts`, which needs Playwright's headless Chromium and can't run on this machine (it passes in CI). |
+| Clean npm install | The tarball (SHA-256 `b9226e30606346df4b3b4f33ae91bf0f10df5ff41e879a4762d1c64eb2e72366`) contains the required entrypoints and passed the install, setup, browser-host and installed CLI cold and warm run checks. |
+| macOS artifacts | Ad hoc arm64 DMG/ZIP built from the same worktree with the pinned Numbat runtime (`numbat:verify` passed). Signature and updater names passed; DMG `ec4ec26644025f028f9eaaa324705569e5f297d7cd1c4de0b1fc70f014707862`, ZIP `06740828cc2ce699e976ccfccfe3ad98fef7f0e5374fc01cf35de79ab69646b5`. The first-window check is pending: the launch stopped at a macOS Keychain access prompt for the new ad hoc bundle. |
+| Packaged viewer | Not repeated. Since `6ed0bea47` the task-computer code changed only in #807, which moves the tool-support check and the container limits into shared modules without changing them; its parity tests pass. The packaged result above still applies. |
+| CI | [Run 41034536557](https://github.com/CoWork-OS/CoWork-OS/actions/runs/41034536557) on `5947049a1` (`303f17551` adds only adoption stats): on the first attempt Tests failed `PlaybookService.test.ts` because a random UUID in the ledger contained the digits the test looks for (`4411`). This PR anchors the check to `account 4411`; on rerun, Tests and Tests (macOS) passed. |
+
+The first macOS artifact smoke on this head failed because the fresh worktree
+had no `build/numbat` (gitignored; the release workflow builds it), so the app
+was packaged without the Numbat runtime. It is excluded; the run above packaged
+the verified runtime.
 
 ## Native Keychain startup and recovery
 

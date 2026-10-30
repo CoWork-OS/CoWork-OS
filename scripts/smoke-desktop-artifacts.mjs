@@ -14,6 +14,8 @@ const DEFAULT_RELEASE_DIR = path.join(ROOT, "release");
 const MIN_DMG_BYTES = 50 * 1024 * 1024;
 const MIN_EXE_BYTES = 100 * 1024 * 1024;
 const MAC_LAUNCH_MS = 60_000;
+// No single tool call may outlive this; a hung one would otherwise run to the job timeout.
+const COMMAND_TIMEOUT_MS = 10 * 60_000;
 const WINDOWS_LAUNCH_MS = 20_000;
 const PLATFORM_SUPPORT = JSON.parse(
   readFileSync(path.join(ROOT, "src", "shared", "platform-support.json"), "utf8"),
@@ -115,6 +117,7 @@ function run(command, args, options = {}) {
     encoding: options.encoding ?? "utf8",
     stdio: options.stdio ?? "pipe",
     shell: options.shell ?? process.platform === "win32",
+    timeout: options.timeoutMs ?? COMMAND_TIMEOUT_MS,
   });
 
   if (!options.quiet && result.stdout) process.stdout.write(result.stdout);
@@ -133,6 +136,7 @@ function runStatus(command, args, options = {}) {
     encoding: options.encoding ?? "utf8",
     stdio: "pipe",
     shell: options.shell ?? process.platform === "win32",
+    timeout: options.timeoutMs ?? COMMAND_TIMEOUT_MS,
   });
 
   if (result.error) throw result.error;
@@ -446,10 +450,22 @@ async function smokeLaunchMac(executablePath, mockKeychain) {
       COWORK_USER_DATA_DIR: profile,
     },
     stdio: ["ignore", "pipe", "pipe"],
+    // Its own process group, so stopping it also stops the helpers. A renderer helper
+    // outliving a killed main process kept these pipes open, and the smoke never exited.
+    detached: true,
   });
+  const signalApp = (signal) => {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      // The group is already gone.
+    }
+  };
 
   try {
+    console.log(`[desktop-smoke] Launching ${executablePath}`);
     await waitForFirstWindow(child, MAC_LAUNCH_MS);
+    console.log("[desktop-smoke] First window loaded; stopping the app.");
   } finally {
     const waitForExit = (timeoutMs) =>
       new Promise((resolve) => {
@@ -464,13 +480,16 @@ async function smokeLaunchMac(executablePath, mockKeychain) {
         }, timeoutMs);
         child.once("exit", onExit);
       });
-    if (child.pid && child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGTERM");
-      if (!(await waitForExit(500))) {
-        child.kill("SIGKILL");
-        await waitForExit(2000);
+    if (child.pid) {
+      if (child.exitCode === null && child.signalCode === null) {
+        signalApp("SIGTERM");
+        await waitForExit(5000);
       }
+      signalApp("SIGKILL");
+      await waitForExit(2000);
     }
+    child.stdout?.destroy();
+    child.stderr?.destroy();
     await fs.rm(profile, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -557,6 +576,7 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned, mockKeycha
   } finally {
     if (mounted) {
       try {
+        console.log(`[desktop-smoke] Detaching ${mountPoint}`);
         run("hdiutil", ["detach", mountPoint, "-force"], { shell: false });
       } catch (error) {
         console.warn(`[desktop-smoke] Failed to detach ${mountPoint}: ${error.message}`);
@@ -577,6 +597,7 @@ async function smokeMacInstaller({ releaseDir, zip, expectedVersion }) {
   await fs.access(metadataPath);
   const installRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-mac-install-smoke-"));
   try {
+    console.log(`[desktop-smoke] Installing ${zip.name} with the terminal installer`);
     // /bin/bash is the bash 3.2 that `curl ... | bash` runs on a stock Mac.
     run(
       "/bin/bash",

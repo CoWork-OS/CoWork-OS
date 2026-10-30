@@ -26,6 +26,7 @@ function parseArgs(argv) {
     expectedVersion: undefined,
     skipLaunch: false,
     allowUnsigned: false,
+    mockKeychain: false,
     help: false,
   };
 
@@ -41,6 +42,10 @@ function parseArgs(argv) {
     }
     if (arg === "--allow-unsigned") {
       args.allowUnsigned = true;
+      continue;
+    }
+    if (arg === "--mock-keychain") {
+      args.mockKeychain = true;
       continue;
     }
     if (arg === "--platform" && argv[i + 1]) {
@@ -83,6 +88,8 @@ Options:
   --expected-version=<version>  Expected app/package version. Default: package.json version.
   --skip-launch                 Windows only: install/uninstall without launch hold.
   --allow-unsigned              macOS only: accept a valid ad hoc signed app bundle.
+  --mock-keychain               macOS only: launch with --use-mock-keychain, for hosts where
+                                nobody can answer a Keychain access prompt (CI runners).
   --help                        Show this help.
 `);
 }
@@ -428,9 +435,11 @@ function assertMacCodeSignature(appPath, allowUnsigned) {
   }
 }
 
-async function smokeLaunchMac(executablePath) {
+async function smokeLaunchMac(executablePath, mockKeychain) {
   const profile = await disposableProfile();
-  const child = spawn(executablePath, [], {
+  // A fresh profile creates the secrets data key in the Keychain before the first window.
+  // On a CI runner nobody can answer that access prompt, so the launch would wait forever.
+  const child = spawn(executablePath, mockKeychain ? ["--use-mock-keychain"] : [], {
     env: {
       ...process.env,
       COWORK_DESKTOP_SMOKE: "1",
@@ -466,7 +475,7 @@ async function smokeLaunchMac(executablePath) {
   }
 }
 
-async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
+async function smokeMac({ releaseDir, expectedVersion, allowUnsigned, mockKeychain }) {
   const dmg = await findSingleVersionedFile(
     releaseDir,
     (file) => file.name.endsWith(".dmg") && !file.name.endsWith(".blockmap"),
@@ -543,7 +552,7 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
     );
     await assertNoRetiredHealthBridge(path.join(appPath, "Contents", "Resources"));
     assertMacCodeSignature(appPath, allowUnsigned);
-    await smokeLaunchMac(executablePath);
+    await smokeLaunchMac(executablePath, mockKeychain);
     console.log(`[desktop-smoke] macOS DMG passed: ${dmg.name} (${path.basename(appPath)})`);
   } finally {
     if (mounted) {
@@ -783,6 +792,7 @@ async function main() {
       releaseDir: args.releaseDir,
       expectedVersion,
       allowUnsigned: args.allowUnsigned,
+      mockKeychain: args.mockKeychain,
     });
   } else {
     await smokeWindows({

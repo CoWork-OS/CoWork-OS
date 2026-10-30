@@ -306,7 +306,9 @@ jobs:
           set -euo pipefail
           smoke_args=(-- --expected-version=${{ steps.release_metadata.outputs.npm_version }})
           if [ "${RUNNER_OS}" = "macOS" ]; then
-            smoke_args+=(--allow-unsigned)
+            # Nobody can answer a Keychain access prompt on the runner. Local release
+            # qualification launches the packaged app against the real Keychain.
+            smoke_args+=(--allow-unsigned --mock-keychain)
           fi
           npm run package:desktop:smoke "${smoke_args[@]}"
 

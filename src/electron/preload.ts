@@ -6125,6 +6125,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   searchHubFiles: (query: string, sources?: string[], workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SEARCH, { query, sources, workspaceId }),
   getRecentHubFiles: (limit?: number) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_RECENT, limit),
+  trackHubFileAccess: (file: import("./file-hub/types").UnifiedFile) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_TRACK_ACCESS, file),
   getHubSources: () => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SOURCES),
 
   // Web Access
@@ -6645,6 +6647,7 @@ export interface ElectronAPI {
     workspaceId?: string,
   ) => Promise<import("./file-hub/types").FileHubSearchResult[]>;
   getRecentHubFiles: (limit?: number) => Promise<import("./file-hub/types").UnifiedFile[]>;
+  trackHubFileAccess: (file: import("./file-hub/types").UnifiedFile) => Promise<void>;
   getHubSources: () => Promise<import("./file-hub/types").FileHubSource[]>;
   selectFolder: (defaultPath?: string) => Promise<string | null>;
   selectFiles: (defaultPath?: string) => Promise<

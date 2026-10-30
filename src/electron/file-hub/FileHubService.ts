@@ -234,29 +234,26 @@ export class FileHubService {
       .map((r) => r.file);
   }
 
-  trackAccess(file: UnifiedFile): void {
+  async trackAccess(file: UnifiedFile): Promise<void> {
     const key = `${file.source}:${file.id}`;
     this.recentFiles.set(key, { file, accessedAt: Date.now() });
 
     // Persist to DB
     if (this.db) {
       try {
-        // Recorded without holding up the caller; the in-memory entry is already set.
-        void serviceStatements(this.db)
-          .unit("fileHub_trackRecent", [
-            {
-              key,
-              source: file.source,
-              sourceFileId: file.id,
-              name: file.name,
-              path: file.path,
-              mimeType: file.mimeType,
-              size: file.size,
-              accessedAt: Date.now(),
-              metadataJson: file.metadata ? JSON.stringify(file.metadata) : null,
-            },
-          ])
-          .catch(() => undefined);
+        await serviceStatements(this.db).unit("fileHub_trackRecent", [
+          {
+            key,
+            source: file.source,
+            sourceFileId: file.id,
+            name: file.name,
+            path: file.path,
+            mimeType: file.mimeType,
+            size: file.size,
+            accessedAt: Date.now(),
+            metadataJson: file.metadata ? JSON.stringify(file.metadata) : null,
+          },
+        ]);
       } catch {
         // ignore
       }

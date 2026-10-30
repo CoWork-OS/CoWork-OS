@@ -224,7 +224,9 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
         listedRoot ? [listedRoot, ...workspaceRoots] : workspaceRoots,
       ),
     });
-    setRecentFiles((recent) => [file, ...recent.filter((item) => item.id !== file.id)].slice(0, 10));
+    setRecentFiles((recent) =>
+      [file, ...recent.filter((item) => item.id !== file.id)].slice(0, 10),
+    );
     void (window as Any).electronAPI.trackHubFileAccess(file).catch(() => undefined);
   };
 

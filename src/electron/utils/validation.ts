@@ -1,4 +1,5 @@
 import { ExecutionEnvironmentSelectionSchema } from "../../shared/execution-environment";
+import { TASK_PROPOSAL_LIMITS } from "../../shared/task-proposals";
 /**
  * Input validation schemas for IPC handlers using Zod
  * Provides type-safe validation to prevent malformed input attacks
@@ -637,6 +638,37 @@ export const StepFeedbackSchema = z.object({
   action: z.enum(["retry", "skip", "stop", "drift"]),
   message: z.string().max(MAX_PROMPT_LENGTH).optional(),
 });
+
+/** Suggested tasks (task-proposals.ts): the person's actions on a proposal card. */
+export const TaskProposalListSchema = z.object({ taskId: z.string().uuid() }).strict();
+
+export const TaskProposalActionSchema = z.object({ proposalId: z.string().uuid() }).strict();
+
+export const TaskProposalStartSchema = z
+  .object({
+    proposalId: z.string().uuid(),
+    options: z
+      .object({
+        workspaceId: WorkspaceIdSchema.optional(),
+        worktreeMode: z.enum(["local", "worktree"]).optional(),
+        providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
+        modelKey: z.string().trim().min(1).max(200).optional(),
+        reasoningEffort: z
+          .enum(["none", "low", "medium", "high", "xhigh", "max", "ultra", "extra_high"])
+          .optional(),
+        accessProfileId: AccessProfileIdSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const TaskProposalStartAllSchema = z
+  .object({
+    taskId: z.string().uuid(),
+    proposalIds: z.array(z.string().uuid()).min(1).max(TASK_PROPOSAL_LIMITS.pendingPerTask),
+  })
+  .strict();
 
 export const ForkSessionSchema = z.object({
   taskId: z.string().uuid(),

@@ -156,6 +156,8 @@ const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
   mention_agent: "app",
   orchestrate_agents: "app",
   pause_agent: "app",
+  // Suggested tasks: a card for the person; nothing runs until they start it.
+  propose_task: "app",
   request_protected_credential: "app",
   request_user_input: "app",
   resume_agent: "app",
@@ -176,6 +178,7 @@ const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
   wait: "app",
   wait_for_agent: "app",
   wait_for_event: "app",
+  withdraw_task_proposal: "app",
   // Files, through the workspace file boundary
   analyze_image: "workspace_files",
   batch_image_process: "workspace_files",

@@ -7384,6 +7384,7 @@ describe("TaskExecutor step loop control", () => {
       executor.daemon.getTask = vi.fn(() => executor.task);
       executor.provider = { type: "openai" };
       executor.toolRegistry.setCanvasSessionCutoff = vi.fn();
+      executor.toolRegistry.beginTaskProposalTurn = vi.fn();
       executor.toolCallDeduplicator.reset = vi.fn();
       executor.turnSuccessfulToolUsageCounts = new Map();
       executor.finalizeSuccessfulFollowUp = vi.fn();

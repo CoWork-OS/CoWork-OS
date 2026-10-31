@@ -10,6 +10,7 @@ import {
 import { SCHEDULER_LEASE_SCHEMA } from "../automation/scheduler-lease-store";
 import { ANSWER_SURFACE_STATE_SCHEMA } from "../answer-surfaces/answer-surface-state-sql";
 import { ANSWER_TOOL_DATA_SCHEMA } from "../answer-surfaces/tool-data-sql";
+import { TASK_PROPOSAL_SCHEMA } from "../task-proposals/task-proposal-sql";
 import { DISPATCH_BUDGET_SCHEMA } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
 import path from "path";
@@ -891,6 +892,7 @@ export class DatabaseManager {
       ${SCHEDULER_LEASE_SCHEMA}
       ${ANSWER_SURFACE_STATE_SCHEMA}
       ${ANSWER_TOOL_DATA_SCHEMA}
+      ${TASK_PROPOSAL_SCHEMA}
       ${BOT_RESPONSIBILITY_SCHEMA}
       ${BOT_NOTIFICATION_SCHEMA}
       ${NOTIFICATION_INBOX_SCHEMA}

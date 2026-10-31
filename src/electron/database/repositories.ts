@@ -1,6 +1,7 @@
 import { isAssistantApprovalInputRequest } from "../agent/assistant-approval";
 import { deleteAnswerSurfaceStateForTask } from "../answer-surfaces/answer-surface-state-sql";
 import { deleteAnswerToolDataForTask } from "../answer-surfaces/tool-data-sql";
+import { deleteTaskProposalsForTask } from "../task-proposals/task-proposal-sql";
 import {
   assertApprovalDraftsCurrent,
   captureApprovalDrafts,
@@ -1838,6 +1839,8 @@ export class TaskStore {
       deleteAnswerSurfaceStateForTask(this.db, taskId);
       // Tool results kept as data for this task's answers.
       deleteAnswerToolDataForTask(this.db, taskId);
+      // Tasks this task's agent proposed (suggested tasks).
+      deleteTaskProposalsForTask(this.db, taskId);
 
       // Delete hook_sessions (task_id NOT NULL)
       const deleteHookSessions = this.db.prepare("DELETE FROM hook_sessions WHERE task_id = ?");

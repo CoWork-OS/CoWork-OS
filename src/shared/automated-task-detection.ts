@@ -17,6 +17,8 @@ export function isAutomatedTaskLike(task: Task | null | undefined): boolean {
   if (!task) return false;
   if (task.source === "managed_agent_panel") return false;
   if (task.source === "manual") return false;
+  // The person started it from a suggestion card, like a task they typed.
+  if (task.source === "suggested_task") return false;
   if (
     task.source === "cron" ||
     task.source === "improvement" ||

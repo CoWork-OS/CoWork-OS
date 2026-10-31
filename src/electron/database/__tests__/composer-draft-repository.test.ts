@@ -39,9 +39,14 @@ describe("ComposerDraftStore", () => {
     `);
     const repository = new ComposerDraftStore(db);
 
-    expect(repository.upsertIfNewer(makeDraft(2))).toBe(true);
+    expect(repository.upsertIfNewer(makeDraft(2, { interactionMode: { mode: "chat" } }))).toBe(
+      true,
+    );
     expect(repository.upsertIfNewer(makeDraft(1))).toBe(false);
     expect(repository.get("local:workspace-1:task-1:main")?.text).toBe("draft-2");
+    expect(repository.get("local:workspace-1:task-1:main")?.interactionMode).toEqual({
+      mode: "chat",
+    });
   });
 
   it("clears only the submitted revision", () => {

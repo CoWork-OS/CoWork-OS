@@ -11,6 +11,13 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that PR's run still in progress, so pushes
+# in quick succession don't each run the whole pipeline. Pushes to main and manual
+# runs get a group of their own (the run id), so every main commit is still tested.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   registry-publication-tests:
     name: Registry publication recovery tests
@@ -283,7 +290,9 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: [secret-scan, lint-and-typecheck, test]
+    # Not gated on the test job: tests take ~12 minutes, and waiting for them put the
+    # whole build on the critical path. A red test still fails the run.
+    needs: [secret-scan, lint-and-typecheck]
     env:
       # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
       NODE_OPTIONS: --max-old-space-size=4096
@@ -305,10 +314,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Packaging the installers takes ~10 minutes per OS. Pull requests only compile
+      # (npm run build) unless they touch what packaging depends on; pushes to main
+      # and manual runs always package.
+      - name: Detect packaging changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            packaging:
+              - 'package.json'
+              - 'package-lock.json'
+              - 'build/**'
+              - 'native/**'
+              - 'assets/tray/**'
+              - 'resources/bot-desktop/**'
+              - 'resources/computer-use/**'
+              - 'resources/fonts/**'
+              - 'resources/numbat/**'
+              - 'scripts/run_electron_builder.mjs'
+              - 'scripts/release-artifact-names.mjs'
+              - 'scripts/package-*.mjs'
+              - 'scripts/build_numbat_runtime.mjs'
+              - 'scripts/build_location_helper*.mjs'
+              - 'scripts/copy_location_helpers.mjs'
+              - 'scripts/build-native-session-probe.mjs'
+              - 'scripts/clean-build-output.mjs'
+              - '.github/workflows/ci.yml'
+
+      - name: Decide whether to package
+        id: packaging
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ steps.changes.outputs.packaging }}" = "true" ]; then
+            echo "package=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "package=false" >> "$GITHUB_OUTPUT"
+            echo "No packaging changes in this pull request; compiling without electron-builder."
+          fi
+
+      # npm run package runs the full build itself, so build separately only when not packaging.
       - name: Build application
+        if: steps.packaging.outputs.package != 'true'
         run: npm run build
 
       - name: Prepare package.json for electron-builder
+        if: steps.packaging.outputs.package == 'true'
         shell: bash
         run: |
           node -e "
@@ -326,11 +378,13 @@ jobs:
           "
 
       - name: Package application
+        if: steps.packaging.outputs.package == 'true'
         run: npm run package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
+        if: steps.packaging.outputs.package == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: CoWork-OSS-${{ matrix.os }}

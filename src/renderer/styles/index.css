@@ -2694,11 +2694,6 @@ a,
   display: inline-block;
 }
 
-.cli-session-indicator-active {
-  border-top-color: transparent;
-  animation: spin 0.8s linear infinite;
-}
-
 .cli-session-indicator-awaiting {
   opacity: 0.7;
 }
@@ -4113,6 +4108,38 @@ a,
     #000 calc(100% - var(--sidebar-title-fade-width)),
     transparent 100%
   );
+}
+
+/* A running session shows no spinner: a soft light band sweeps left to right
+   through its title, then the title rests dark for a moment (3s loop). The band
+   rides a fixed 450px tile, so it moves at one speed whatever the title's width.
+   The text fill goes transparent while `color` stays the title's own ink, so
+   currentColor follows every theme and selection state. It keeps moving under
+   reduced motion: like the spinner it replaces, it is the only running cue. */
+.cli-task-item.task-item-running .cli-task-title {
+  background-image: linear-gradient(
+    90deg,
+    currentColor 0,
+    currentColor 250px,
+    color-mix(in srgb, currentColor 25%, transparent) 300px,
+    color-mix(in srgb, currentColor 25%, transparent) 366px,
+    currentColor 450px
+  );
+  background-size: 450px 100%;
+  background-repeat: repeat-x;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sidebar-title-running 3s linear infinite;
+}
+
+@keyframes sidebar-title-running {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 450px;
+  }
 }
 
 .cli-task-title-row {

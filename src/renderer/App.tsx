@@ -863,7 +863,9 @@ type SelectedTaskWorkspaceViewProps = {
   ) => void | boolean | Promise<void | boolean>;
   draftSnapshot: ComposerDraft | null;
   onDraftPatch: (
-    patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
+    patch: Partial<
+      Pick<ComposerDraft, "interactionMode" | "mentions" | "quotedAssistantMessage" | "attachments">
+    >,
   ) => ComposerDraft | void;
   onStageDraftAttachment: (attachment: {
     name: string;
@@ -2714,7 +2716,12 @@ export function App() {
   );
   const handleComposerDraftPatch = useCallback(
     (
-      patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
+      patch: Partial<
+        Pick<
+          ComposerDraft,
+          "interactionMode" | "mentions" | "quotedAssistantMessage" | "attachments"
+        >
+      >,
     ): ComposerDraft | undefined => {
       if (!composerDraftReady) return undefined;
       return composerDraft.update(patch);

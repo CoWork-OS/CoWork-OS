@@ -1,9 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createEmptyComposerDraft } from "../../../shared/composer-drafts";
+import { buildComposerDraftKey, createEmptyComposerDraft } from "../../../shared/composer-drafts";
 import { ComposerDraftStore } from "../composer-draft-store";
 
 describe("ComposerDraftStore", () => {
+  it("restores an unsent work mode with its text and carries it to another folder", async () => {
+    const persisted = new Map<string, ReturnType<typeof createEmptyComposerDraft>>();
+    const transport = {
+      upsert: async (draft: ReturnType<typeof createEmptyComposerDraft>) => {
+        persisted.set(draft.draftKey, draft);
+        return { accepted: true, draft };
+      },
+      get: async ({ draftKey }: { draftKey: string }) => persisted.get(draftKey) ?? null,
+      clear: async () => ({ cleared: true, releasedAttachments: 0 }),
+    };
+    const from = { scope: "local" as const, workspaceId: "scratch", taskId: null };
+    const to = { scope: "local" as const, workspaceId: "project", taskId: null };
+    const store = new ComposerDraftStore({ transport });
+    const draft = store.update(from, {
+      text: "Draft a comparison",
+      interactionMode: { mode: "chat" },
+    });
+    await store.flush(draft.draftKey);
+
+    const restored = new ComposerDraftStore({ transport });
+    expect(await restored.load(from)).toMatchObject({
+      text: "Draft a comparison",
+      interactionMode: { mode: "chat" },
+    });
+    expect(await restored.carry(from, to)).toBe(true);
+    expect(restored.get(buildComposerDraftKey(to))).toMatchObject({
+      text: "Draft a comparison",
+      interactionMode: { mode: "chat" },
+    });
+  });
+
   it("keeps a submitted revision stable across repeated navigation and unmount flushes", async () => {
     let persisted: ReturnType<typeof createEmptyComposerDraft> | null = null;
     const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => {

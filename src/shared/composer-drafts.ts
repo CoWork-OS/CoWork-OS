@@ -1,4 +1,5 @@
 import type { IntegrationMentionSelection, QuotedAssistantMessage } from "./types";
+import type { InteractionModeSelection } from "./interaction-mode";
 
 export const COMPOSER_DRAFT_SCHEMA_VERSION = 1 as const;
 export const COMPOSER_DRAFT_DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -53,6 +54,7 @@ export interface ComposerDraft {
   surface: ComposerDraftSurface;
   remoteDeviceId?: string;
   text: string;
+  interactionMode?: InteractionModeSelection;
   mentions: ComposerDraftMentionSpan[];
   quotedAssistantMessage?: QuotedAssistantMessage;
   attachments: DraftAttachmentRef[];
@@ -280,6 +282,17 @@ export function normalizeComposerDraft(value: unknown): ComposerDraft | null {
       ? { remoteDeviceId: input.remoteDeviceId.trim() }
       : {}),
     text: typeof input.text === "string" ? input.text : "",
+    ...(input.interactionMode?.mode === "chat"
+      ? { interactionMode: { mode: "chat" as const } }
+      : input.interactionMode?.mode === "smart" &&
+          (input.interactionMode.executionOverride === undefined ||
+            input.interactionMode.executionOverride === "plan")
+        ? {
+            interactionMode: input.interactionMode.executionOverride
+              ? { mode: "smart" as const, executionOverride: "plan" as const }
+              : { mode: "smart" as const },
+          }
+        : {}),
     mentions,
     ...(normalizeQuotedAssistantMessage(input.quotedAssistantMessage)
       ? { quotedAssistantMessage: normalizeQuotedAssistantMessage(input.quotedAssistantMessage)! }

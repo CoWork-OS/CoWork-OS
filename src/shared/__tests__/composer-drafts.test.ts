@@ -8,6 +8,25 @@ import {
 } from "../composer-drafts";
 
 describe("composer draft bounds", () => {
+  it("preserves valid work modes and discards invalid mode data", () => {
+    const base = createEmptyComposerDraft({ scope: "local", workspaceId: "workspace" });
+    for (const interactionMode of [
+      { mode: "chat" },
+      { mode: "smart" },
+      { mode: "smart", executionOverride: "plan" },
+    ]) {
+      expect(normalizeComposerDraft({ ...base, interactionMode })?.interactionMode).toEqual(
+        interactionMode,
+      );
+    }
+    expect(
+      normalizeComposerDraft({
+        ...base,
+        interactionMode: { mode: "smart", executionOverride: "unknown" },
+      })?.interactionMode,
+    ).toBeUndefined();
+  });
+
   it("rejects oversized text and malformed attachment metadata", () => {
     const base = createEmptyComposerDraft({ scope: "local", workspaceId: "workspace" });
     expect(

@@ -10021,7 +10021,7 @@ function MainContentComponent({
                     aria-label="Stop task"
                     title="Stop task"
                   >
-                    <Square size={16} aria-hidden="true" />
+                    <span className="stop-btn-glyph" aria-hidden="true" />
                   </button>
                 </div>
               ) : (

@@ -255,7 +255,7 @@ export function resolveTimelineIndicator(
     return { icon: Link2, tone: "neutral", label: "Evidence attached" };
   }
 
-  if (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") {
+  if (effectiveType === "artifact_created") {
     return { icon: FileOutput, tone: "neutral", label: "File created" };
   }
 

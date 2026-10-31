@@ -999,7 +999,7 @@ export function estimateTaskFeedRowHeight(
     return Math.min(420, 120 + Math.ceil(messageLength / 180) * 44);
   }
 
-  if (effectiveType === "artifact_created" || event.type === "timeline_artifact_emitted") {
+  if (effectiveType === "artifact_created") {
     return 42;
   }
 

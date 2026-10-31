@@ -115,6 +115,16 @@ describe("timeline indicators", () => {
     expect(indicator.label).toBe("File created");
   });
 
+  it("does not label a canonical file modification as a creation", () => {
+    const indicator = resolveTimelineIndicator(
+      makeEvent("timeline_artifact_emitted", {
+        legacyType: "file_modified",
+        path: "docs/report.md",
+      }),
+    );
+    expect(indicator.label).toBe("File change");
+  });
+
   it("maps verification failures to Shield warning icon", () => {
     const indicator = resolveTimelineIndicator(makeEvent("verification_failed", { attempt: 1 }));
     expect(indicator.icon).toBe(Shield);

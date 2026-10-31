@@ -4047,7 +4047,7 @@ function MainContentComponent({
       if (effectiveType === "diagram_created") return true;
       // A document, sheet, deck or page artifact opens in the side panel from its title and
       // is listed on the turn's file line, so only other artifacts (images, PDFs, logs) expand.
-      if (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") {
+      if (effectiveType === "artifact_created") {
         const artifactPath = typeof event.payload?.path === "string" ? event.payload.path : "";
         return Boolean(artifactPath) && !getSidePanelViewerKind(artifactPath);
       }

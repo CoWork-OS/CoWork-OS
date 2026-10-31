@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge, GitBranch, Plus } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  LayoutDashboard,
+  AppWindow,
+  Gauge,
+  GitBranch,
+  Monitor,
+  Plus,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import {
   isTempWorkspaceId,
   type AgentConfig,
@@ -114,6 +127,47 @@ const BUILD_STARTERS = [
 
 /** Same cap as the home composer: grow with the text, then scroll. */
 const COMPOSER_MAX_HEIGHT = 200;
+
+/** A native select drawn like the row's other quiet buttons: icon, value, chevron. */
+function BuildSelect({
+  icon: Icon,
+  label,
+  title,
+  value,
+  disabled,
+  onChange,
+  children,
+}: {
+  icon?: LucideIcon;
+  label: string;
+  title?: string;
+  value: string | number;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="calm-build-select" title={title}>
+      {Icon ? <Icon size={14} aria-hidden="true" /> : null}
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {children}
+      </select>
+      <ChevronDown className="calm-build-select-chevron" size={14} aria-hidden="true" />
+    </label>
+  );
+}
+
+function splitPathLines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 /**
  * Build Compare: the same request as `count` worktree builds, all started from the commit the
@@ -353,6 +407,8 @@ export function BuildPanel({
     return () => window.removeEventListener(BUILD_FOCUS_COMPOSER_EVENT, focusComposer);
   }, []);
 
+  const transferInputCount = splitPathLines(computerInputs).length;
+  const transferOutputCount = splitPathLines(computerOutputs).length;
   const computerPolicyIssue = getBuildComputerPolicyIssue(
     computer,
     resolveAccessProfileDefinition(access.profileId, access.customProfiles),
@@ -396,14 +452,8 @@ export function BuildPanel({
                     executionEnvironment: {
                       backend: computer,
                       lifetime: "task" as const,
-                      inputPaths: computerInputs
-                        .split("\n")
-                        .map((value) => value.trim())
-                        .filter(Boolean),
-                      outputPaths: computerOutputs
-                        .split("\n")
-                        .map((value) => value.trim())
-                        .filter(Boolean),
+                      inputPaths: splitPathLines(computerInputs),
+                      outputPaths: splitPathLines(computerOutputs),
                     },
                   }
                 : {}),
@@ -517,8 +567,9 @@ export function BuildPanel({
                 onOpen: () => void loadRecentWorkspaces(),
               }}
             />
-            <label
-              className="calm-build-checkout"
+            <BuildSelect
+              icon={GitBranch}
+              label="Build location"
               title={
                 checkoutMode === "compare"
                   ? "Build the same request in several checkouts and compare them"
@@ -526,55 +577,53 @@ export function BuildPanel({
                     ? "Build in a separate Git checkout"
                     : "Build directly in the selected folder"
               }
+              value={checkoutMode}
+              disabled={submitting}
+              onChange={(next) => setCheckoutMode(next as CheckoutMode)}
             >
-              <GitBranch size={14} aria-hidden="true" />
-              <select
-                aria-label="Build location"
-                value={checkoutMode}
-                disabled={submitting}
-                onChange={(event) => setCheckoutMode(event.target.value as CheckoutMode)}
-              >
-                <option value="local">Local</option>
-                <option value="worktree" disabled={!worktreeAvailable}>
-                  Worktree
-                </option>
-                <option value="compare" disabled={!worktreeAvailable || computer !== "host"}>
-                  Compare
-                </option>
-              </select>
-            </label>
-            <label className="calm-build-checkout">
-              <span>Computer</span>
-              <select
-                aria-label="Task computer"
-                value={computer}
-                disabled={submitting || checkoutMode === "compare"}
-                onChange={(event) => setComputer(event.target.value as typeof computer)}
-              >
-                <option value="host">This computer</option>
-                <option value="bot-desktop">Fresh Linux computer</option>
-                <option value="cua">Fresh Cua Space</option>
-              </select>
-            </label>
+              <option value="local">Local</option>
+              <option value="worktree" disabled={!worktreeAvailable}>
+                Worktree
+              </option>
+              <option value="compare" disabled={!worktreeAvailable || computer !== "host"}>
+                Compare
+              </option>
+            </BuildSelect>
+            <BuildSelect
+              icon={Monitor}
+              label="Task computer"
+              title={
+                checkoutMode === "compare"
+                  ? "Compare builds run on this computer"
+                  : computer === "host"
+                    ? "Computer: build on this computer"
+                    : "Computer: build on a fresh computer that is deleted when the task ends"
+              }
+              value={computer}
+              disabled={submitting || checkoutMode === "compare"}
+              onChange={(next) => setComputer(next as typeof computer)}
+            >
+              <option value="host">This computer</option>
+              <option value="bot-desktop">Fresh Linux computer</option>
+              <option value="cua">Fresh Cua Space</option>
+            </BuildSelect>
             {checkoutMode === "compare" && worktreeAvailable && (
-              <select
-                className="calm-build-branch"
-                aria-label="Number of variants"
+              <BuildSelect
+                label="Number of variants"
                 value={compareCount}
                 disabled={submitting}
-                onChange={(event) => setCompareCount(Number(event.target.value))}
+                onChange={(next) => setCompareCount(Number(next))}
               >
                 <option value={2}>2 variants</option>
                 <option value={3}>3 variants</option>
-              </select>
+              </BuildSelect>
             )}
             {checkoutMode !== "local" && worktreeAvailable && (
-              <select
-                className="calm-build-branch"
-                aria-label="Starting branch"
+              <BuildSelect
+                label="Starting branch"
                 value={startingBranch}
                 disabled={submitting}
-                onChange={(event) => setStartingBranch(event.target.value)}
+                onChange={setStartingBranch}
               >
                 <option value="">
                   Current checkout ({worktreeWorkspace?.currentBranch || "HEAD"})
@@ -584,7 +633,7 @@ export function BuildPanel({
                     {branch}
                   </option>
                 ))}
-              </select>
+              </BuildSelect>
             )}
           </div>
           <BuildAccessPicker
@@ -595,37 +644,55 @@ export function BuildPanel({
             onOpenSettings={onOpenSettings ? () => onOpenSettings("system") : undefined}
             disabled={submitting}
           />
-          <span className="calm-build-hints" aria-hidden="true">
-            <kbd>↵</kbd> to build · <kbd>⇧↵</kbd> new line
-          </span>
         </div>
         {computerPolicyIssue ? (
-          <p className="calm-build-location-help" role="status">
-            {computerPolicyIssue}
+          <p className="calm-build-notice" role="status">
+            <TriangleAlert size={14} aria-hidden="true" />
+            <span>{computerPolicyIssue}</span>
           </p>
         ) : null}
         {computer !== "host" && checkoutMode !== "compare" ? (
           <details className="calm-build-transfers">
-            <summary>Files for this computer</summary>
+            <summary>
+              <ChevronRight className="calm-build-transfers-chevron" size={14} aria-hidden="true" />
+              <span>Files for this computer</span>
+              <span className="calm-build-transfers-count">
+                {transferInputCount || transferOutputCount
+                  ? `${transferInputCount} in · ${transferOutputCount} out`
+                  : "None selected"}
+              </span>
+            </summary>
             <div className="calm-build-transfer-fields">
               <label>
-                Input files (one workspace path per line)
+                <span className="calm-build-transfer-label">Input files</span>
+                <span className="calm-build-transfer-hint">
+                  From this folder, one path per line
+                </span>
                 <textarea
                   value={computerInputs}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder="data/input.csv"
                   onChange={(event) => setComputerInputs(event.target.value)}
                 />
               </label>
               <label>
-                Result files (one guest path per line)
+                <span className="calm-build-transfer-label">Result files</span>
+                <span className="calm-build-transfer-hint">
+                  From its work folder, one path per line
+                </span>
                 <textarea
                   value={computerOutputs}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder="result.csv"
                   onChange={(event) => setComputerOutputs(event.target.value)}
                 />
               </label>
             </div>
-            <p>
-              Only selected files are imported. Results are saved before the fresh computer is
-              deleted. Docker / Podman or Cua Spaces must be installed.
+            <p className="calm-build-transfer-note">
+              Only listed files are copied in. Results are saved before the fresh computer is
+              deleted. Needs Docker, Podman or Cua Spaces.
             </p>
           </details>
         ) : null}
@@ -641,15 +708,20 @@ export function BuildPanel({
             aria-label="Check command for every variant"
           />
         )}
-        <p className="calm-build-location-help" aria-live="polite">
-          {checkoutMode === "compare" && worktreeAvailable
-            ? "Builds the same request in separate checkouts from one commit. Compare them below and merge one."
-            : checkoutMode === "worktree" && worktreeAvailable
-              ? "Starts from committed code in a separate checkout. Local uncommitted changes stay in your folder."
-              : !worktreeAvailable
-                ? worktreeReason
-                : "Local builds edit this folder. Choose Worktree to keep changes isolated."}
-        </p>
+        <div className="calm-build-footnote">
+          <p className="calm-build-location-help" aria-live="polite">
+            {checkoutMode === "compare" && worktreeAvailable
+              ? "Builds the same request in separate checkouts from one commit. Compare them below and merge one."
+              : checkoutMode === "worktree" && worktreeAvailable
+                ? "Starts from committed code in a separate checkout. Local uncommitted changes stay in your folder."
+                : !worktreeAvailable
+                  ? worktreeReason
+                  : "Local builds edit this folder. Choose Worktree to keep changes isolated."}
+          </p>
+          <span className="calm-build-hints" aria-hidden="true">
+            <kbd>↵</kbd> to build · <kbd>⇧↵</kbd> new line
+          </span>
+        </div>
 
         <div className="calm-build-starters">
           {BUILD_STARTERS.map((starter) => {

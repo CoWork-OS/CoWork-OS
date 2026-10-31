@@ -3548,78 +3548,234 @@ html.visual-calm .calm-build-location {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 2px;
   min-width: 0;
 }
 
-html.visual-calm .calm-build-checkout {
+/* Location, computer and branch pickers: native selects drawn like the row's
+   quiet folder and access buttons (icon, value, chevron; tint on hover). */
+html.visual-calm .calm-build-select {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  color: var(--calm-text-secondary);
-}
-
-html.visual-calm .calm-build-checkout select,
-html.visual-calm .calm-build-branch {
+  gap: 6px;
+  min-width: 0;
   max-width: 240px;
-  padding: 4px 6px;
-  border: 1px solid var(--calm-border);
-  border-radius: 7px;
-  background: var(--calm-surface);
+  padding: 4px 8px;
+  border-radius: var(--calm-radius-item);
   color: var(--calm-text-secondary);
-  font: 400 12.5px var(--font-ui);
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-html.visual-calm .calm-build-location-help {
-  width: 100%;
-  margin: 6px 0 0;
-  padding: 0 20px;
+html.visual-calm .calm-build-select:hover:not(:has(select:disabled)) {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-build-select:has(select:focus-visible) {
+  outline: 2px solid var(--calm-accent);
+  outline-offset: 1px;
+}
+
+html.visual-calm .calm-build-select:has(select:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+html.visual-calm .calm-build-select > svg {
+  flex-shrink: 0;
   color: var(--calm-text-muted);
-  font: 400 12px/1.5 var(--font-ui);
+  pointer-events: none;
+}
+
+html.visual-calm .calm-build-select select {
+  appearance: none;
+  field-sizing: content;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: 500 12.5px var(--font-ui);
+  text-overflow: ellipsis;
+  cursor: inherit;
+}
+
+/* The app-wide field font (index.css, specificity 0,4,2) would draw the value in
+   Google Sans; match the row's folder and access buttons instead. */
+html.visual-calm .calm-build-status .calm-build-select > select:not([multiple]):not([size]) {
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+}
+
+html.visual-calm .calm-build-select select option {
+  background: var(--calm-surface);
+  color: var(--calm-text);
+}
+
+/* Blocks Start: reads as a warning, not as help text. */
+html.visual-calm .calm-build-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+  font: 400 12.5px/1.45 var(--font-ui);
+  text-align: left;
+}
+
+html.visual-calm .calm-build-notice > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 html.visual-calm .calm-build-transfers {
   width: 100%;
   margin-top: 10px;
-  padding: 0 20px;
+  border: 1px solid var(--calm-border);
+  border-radius: 12px;
+  background: var(--calm-surface);
   color: var(--calm-text-secondary);
   text-align: left;
-  font: 400 12px/1.5 var(--font-ui);
+  font: 400 12.5px/1.5 var(--font-ui);
 }
 
 html.visual-calm .calm-build-transfers summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: var(--calm-text);
+  font-weight: 500;
+  list-style: none;
   cursor: pointer;
+}
+
+html.visual-calm .calm-build-transfers summary::-webkit-details-marker {
+  display: none;
+}
+
+html.visual-calm .calm-build-transfers summary:focus {
+  outline: none;
+}
+
+html.visual-calm .calm-build-transfers summary:focus-visible {
+  outline: 2px solid var(--calm-accent);
+  outline-offset: -2px;
+}
+
+html.visual-calm .calm-build-transfers summary:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-build-transfers[open] summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+html.visual-calm .calm-build-transfers-chevron {
+  flex-shrink: 0;
+  color: var(--calm-text-muted);
+  transition: transform 0.15s var(--ease-out);
+}
+
+html.visual-calm .calm-build-transfers[open] .calm-build-transfers-chevron {
+  transform: rotate(90deg);
+}
+
+html.visual-calm .calm-build-transfers-count {
+  margin-left: auto;
+  color: var(--calm-text-muted);
+  font: 400 11.5px var(--font-mono);
 }
 
 html.visual-calm .calm-build-transfer-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px;
-  margin-top: 10px;
+  padding: 4px 12px 0;
 }
 
 html.visual-calm .calm-build-transfer-fields label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
+}
+
+html.visual-calm .calm-build-transfer-label {
+  color: var(--calm-text);
+  font-weight: 500;
+}
+
+html.visual-calm .calm-build-transfer-hint {
+  margin-bottom: 4px;
+  color: var(--calm-text-muted);
+  font-size: 12px;
 }
 
 html.visual-calm .calm-build-transfer-fields textarea {
   width: 100%;
-  min-height: 72px;
+  min-height: 64px;
   padding: 8px 10px;
   border: 1px solid var(--calm-border);
-  border-radius: 7px;
+  border-radius: 8px;
+  outline: none;
   resize: vertical;
-  background: var(--calm-surface);
+  background: var(--calm-surface-muted);
   color: var(--calm-text);
-  font: 400 12px/1.5 var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  transition: border-color 0.15s ease;
 }
 
-html.visual-calm .calm-build-transfers p {
-  margin: 8px 0 0;
+html.visual-calm .calm-build-transfer-fields textarea::placeholder {
   color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-build-transfer-fields textarea:focus {
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .calm-build-transfer-note {
+  margin: 0;
+  padding: 10px 12px 12px;
+  color: var(--calm-text-muted);
+  font-size: 12px;
+}
+
+/* Help text on the left, key hints on the right: one quiet line under the row. */
+html.visual-calm .calm-build-footnote {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 0 12px;
+  text-align: left;
+}
+
+html.visual-calm .calm-build-location-help {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 0 0 8px;
+  color: var(--calm-text-muted);
+  font: 400 12px/1.5 var(--font-ui);
+}
+
+html.visual-calm .calm-build-footnote .calm-build-hints {
+  flex-shrink: 0;
+  padding-right: 8px;
 }
 
 html.visual-calm .calm-build-hints kbd {

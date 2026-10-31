@@ -93,6 +93,7 @@ import {
 import { SessionProgressCard } from "./SessionProgressCard";
 import { SessionDashboardCard } from "./SessionDashboardCard";
 import { SessionMembersCard } from "./SessionMembersCard";
+import { ComputerUseLiveCard } from "./ComputerUseLiveCard";
 import {
   getRecoveredSynthesisTaskIds,
   isSynthesisChildTask,
@@ -2637,6 +2638,11 @@ function RightPanelComponent({
           Output created, final verification failed
         </div>
       )}
+
+      {/* Below the other sections, in the panel's free space. */}
+      {task ? (
+        <ComputerUseLiveCard taskId={task.id} agentName={agentContext.agentName || "CoWork"} />
+      ) : null}
 
       {/* Footer note */}
       <div className="cli-panel-footer">

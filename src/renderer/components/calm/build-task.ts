@@ -24,7 +24,7 @@ export function getBuildComputerPolicyIssue(
 ): string | null {
   if (computer === "host") return null;
   return profile.network !== "enabled" || (profile.domainRules?.length ?? 0) > 0
-    ? "Fresh task computers require an access profile with network enabled and no domain rules. Choose a compatible Access profile before starting."
+    ? "Fresh computers need an Access profile with network on and no domain rules. Choose one from the access menu before starting."
     : null;
 }
 

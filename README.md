@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <strong>English</strong> &middot; <a href="README.zh-CN.md">简体中文</a>
+  <strong>English</strong> &middot; <a href="i18n/README.zh-CN.md">简体中文</a>
 </p>
 
 CoWork OS is a free, open-source desktop app for macOS and Windows that does real work for you: files, documents, the browser, your inbox and scheduled jobs. You watch every step as it happens, and with the default **Ask for approval** profile the agent works freely inside your workspace but stops and asks before anything that leaves it: sending, network access, credentials, exports, or files outside the workspace. Use the model you choose; your workspace, memory, skills and history stay on your machine. Model providers may charge for usage and receive the data needed for the tasks you run. [What you own](docs/what-you-own.md)
@@ -141,7 +141,7 @@ Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-r
 | [Security Guide](docs/security-guide.md) | Threat model, guardrails, sandboxing, credential storage |
 | [Self-Hosting](docs/self-hosting.md) | Linux server, Docker and remote access |
 | [Development](docs/development.md) | Build from source and run the tests |
-| [All docs](docs/) · [Changelog](CHANGELOG.md) · [Release Notes 0.5.61](docs/release-notes-0.5.61.md) | |
+| [All docs](docs/) · [Changelog](CHANGELOG.md) · [Release Notes 0.5.62](docs/release-notes-0.5.62.md) | |
 
 ## Community
 
@@ -149,7 +149,7 @@ Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-r
 - **Questions and ideas:** [GitHub Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions)
 - **Bugs and requests:** [Issues](https://github.com/CoWork-OS/CoWork-OS/issues). We reply within a day.
 - **Contribute:** start with a [good first issue](https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Read Chinese?** `README.zh-CN.md` needs a native-speaker review: see [#635](https://github.com/CoWork-OS/CoWork-OS/issues/635).
+- **Read Chinese?** [`i18n/README.zh-CN.md`](i18n/README.zh-CN.md) needs a native-speaker review: see [#635](https://github.com/CoWork-OS/CoWork-OS/issues/635).
 - **Security reports:** [SECURITY.md](SECURITY.md)
 
 <!-- COWORK_PUBLIC_ADOPTION_STATS_START -->

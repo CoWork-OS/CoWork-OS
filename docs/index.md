@@ -156,8 +156,8 @@ hero:
       text: LLM Wiki
       link: /llm-wiki
     - theme: alt
-      text: Release Notes 0.5.61
-      link: /release-notes-0.5.61
+      text: Release Notes 0.5.62
+      link: /release-notes-0.5.62
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3

@@ -369,7 +369,26 @@ resolves the task's effective access profile, and missing policies deny remote
 traffic. Chromium's proxy validates and pins each destination connection,
 including redirects, while preserving native cookies and TLS verification.
 Tabs sharing a persistent cookie partition require every active owner to permit
-the destination. Browser WebSockets are blocked. External CDP attachment is
+the destination. In the visible browser a WebSocket gets the same decision as an
+HTTP(S) request to its host (`ws:` as `http:`, `wss:` as `https:`) and tunnels
+through the same pinning proxy; requests without an owning tab stay refused.
+
+Loopback is reachable from the visible browser only as a local preview: an
+`http://localhost`, `http://127.0.0.1` or `http://[::1]` origin (any port,
+including the default) that the user typed or the agent opened, approved by
+every tab sharing the partition. The proxy enforces this when it connects, so
+other loopback names and addresses (`127.0.0.2`, `app.localhost`, IPv4-mapped
+forms) and public DNS names that resolve to loopback (`lvh.me`, `localtest.me`,
+`127.0.0.1.nip.io`) are refused for pages, sockets and redirects, and DNS
+rebinding cannot turn an approved remote name into a local one. This matters most
+for WebSockets, whose replies CORS does not protect. Use `localhost` or
+`127.0.0.1` for local development; an administrator can re-open a specific name
+with `runtime.network.allowedInternalHosts`. Established tunnels stay open through 10
+minutes of silence, so WebSockets and pooled HTTP/2 sessions are not cut while
+idle.
+
+Page appearance uses only CDP `Emulation`, never `Runtime`, so bot checks do not
+read the user's own browsing as automation. External CDP attachment is
 unavailable because existing sockets can predate interception; use a dedicated
 browser profile. Environment proxies are refused when destination pinning cannot
 be guaranteed.

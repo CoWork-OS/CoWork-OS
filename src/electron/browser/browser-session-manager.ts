@@ -32,6 +32,7 @@ import {
   normalizeWebviewUrl,
 } from "./webview-url-policy";
 import { isAgentIdentityHeader } from "../security/agent-request-identity";
+import { resolvePinnedAddresses } from "../security/pinned-fetch";
 import { agentNavigationIdentity, type AgentNavigationSignature } from "./browser-agent-identity";
 
 export type BrowserBackendKind = "electron-workbench" | "playwright-local" | "external-cdp";
@@ -348,6 +349,15 @@ function loopbackOrigin(rawUrl: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * The URL a request is checked as. A WebSocket goes to the same host and port as its HTTP
+ * counterpart (ws: → http:, wss: → https:), so it gets the same domain and loopback decision;
+ * Chromium tunnels it through the pinning proxy like any HTTPS connection.
+ */
+export function browserRequestPolicyUrl(rawUrl: string): string {
+  return String(rawUrl || "").replace(/^ws(s?):/i, "http$1:");
 }
 
 function getAxValue(value: unknown): string {
@@ -2345,14 +2355,16 @@ export class BrowserSessionManager {
     await this.sendCommand(contents, "Page.enable").catch(() => undefined);
   }
 
-  /** Target-scoped browser appearance; never changes Electron's global nativeTheme. */
+  /**
+   * Target-scoped browser appearance; never changes Electron's global nativeTheme.
+   * Only the Emulation command is sent: enabling Runtime and the other domains on every page
+   * the user opens is visible to bot checks (Cloudflare reads Runtime.enable as automation).
+   */
   async setContentsColorScheme(
     contents: Any,
     colorScheme: BrowserColorScheme | null,
   ): Promise<void> {
-    const session = this.findSessionByWebContentsId(contents.id);
-    if (session) await this.ensureDebugger(session, contents);
-    else await this.ensureDebuggerForContents(contents);
+    await this.ensureDebuggerForContents(contents);
     await this.sendCommand(contents, "Emulation.setEmulatedMedia", {
       features: colorScheme ? [{ name: "prefers-color-scheme", value: colorScheme }] : [],
     });
@@ -2513,15 +2525,29 @@ export class BrowserSessionManager {
     let setup = this.networkProxies.get(electronSession);
     if (!setup) {
       setup = (async () => {
-        const proxy = await createBrowserNetworkProxy((url) => {
-          const owners = Array.from(this.allTabs()).filter(
+        const owners = () =>
+          Array.from(this.allTabs()).filter(
             (candidate) =>
               this.accessGuardHandlers.get(candidate.webContentsId)?.contents.session ===
               electronSession,
           );
-          if (!owners.length || !owners.every((owner) => this.isUrlAllowed(owner, url)))
-            throw new Error("Browser network access denied");
-        });
+        const allOwnersAllow = (url: string) => {
+          const list = owners();
+          return list.length > 0 && list.every((owner) => this.isUrlAllowed(owner, url));
+        };
+        const proxy = await createBrowserNetworkProxy(
+          (url) => {
+            if (!allOwnersAllow(url)) throw new Error("Browser network access denied");
+          },
+          {
+            // Loopback is reachable only as a local preview every owner approved; a DNS name
+            // or another address that leads there is refused when the proxy connects.
+            allowsLoopback: (origin) => {
+              const url = `${origin}/`;
+              return isLoopbackHttpUrl(url) && allOwnersAllow(url);
+            },
+          },
+        );
         try {
           await electronSession.setProxy({
             mode: "fixed_servers",
@@ -2722,11 +2748,21 @@ export class BrowserSessionManager {
           typeof details.webContentsId === "number"
             ? this.findSessionByWebContentsId(details.webContentsId)
             : null;
-        if (
-          matchingSession &&
-          !/^wss?:/.test(details.url) &&
-          this.isUrlAllowed(matchingSession, details.url)
-        ) {
+        // A WebSocket needs the same policy approval as the page's HTTP requests.
+        const policyUrl = browserRequestPolicyUrl(details.url);
+        if (matchingSession && this.isUrlAllowed(matchingSession, policyUrl)) {
+          if (/^wss?:/i.test(details.url) && !isLoopbackHttpUrl(policyUrl)) {
+            // Sockets have no CORS, so a page may read what a local service answers. Loopback is
+            // open only to the local previews the user approved (accepted above); any other name
+            // or address that leads there, a DNS name pointing at 127.0.0.1 included, is refused.
+            void resolvePinnedAddresses(policyUrl, AbortSignal.timeout(5_000), {
+              allowLoopback: false,
+            }).then(
+              () => callback({}),
+              () => callback({ cancel: true }),
+            );
+            return;
+          }
           callback({});
           return;
         }

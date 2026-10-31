@@ -22,7 +22,10 @@ describe("webview URL policy", () => {
     expect(isLoopbackHttpUrl("http://127.0.0.1:4173")).toBe(true);
     expect(isLoopbackHttpUrl("http://[::1]:4173/preview")).toBe(true);
     expect(isLoopbackHttpUrl("http://localhost:4173")).toBe(true);
-    expect(isLoopbackHttpUrl("http://127.0.0.1/preview")).toBe(false);
+    // The default port needs the same approval as a dev server port.
+    expect(isLoopbackHttpUrl("http://127.0.0.1/preview")).toBe(true);
+    expect(isLoopbackHttpUrl("http://localhost/")).toBe(true);
+    expect(isLoopbackHttpUrl("http://127.0.0.2:4173")).toBe(false);
     expect(isLoopbackHttpUrl("http://127.0.0.1:4173@evil.example")).toBe(false);
     expect(isLoopbackHttpUrl("https://127.0.0.1:4173")).toBe(false);
   });

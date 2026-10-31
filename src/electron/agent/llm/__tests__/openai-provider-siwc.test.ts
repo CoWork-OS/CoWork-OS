@@ -297,7 +297,7 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
     }
   });
 
-  it("lists the plan catalog plus known-working unlisted models", async () => {
+  it("lists the plan catalog plus additional model choices", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -314,7 +314,12 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       const models = await new OpenAIProvider(makeConfig()).getAvailableModels();
-      expect(models.map((model) => model.id)).toEqual(["gpt-6-astra", "gpt-6.1-sol", "gpt-5.5"]);
+      expect(models.map((model) => model.id)).toEqual([
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "gpt-5.5",
+      ]);
       expect(models[1].description).toContain("not in OpenAI's list");
     } finally {
       vi.unstubAllGlobals();

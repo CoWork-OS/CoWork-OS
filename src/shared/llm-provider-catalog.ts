@@ -53,6 +53,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     defaultModel: "gpt-5.5",
     knownModels: [
       "gpt-6-astra",
+      "gpt-6.1-terra",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",

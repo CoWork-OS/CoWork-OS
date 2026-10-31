@@ -33,6 +33,7 @@ const MODEL_LIMITS: Record<string, number> = {
   "gpt-4-turbo": 128000,
   "gpt-6-astra": 1_050_000,
   "gpt-6.1-sol": 1_050_000,
+  "gpt-6.1-terra": 1_050_000,
   "gpt-6-sol": 1_050_000,
   "gpt-6-luna": 1_050_000,
   "gpt-3.5-turbo": 16000,
@@ -97,7 +98,7 @@ function inferModelLimit(modelKey: string): number | null {
   const key = modelKey.toLowerCase().trim();
   if (!key) return null;
 
-  if (/gpt-6(?:\.1)?-(?:astra|sol|luna)/.test(key)) return 1_050_000;
+  if (/gpt-6(?:\.1)?-(?:astra|sol|terra|luna)/.test(key)) return 1_050_000;
 
   // Claude first: the catalogue lists Sonnet 4.5's beta 1M window, which CoWork does not enable.
   const claudeLimit = inferClaudeLimit(key);

@@ -6744,7 +6744,18 @@ export function Settings({
               <div className="openai-model-picker">
                 {openaiModels.length > 0 ? (
                   <SearchableSelect
-                    options={openaiModels.map((model) => ({
+                    options={[
+                      ...openaiModels,
+                      ...(openaiModels.some((model) => model.id === "gpt-6.1-terra")
+                        ? []
+                        : [
+                            {
+                              id: "gpt-6.1-terra",
+                              name: "GPT-6.1 Terra",
+                              description: "Visual reasoning, computer use, and writing",
+                            },
+                          ]),
+                    ].map((model) => ({
                       value: model.id,
                       label: model.name,
                       description: model.description,

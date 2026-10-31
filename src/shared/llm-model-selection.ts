@@ -71,6 +71,20 @@ export function getLlmModelReasoningEfforts(
     return getAnthropicReasoningEffortOptions(modelKey);
   }
 
+  const normalizedModelKey = modelKey
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:openai-codex|openai)\//, "")
+    .split("@", 1)[0];
+  if (
+    normalizedModelKey === "gpt-6.1-terra" &&
+    ["openai", "azure", "openrouter", "opencode"].includes(providerType)
+  ) {
+    return providerType === "openai" && openaiAuthMethod === "oauth"
+      ? [...GPT_6_SOL_LUNA_REASONING_EFFORTS, "ultra"]
+      : ["none", ...GPT_6_SOL_LUNA_REASONING_EFFORTS];
+  }
+
   if (providerType === "azure") {
     if (modelKey === "gpt-6-sol" || modelKey === "gpt-6-luna") {
       return ["none", ...GPT_6_SOL_LUNA_REASONING_EFFORTS];
@@ -79,11 +93,6 @@ export function getLlmModelReasoningEfforts(
   }
 
   if (providerType === "openai") {
-    const normalizedModelKey = modelKey
-      .trim()
-      .toLowerCase()
-      .replace(/^(?:openai-codex|openai)\//, "")
-      .split("@", 1)[0];
     if (normalizedModelKey === "gpt-6.1-sol") {
       return openaiAuthMethod === "oauth"
         ? [...GPT_6_SOL_LUNA_REASONING_EFFORTS, "ultra"]

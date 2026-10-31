@@ -300,7 +300,10 @@ function inferApprovalKind(toolName: string, readOnly: boolean): RuntimeToolAppr
   if (
     toolName === "task_list_create" ||
     toolName === "task_list_update" ||
-    toolName === "task_list_list"
+    toolName === "task_list_list" ||
+    // A proposal only shows a card; nothing runs until the person starts it.
+    toolName === "propose_task" ||
+    toolName === "withdraw_task_proposal"
   ) {
     return "none";
   }

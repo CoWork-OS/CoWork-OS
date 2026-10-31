@@ -76,6 +76,7 @@ import type {
   AgentImportSource,
 } from "../shared/types";
 import type { BotOutcomeMetrics, BotOutcomeMetricsRequest } from "../shared/bot-outcome-metrics";
+import type { TaskProposal, TaskProposalStartOptions } from "../shared/task-proposals";
 import type { BotCapabilitiesRequest, BotCapabilitySummary } from "../shared/bot-capabilities";
 import type {
   ChannelHealthResponse,
@@ -3453,6 +3454,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     sideChat?: boolean;
     initialMessage?: string;
   }) => ipcRenderer.invoke(IPC_CHANNELS.TASK_FORK_SESSION, data),
+  listTaskProposals: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_LIST, { taskId }),
+  startTaskProposal: (proposalId: string, options?: TaskProposalStartOptions) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_START, {
+      proposalId,
+      ...(options ? { options } : {}),
+    }),
+  startAllTaskProposals: (taskId: string, proposalIds: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, { taskId, proposalIds }),
+  doTaskProposalHere: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE, { proposalId }),
+  dismissTaskProposal: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_DISMISS, { proposalId }),
   sendStdin: (taskId: string, input: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_SEND_STDIN, { taskId, input }),
   killCommand: (taskId: string, force?: boolean) =>
@@ -7417,6 +7431,14 @@ export interface ElectronAPI {
     sideChat?: boolean;
     initialMessage?: string;
   }) => Promise<Any>;
+  listTaskProposals: (taskId: string) => Promise<TaskProposal[]>;
+  startTaskProposal: (proposalId: string, options?: TaskProposalStartOptions) => Promise<Task>;
+  startAllTaskProposals: (
+    taskId: string,
+    proposalIds: string[],
+  ) => Promise<Array<{ proposalId: string; taskId?: string; error?: string }>>;
+  doTaskProposalHere: (proposalId: string) => Promise<void>;
+  dismissTaskProposal: (proposalId: string) => Promise<void>;
   sendStdin: (taskId: string, input: string) => Promise<boolean>;
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;

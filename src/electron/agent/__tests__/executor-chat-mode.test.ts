@@ -739,7 +739,7 @@ describe("TaskExecutor chat mode", () => {
     });
     executor.setPromptCacheContext = () => "system";
     executor.fileOperationTracker = { getKnowledgeSummary: () => "" };
-    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn(), beginTaskProposalTurn: vi.fn() };
     executor.toolCallDeduplicator = { reset: vi.fn() };
     executor.turnSuccessfulToolUsageCounts = new Map();
     executor.emitEvent = vi.fn();
@@ -871,7 +871,7 @@ describe("TaskExecutor chat mode", () => {
       });
       executor.setPromptCacheContext = () => "system";
       executor.fileOperationTracker = { getKnowledgeSummary: () => "" };
-      executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+      executor.toolRegistry = { setCanvasSessionCutoff: vi.fn(), beginTaskProposalTurn: vi.fn() };
       executor.toolCallDeduplicator = { reset: vi.fn() };
       executor.turnSuccessfulToolUsageCounts = new Map();
       executor.emitEvent = vi.fn();

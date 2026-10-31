@@ -483,7 +483,7 @@ describe("TaskExecutor — redirect follow-up wiring after a completed task", ()
     };
     executor.setPromptCacheContext = () => "system";
     executor.fileOperationTracker = { getKnowledgeSummary: () => "", getCreatedFiles: () => [] };
-    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn(), beginTaskProposalTurn: vi.fn() };
     executor.toolCallDeduplicator = { reset: vi.fn() };
     executor.turnSuccessfulToolUsageCounts = new Map();
     executor.emitEvent = vi.fn();

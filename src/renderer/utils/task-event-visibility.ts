@@ -934,6 +934,12 @@ function isVerbosePostFailureCutoffEvent(event: TaskEvent): boolean {
  * Progress updates are intentionally hidden entirely; they are executor status beacons,
  * not user-facing steps.
  */
+/** Suggested-task events render as the turn's suggestion card, never as their own rows. */
+export function isTaskProposalEvent(event: TaskEvent): boolean {
+  const effectiveType = getEffectiveTaskEventType(event);
+  return effectiveType === "task_proposal_created" || effectiveType === "task_proposal_updated";
+}
+
 export function filterVerboseTimelineNoise(events: TaskEvent[]): TaskEvent[] {
   const out: TaskEvent[] = [];
   const seenExactIds = new Set<string>();
@@ -964,6 +970,7 @@ export function filterVerboseTimelineNoise(events: TaskEvent[]): TaskEvent[] {
     }
     if (isLowValueVerboseLifecycleEvent(event)) continue;
     if (effectiveType === "progress_update") continue;
+    if (isTaskProposalEvent(event)) continue;
     const exactId =
       typeof event.eventId === "string" && event.eventId.trim().length > 0
         ? event.eventId.trim()
@@ -1019,6 +1026,7 @@ export function shouldShowTaskEventInStepFeed(
   options?: { verboseSteps?: boolean },
 ): boolean {
   if (isImplementationOnlyBrowserActionEvent(event)) return false;
+  if (isTaskProposalEvent(event)) return false;
   if (isToolBatchTimelineGroupEvent(event)) return false;
   if (isToolBatchLaneEvent(event)) return false;
 

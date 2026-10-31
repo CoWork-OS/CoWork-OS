@@ -408,6 +408,7 @@ import { ProfileManager } from "../profiles/ProfileManager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { resolveAccessProfileDefinitionWithStatus } from "../../shared/access-profiles";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
+import { TaskProposalService } from "../task-proposals/TaskProposalService";
 import { removeWorkspacePermissionManifestRule } from "../security/workspace-permission-manifest";
 import {
   validateInput,
@@ -474,6 +475,10 @@ import {
   SetImportedRecallIgnoredSchema,
   StepFeedbackSchema,
   ForkSessionSchema,
+  TaskProposalActionSchema,
+  TaskProposalListSchema,
+  TaskProposalStartAllSchema,
+  TaskProposalStartSchema,
   PersonalityImportSchema,
   PersonalityConfigV2Schema,
   parsePersonalitySaveOptions,
@@ -1230,6 +1235,11 @@ rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.BOT_CAPABILITIES_GET, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_LIST, RATE_LIMIT_CONFIGS.frequent);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_START, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_DISMISS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
@@ -6333,6 +6343,87 @@ export async function setupIpcHandlers(
       undefined,
       authorization.actor.principalId,
     );
+  });
+
+  // Suggested tasks: the person's actions on proposals an agent made with propose_task.
+  // A started task is created like a composer task (default access profile, WorkContext),
+  // but without prompt provenance: its prompt is the agent's brief.
+  const taskProposalService = new TaskProposalService({
+    getTask: (taskId) => agentDaemon.getTask(taskId),
+    getWorkspaceById: (id) => agentDaemon.getWorkspaceById(id),
+    logEvent: (taskId, type, payload) => agentDaemon.logEvent(taskId, type, payload),
+    sendMessage: (...args) => agentDaemon.sendMessage(...args),
+    createTask: async (params) => {
+      const task = await agentDaemon.createTask({
+        ...params,
+        agentConfig: applyDefaultAccessProfile(
+          params.agentConfig,
+          PermissionSettingsManager.loadSettings(),
+        ),
+      });
+      try {
+        await workContextService.ensureForTask(task);
+      } catch (error) {
+        logger.warn("Failed to register suggested task WorkContext:", error);
+      }
+      return task;
+    },
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_LIST, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_LIST);
+    const validated = validateInput(TaskProposalListSchema, data, "suggested task list");
+    await authorizeTaskForEvent(event, validated.taskId, "view");
+    return taskProposalService.list(validated.taskId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_START, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_START);
+    const validated = validateInput(TaskProposalStartSchema, data, "suggested task start");
+    const originTaskId = await taskProposalService.originTaskId(validated.proposalId);
+    await authorizeTaskForEvent(event, originTaskId, "manage");
+    const options = validated.options ?? {};
+    // Effort is a provider setting, applied the way the thread model picker applies it.
+    if (options.providerType && options.reasoningEffort) {
+      LLMProviderFactory.saveSettings(
+        LLMProviderFactory.applyReasoningEffortSelection(
+          LLMProviderFactory.loadSettings(),
+          options.providerType,
+          options.reasoningEffort as LLMReasoningEffort,
+        ),
+      );
+    }
+    return taskProposalService.start(validated.proposalId, {
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.worktreeMode ? { worktreeMode: options.worktreeMode } : {}),
+      ...(options.providerType && options.modelKey
+        ? { providerType: options.providerType, modelKey: options.modelKey }
+        : {}),
+      ...(options.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_START_ALL);
+    const validated = validateInput(TaskProposalStartAllSchema, data, "suggested task start all");
+    await authorizeTaskForEvent(event, validated.taskId, "manage");
+    return taskProposalService.startAll(validated.taskId, validated.proposalIds);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE);
+    const validated = validateInput(TaskProposalActionSchema, data, "suggested task");
+    const originTaskId = await taskProposalService.originTaskId(validated.proposalId);
+    await authorizeTaskForEvent(event, originTaskId, "contribute");
+    await taskProposalService.doHere(validated.proposalId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_DISMISS, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_DISMISS);
+    const validated = validateInput(TaskProposalActionSchema, data, "suggested task");
+    const originTaskId = await taskProposalService.originTaskId(validated.proposalId);
+    await authorizeTaskForEvent(event, originTaskId, "manage");
+    await taskProposalService.dismiss(validated.proposalId);
   });
 
   ipcMain.handle(

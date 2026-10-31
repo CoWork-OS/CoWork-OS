@@ -76,6 +76,8 @@ import {
 } from "./artifact-logic";
 import { collectTurnOutputSummaries } from "./turn-outputs";
 import { TurnOutputsRow } from "./TurnOutputsRow";
+import { collectTurnProposalGroups } from "./turn-proposals";
+import { ConnectedSuggestedTasksCard } from "./SuggestedTasksCard";
 import {
   getAssistantBubbleStatusLabel,
   isAssistantMessageInLatestTurn,
@@ -1006,6 +1008,8 @@ interface TaskConversationFlowProps {
   returnToDefaultTranscript: () => void;
   openFileInPanel: (path: string) => void;
   botIcon?: string;
+  /** Show the card for the tasks each finished turn suggested (propose_task, SuggestedTasksContext). */
+  suggestedTasksEnabled?: boolean | undefined;
 }
 
 export const TaskConversationFlow = memo(function TaskConversationFlow(
@@ -1021,6 +1025,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
   const onOpenSettings = props.onOpenSettings;
   const childEvents = props.childEvents;
   const childTasks = props.childTasks;
+  const suggestedTasksEnabled = props.suggestedTasksEnabled === true;
   const agentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
   const childTasksById = useMemo(
     () => new Map(childTasks.map((childTask) => [childTask.id, childTask])),
@@ -1280,6 +1285,32 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
         turnOutputsByLastTimelineIndex.set(timelineIndex, existing);
       }
     }
+    // A turn's suggested tasks go under its file line: one card per finished turn.
+    const turnProposalGroups = suggestedTasksEnabled
+      ? collectTurnProposalGroups(events, { isTaskWorking })
+      : [];
+    const proposalGroupsByLastTimelineIndex = new Map<number, number[]>();
+    if (turnProposalGroups.length > 0) {
+      const groupIndexByEventId = new Map<string, number>();
+      turnProposalGroups.forEach((group, groupIndex) => {
+        for (let index = group.startIndex; index <= group.endIndex; index += 1) {
+          const eventId = events[index]?.id;
+          if (eventId) groupIndexByEventId.set(eventId, groupIndex);
+        }
+      });
+      const lastTimelineIndexByGroup = new Map<number, number>();
+      timelineItems.forEach((item, timelineIndex) => {
+        for (const itemEvent of getTimelineItemEvents(item)) {
+          const groupIndex = itemEvent?.id ? groupIndexByEventId.get(itemEvent.id) : undefined;
+          if (groupIndex !== undefined) lastTimelineIndexByGroup.set(groupIndex, timelineIndex);
+        }
+      });
+      for (const [groupIndex, timelineIndex] of lastTimelineIndexByGroup) {
+        const existing = proposalGroupsByLastTimelineIndex.get(timelineIndex) || [];
+        existing.push(groupIndex);
+        proposalGroupsByLastTimelineIndex.set(timelineIndex, existing);
+      }
+    }
     const pushTurnOutputsAfterTimelineItem = (timelineIndex: number) => {
       for (const turnIndex of turnOutputsByLastTimelineIndex.get(timelineIndex) ?? []) {
         const summary = turnOutputs[turnIndex];
@@ -1289,6 +1320,17 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
           estimatedHeight: 44,
           files: summary.files,
           revision: summary.files.map((file) => `${file.action}:${file.path}`).join("|"),
+          visiblePerfEventId: null,
+        });
+      }
+      for (const groupIndex of proposalGroupsByLastTimelineIndex.get(timelineIndex) ?? []) {
+        const group = turnProposalGroups[groupIndex];
+        rows.push({
+          kind: "suggested-tasks",
+          key: `suggested-tasks:${group.key}`,
+          estimatedHeight: 96 + group.proposalIds.length * 120,
+          proposalIds: group.proposalIds,
+          revision: group.proposalIds.join("|"),
           visiblePerfEventId: null,
         });
       }
@@ -1438,6 +1480,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
     events,
     expandedArtifactStacks,
     verboseSteps,
+    suggestedTasksEnabled,
   ]);
   const displayFeedRows = useMemo(
     () =>
@@ -1611,6 +1654,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
               if (
                 row.kind === "image-stack" ||
                 row.kind === "turn-outputs" ||
+                row.kind === "suggested-tasks" ||
                 row.kind === "turn-header"
               ) {
                 return row.revision;
@@ -1699,6 +1743,9 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
               }
               if (row.kind === "leading-command-outputs") {
                 return renderCommandOutputs(row.sessions);
+              }
+              if (row.kind === "suggested-tasks") {
+                return <ConnectedSuggestedTasksCard proposalIds={row.proposalIds} />;
               }
               if (row.kind === "turn-outputs") {
                 if (!workspace?.path) return null;
@@ -2542,13 +2589,16 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                     <div className="chat-message user-message">
                       {(surfaceOrigin === "answer" ||
                         surfaceOrigin === "page" ||
-                        surfaceOrigin === "browser_page") && (
+                        surfaceOrigin === "browser_page" ||
+                        surfaceOrigin === "suggested_task") && (
                         <div className="user-message-surface-origin">
                           {surfaceOrigin === "page"
                             ? "Sent from an interactive page"
                             : surfaceOrigin === "browser_page"
                               ? "Sent from the browser"
-                              : "Sent from a button in the answer"}
+                              : surfaceOrigin === "suggested_task"
+                                ? "Suggested task, sent with Do it here"
+                                : "Sent from a button in the answer"}
                         </div>
                       )}
                       <UserMessageImageGallery

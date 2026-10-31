@@ -454,6 +454,10 @@ const SkillParameterModal = preloadableLazy(() =>
   import("../SkillParameterModal").then((module) => module.SkillParameterModal),
 );
 
+import { useTaskProposals } from "../../hooks/useTaskProposals";
+import { SuggestedTasksContext, type SuggestedTasksContextValue } from "./suggested-tasks-context";
+import type { SuggestedTaskOptionsContext } from "./SuggestedTaskOptionsPopover";
+
 const TaskConversationFlow = preloadableLazy(() =>
   import("./TaskConversationFlow").then((module) => module.TaskConversationFlow),
 );
@@ -1595,6 +1599,38 @@ function MainContentComponent({
     }
     return BUILTIN_ACCESS_PROFILES[0];
   }, [accessProfiles, selectedProfileId]);
+  // Suggested tasks the agent proposed in this task (propose_task), shown under each turn.
+  const taskProposals = useTaskProposals(task?.id, events);
+  const suggestedTaskOptionsContext = useMemo<SuggestedTaskOptionsContext>(
+    () => ({
+      workspace: workspace
+        ? { id: workspace.id, name: workspace.name, path: workspace.path }
+        : null,
+      providerType: selectedProvider,
+      modelKey: selectedModel,
+      models: availableModels,
+      reasoningEffort: selectedReasoningEffort,
+      accessProfiles: [...BUILTIN_ACCESS_PROFILES, ...accessProfiles],
+      accessProfileId: selectedProfileId,
+    }),
+    [
+      workspace,
+      selectedProvider,
+      selectedModel,
+      availableModels,
+      selectedReasoningEffort,
+      accessProfiles,
+      selectedProfileId,
+    ],
+  );
+  const suggestedTasksContextValue = useMemo<SuggestedTasksContextValue>(
+    () => ({
+      state: taskProposals,
+      optionsContext: suggestedTaskOptionsContext,
+      ...(onSelectTask ? { onOpenTask: (taskId: string) => onSelectTask(taskId) } : {}),
+    }),
+    [taskProposals, suggestedTaskOptionsContext, onSelectTask],
+  );
   const selectedAccessProfilePresentation = getAccessProfilePresentation(
     selectedAccessProfile,
     approvalPromptsEnabled,
@@ -8606,91 +8642,94 @@ function MainContentComponent({
   }
 
   const conversationFlow = (
-    <TaskConversationFlow
-      agentContext={agentContext}
-      codeBlockRunTarget={codeBlockRunTarget}
-      onOpenSettings={onOpenSettings}
-      activityGroupsById={statusActivityGroupsById}
-      childEvents={childEvents}
-      childTasks={childTasks}
-      collaborativeRun={collaborativeRun}
-      commandOutputSessionsByInsertIndex={commandOutputSessionsByInsertIndex}
-      currentStep={currentStep}
-      lastAssistantMessage={lastAssistantMessage}
-      initialPromptEventId={initialPromptEventId}
-      trimmedPrompt={trimmedPrompt}
-      eventTitleMarkdownComponents={eventTitleMarkdownComponents}
-      events={events}
-      disclosureIntents={disclosureIntents}
-      toggleDisclosureIntent={toggleDisclosureIntent}
-      handleCanvasClose={handleCanvasClose}
-      handleMessageFeedback={handleMessageFeedback}
-      handleStepFeedback={handleStepFeedback}
-      isChatTask={isChatTask}
-      isTaskWorking={isTaskWorking}
-      newActivityCount={newActivityCount}
-      onNewActivityCountChange={setNewActivityCount}
-      isReplayMode={isReplayMode}
-      defaultTranscriptMode={defaultTranscriptMode}
-      transcriptMode={transcriptMode}
-      returnToDefaultTranscript={returnToDefaultTranscript}
-      markdownComponents={markdownComponents}
-      mainBodyRef={mainBodyRef}
-      messageFeedbackMap={messageFeedbackMap}
-      onOpenBrowserView={onOpenBrowserView}
-      onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-      onOpenDocumentArtifact={openDocumentArtifact}
-      onOpenPresentationArtifact={openPresentationArtifact}
-      onOpenWebArtifact={openWebArtifact}
-      openFileInPanel={openFileInPanel}
-      botName={botName}
-      botIcon={botIcon}
-      botMascotForSender={botMascotForSender}
-      onForkTaskSessionFromEvent={
-        remoteSession ||
-        !hasHostMethod("forkTaskSession") ||
-        (isBrowserHost && workspace?.permissions.write !== true)
-          ? undefined
-          : handleForkTaskSessionFromEvent
-      }
-      onSelectChildTask={onSelectChildTask}
-      onOpenChildAgentSidebar={onOpenChildAgentSidebar}
-      onViewTaskOutputs={onViewTaskOutputs}
-      parallelGroupsByAnchorEventId={parallelGroupsByAnchorEventId}
-      rejectMenuOpenFor={rejectMenuOpenFor}
-      rejectMenuRef={rejectMenuRef}
-      renderCommandOutputs={renderCommandOutputs}
-      setRejectMenuOpenFor={setRejectMenuOpenFor}
-      setStepFeedbackOpen={setStepFeedbackOpen}
-      setStepFeedbackText={setStepFeedbackText}
-      setViewerFilePath={setViewerFilePath}
-      formatTime={formatTime}
-      shouldRenderTimelineEventInStepFeed={shouldRenderTimelineEventInStepFeed}
-      toolCallPairing={toolCallPairing}
-      hasEventDetails={hasEventDetails}
-      isEventExpanded={isEventExpanded}
-      stepFeedbackOpen={stepFeedbackOpen}
-      stepFeedbackSending={stepFeedbackSending}
-      stepFeedbackText={stepFeedbackText}
-      suppressedParallelEventIds={suppressedParallelEventIds}
-      task={task}
-      timelineItems={timelineItems}
-      timelineRef={timelineRef}
-      toggleEventExpanded={toggleEventExpanded}
-      verboseSteps={verboseSteps}
-      voiceEnabled={voiceEnabled}
-      rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-      taskSwitchId={taskSwitchId}
-      hasMoreTimelineHistory={
-        isBotConversation && !botHistoryUnlocked ? false : hasMoreTimelineHistory
-      }
-      isLoadingTimelineHistory={isLoadingTimelineHistory}
-      timelineHistoryError={timelineHistoryError}
-      onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
-      wrappingUp={wrappingUp}
-      onWrapUp={collaborativeRun && onWrapUpTask ? handleWrapUp : undefined}
-      workspace={workspace}
-    />
+    <SuggestedTasksContext.Provider value={suggestedTasksContextValue}>
+      <TaskConversationFlow
+        suggestedTasksEnabled={taskProposals.available}
+        agentContext={agentContext}
+        codeBlockRunTarget={codeBlockRunTarget}
+        onOpenSettings={onOpenSettings}
+        activityGroupsById={statusActivityGroupsById}
+        childEvents={childEvents}
+        childTasks={childTasks}
+        collaborativeRun={collaborativeRun}
+        commandOutputSessionsByInsertIndex={commandOutputSessionsByInsertIndex}
+        currentStep={currentStep}
+        lastAssistantMessage={lastAssistantMessage}
+        initialPromptEventId={initialPromptEventId}
+        trimmedPrompt={trimmedPrompt}
+        eventTitleMarkdownComponents={eventTitleMarkdownComponents}
+        events={events}
+        disclosureIntents={disclosureIntents}
+        toggleDisclosureIntent={toggleDisclosureIntent}
+        handleCanvasClose={handleCanvasClose}
+        handleMessageFeedback={handleMessageFeedback}
+        handleStepFeedback={handleStepFeedback}
+        isChatTask={isChatTask}
+        isTaskWorking={isTaskWorking}
+        newActivityCount={newActivityCount}
+        onNewActivityCountChange={setNewActivityCount}
+        isReplayMode={isReplayMode}
+        defaultTranscriptMode={defaultTranscriptMode}
+        transcriptMode={transcriptMode}
+        returnToDefaultTranscript={returnToDefaultTranscript}
+        markdownComponents={markdownComponents}
+        mainBodyRef={mainBodyRef}
+        messageFeedbackMap={messageFeedbackMap}
+        onOpenBrowserView={onOpenBrowserView}
+        onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+        onOpenDocumentArtifact={openDocumentArtifact}
+        onOpenPresentationArtifact={openPresentationArtifact}
+        onOpenWebArtifact={openWebArtifact}
+        openFileInPanel={openFileInPanel}
+        botName={botName}
+        botIcon={botIcon}
+        botMascotForSender={botMascotForSender}
+        onForkTaskSessionFromEvent={
+          remoteSession ||
+          !hasHostMethod("forkTaskSession") ||
+          (isBrowserHost && workspace?.permissions.write !== true)
+            ? undefined
+            : handleForkTaskSessionFromEvent
+        }
+        onSelectChildTask={onSelectChildTask}
+        onOpenChildAgentSidebar={onOpenChildAgentSidebar}
+        onViewTaskOutputs={onViewTaskOutputs}
+        parallelGroupsByAnchorEventId={parallelGroupsByAnchorEventId}
+        rejectMenuOpenFor={rejectMenuOpenFor}
+        rejectMenuRef={rejectMenuRef}
+        renderCommandOutputs={renderCommandOutputs}
+        setRejectMenuOpenFor={setRejectMenuOpenFor}
+        setStepFeedbackOpen={setStepFeedbackOpen}
+        setStepFeedbackText={setStepFeedbackText}
+        setViewerFilePath={setViewerFilePath}
+        formatTime={formatTime}
+        shouldRenderTimelineEventInStepFeed={shouldRenderTimelineEventInStepFeed}
+        toolCallPairing={toolCallPairing}
+        hasEventDetails={hasEventDetails}
+        isEventExpanded={isEventExpanded}
+        stepFeedbackOpen={stepFeedbackOpen}
+        stepFeedbackSending={stepFeedbackSending}
+        stepFeedbackText={stepFeedbackText}
+        suppressedParallelEventIds={suppressedParallelEventIds}
+        task={task}
+        timelineItems={timelineItems}
+        timelineRef={timelineRef}
+        toggleEventExpanded={toggleEventExpanded}
+        verboseSteps={verboseSteps}
+        voiceEnabled={voiceEnabled}
+        rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+        taskSwitchId={taskSwitchId}
+        hasMoreTimelineHistory={
+          isBotConversation && !botHistoryUnlocked ? false : hasMoreTimelineHistory
+        }
+        isLoadingTimelineHistory={isLoadingTimelineHistory}
+        timelineHistoryError={timelineHistoryError}
+        onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
+        wrappingUp={wrappingUp}
+        onWrapUp={collaborativeRun && onWrapUpTask ? handleWrapUp : undefined}
+        workspace={workspace}
+      />
+    </SuggestedTasksContext.Provider>
   );
 
   const renderMainHeader = (header: React.ReactNode) =>

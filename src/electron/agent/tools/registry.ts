@@ -84,6 +84,8 @@ import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
+import { TASK_PROPOSAL_TOOL_NAMES, TaskProposalTools } from "./task-proposal-tools";
+import { TaskProposalService } from "../../task-proposals/TaskProposalService";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -419,6 +421,8 @@ const SPREADSHEET_CELL_SCHEMA = {
 const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
   // A sub-agent never acts with the owner's business identity or grants (PACT).
   ...PACT_TOOL_NAMES,
+  // Suggested tasks come from the task the person talks to, not from delegated work.
+  ...TASK_PROPOSAL_TOOL_NAMES,
   "spawn_agent",
   "wait_for_agent",
   "get_agent_status",
@@ -754,6 +758,7 @@ export class ToolRegistry {
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
+  private taskProposalTools: TaskProposalTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -847,6 +852,7 @@ export class ToolRegistry {
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
+    this.taskProposalTools = new TaskProposalTools(new TaskProposalService(daemon), taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1372,6 +1378,11 @@ export class ToolRegistry {
     this.canvasTools.setSessionCutoff(cutoff);
   }
 
+  /** A follow-up turn begins: the per-turn limit on proposed tasks counts afresh. */
+  beginTaskProposalTurn(): void {
+    this.taskProposalTools.beginTurn();
+  }
+
   getLatestCanvasSessionId(): string | null {
     const latestSession = this.canvasTools.getLatestActiveSessionForTask();
     return latestSession?.id || null;
@@ -1809,6 +1820,12 @@ export class ToolRegistry {
     // Waiting on an event needs the runtime's event trigger engine.
     if (this.daemon.hasEventWaitSupport?.()) {
       allTools.push(...EventWaitTools.getToolDefinitions());
+    }
+    // Suggested tasks: only the task the person talks to proposes; delegated work does not.
+    const proposingTask =
+      typeof this.daemon.getTask === "function" ? this.daemon.getTask(this.taskId) : undefined;
+    if (!proposingTask?.parentTaskId) {
+      allTools.push(...TaskProposalTools.getToolDefinitions());
     }
     if (MCPEventService.getActive()) {
       allTools.push({
@@ -3970,6 +3987,16 @@ export class ToolRegistry {
       serialSchedulerSpec,
     );
     register(
+      "propose_task",
+      async ({ request }) => this.taskProposalTools.proposeTask(request.input),
+      serialSchedulerSpec,
+    );
+    register(
+      "withdraw_task_proposal",
+      async ({ request }) => this.taskProposalTools.withdrawTaskProposal(request.input),
+      serialSchedulerSpec,
+    );
+    register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
       serialSchedulerSpec,
@@ -5885,6 +5912,10 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
     if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
+    if (name === "propose_task") return await this.taskProposalTools.proposeTask(input);
+    if (name === "withdraw_task_proposal") {
+      return await this.taskProposalTools.withdrawTaskProposal(input);
+    }
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Canvas tools

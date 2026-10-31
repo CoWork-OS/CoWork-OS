@@ -19551,6 +19551,16 @@ ${transcript}
       TASK_KICKOFF_PROMPT_RULES,
       "- Do not append trailing offer questions by default.",
       "",
+      ...(!this.task.parentTaskId
+        ? [
+            "SUGGESTED TASKS (propose_task):",
+            "- When you notice real work outside the current request (a bug found in passing, a cost too large to fix here, a missing test, stale docs), propose it with propose_task instead of doing it unasked or only mentioning it. If your reply calls something a follow-up or a separate PR, propose it.",
+            "- Never propose what the user asked you to do, what you are about to do anyway, one-line tweaks, or speculation. The one fix that acts on what you just found stays here: ask about it in your reply instead.",
+            "- At most 3 per turn, never the same task twice. Write the brief so it stands alone: the goal, what you found, the files (repository-relative paths) and what done looks like.",
+            "- If a proposal goes stale (you did it here, or it proved unnecessary), withdraw it with withdraw_task_proposal.",
+            "",
+          ]
+        : []),
       "HONESTY & UNCERTAINTY:",
       "- State uncertainty explicitly when it matters.",
       "- Never fabricate tool outputs or claim a tool succeeded when it did not.",
@@ -20694,6 +20704,10 @@ ${transcript}
       "scratchpad_write",
       "scratchpad_read",
       "task_history",
+      // Work worth suggesting turns up in any step (suggested tasks); the registry offers
+      // these only to the task the person talks to.
+      "propose_task",
+      "withdraw_task_proposal",
       "list_directory",
       "glob",
       "grep",
@@ -42585,6 +42599,7 @@ Return ONLY a JSON object:
       this.task.prompt = `${this.task.prompt}\n\nUSER UPDATE:\n${executionMessage}`;
     }
     this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
+    this.toolRegistry.beginTaskProposalTurn();
     // Reset deduplicator so follow-up messages can re-invoke tools used in the previous run
     this.toolCallDeduplicator.reset();
     if (shouldStartNewCanvasSession) {

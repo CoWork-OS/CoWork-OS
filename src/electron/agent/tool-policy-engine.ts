@@ -208,6 +208,9 @@ const MEMORY_LANE_TOOLS = new Set([
 ]);
 
 const ALWAYS_VISIBLE_TOOLS = new Set([
+  // Suggested tasks: noticing work worth proposing is never tied to the request's wording.
+  "propose_task",
+  "withdraw_task_proposal",
   "read_file",
   "read_files",
   "write_file",

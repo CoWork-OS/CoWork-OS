@@ -125,8 +125,8 @@ export class AzureOpenAIProvider implements LLMProvider {
     return `${this.endpoint}/openai/v1/responses`;
   }
 
-  private isGpt6SolOrLuna(model: string): boolean {
-    return model === "gpt-6-sol" || model === "gpt-6-luna";
+  private requiresResponsesApi(model: string): boolean {
+    return model === "gpt-6-sol" || model === "gpt-6-luna" || model === "gpt-6.1-terra";
   }
 
   private isMaxTokensUnsupported(errorData: Any): boolean {
@@ -1210,7 +1210,7 @@ export class AzureOpenAIProvider implements LLMProvider {
         return fromOpenAICompatibleResponse(data);
       };
 
-      if (this.isGpt6SolOrLuna(model) || requestedReasoningEffort === "max") {
+      if (this.requiresResponsesApi(model) || requestedReasoningEffort === "max") {
         return await runResponses(shouldStream, requestedReasoningEffort);
       }
 
@@ -1327,7 +1327,7 @@ export class AzureOpenAIProvider implements LLMProvider {
         return { success: true };
       };
 
-      if (this.isGpt6SolOrLuna(model) || requestedReasoningEffort === "max") {
+      if (this.requiresResponsesApi(model) || requestedReasoningEffort === "max") {
         return await runResponses();
       }
 

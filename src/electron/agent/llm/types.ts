@@ -644,6 +644,11 @@ export const OPENROUTER_MODELS = {
     displayName: "Claude Opus 4.6",
     description: "Anthropic's most capable model",
   },
+  "openai/gpt-6.1-terra": {
+    id: "openai/gpt-6.1-terra",
+    displayName: "GPT-6.1 Terra",
+    description: "Visual reasoning, computer use, and writing",
+  },
   "openai/gpt-4o": {
     id: "openai/gpt-4o",
     displayName: "GPT-4o",
@@ -692,6 +697,11 @@ export const OPENAI_MODELS = {
     id: "gpt-6.1-sol",
     displayName: "GPT-6.1 Sol",
     description: "Complex coding and agentic workflows",
+  },
+  "gpt-6.1-terra": {
+    id: "gpt-6.1-terra",
+    displayName: "GPT-6.1 Terra",
+    description: "Visual reasoning, computer use, and writing",
   },
   "gpt-6-sol": {
     id: "gpt-6-sol",

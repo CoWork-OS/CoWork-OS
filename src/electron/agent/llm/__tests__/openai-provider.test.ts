@@ -8,6 +8,7 @@ const getApiKeyFromTokensMock = vi.fn();
 const loadPiAiModuleMock = vi.fn();
 const chatCompletionsCreateMock = vi.fn();
 const responsesCreateMock = vi.fn();
+const modelsListMock = vi.fn();
 
 vi.mock("openai", () => ({
   default: vi.fn().mockImplementation(function OpenAIClientMock() {
@@ -16,6 +17,7 @@ vi.mock("openai", () => ({
         create: (...args: Any[]) => chatCompletionsCreateMock(...args),
       },
     };
+    this.models = { list: (...args: Any[]) => modelsListMock(...args) };
     this.responses = {
       create: (...args: Any[]) => responsesCreateMock(...args),
     };
@@ -548,7 +550,7 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
-  it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
+  it.each(["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"])(
     "routes %s API-key tool calls through Responses",
     async (model) => {
       responsesCreateMock.mockResolvedValue({
@@ -1088,6 +1090,7 @@ describe("OpenAIProvider structured errors", () => {
   it.each([
     "gpt-6-astra",
     "gpt-6.1-sol",
+    "gpt-6.1-terra",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
@@ -1109,7 +1112,9 @@ describe("OpenAIProvider structured errors", () => {
         id: model,
         api: "openai-codex-responses",
         provider: "openai-codex",
-        ...(model === "gpt-6.1-sol" ? { contextWindow: 1_050_000, maxTokens: 128_000 } : {}),
+        ...(["gpt-6.1-sol", "gpt-6.1-terra"].includes(model)
+          ? { contextWindow: 1_050_000, maxTokens: 128_000 }
+          : {}),
       }),
       expect.any(Object),
       expect.any(Object),
@@ -1463,15 +1468,34 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
+  it.each([false, true])(
+    "offers Terra once when the API catalog includes it: %s",
+    async (listed) => {
+      modelsListMock.mockResolvedValue({
+        data: [{ id: "gpt-4o" }, ...(listed ? [{ id: "gpt-6.1-terra" }] : [])],
+      });
+      const provider = new OpenAIProvider({ type: "openai", openaiApiKey: "test-key" });
+      const models = await provider.getAvailableModels();
+      expect(models.filter((model) => model.id === "gpt-6.1-terra")).toEqual([
+        {
+          id: "gpt-6.1-terra",
+          name: "GPT-6.1 Terra",
+          description: "Visual reasoning, computer use, and writing",
+        },
+      ]);
+    },
+  );
+
   it("includes GPT-6 and GPT-5.6 variants in the ChatGPT subscription model catalog", async () => {
     getModelsMock.mockReturnValue([{ id: "gpt-5.5", name: "GPT-5.5" }]);
     const provider = new OpenAIProvider(makeConfig());
 
     const models = await provider.getAvailableModels();
 
-    expect(models.slice(0, 7).map((model) => model.id)).toEqual([
+    expect(models.slice(0, 8).map((model) => model.id)).toEqual([
       "gpt-6-astra",
       "gpt-6.1-sol",
+      "gpt-6.1-terra",
       "gpt-6-sol",
       "gpt-6-luna",
       "gpt-5.6-sol",

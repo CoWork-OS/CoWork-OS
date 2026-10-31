@@ -38,6 +38,9 @@ describe("settings-llm-helpers", () => {
 
   it("loads OpenAI GPT-5.5 control defaults and saved values", () => {
     expect(resolveOpenAIReasoningEffort()).toBe("medium");
+    expect(resolveOpenAIReasoningEffort({ model: "gpt-6.1-terra", reasoningEffort: "none" })).toBe(
+      "none",
+    );
     expect(resolveOpenAITextVerbosity()).toBe("medium");
     expect(
       resolveOpenAIReasoningEffort({

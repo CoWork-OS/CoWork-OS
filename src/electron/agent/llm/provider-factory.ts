@@ -107,6 +107,7 @@ export interface OpenRouterImageModel {
 const OPENAI_OAUTH_SUPPORTED_MODELS = new Set([
   "gpt-6-astra",
   "gpt-6.1-sol",
+  "gpt-6.1-terra",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-5.6-sol",
@@ -3080,7 +3081,7 @@ export class LLMProviderFactory {
 
       case "openrouter": {
         const currentModel = settings.openrouter?.model || OPENROUTER_DEFAULT_MODEL;
-        const modelList =
+        let modelList =
           settings.cachedOpenRouterModels && settings.cachedOpenRouterModels.length > 0
             ? settings.cachedOpenRouterModels
             : Object.values(OPENROUTER_MODELS).map((value) => ({
@@ -3088,6 +3089,13 @@ export class LLMProviderFactory {
                 displayName: value.displayName,
                 description: value.description,
               }));
+        const terra = OPENROUTER_MODELS["openai/gpt-6.1-terra"];
+        if (!modelList.some((model) => model.key === terra.id)) {
+          modelList = [
+            ...modelList,
+            { key: terra.id, displayName: terra.displayName, description: terra.description },
+          ];
+        }
         return {
           currentModel,
           models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
@@ -3129,6 +3137,11 @@ export class LLMProviderFactory {
                   key: "gpt-6.1-sol",
                   displayName: "GPT-6.1 Sol",
                   description: "GPT-6.1 Sol for ChatGPT subscription access",
+                },
+                {
+                  key: "gpt-6.1-terra",
+                  displayName: "GPT-6.1 Terra",
+                  description: "GPT-6.1 Terra for ChatGPT subscription access",
                 },
                 {
                   key: "gpt-6-sol",
@@ -3193,6 +3206,11 @@ export class LLMProviderFactory {
                   description: "Complex coding and agentic workflows",
                 },
                 {
+                  key: "gpt-6.1-terra",
+                  displayName: "GPT-6.1 Terra",
+                  description: "Visual reasoning, computer use, and writing",
+                },
+                {
                   key: "gpt-6-sol",
                   displayName: "GPT-6 Sol",
                   description: "Complex coding and agentic workflows",
@@ -3238,7 +3256,9 @@ export class LLMProviderFactory {
           cachedModels && cachedModels.length > 0
             ? [
                 ...defaultOpenAIModels
-                  .filter((model) => ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"].includes(model.key))
+                  .filter((model) =>
+                    ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"].includes(model.key),
+                  )
                   .filter((model) => !cachedModels.some((cached) => cached.key === model.key)),
                 ...cachedModels,
               ]
@@ -4216,6 +4236,7 @@ export class LLMProviderFactory {
         name: "Claude Opus 4.6",
         context_length: 1000000,
       },
+      { id: "openai/gpt-6.1-terra", name: "GPT-6.1 Terra", context_length: 1_050_000 },
       { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 },
       { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000 },
       {
@@ -4365,6 +4386,11 @@ export class LLMProviderFactory {
         name: "GPT-6.1 Sol",
         description: "Complex coding and professional work",
       },
+      {
+        id: "gpt-6.1-terra",
+        name: "GPT-6.1 Terra",
+        description: "Visual reasoning, computer use, and writing",
+      },
       { id: "gpt-6-sol", name: "GPT-6 Sol", description: "Complex coding and agentic workflows" },
       { id: "gpt-6-luna", name: "GPT-6 Luna", description: "Efficient focused tasks" },
       {
@@ -4420,6 +4446,11 @@ export class LLMProviderFactory {
             id: "gpt-6.1-sol",
             name: "GPT-6.1 Sol",
             description: "GPT-6.1 Sol for ChatGPT subscription access",
+          },
+          {
+            id: "gpt-6.1-terra",
+            name: "GPT-6.1 Terra",
+            description: "GPT-6.1 Terra for ChatGPT subscription access",
           },
           {
             id: "gpt-6-sol",

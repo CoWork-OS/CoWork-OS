@@ -201,6 +201,46 @@ describe("LLMProviderFactory model status", () => {
     },
   );
 
+  it.each(["api_key", "oauth"] as const)(
+    "keeps GPT-6.1 Terra selectable with a stale %s model cache",
+    (authMethod) => {
+      const settings: LLMSettings = {
+        providerType: "openai",
+        modelKey: "gpt-6.1-terra",
+        openai: { authMethod, model: "gpt-6.1-terra" },
+        cachedOpenAIModels: [{ key: "gpt-4o", displayName: "GPT-4o", description: "OpenAI" }],
+      };
+      const status = LLMProviderFactory.getProviderModelStatus(settings);
+      expect(status.currentModel).toBe("gpt-6.1-terra");
+      expect(status.models.filter((model) => model.key === "gpt-6.1-terra")).toHaveLength(1);
+      expect(status.models.find((model) => model.key === "gpt-6.1-terra")?.displayName).toBe(
+        "GPT-6.1 Terra",
+      );
+    },
+  );
+
+  it("adds Terra to a stale OpenRouter cache without changing the selected model", () => {
+    const cached = { key: OPENROUTER_DEFAULT_MODEL, displayName: "Sonnet", description: "" };
+    const settings: LLMSettings = {
+      providerType: "openrouter",
+      modelKey: OPENROUTER_DEFAULT_MODEL,
+      cachedOpenRouterModels: [cached],
+    };
+    const status = LLMProviderFactory.getProviderModelStatus(settings);
+    expect(status.currentModel).toBe(OPENROUTER_DEFAULT_MODEL);
+    expect(status.models.find((model) => model.key === "openai/gpt-6.1-terra")).toMatchObject({
+      displayName: "GPT-6.1 Terra",
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+    });
+    expect(settings.cachedOpenRouterModels).toEqual([cached]);
+    settings.cachedOpenRouterModels = status.models;
+    expect(
+      LLMProviderFactory.getProviderModelStatus(settings).models.filter(
+        (model) => model.key === "openai/gpt-6.1-terra",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("infers the ChatGPT route for legacy OAuth settings without authMethod", () => {
     const settings: LLMSettings = {
       providerType: "openai",
@@ -369,26 +409,30 @@ describe("LLMProviderFactory model status", () => {
     expect(resolved.modelId).toBe("gpt-6-astra");
   });
 
-  it.each(["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
-    "preserves the supported ChatGPT subscription model %s",
-    (model) => {
-      const settings: LLMSettings = {
-        providerType: "openai",
-        modelKey: model,
-        openai: {
-          authMethod: "oauth",
-          accessToken: "access-token",
-          refreshToken: "refresh-token",
-          model,
-        },
-      };
-      vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+  it.each([
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ])("preserves the supported ChatGPT subscription model %s", (model) => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: model,
+      openai: {
+        authMethod: "oauth",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        model,
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
 
-      const resolved = LLMProviderFactory.resolveTaskModelSelection();
+    const resolved = LLMProviderFactory.resolveTaskModelSelection();
 
-      expect(resolved.modelId).toBe(model);
-    },
-  );
+    expect(resolved.modelId).toBe(model);
+  });
 
   it("runs the stored Anthropic-compatible gateway model even when another provider uses the same id", () => {
     const settings: LLMSettings = {

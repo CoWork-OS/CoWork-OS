@@ -91,6 +91,32 @@ describe("AzureOpenAIProvider", () => {
     },
   );
 
+  it.each(["none", "high"] as const)(
+    "routes Terra through Responses with %s reasoning for requests and connection tests",
+    async (effort) => {
+      mockFetch.mockResolvedValue(createOkResponse({ output: [] }));
+      const provider = new AzureOpenAIProvider({
+        ...baseConfig,
+        azureDeployment: "gpt-6.1-terra",
+        azureReasoningEffort: effort,
+      });
+      await provider.createMessage({
+        model: "gpt-6.1-terra",
+        maxTokens: 16_000,
+        messages: [{ role: "user", content: "hello" }],
+      });
+      expect(await provider.testConnection()).toEqual({ success: true });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      for (const [url, options] of mockFetch.mock.calls) {
+        expect(url).toBe("https://example.openai.azure.com/openai/v1/responses");
+        expect(JSON.parse(options.body)).toMatchObject({
+          model: "gpt-6.1-terra",
+          reasoning: { effort },
+        });
+      }
+    },
+  );
+
   it("keeps a large Responses output budget unchanged", async () => {
     mockFetch.mockResolvedValue(createOkResponse({ output: [] }));
     const provider = new AzureOpenAIProvider({

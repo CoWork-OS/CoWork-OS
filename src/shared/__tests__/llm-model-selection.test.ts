@@ -43,6 +43,25 @@ describe("llm model selection metadata", () => {
     },
   );
 
+  it.each(["openai", "azure", "openrouter", "opencode"])(
+    "exposes Terra's documented reasoning levels for %s",
+    (provider) => {
+      for (const model of [
+        "gpt-6.1-terra",
+        "openai/gpt-6.1-terra@fast",
+        "openai-codex/gpt-6.1-terra",
+      ]) {
+        for (const auth of ["api_key", "oauth"] as const) {
+          expect(getLlmModelReasoningEfforts(provider, model, auth)).toEqual(
+            provider === "openai" && auth === "oauth"
+              ? ["low", "medium", "high", "xhigh", "max", "ultra"]
+              : ["none", "low", "medium", "high", "xhigh", "max"],
+          );
+        }
+      }
+    },
+  );
+
   it("keeps Ultra subscription-only for Astra", () => {
     expect(getLlmModelReasoningEfforts("openai", "gpt-6-astra", "api_key")).toEqual([
       "low",

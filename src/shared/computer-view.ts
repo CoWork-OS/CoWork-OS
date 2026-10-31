@@ -43,6 +43,8 @@ export interface ComputerViewState {
 export const COMPUTER_VIEW_FRAME_MAX_WIDTH = 960;
 /** How often a watched browser is captured while a bot works in it. */
 export const COMPUTER_VIEW_POLL_MS = 5_000;
+/** How often the window a task controls on this computer is captured while someone watches. */
+export const COMPUTER_VIEW_LIVE_POLL_MS = 1_000;
 /** The longest reason a bot may give when it asks the person to take over. */
 export const COMPUTER_TAKEOVER_REASON_MAX_LENGTH = 300;
 

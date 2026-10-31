@@ -1732,8 +1732,9 @@ export async function setupIpcHandlers(
       win.webContents.send(IPC_CHANNELS.COMPUTER_USE_EVENT, event);
     }
   });
-  // Which tasks each app window watches, so a closed or reloaded window stops its captures.
-  const computerViewWatches = new Map<number, Set<string>>();
+  // Which tasks each app window watches (and how many of its views do), so a closed or
+  // reloaded window stops its captures and one view closing leaves the others live.
+  const computerViewWatches = new Map<number, Map<string, number>>();
   const readComputerViewTaskId = (value: unknown): string =>
     validateInput(StringIdSchema, value, "task ID");
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_WATCH, (event, taskId: unknown) => {
@@ -1753,23 +1754,31 @@ export async function setupIpcHandlers(
     const senderId = event.sender.id;
     let watched = computerViewWatches.get(senderId);
     if (!watched) {
-      watched = new Set();
+      watched = new Map();
       computerViewWatches.set(senderId, watched);
       event.sender.once("destroyed", () => {
-        for (const watchedTaskId of computerViewWatches.get(senderId) ?? []) {
+        for (const watchedTaskId of computerViewWatches.get(senderId)?.keys() ?? []) {
           computerView.unwatch(watchedTaskId);
         }
         computerViewWatches.delete(senderId);
       });
     }
-    if (watched.has(id)) return computerView.getState(id);
-    watched.add(id);
-    return computerView.watch(id);
+    const views = watched.get(id) ?? 0;
+    watched.set(id, views + 1);
+    return views > 0 ? computerView.getState(id) : computerView.watch(id);
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, (event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH);
     const id = readComputerViewTaskId(taskId);
-    if (computerViewWatches.get(event.sender.id)?.delete(id)) computerView.unwatch(id);
+    const watched = computerViewWatches.get(event.sender.id);
+    const views = watched?.get(id) ?? 0;
+    if (!watched || views === 0) return;
+    if (views > 1) {
+      watched.set(id, views - 1);
+      return;
+    }
+    watched.delete(id);
+    computerView.unwatch(id);
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER);

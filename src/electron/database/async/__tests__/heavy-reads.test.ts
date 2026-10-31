@@ -37,13 +37,15 @@ exports.commands = {
       return null;
     },
   },
-  "test.sleep": {
+  "test.holdReader": {
     kind: "read",
     tables: [],
     run(db, args) {
-      const end = Date.now() + args.ms;
-      while (Date.now() < end) {}
-      return { slept: args.ms };
+      const gate = new Int32Array(args.gate);
+      Atomics.store(gate, 0, 1);
+      Atomics.wait(gate, 1, 0, 10000);
+      Atomics.store(gate, 2, 1);
+      return null;
     },
   },
 };
@@ -423,12 +425,13 @@ describe("heavy reads and maintenance in the database worker", () => {
     seedUsage();
     const reader = await startReader();
     const controller = new AbortController();
-    const slow = reader.executeCommand("test.sleep", { ms: 400 });
-    const queued = new UsageInsightsService(db).generateInReader(reader, null, 30, {
-      signal: controller.signal,
-    });
-    const stall = await maxHostStall(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+    const gate = new Int32Array(new SharedArrayBuffer(12));
+    const slow = reader.executeCommand("test.holdReader", { gate: gate.buffer });
+    try {
+      await waitFor(() => Atomics.load(gate, 0) === 1);
+      const queued = new UsageInsightsService(db).generateInReader(reader, null, 30, {
+        signal: controller.signal,
+      });
       controller.abort();
       const error = await queued.then(
         () => null,
@@ -436,9 +439,12 @@ describe("heavy reads and maintenance in the database worker", () => {
       );
       expect(error).toBeInstanceOf(DatabaseRequestError);
       expect(error).toMatchObject({ code: "cancelled" });
+      expect(Atomics.load(gate, 2)).toBe(0);
+    } finally {
+      Atomics.store(gate, 1, 1);
+      Atomics.notify(gate, 1);
       await slow;
-    });
-    expect(stall).toBeLessThan(100);
+    }
     // The reader keeps serving after a cancellation.
     await expect(
       reader.execute("usage.generateReport", {

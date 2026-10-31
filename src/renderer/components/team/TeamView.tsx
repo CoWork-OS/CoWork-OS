@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, CalendarClock, Laptop, Plus, Server, Workflow, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, Plus, Workflow, type LucideIcon } from "lucide-react";
 import { BUILTIN_ACCESS_PROFILES } from "../../../shared/access-profiles";
 import type { Task, Workspace } from "../../../shared/types";
 import { useAttentionSnapshot } from "../../hooks/useAttentionSnapshot";
@@ -17,6 +17,7 @@ import {
 } from "../../utils/team-view";
 import { AgentRoleEditorDialog } from "../AgentRoleEditorDialog";
 import { BOT_PROFILE_UPDATED_EVENT } from "../BotProfileDialog";
+import { TeamDeviceCard } from "./TeamDeviceCard";
 import "./team-view.css";
 
 const LOCAL_LABEL = navigator.userAgent.includes("Mac") ? "This Mac" : "This computer";
@@ -259,7 +260,7 @@ export function TeamView({
           <h1 className="calm-view-title">Team</h1>
           <p className="calm-view-subtitle">
             Your agents, schedules, automations and devices: what each is doing, what it needs from
-            you, and how it's set up. Pick a device to manage it and see its work.
+            you, and how it's set up. Pick a remote device to manage it and see its work.
           </p>
         </header>
 
@@ -269,35 +270,7 @@ export function TeamView({
           </h2>
           <div className="team-view-devices">
             {model.devices.map((device) => (
-              <button
-                key={device.id}
-                type="button"
-                className={`team-view-device${device.online ? "" : " offline"}`}
-                onClick={() => onOpenDevices(device.local ? undefined : device.id)}
-              >
-                <span className="team-view-device-head">
-                  {device.local ? (
-                    <Laptop size={18} aria-hidden="true" />
-                  ) : (
-                    <Server size={18} aria-hidden="true" />
-                  )}
-                  <span className="team-view-device-name">{device.name}</span>
-                  <span className="team-view-device-status">
-                    <span className="team-view-dot" aria-hidden="true" />
-                    {device.statusLabel}
-                  </span>
-                </span>
-                <span className="team-view-device-line">
-                  {device.running === 0 && device.waiting === 0
-                    ? "Nothing running"
-                    : [
-                        device.running > 0 ? `${device.running} running` : "",
-                        device.waiting > 0 ? `${device.waiting} waiting on you` : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                </span>
-              </button>
+              <TeamDeviceCard key={device.id} device={device} onOpen={onOpenDevices} />
             ))}
             <button
               type="button"

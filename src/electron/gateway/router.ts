@@ -61,6 +61,7 @@ import {
 
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
+import { buildGatewayOriginRefs } from "../../shared/task-origin-refs";
 import * as os from "os";
 import { LLMProviderFactory, LLMSettings } from "../agent/llm/provider-factory";
 import { LLMProviderType } from "../agent/llm/types";
@@ -4631,6 +4632,12 @@ export class MessageRouter {
           gatewayContext,
           toolRestrictions,
           originChannel: adapter.type,
+          originRefs: buildGatewayOriginRefs({
+            channelType: adapter.type,
+            sessionId,
+            chatId: message.chatId,
+            threadId: message.threadId,
+          }),
           allowUserInput: false,
           retainMemory: false,
           readOnlyExecution: true,
@@ -4762,6 +4769,12 @@ export class MessageRouter {
           gatewayContext,
           ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
           originChannel: adapter.type,
+          originRefs: buildGatewayOriginRefs({
+            channelType: adapter.type,
+            sessionId,
+            chatId: message.chatId,
+            threadId: message.threadId,
+          }),
         },
         PermissionSettingsManager.loadSettings(),
       ),
@@ -7015,6 +7028,12 @@ export class MessageRouter {
             ? { channelSpecializationId: securityContext.channelSpecialization.id }
             : {}),
           originChannel: adapter.type,
+          originRefs: buildGatewayOriginRefs({
+            channelType: adapter.type,
+            sessionId,
+            chatId: message.chatId,
+            threadId: message.threadId,
+          }),
           ...senderConfig,
           ...(securityContext?.researchWorkflowPreset
             ? {

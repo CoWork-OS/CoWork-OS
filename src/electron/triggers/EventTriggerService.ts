@@ -23,6 +23,7 @@ import {
 } from "./types";
 import { evaluateConditions, substituteEventVariables } from "./condition-evaluator";
 import { ensureResponsibilitySnapshotColumn } from "./trigger-sql";
+import { buildTriggerOriginRefs, withOriginRefs } from "../../shared/task-origin-refs";
 
 const DEFAULT_COOLDOWN_MS = 60_000; // 1 minute
 const MAX_HISTORY_PER_TRIGGER = 50;
@@ -637,7 +638,15 @@ export class EventTriggerService implements EventTriggerRegistry {
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: prepared?.agentConfig ?? cfg.agentConfig,
+              // The task keeps the IDs of the event that created it (Chain of Recall).
+              agentConfig: withOriginRefs(
+                prepared?.agentConfig ?? cfg.agentConfig,
+                buildTriggerOriginRefs({
+                  triggerId: trigger.id,
+                  occurrenceId: String(row.id),
+                  event,
+                }),
+              ),
             });
             historyEntry.taskId = result.id;
             historyEntry.actionResult = "task_created";
@@ -877,7 +886,10 @@ export class EventTriggerService implements EventTriggerRegistry {
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: prepared?.agentConfig ?? cfg.agentConfig,
+              agentConfig: withOriginRefs(
+                prepared?.agentConfig ?? cfg.agentConfig,
+                buildTriggerOriginRefs({ triggerId: trigger.id, event }),
+              ),
             });
             historyEntry.taskId = result.id;
             historyEntry.actionResult = "task_created";

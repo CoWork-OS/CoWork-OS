@@ -7,6 +7,16 @@ import {
 import { estimateImageTokens } from "./llm/image-utils";
 import { getModelContextWindow } from "../../shared/model-metadata";
 import { PINNED_CONTEXT_OPEN_TAGS } from "./pinned-context-blocks";
+import {
+  OMITTED_ITEMS_NOTICE_RE,
+  omittedCharsNotice,
+  omittedCharsNoticeRegExp,
+  omittedItemsNotice,
+  spillPartHandle,
+  stripSpillClauses,
+  type SpillLocation,
+  type ToolResultSpillSink,
+} from "./tool-result-spill";
 
 /**
  * Context Manager handles conversation history to prevent "input too long" errors
@@ -355,8 +365,6 @@ const TRIMMED_READ_NOTE_RE =
   /\n\n\[\.\.\. trimmed to fit the tool-result budget: delivered (?:bytes|chars) \d+-\d+ of \d+\. Call [a-z_]+ with [A-Za-z_]+=\d+ to continue \.\.\.\]\s*$/;
 const TRIMMED_READ_FILES_NOTE_RE =
   /\n\n\[\.\.\. \d+ chars of this file omitted to fit the tool-result budget\. Call read_file with path .*? to read the rest \.\.\.\]\s*$/;
-const OMITTED_ITEMS_NOTICE_RE = /^\[\.\.\. (\d+) more items omitted/;
-const OMITTED_CHARS_NOTICE_RE = /\n?\[\.\.\. (\d+) chars omitted \.\.\.\]\n?/g;
 
 function isPlainObject(value: unknown): value is Record<string, Any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -403,32 +411,69 @@ function snapTailStart(text: string, start: number): number {
   return alignCut(text, start, "forward");
 }
 
-function omittedCharsNotice(omitted: number): string {
-  return `[... ${omitted} chars omitted ...]`;
-}
-
 /**
  * Keep the start and the end of text within maxChars and mark the omitted middle,
  * so errors and summaries at the end of an output survive truncation.
+ *
+ * With `spillHandle`, the caller keeps `text` itself under that handle and the notice
+ * says where in it the omitted middle starts. Without one, the notice of an earlier trim
+ * inside the new cut keeps pointing at its spilled text, at the new cut's offset.
  */
-function trimHeadTail(text: string, maxChars: number, headRatio: number): string {
+function trimHeadTail(
+  text: string,
+  maxChars: number,
+  headRatio: number,
+  spillHandle?: string,
+): string {
   if (text.length <= maxChars) return text;
-  const keep = Math.max(0, maxChars - omittedCharsNotice(text.length).length - 2);
+  const notices = Array.from(text.matchAll(omittedCharsNoticeRegExp()), (match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+    omitted: Number(match[1]),
+    handle: match[2],
+    offset: match[3] === undefined ? undefined : Number(match[3]),
+  }));
+  const widestSpill: SpillLocation | undefined = spillHandle
+    ? { handle: spillHandle, offset: text.length }
+    : notices.some((notice) => notice.handle)
+      ? { handle: "sp000000000000.000000", offset: text.length }
+      : undefined;
+  const keep = Math.max(0, maxChars - omittedCharsNotice(text.length, widestSpill).length - 2);
   const headBudget = Math.floor(keep * headRatio);
-  const headEnd = snapHeadEnd(text, headBudget);
-  const tailStart = Math.max(headEnd, snapTailStart(text, text.length - (keep - headBudget)));
+  let headEnd = snapHeadEnd(text, headBudget);
+  let tailStart = Math.max(headEnd, snapTailStart(text, text.length - (keep - headBudget)));
+  // Never cut through an earlier notice.
+  for (const notice of notices) {
+    if (headEnd > notice.start && headEnd < notice.end) headEnd = notice.start;
+    if (tailStart > notice.start && tailStart < notice.end) tailStart = notice.end;
+  }
+  tailStart = Math.max(headEnd, tailStart);
   const head = text.slice(0, headEnd);
   const tail = text.slice(tailStart);
   // Text trimmed before (e.g. re-trimmed during compaction) carries earlier notices:
   // count what they stood for instead of the notice text itself.
   let omitted = tailStart - headEnd;
-  for (const match of text.slice(headEnd, tailStart).matchAll(OMITTED_CHARS_NOTICE_RE)) {
-    omitted += Number(match[1]) - match[0].length;
+  let reused: SpillLocation | undefined;
+  const headHasNotice = notices.some((notice) => notice.end <= headEnd);
+  for (const notice of notices) {
+    if (notice.start < headEnd || notice.end > tailStart) continue;
+    omitted += notice.omitted - (notice.end - notice.start);
+    if (!reused && notice.handle && notice.offset !== undefined) {
+      // Text before the first notice is a prefix of what that notice's handle keeps, so
+      // the new cut starts that many characters earlier in the same kept text.
+      reused = {
+        handle: notice.handle,
+        offset: headHasNotice
+          ? notice.offset
+          : Math.max(0, notice.offset - (notice.start - headEnd)),
+      };
+    }
   }
+  const spill = spillHandle ? { handle: spillHandle, offset: headEnd } : reused;
   // Always exactly one newline on each side, so a notice can be told apart from the text.
   const beforeNotice = head ? "\n" : "";
   const afterNotice = tail ? "\n" : "";
-  return `${head}${beforeNotice}${omittedCharsNotice(omitted)}${afterNotice}${tail}`;
+  return `${head}${beforeNotice}${omittedCharsNotice(omitted, spill)}${afterNotice}${tail}`;
 }
 
 function jsonEscapedLength(text: string): number {
@@ -532,6 +577,8 @@ interface TrimSlot {
   escapedLength: number;
   render: (maxRawChars: number) => string;
   assign: (value: string) => void;
+  /** Handle the slot's full text is kept under when it is trimmed (Inline & Spill). */
+  spillHandle?: string;
 }
 
 /**
@@ -574,15 +621,16 @@ function collectTrimSlots(
 ): void {
   const value = (parent as Any)[key];
   if (typeof value === "string") {
-    out.push({
+    const slot: TrimSlot = {
       label: label || "(result)",
       original: value,
       escapedLength: jsonEscapedLength(value),
-      render: (maxRawChars) => trimHeadTail(value, maxRawChars, headRatio),
+      render: (maxRawChars) => trimHeadTail(value, maxRawChars, headRatio, slot.spillHandle),
       assign: (next) => {
         (parent as Any)[key] = next;
       },
-    });
+    };
+    out.push(slot);
     return;
   }
   if (depth > 32 || !value || typeof value !== "object") return;
@@ -611,8 +659,25 @@ function collectArrays(value: unknown, label: string, out: Array<{ label: string
   }
 }
 
-/** Drop trailing items of the largest array, leaving a notice. Returns its label. */
-function dropTrailingArrayItems(root: unknown, maxChars: number): string | null {
+const SPILL_HANDLE_IN_TEXT_RE = /handle="(sp[0-9a-f]{12}(?:\.\d{1,6})?)"/;
+
+interface DroppedArrayItems {
+  label: string;
+  /** The array; its last item is the notice that stands for the dropped items. */
+  items: Any[];
+  /** Handle the dropped items are to be kept under, with their text (one JSON line each). */
+  kept?: { handle: string; text: string };
+}
+
+/**
+ * Drop trailing items of the largest array, leaving a notice. With `spillHandle`, the
+ * notice says how to read the dropped items, which the caller keeps under that handle.
+ */
+function dropTrailingArrayItems(
+  root: unknown,
+  maxChars: number,
+  spillHandle?: string,
+): DroppedArrayItems | null {
   const arrays: Array<{ label: string; items: Any[] }> = [];
   collectArrays(root, "", arrays);
   let target: { label: string; items: Any[]; size: number } | null = null;
@@ -624,43 +689,86 @@ function dropTrailingArrayItems(root: unknown, maxChars: number): string | null 
 
   const items = target.items;
   let omitted = 0;
+  const lastItem = items[items.length - 1];
   const previousNotice =
-    typeof items[items.length - 1] === "string"
-      ? OMITTED_ITEMS_NOTICE_RE.exec(items[items.length - 1])
-      : null;
+    typeof lastItem === "string" ? OMITTED_ITEMS_NOTICE_RE.exec(lastItem) : null;
+  // A notice from an earlier trim keeps its handle when no new one is given.
+  let handle = spillHandle;
   if (previousNotice) {
     items.pop();
     omitted += Number(previousNotice[1]);
+    handle ??= SPILL_HANDLE_IN_TEXT_RE.exec(lastItem as string)?.[1];
   }
-  const excess = JSON.stringify(root).length - maxChars + 96;
+  const excess = JSON.stringify(root).length - maxChars + 96 + (handle ? 80 : 0);
   let removedChars = 0;
+  const dropped: Any[] = [];
   while (items.length > 1 && removedChars < excess) {
-    removedChars += JSON.stringify(items.pop()).length + 1;
+    const item = items.pop();
+    dropped.unshift(item);
+    removedChars += JSON.stringify(item).length + 1;
     omitted += 1;
   }
-  items.push(`[... ${omitted} more items omitted to fit the tool-result budget ...]`);
-  return target.label;
+  items.push(omittedItemsNotice(omitted, handle));
+  if (!spillHandle) return { label: target.label, items };
+  // An earlier notice goes last, so its own handle can still be followed.
+  const keptLines = dropped.map((item) => JSON.stringify(item));
+  if (previousNotice) keptLines.push(lastItem as string);
+  return { label: target.label, items, kept: { handle: spillHandle, text: keptLines.join("\n") } };
+}
+
+function newSpillBase(sink: ToolResultSpillSink | undefined): string | undefined {
+  if (!sink) return undefined;
+  try {
+    return sink.newHandle();
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSpill(
+  sink: ToolResultSpillSink | undefined,
+  parts: ReadonlyMap<string, string>,
+): boolean {
+  if (!sink || parts.size === 0) return false;
+  try {
+    return sink.write(parts);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Fit any other JSON value: shorten long strings head+tail (logs keep more tail), then
  * drop trailing items of long arrays. Small fields such as exit codes stay intact and the
- * output remains valid JSON.
+ * output remains valid JSON. With a spill sink, what is cut is kept under handles and
+ * each notice says how to read it with tool_result_read.
  */
-function fitGenericJson(root: unknown, maxChars: number): string | null {
+function fitGenericJson(
+  root: unknown,
+  maxChars: number,
+  spill?: ToolResultSpillSink,
+): string | null {
   // Strings are reassigned through their container, so wrap the root once.
   const holder: Record<string, Any> = { value: root };
   const wrapperChars = JSON.stringify({ value: null }).length - "null".length;
   const objectRoot = isPlainObject(root);
   const valueBudget = maxChars - (objectRoot ? TRUNCATION_NOTE_RESERVE : 0);
+  const spillBase = newSpillBase(spill);
 
   const slots: TrimSlot[] = [];
   collectTrimSlots(holder, "value", "", DEFAULT_HEAD_RATIO, slots);
   const trimmedLabels = new Set<string>();
+  const currentValues = new Map<TrimSlot, string>();
+  // Only strings long enough to be trimmed get a part handle; parts are numbered in order.
+  let nextPart = 0;
   for (const slot of slots) {
+    if (spillBase && slot.escapedLength > MIN_TRIMMED_STRING_CHARS) {
+      slot.spillHandle = spillPartHandle(spillBase, nextPart++);
+    }
     const assign = slot.assign;
     slot.assign = (next) => {
       assign(next);
+      currentValues.set(slot, next);
       if (next !== slot.original) trimmedLabels.add(slot.label);
       else trimmedLabels.delete(slot.label);
     };
@@ -669,20 +777,64 @@ function fitGenericJson(root: unknown, maxChars: number): string | null {
   const fitsBudget = () => JSON.stringify(holder.value).length <= valueBudget;
   let fits = fitTrimSlots(holder, slots, valueBudget + wrapperChars) || fitsBudget();
   const droppedFrom = new Set<string>();
+  const dropNotices: DroppedArrayItems[] = [];
   for (let attempt = 0; !fits && attempt < 8; attempt += 1) {
-    const label = dropTrailingArrayItems(holder.value, valueBudget);
-    if (!label) break;
-    droppedFrom.add(label);
+    const dropped = dropTrailingArrayItems(
+      holder.value,
+      valueBudget,
+      spillBase ? spillPartHandle(spillBase, nextPart++) : undefined,
+    );
+    if (!dropped) break;
+    droppedFrom.add(dropped.label);
+    dropNotices.push(dropped);
     fits = fitsBudget();
   }
   if (!fits) return null;
+
+  // Keep what was cut, all at once: every trimmed string whose notice names its handle,
+  // and the dropped array items. If nothing could be kept, the notices lose their hints.
+  let spilled = false;
+  if (spillBase) {
+    const parts = new Map<string, string>();
+    for (const slot of slots) {
+      const value = currentValues.get(slot);
+      if (
+        slot.spillHandle &&
+        value !== undefined &&
+        value !== slot.original &&
+        value.includes(`handle="${slot.spillHandle}"`)
+      ) {
+        parts.set(slot.spillHandle, slot.original);
+      }
+    }
+    for (const dropped of dropNotices) {
+      if (dropped.kept) parts.set(dropped.kept.handle, dropped.kept.text);
+    }
+    spilled = parts.size > 0 && writeSpill(spill, parts);
+    if (parts.size > 0 && !spilled) {
+      for (const slot of slots) {
+        const value = currentValues.get(slot);
+        if (slot.spillHandle && value !== undefined && parts.has(slot.spillHandle)) {
+          slot.assign(stripSpillClauses(value, slot.spillHandle));
+        }
+      }
+      for (const dropped of dropNotices) {
+        const notice = dropped.items[dropped.items.length - 1];
+        if (dropped.kept && typeof notice === "string") {
+          dropped.items[dropped.items.length - 1] = stripSpillClauses(notice, dropped.kept.handle);
+        }
+      }
+    }
+  }
 
   if (objectRoot) {
     const fields = Array.from(trimmedLabels).slice(0, 6);
     const parts = [
       "This result was trimmed to fit the tool-result budget.",
       fields.length > 0
-        ? `Shortened fields (omitted text marked "[... N chars omitted ...]"): ${fields.join(", ")}.`
+        ? spilled
+          ? `Shortened fields: ${fields.join(", ")}. Each "[... N chars omitted ...]" marker says how to read the omitted text with tool_result_read.`
+          : `Shortened fields (omitted text marked "[... N chars omitted ...]"): ${fields.join(", ")}.`
         : "",
       droppedFrom.size > 0
         ? `Trailing items dropped from: ${Array.from(droppedFrom).join(", ")}.`
@@ -841,8 +993,15 @@ function isReadFilesPayload(parsed: unknown): parsed is Record<string, Any> {
  * - read_files trims per file and keeps skippedFiles/warnings;
  * - other JSON keeps small fields intact and shortens long strings head+tail;
  * - plain text keeps head and tail around an explicit omission marker.
+ *
+ * With `options.spill` (Inline & Spill), the text a marker stands for is kept under a
+ * handle and the marker says how to page through it with tool_result_read. read_file,
+ * parse_document and read_files windows already say where to continue, so they are not spilled.
  */
-export function truncateToolResult(result: string): string {
+export function truncateToolResult(
+  result: string,
+  options: { spill?: ToolResultSpillSink } = {},
+): string {
   if (typeof result !== "string") {
     return "";
   }
@@ -862,14 +1021,17 @@ export function truncateToolResult(result: string): string {
       const fitted = fitReadFilesPayload(safeJsonParse(result), maxChars);
       if (fitted !== null) return fitted;
     }
-    const fitted = fitGenericJson(safeJsonParse(result), maxChars);
+    const fitted = fitGenericJson(safeJsonParse(result), maxChars, options.spill);
     if (fitted !== null) return fitted;
   } else if (typeof parsed === "string") {
-    const fitted = fitGenericJson(parsed, maxChars);
+    const fitted = fitGenericJson(parsed, maxChars, options.spill);
     if (fitted !== null) return fitted;
   }
 
-  return trimHeadTail(result, maxChars, PLAIN_TEXT_HEAD_RATIO);
+  // The whole text is kept, so the notice's offset is simply where the cut starts.
+  const handle = newSpillBase(options.spill);
+  const kept = handle !== undefined && writeSpill(options.spill, new Map([[handle, result]]));
+  return trimHeadTail(result, maxChars, PLAIN_TEXT_HEAD_RATIO, kept ? handle : undefined);
 }
 
 export type CompactionKind = "none" | "tool_truncation_only" | "message_removal";

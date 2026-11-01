@@ -133,6 +133,36 @@ describe("EventTriggerService", () => {
     );
   });
 
+  it("gives a created task the IDs of the trigger and event it came from", async () => {
+    const trigger = await service.addTrigger({
+      name: "Deploy Watcher",
+      enabled: true,
+      source: "channel_message",
+      conditions: [{ field: "text", operator: "contains", value: "deploy" }],
+      action: { type: "create_task", config: { prompt: "Handle deployment" } },
+      workspaceId: "ws-1",
+    });
+
+    await service.evaluateEvent({
+      ...makeMessageEvent("please deploy", { channelType: "slack", chatId: "C123" }),
+      eventId: "gateway-message-v1:abc",
+    });
+
+    expect(deps.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentConfig: expect.objectContaining({
+          originRefs: {
+            triggerId: trigger.id,
+            triggerEventId: "gateway-message-v1:abc",
+            threadKey: "slack:C123",
+            gatewayChannel: "slack",
+            gatewayChatId: "C123",
+          },
+        }),
+      }),
+    );
+  });
+
   it("allows Routine v2 to intercept a matched trigger before task creation", async () => {
     const interceptor = vi
       .fn()

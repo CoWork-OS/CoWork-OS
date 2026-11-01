@@ -1070,6 +1070,7 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "image generation",
         "text to image",
         "text-to-image",
+        "openai",
         "gpt-image",
         "gpt image",
         "nano-banana",
@@ -1221,6 +1222,27 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
       target: { tab: "access", accessSubTab: "webaccess" },
     },
   ],
+  browser: [
+    {
+      terms: [
+        "browser",
+        "search engine",
+        "restore tabs",
+        "user agent",
+        "browser downloads",
+        "browser uploads",
+        "browser engine",
+        "browser profile",
+        "browsing history",
+        "site permissions",
+        "cookies",
+        "saved logins",
+        "import passwords",
+        "browsing data",
+        "cache and storage",
+      ],
+    },
+  ],
   extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
   insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
   pulse: [
@@ -1250,6 +1272,18 @@ const matchesSettingsSidebarSearchQuery = (haystack: string, query: string): boo
   return tokens.every((token) => haystack.includes(token));
 };
 
+export const findSettingsSidebarSearchEntry = (
+  entries: SidebarSearchEntry[],
+  query: string,
+  contextTerms: string[] = [],
+): SidebarSearchEntry | undefined =>
+  entries.find((entry) =>
+    matchesSettingsSidebarSearchQuery(
+      [...contextTerms, ...entry.terms].join(" ").toLowerCase(),
+      query,
+    ),
+  );
+
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
   isMacPlatform: boolean;
@@ -1276,19 +1310,14 @@ const SettingsSidebar = memo(function SettingsSidebar({
           },
           ...(sidebarSearchEntries[item.tab] ?? []),
         ];
-        const searchBlob = entries
-          .flatMap((entry) => entry.terms)
-          .join(" ")
-          .toLowerCase();
-        const matchedEntry = entries.find((entry) =>
-          entry.terms.some((term) =>
-            matchesSettingsSidebarSearchQuery(term.toLowerCase(), deferredSidebarSearch),
-          ),
-        );
+        const matchedEntry = findSettingsSidebarSearchEntry(entries, deferredSidebarSearch, [
+          getSidebarItemLabel(item),
+          item.group,
+        ]);
         return {
           item,
           matchedTarget: matchedEntry?.target,
-          matches: matchesSettingsSidebarSearchQuery(searchBlob, deferredSidebarSearch),
+          matches: Boolean(matchedEntry),
         };
       })
       .filter((entry) => entry.matches);

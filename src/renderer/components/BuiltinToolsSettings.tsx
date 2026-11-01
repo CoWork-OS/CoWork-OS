@@ -467,6 +467,7 @@ export function BuiltinToolsSettings() {
                     }
                     disabled={!config.enabled}
                     title="Tool priority"
+                    aria-label={`${info.name} tool priority`}
                   >
                     {PRIORITY_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
@@ -478,6 +479,7 @@ export function BuiltinToolsSettings() {
                   <label className="builtin-tool-toggle">
                     <input
                       type="checkbox"
+                      aria-label={`Enable ${info.name}`}
                       checked={config.enabled}
                       onChange={(e) => handleCategoryToggle(category, e.target.checked)}
                     />
@@ -489,7 +491,9 @@ export function BuiltinToolsSettings() {
                     onClick={() =>
                       setExpandedCategory(expandedCategory === category ? null : category)
                     }
-                    title="Show tools in this category"
+                    aria-label={`${expandedCategory === category ? "Hide" : "Show"} tools for ${info.name}`}
+                    aria-expanded={expandedCategory === category}
+                    title={`${expandedCategory === category ? "Hide" : "Show"} tools in this category`}
                   >
                     <ChevronDown
                       size={16}
@@ -515,6 +519,7 @@ export function BuiltinToolsSettings() {
                     </div>
                     <select
                       className="builtin-tool-mode-select"
+                      aria-label="Shell command approval mode"
                       value={runCommandApprovalMode}
                       onChange={(e) =>
                         handleRunCommandApprovalMode(
@@ -538,6 +543,7 @@ export function BuiltinToolsSettings() {
                     </div>
                     <select
                       className="builtin-tool-mode-select"
+                      aria-label="Codex runtime"
                       value={settings.codexRuntimeMode}
                       onChange={(e) => handleCodexRuntimeMode(e.target.value as "native" | "acpx")}
                       disabled={!config.enabled}
@@ -557,6 +563,7 @@ export function BuiltinToolsSettings() {
                     <label className="builtin-tool-toggle">
                       <input
                         type="checkbox"
+                        aria-label="Auto-approve safe commands"
                         checked={runCommandAutoApprove}
                         onChange={(e) => handleRunCommandAutoApprove(e.target.checked)}
                         disabled={!config.enabled}
@@ -575,6 +582,7 @@ export function BuiltinToolsSettings() {
                     <input
                       className="builtin-tool-timeout-input"
                       type="number"
+                      aria-label="run_command timeout (ms)"
                       min={1000}
                       step={1000}
                       value={runCommandTimeout}
@@ -598,6 +606,7 @@ export function BuiltinToolsSettings() {
                     </div>
                     <select
                       className="builtin-tool-mode-select"
+                      aria-label="Browser automation"
                       value={browserAutomationMode}
                       onChange={(e) =>
                         handleBrowserAutomationMode(
@@ -622,6 +631,7 @@ export function BuiltinToolsSettings() {
                     </div>
                     <select
                       className="builtin-tool-mode-select"
+                      aria-label="Native desktop control"
                       value={nativeComputerUseMode}
                       onChange={(e) =>
                         handleNativeComputerUseMode(
@@ -650,6 +660,7 @@ export function BuiltinToolsSettings() {
                         <label className="builtin-tool-toggle">
                           <input
                             type="checkbox"
+                            aria-label={`Enable ${tool}`}
                             checked={toolEnabled}
                             onChange={(e) => handleToolToggle(tool, e.target.checked)}
                             disabled={!config.enabled || saving}

@@ -40,6 +40,7 @@ import {
   ChannelType,
   GatewayEvent,
   GatewayEventHandler,
+  MessageReceivedEventData,
   CallbackQuery,
   InlineKeyboardButton,
   MessageAttachment,
@@ -2245,8 +2246,10 @@ export class MessageRouter {
         messageId: message.messageId,
         chatId: message.chatId,
         userId: message.userId,
+        senderName: (message.userName || "").trim() || message.userId,
+        text: message.text,
         preview: message.text.slice(0, 100),
-      },
+      } satisfies MessageReceivedEventData,
     });
 
     // Ingest-only mode: persist the message but do not route to the agent or reply, unless

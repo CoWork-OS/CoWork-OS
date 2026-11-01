@@ -1021,6 +1021,25 @@ export interface GatewayEvent {
 }
 
 /**
+ * `data` of a `message:received` gateway event. Event triggers evaluate their
+ * `channel_message` conditions (`text`, `senderName`, ...) against these fields.
+ */
+export interface MessageReceivedEventData {
+  /** Configured channel (database id) that received the message */
+  channelId: string;
+  messageId: string;
+  chatId: string;
+  /** Sender's user id on the channel */
+  userId: string;
+  /** Sender display name; the channel user id when the channel gave none */
+  senderName: string;
+  /** Full message text (after routing normalization and any audio transcription) */
+  text: string;
+  /** First 100 characters of `text`, for logs and notifications */
+  preview: string;
+}
+
+/**
  * Gateway event handler
  */
 export type GatewayEventHandler = (event: GatewayEvent) => void;

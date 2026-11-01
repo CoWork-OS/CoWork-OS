@@ -1,5 +1,4 @@
 import { setHeartbeatSignalEmitter } from "../agents/heartbeat-signal-bus";
-import { createHash } from "crypto";
 import { connectorTriggerEvents, connectorTriggerSubscription } from "./connector-trigger-events";
 import { MemorySourceRecheckService } from "../memory/MemorySourceRecheckService";
 import type { MCPConnectorEvent } from "../mcp/client/MCPServerConnection";
@@ -21,6 +20,7 @@ import {
   attachThreadSubscriptionCleanup,
   createEventRoutingDeps,
 } from "../triggers/event-routing-deps";
+import { channelMessageTriggerEvent } from "../triggers/gateway-message-event";
 import { RoutineService } from "../routines/service";
 import { HooksSettingsManager } from "../hooks/settings";
 import { createRoutineWorkflowActionExecutor } from "../routines/workflow/action-executor";
@@ -234,31 +234,9 @@ export function createHeadlessBotAutomation(input: {
   setHeartbeatService(heartbeat);
   let listening = true;
   input.channelGateway.onEvent((event) => {
-    if (!listening || event.type !== "message:received" || !event.data) return;
-    const channelType = event.channel || "";
-    const chatId = String(event.data.chatId || "");
-    const messageId = String(event.data.messageId || "");
-    const channelDbId = String(event.data.channelId || "");
-    const identityParts = [channelType, channelDbId, chatId, messageId];
-    const eventId = identityParts.every((part) => part.length > 0 && part.length <= 1024)
-      ? `gateway-message-v1:${createHash("sha256")
-          .update(JSON.stringify(["gateway-message-v1", ...identityParts]))
-          .digest("hex")}`
-      : undefined;
-    void triggers
-      .evaluateEvent({
-        source: "channel_message",
-        ...(eventId ? { eventId } : {}),
-        timestamp: event.timestamp.getTime(),
-        fields: {
-          channelType,
-          channelInstanceId: channelDbId,
-          chatId,
-          text: String(event.data.text || ""),
-          senderName: String(event.data.senderName || ""),
-        },
-      })
-      .catch(input.log);
+    if (!listening) return;
+    const triggerEvent = channelMessageTriggerEvent(event);
+    if (triggerEvent) void triggers.evaluateEvent(triggerEvent).catch(input.log);
   });
   const onConnectorEvent = (event: MCPConnectorEvent) => {
     if (!listening) return;

@@ -1,5 +1,9 @@
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
-import { isFreshAgentHandoff } from "./background-process-notifications";
+import {
+  isFreshAgentHandoff,
+  isRuntimeNotice,
+  runningTurnUpdateText,
+} from "./background-process-notifications";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
 import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
@@ -35709,7 +35713,7 @@ Return ONLY a JSON object:
                     },
                   )
                 : withSurfaceOriginNote(
-                    `USER UPDATE: ${pendingMsg.message}`,
+                    runningTurnUpdateText(pendingMsg),
                     pendingMsg.surfaceOrigin,
                   );
               const content = await this.buildUserContent(
@@ -35726,7 +35730,11 @@ Return ONLY a JSON object:
                 messages.pop();
                 throw error;
               }
-              if (!isPendingBotHandoff && pendingMsg.deliveryMode === "follow_up") {
+              if (
+                !isPendingBotHandoff &&
+                !isRuntimeNotice(pendingMsg.notificationKind) &&
+                pendingMsg.deliveryMode === "follow_up"
+              ) {
                 this.recordAcceptedRunUserUpdate(pendingMsg.message);
               }
               if (hasDurableFollowUpReceipt) {
@@ -43004,7 +43012,7 @@ Return ONLY a JSON object:
                     },
                   )
                 : withSurfaceOriginNote(
-                    `USER UPDATE: ${pendingMsg.message}`,
+                    runningTurnUpdateText(pendingMsg),
                     pendingMsg.surfaceOrigin,
                   );
               const content = await this.buildUserContent(
@@ -43016,7 +43024,11 @@ Return ONLY a JSON object:
               );
               // messages === this.conversationHistory here, so push persists automatically
               messages.push({ role: "user" as const, content });
-              if (!isPendingBotHandoff && pendingMsg.deliveryMode === "follow_up") {
+              if (
+                !isPendingBotHandoff &&
+                !isRuntimeNotice(pendingMsg.notificationKind) &&
+                pendingMsg.deliveryMode === "follow_up"
+              ) {
                 this.recordAcceptedRunUserUpdate(pendingMsg.message);
               }
               if (hasDurableFollowUpReceipt) {

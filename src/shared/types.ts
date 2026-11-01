@@ -3552,6 +3552,9 @@ export type FollowUpTextProvenance = "user_typed";
  */
 export type TaskPromptProvenance = "user_typed";
 
+/** Work that finished outside the turn and reports back to the session as a follow-up event. */
+export type RuntimeNotificationKind = "background_process" | "agent_output";
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3577,8 +3580,12 @@ export interface TaskFollowUpInput {
   deliveryMode?: "message" | "follow_up";
   /** Internal provenance for messages sent between parent and child tasks. */
   messageSource?: "user" | "agent";
-  /** Internal runtime notice; retains the current conversation instead of starting a bot handoff. */
-  notificationKind?: "background_process";
+  /**
+   * Internal runtime notice; retains the current conversation instead of starting a bot handoff.
+   * "background_process": a tracked run_command job finished. "agent_output": a child agent
+   * started with spawn_agent finished; its report is agent output, not user input.
+   */
+  notificationKind?: RuntimeNotificationKind;
   /** Stable ID used to correlate an agent message with its delivery event. */
   messageId?: string;
   /** Parent/agent task that authored an agent message. */

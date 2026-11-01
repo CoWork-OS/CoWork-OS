@@ -147,9 +147,40 @@ jobs:
       - name: Run TypeScript type check
         run: npm run type-check
 
+  # npm test is skills:check, then the node:test suites, then vitest. The first two
+  # are quick and need no native setup, so they run here; vitest runs in the
+  # sharded test job below.
+  test-node:
+    name: Skills Check & Node Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Check skills
+        run: npm run skills:check
+
+      - name: Run node:test suites
+        run: npm run test:node
+
   test:
-    name: Tests
+    # The vitest files are split across four runners; one runner took ~9 minutes.
+    name: Tests (${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04 # Playwright has no Chromium build for the ubuntu-latest 26.04 image yet
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -170,10 +201,33 @@ jobs:
       - name: Install Chromium for browser integration tests
         run: npx playwright install --with-deps chromium
 
-      - name: Prepare native test dependencies and Numbat fixtures
-        run: |
-          npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
-          npm run numbat:build
+      - name: Rebuild node-pty for tests
+        run: npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
+
+      # Building the Numbat runtime downloads a Go SDK and compiles pinned sources
+      # (~35 s). Pushes to main save the result; other runs restore it and verify
+      # the checksums instead of rebuilding.
+      - name: Restore Numbat runtime
+        id: numbat-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: build/numbat
+          key: numbat-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resources/numbat/**', 'scripts/build_numbat_runtime.mjs') }}
+
+      - name: Build Numbat runtime
+        if: steps.numbat-cache.outputs.cache-hit != 'true'
+        run: npm run numbat:build
+
+      - name: Verify restored Numbat runtime
+        if: steps.numbat-cache.outputs.cache-hit == 'true'
+        run: node scripts/build_numbat_runtime.mjs --verify-only
+
+      - name: Save Numbat runtime
+        if: github.event_name != 'pull_request' && matrix.shard == 1 && steps.numbat-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: build/numbat
+          key: ${{ steps.numbat-cache.outputs.cache-primary-key }}
 
       - name: Setup Python for Android worker guard tests
         uses: actions/setup-python@v7
@@ -184,7 +238,7 @@ jobs:
         run: python -m pip install pillow==12.3.0
 
       - name: Run tests
-        run: npm test
+        run: npx vitest run --shard=${{ matrix.shard }}/4
 
   test-macos:
     # The release workflow runs the suite on macOS too (sandbox-exec, Keychain and slower
@@ -290,9 +344,9 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Not gated on the test job: tests take ~12 minutes, and waiting for them put the
-    # whole build on the critical path. A red test still fails the run.
-    needs: [secret-scan, lint-and-typecheck]
+    # Gated only on the secret scan (~10 s). Waiting for lint (~2.5 min) or the tests
+    # put the build on the critical path; a red lint or test still fails the run.
+    needs: [secret-scan]
     env:
       # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
       NODE_OPTIONS: --max-old-space-size=4096

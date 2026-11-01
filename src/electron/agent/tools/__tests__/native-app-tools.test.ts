@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { NativeAppTools, NativeAppInputSchema, NATIVE_APP_TOOL } from "../native-app-tools";
 import { beginPrivateSurface } from "../../../browser/credentials/private-capture-guard";
 import { HelperTransportError, HelperCommandError } from "../../../computer-use/helper-runtime";
+import { ComputerViewService } from "../../../computer-use/computer-view-service";
 import {
   normalizeNativeComputerUseMode,
   isComputerUseToolName,
@@ -241,6 +242,39 @@ describe("native app private input races", () => {
     });
     await expect(operation).rejects.toThrow(/private/i);
     expect(f.events).toEqual([]);
+  });
+
+  it("shows the observed window in the live view and keeps capturing it in the background", async () => {
+    const view = ComputerViewService.resetForTesting({
+      encodeFrame: (png) => ({ dataUrl: `jpeg:${png.toString()}`, width: 10, height: 10 }),
+    });
+    try {
+      const f = fixture();
+      const screenshot = vi.fn(async () => ({
+        pngBase64: Buffer.from("later").toString("base64"),
+      }));
+      Object.assign(f.runtime, { screenshot });
+      f.runtime.background.mockResolvedValueOnce({
+        pid: 42,
+        windowId: 100,
+        bundleId: "com.example.target",
+        windowTitle: "Untitled",
+        capture: { pngBase64: Buffer.from("first").toString("base64") },
+      } as never);
+      await f.tools.run({ action: "observe", pid: 42, windowId: 100 });
+      expect(view.getState("task").frame).toMatchObject({
+        dataUrl: "jpeg:first",
+        surface: "this_computer",
+        label: "com.example.target — Untitled",
+      });
+
+      view.watch("task");
+      await view.captureNow("task");
+      expect(screenshot).toHaveBeenCalledWith(100);
+      expect(view.getState("task").frame?.dataUrl).toBe("jpeg:later");
+    } finally {
+      ComputerViewService.resetForTesting();
+    }
   });
 
   it("records an interrupted dispatched action as unknown and blocks replay", async () => {

@@ -26,6 +26,8 @@ import { ensureResponsibilitySnapshotColumn } from "./trigger-sql";
 
 const DEFAULT_COOLDOWN_MS = 60_000; // 1 minute
 const MAX_HISTORY_PER_TRIGGER = 50;
+/** Longest string field kept in trigger run history (full channel messages stay out). */
+export const MAX_HISTORY_FIELD_CHARS = 4_000;
 type TriggerDefinitionSnapshot = Pick<
   EventTrigger,
   | "id"
@@ -56,6 +58,18 @@ function triggerMatchesEventSource(triggerSource: string, eventSource: string): 
   if (triggerSource === "email" && eventSource === "mailbox_event") return true;
   if (triggerSource === "mailbox_event" && eventSource === "email") return true;
   return false;
+}
+
+/** Event fields as stored in run history, with long string values capped. */
+function historyEventData(fields: TriggerEvent["fields"]): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    data[key] =
+      typeof value === "string" && value.length > MAX_HISTORY_FIELD_CHARS
+        ? value.slice(0, MAX_HISTORY_FIELD_CHARS)
+        : value;
+  }
+  return data;
 }
 
 function renderTriggerPrompt(template: string, event: TriggerEvent): string {
@@ -411,7 +425,7 @@ export class EventTriggerService implements EventTriggerRegistry {
       id: randomUUID(),
       triggerId: String(row.trigger_id),
       firedAt: now,
-      eventData: event.fields as Record<string, unknown>,
+      eventData: historyEventData(event.fields),
       sourceLabel:
         configuredTrigger && isMailboxEventSource(configuredTrigger.source)
           ? "Inbox automation"
@@ -798,7 +812,7 @@ export class EventTriggerService implements EventTriggerRegistry {
       id: randomUUID(),
       triggerId: trigger.id,
       firedAt: now,
-      eventData: event.fields as Record<string, unknown>,
+      eventData: historyEventData(event.fields),
       sourceLabel: isMailboxEventSource(trigger.source) ? "Inbox automation" : trigger.source,
     };
 

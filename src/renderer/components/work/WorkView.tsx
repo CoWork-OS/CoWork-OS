@@ -33,6 +33,8 @@ const STATUS_TABS: Array<{ id: WorkStatusFilter; label: string }> = [
   { id: "needs", label: "Needs you" },
   { id: "running", label: "Running" },
   { id: "done", label: "Done" },
+  { id: "partial", label: "Partly done" },
+  { id: "cancelled", label: "Cancelled" },
   { id: "failed", label: "Failed" },
 ];
 

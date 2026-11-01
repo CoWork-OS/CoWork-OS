@@ -479,10 +479,14 @@ See [Editable queued inputs](queued-inputs.md).
 
 ## Background job completion
 
-Tracked jobs promote repeated quiet polls into completion delivery. Finished notices wait
-in the task journal during a pause or block and retry on lifecycle changes. Deterministic
-message IDs and cancellation tombstones prevent duplicate or cancelled delivery.
-See [Tracked background jobs](background-jobs.md).
+Long work reports back as an event instead of being polled. Tracked jobs promote repeated
+quiet polls into completion delivery, and a `spawn_agent` child pushes its result to the
+parent when its orchestration node ends, so `wait_for_agent` never blocks on it. Every
+running session (Desktop, gateway, bot, headless, child) drains these follow-ups at its next
+iteration. Finished notices wait in the task journal during a pause or block and retry on
+lifecycle changes; a notice for a task that has ended is logged with the reason and
+dropped. Deterministic message IDs and cancellation tombstones prevent duplicate or
+cancelled delivery. See [Tracked background jobs](background-jobs.md).
 
 ## Interrupted turn recovery
 

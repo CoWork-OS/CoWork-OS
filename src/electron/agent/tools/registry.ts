@@ -2,6 +2,7 @@ import { ExecutionEnvironmentController } from "../../environments/ExecutionEnvi
 import { isEnvironmentTool } from "../../../shared/execution-environment";
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import { trailingBackgroundCommand } from "./trailing-background-command";
+import { pushesSpawnedAgentResult } from "../background-process-notifications";
 import { isReadOnlyHttpRequestInput } from "../security/http-permission-context";
 import { mcpConfigurationCurrent } from "../../mcp/configuration-authority";
 import { MCPEventService } from "../../mcp/events/MCPEventService";
@@ -84,6 +85,7 @@ import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
+import { ThreadTools } from "./thread-tools";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -756,6 +758,7 @@ export class ToolRegistry {
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
+  private threadTools: ThreadTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -850,6 +853,7 @@ export class ToolRegistry {
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
+    this.threadTools = new ThreadTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1814,6 +1818,8 @@ export class ToolRegistry {
     if (this.daemon.hasEventWaitSupport?.()) {
       allTools.push(...EventWaitTools.getToolDefinitions());
     }
+    // Follow or leave a conversation thread's later events (thread subscriptions).
+    allTools.push(...ThreadTools.getToolDefinitions());
     if (MCPEventService.getActive()) {
       allTools.push({
         name: "manage_connector_events",
@@ -3980,6 +3986,16 @@ export class ToolRegistry {
       serialSchedulerSpec,
     );
     register(
+      "thread_subscribe",
+      async ({ request }) => this.threadTools.subscribe(request.input),
+      serialSchedulerSpec,
+    );
+    register(
+      "thread_unsubscribe",
+      async ({ request }) => this.threadTools.unsubscribe(request.input),
+      serialSchedulerSpec,
+    );
+    register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
       serialSchedulerSpec,
@@ -5295,6 +5311,10 @@ ${
       hasAnyVisibleTools("wait_for_event")
         ? "\n- wait_for_event: Pause this task until a workspace file change, GitHub event or webhook arrives, instead of polling or sleeping; then finish the turn"
         : ""
+    }${
+      hasAnyVisibleTools("thread_subscribe")
+        ? "\n- thread_subscribe / thread_unsubscribe: Receive (or stop receiving) a PR, issue, email chain or chat thread's later events in this task"
+        : ""
     }
 
 ${
@@ -5921,6 +5941,8 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
     if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
+    if (name === "thread_subscribe") return await this.threadTools.subscribe(input);
+    if (name === "thread_unsubscribe") return await this.threadTools.unsubscribe(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Canvas tools
@@ -10681,7 +10703,7 @@ ${skillDescriptions}`;
       {
         name: "process_output",
         description:
-          "Read new output and the status (running, exit code) of a background process started with run_command background: true. Use it to wait for a dev server to become ready, to find the URL or port it printed, or to check its logs after an action. Each call returns output since the previous call; pass since_offset (from next_offset) to page, since_offset: 0 to reread what is still buffered, or tail_lines for just the end. In an interactive native Desktop session, two empty reads enable completion delivery: when notify_on_complete is true, stop polling and continue other work or end the turn; final output will arrive automatically. Call it without process_id to list this task's background processes.",
+          "Read new output and the status (running, exit code) of a background process started with run_command background: true. Use it to wait for a dev server to become ready, to find the URL or port it printed, or to check its logs after an action. Each call returns output since the previous call; pass since_offset (from next_offset) to page, since_offset: 0 to reread what is still buffered, or tail_lines for just the end. Two empty reads enable completion delivery: when notify_on_complete is true, stop polling and follow its note; final output will arrive automatically. Call it without process_id to list this task's background processes.",
         input_schema: {
           type: "object",
           properties: {
@@ -12965,13 +12987,15 @@ ${skillDescriptions}`;
 
     try {
       let handle: string;
+      let resultPushed = false;
       if (typeof this.daemon.createOrchestrationGraphRun === "function") {
         const snapshot = await this.daemon.createOrchestrationGraphRun({
           rootTaskId: this.taskId,
           workspaceId: this.workspace.id,
           kind: "delegation",
           maxParallel: 1,
-          metadata: { createdBy: "spawn_agent" },
+          // wait: true returns the result from this call; otherwise it arrives as an event.
+          metadata: { createdBy: "spawn_agent", ...(wait ? { resultDelivery: "inline" } : {}) },
           nodes: [
             {
               key: "spawn-1",
@@ -13004,6 +13028,7 @@ ${skillDescriptions}`;
           };
         }
         handle = node.publicHandle || node.taskId || node.remoteTaskId || node.id;
+        resultPushed = true;
       } else {
         if (prepared.dispatchTarget === "remote_acp") {
           this.daemon.logEvent(this.taskId, "agent_failed", {
@@ -13064,7 +13089,9 @@ ${skillDescriptions}`;
         success: true,
         task_id: handle,
         title: prepared.taskTitle,
-        message: `Sub-agent spawned successfully. Task ID: ${handle}. Use wait_for_agent or get_agent_status to check progress.`,
+        message: resultPushed
+          ? `Sub-agent spawned successfully. Task ID: ${handle}. ${this.agentResultArrivalNote()}`
+          : `Sub-agent spawned successfully. Task ID: ${handle}. Use wait_for_agent or get_agent_status to check progress.`,
       };
     } catch (error: Any) {
       console.error(`[ToolRegistry] Failed to spawn agent:`, error);
@@ -13193,7 +13220,8 @@ ${skillDescriptions}`;
   }
 
   /**
-   * Wait for a spawned agent to complete
+   * Report a spawned agent's state. A spawn_agent child pushes its result as an event, so this
+   * never blocks on one: it waits only for an explicit short timeout (capped), then returns.
    */
   private async waitForAgent(input: { task_id: string; timeout_seconds?: number }): Promise<{
     success: boolean;
@@ -13203,22 +13231,88 @@ ${skillDescriptions}`;
     result_summary?: string;
     error?: string;
   }> {
-    const { task_id, timeout_seconds = 300 } = input;
+    const { task_id } = input;
 
     if (!task_id) {
       throw new Error("wait_for_agent requires a task_id");
     }
 
-    const result = await this.waitForAgentInternal(task_id, timeout_seconds);
+    const pushedNode = await this.findPushedAgentNode(task_id);
+    if (!pushedNode) {
+      // No event will come for this agent (another tool started it): wait as before.
+      const result = await this.waitForAgentInternal(task_id, input.timeout_seconds ?? 300);
+      return {
+        success: result.success,
+        status: result.status,
+        task_id: task_id,
+        message: result.message,
+        result_summary: result.resultSummary,
+        error: result.error,
+      };
+    }
 
+    const requested =
+      typeof input.timeout_seconds === "number" && Number.isFinite(input.timeout_seconds)
+        ? input.timeout_seconds
+        : 0;
+    const waitSeconds = Math.min(
+      Math.max(0, requested),
+      ToolRegistry.PUSHED_AGENT_WAIT_CAP_SECONDS,
+    );
+    const nodeTerminal = ["completed", "failed", "cancelled", "blocked"].includes(
+      pushedNode.status,
+    );
+    const result =
+      waitSeconds > 0 && !nodeTerminal
+        ? await this.daemon.waitForDelegatedNode(this.taskId, task_id, waitSeconds)
+        : {
+            success: pushedNode.status === "completed",
+            status: nodeTerminal ? pushedNode.status : "running",
+            message:
+              pushedNode.status === "completed"
+                ? "Delegated work completed successfully"
+                : `Delegated work ${pushedNode.status}`,
+            resultSummary: pushedNode.summary || pushedNode.output,
+            error: pushedNode.error,
+          };
+    if (result.status === "running" || result.status === "timeout") {
+      const note = this.agentResultArrivalNote();
+      return {
+        success: true,
+        status: "running",
+        task_id,
+        message: `Running; ${note.charAt(0).toLowerCase()}${note.slice(1)}`,
+      };
+    }
+    // The same terminal result was pushed as an event, which also logged agent_completed/failed.
     return {
       success: result.success,
       status: result.status,
-      task_id: task_id,
+      task_id,
       message: result.message,
       result_summary: result.resultSummary,
       error: result.error,
     };
+  }
+
+  /** A spawn_agent child's result arrives as an event, so wait_for_agent waits at most this long. */
+  private static readonly PUSHED_AGENT_WAIT_CAP_SECONDS = 15;
+
+  /** What the model should do while a child's result is on its way as an event. */
+  private agentResultArrivalNote(): string {
+    // A child agent or automation run ends with its turn, and a later result would be lost.
+    return this.daemon.canReceiveCompletionAfterTurn?.(this.taskId) === false
+      ? "Its result will arrive automatically in this session as an event while you are still working, so continue with other work meanwhile. This task ends when your turn ends: if nothing else remains, call wait_for_agent with timeout_seconds (at most 15) instead of ending the turn."
+      : "Its result will arrive automatically in this session as an event when it finishes, so do not poll or wait for it: continue with other work, or end your turn with a brief status.";
+  }
+
+  /** The delegated node behind a handle, when its result is pushed to this task as an event. */
+  private async findPushedAgentNode(handle: string): Promise<OrchestrationGraphNode | undefined> {
+    if (typeof this.daemon.findDelegatedNode !== "function") return undefined;
+    const node = await this.daemon.findDelegatedNode(this.taskId, handle);
+    if (!node || typeof this.daemon.getOrchestrationGraphSnapshot !== "function") return undefined;
+    const snapshot = await this.daemon.getOrchestrationGraphSnapshot(node.runId);
+    return pushesSpawnedAgentResult(snapshot?.run) ? node : undefined;
   }
 
   /**
@@ -15325,8 +15419,10 @@ ${skillDescriptions}`;
         description:
           "Spawn a new agent (sub-task) to work on a specific task independently. Use this to delegate work, " +
           "perform parallel operations, or use a cheaper/faster model for batch work. Sub-agents do not retain " +
-          "memory after completion. Returns immediately with the spawned task ID - use wait_for_agent or " +
-          "get_agent_status to check progress. Maximum nesting depth is 3 levels. Active child fanout is capped.",
+          "memory after completion. Returns immediately with the spawned task ID. When the agent finishes, " +
+          "its result arrives in this session automatically as an event (agent output, not user input), " +
+          "so polling with wait_for_agent is unnecessary: keep working or end your turn, and use " +
+          "get_agent_status for a progress check. Maximum nesting depth is 3 levels. Active child fanout is capped.",
         input_schema: {
           type: "object",
           properties: {
@@ -15392,7 +15488,7 @@ ${skillDescriptions}`;
             wait: {
               type: "boolean",
               description:
-                "If true, wait for the agent to complete before returning (blocking). Default: false (async)",
+                "If true, block until the agent completes and return its result from this call instead of as a later event. Default: false (async; the result arrives as an event)",
             },
             max_turns: {
               type: "number",
@@ -15475,9 +15571,11 @@ ${skillDescriptions}`;
       {
         name: "wait_for_agent",
         description:
-          "Wait for a spawned agent to complete and retrieve its results. Returns the agent's final status, " +
-          "result summary, and any error information. Use this to synchronize with sub-agents when you need " +
-          "their results before proceeding.",
+          "Check whether a spawned agent has finished and get its result if it has. Usually unnecessary: " +
+          "an agent started with spawn_agent sends its result to this session automatically as an event, " +
+          'so do not poll. If the agent is still running this returns at once with status "running"; ' +
+          "pass a short timeout_seconds (at most 15) only when you have nothing else to do and want to " +
+          "wait briefly. Returns the final status, result summary and any error once it has finished.",
         input_schema: {
           type: "object",
           properties: {
@@ -15487,7 +15585,8 @@ ${skillDescriptions}`;
             },
             timeout_seconds: {
               type: "number",
-              description: "Maximum time to wait in seconds. Default: 300 (5 minutes)",
+              description:
+                "Optional wait in seconds. For agents started with spawn_agent it is capped at 15 and the default is to return at once.",
             },
           },
           required: ["task_id"],

@@ -159,6 +159,26 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     );
   });
 
+  it("tells a child or automation task to keep waiting instead of ending its turn", async () => {
+    const daemon = {
+      ...createDaemon(),
+      canReceiveBackgroundProcessCompletion: vi.fn(() => true),
+      canReceiveCompletionAfterTurn: vi.fn(() => false),
+      notifyBackgroundProcessCompletion: vi.fn(),
+    };
+    const { shellTools } = newShellTools(daemon);
+    const started = await shellTools.startBackgroundCommand("sleep 30", {
+      cwd: workspacePath,
+      startupWaitMs: 0,
+    });
+    const input = { process_id: started.process_id };
+    await shellTools.getBackgroundProcessOutput(input);
+    const armed = await shellTools.getBackgroundProcessOutput(input);
+    expect(armed.notify_on_complete).toBe(true);
+    expect(armed.note).toContain("This task ends when your turn ends");
+    expect(armed.note).not.toContain("end this turn");
+  });
+
   it("authorizes the original trailing ampersand and tracks the actual job", async () => {
     const { shellTools, daemon } = newShellTools();
     const started = await shellTools.startBackgroundCommand("sleep 30 &", {

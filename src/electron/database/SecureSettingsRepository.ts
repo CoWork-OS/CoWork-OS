@@ -157,6 +157,8 @@ export type SettingsCategory =
   | "calendar-proposals"
   // Reply drafts on Today: whether it's on, and which drafts it prepared.
   | "mail-reply-drafts"
+  // Semantic event gate: user-written event policies and per-source/per-chat modes.
+  | "event-gate"
   | "improvement-loop"
   // Ed25519 key CoWork signs its own web requests with when declared agent identity is on.
   | "agent-identity"

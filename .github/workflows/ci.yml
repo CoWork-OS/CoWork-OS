@@ -149,7 +149,8 @@ jobs:
 
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    # Playwright 1.58 does not support the Ubuntu 26.04 image behind ubuntu-latest.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code

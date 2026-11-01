@@ -19,7 +19,7 @@ import { getSidebarSessionTitle, isSidebarRecentWorkspace } from "../components/
  * same rules and queue as the Today stack and the sidebar, so the three agree.
  */
 
-export type WorkStatus = "needs" | "running" | "done" | "failed";
+export type WorkStatus = "needs" | "running" | "done" | "partial" | "cancelled" | "failed";
 export type WorkStatusFilter = "all" | WorkStatus;
 export type WorkOriginFilter = "any" | AttentionOrigin["kind"];
 
@@ -96,14 +96,21 @@ function statusOf(task: Task, decision: AttentionItem | undefined): Omit<WorkRun
   if (activity?.label === "Queued") return { status: "running", statusLabel: "Queued" };
   const canonical = deriveCanonicalTaskStatus(task);
   if (canonical === "failed") return { status: "failed", statusLabel: "Failed" };
-  if (canonical === "cancelled") return { status: "done", statusLabel: "Cancelled" };
+  if (canonical === "cancelled") return { status: "cancelled", statusLabel: "Cancelled" };
   if (task.terminalStatus === "partial_success") {
-    return { status: "done", statusLabel: "Partly done" };
+    return { status: "partial", statusLabel: "Partly done" };
   }
   return { status: "done", statusLabel: "Done" };
 }
 
-const STATUS_ORDER: Record<WorkStatus, number> = { needs: 0, running: 1, failed: 2, done: 3 };
+const STATUS_ORDER: Record<WorkStatus, number> = {
+  needs: 0,
+  running: 1,
+  failed: 2,
+  done: 3,
+  partial: 3,
+  cancelled: 3,
+};
 
 function normalizeTitle(title: string): string {
   return title.trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -192,6 +199,8 @@ export function buildWorkModel(input: {
     needs: 0,
     running: 0,
     done: 0,
+    partial: 0,
+    cancelled: 0,
     failed: 0,
   };
   for (const row of visible) counts[row.status] += 1;

@@ -176,7 +176,7 @@ jobs:
   test:
     # The vitest files are split across four runners; one runner took ~9 minutes.
     name: Tests (${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright has no Chromium build for the ubuntu-latest 26.04 image yet
     strategy:
       fail-fast: false
       matrix:

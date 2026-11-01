@@ -48,11 +48,14 @@ html.visual-calm .team-view-device {
   color: var(--calm-text);
   font: 400 14px/1.4 var(--font-ui);
   text-align: left;
-  cursor: pointer;
   transition: background 0.15s ease;
 }
 
-html.visual-calm .team-view-device:hover {
+html.visual-calm button.team-view-device {
+  cursor: pointer;
+}
+
+html.visual-calm button.team-view-device:hover {
   background: var(--calm-surface-muted);
 }
 

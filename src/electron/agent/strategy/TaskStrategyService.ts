@@ -822,10 +822,13 @@ export class TaskStrategyService {
       // Scratchpad
       "scratchpad_write",
       "scratchpad_read",
+      // Pages of shortened tool results
+      "tool_result_read",
       // Meta tools
       "revise_plan",
       "request_user_input",
       "task_history",
+      "task_get",
       "tool_search",
       "set_personality",
       "set_agent_name",

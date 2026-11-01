@@ -1641,6 +1641,8 @@ export type ToolType =
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
+  // Page through a tool result that was shortened to fit the context window
+  | "tool_result_read"
   // Hand a computer step to the person (passwords, codes, payments)
   | "request_takeover"
   // The bot's own desktop (Works on: Its own desktop)
@@ -1685,7 +1687,8 @@ export type ToolType =
   | "revise_plan"
   | "request_user_input"
   | "task_history"
-  | "task_events";
+  | "task_events"
+  | "task_get";
 
 export type ApprovalType =
   | "delete_file"
@@ -1750,6 +1753,8 @@ export const TOOL_GROUPS = {
     "email_imap_unread",
     // Session scratchpad (read)
     "scratchpad_read",
+    // Pages of this task's own shortened tool results
+    "tool_result_read",
     "youtube_ask_video",
     "youtube_search_ingested_segments",
     "youtube_list_ingested_videos",
@@ -1919,6 +1924,7 @@ export const TOOL_GROUPS = {
     "write_clipboard",
     "task_history",
     "task_events",
+    "task_get",
     // Privacy-sensitive: exposes prior chat logs across chats
     "channel_list_chats",
     "channel_history",
@@ -2145,6 +2151,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
+  tool_result_read: "read",
   // Only asks the person to take over; it changes nothing itself.
   request_takeover: "read",
   // The bot's own desktop is a separate container: actions there don't touch this computer.
@@ -2169,6 +2176,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   request_user_input: "read",
   task_history: "read",
   task_events: "read",
+  task_get: "read",
 };
 
 /**
@@ -2403,6 +2411,30 @@ export interface IntegrationMentionOption extends IntegrationMentionSelection {
  * Per-task agent configuration for customizing LLM and personality
  * Allows spawning agents with different models/personalities than the global settings
  */
+/**
+ * Identifiers of what a task came from, kept so later turns can recall related context by ID
+ * (task_get and the task's identity line). Set only by main-process creation paths; informational,
+ * never used for authorization.
+ */
+export interface TaskOriginRefs {
+  /** Event trigger that created the task. */
+  triggerId?: string;
+  /** Source event identity the ingress adapter supplied (for example a gateway message hash). */
+  triggerEventId?: string;
+  /** Durable trigger occurrence row that created the task. */
+  triggerOccurrenceId?: string;
+  /** Conversation the originating event belongs to (mail thread, chat, or chat thread). */
+  threadKey?: string;
+  /** Gateway channel type that delivered the originating message. */
+  gatewayChannel?: string;
+  /** Gateway channel session (chat) the task answers. */
+  gatewaySessionId?: string;
+  /** Chat identifier on the gateway channel. */
+  gatewayChatId?: string;
+  /** Thread identifier inside that chat, when the channel has threads. */
+  gatewayThreadId?: string;
+}
+
 export interface AgentConfig {
   /** Composer that created the task; preserved in sidebar summaries. */
   taskOrigin?: "build";
@@ -2470,6 +2502,8 @@ export interface AgentConfig {
   gatewaySenderIsOwner?: boolean;
   /** Contact reference of the channel sender (`gateway:<channel>:<user id>`), set with it. */
   gatewaySenderRef?: string;
+  /** Trigger, gateway chat and thread identifiers of the task's origin (see TaskOriginRefs). */
+  originRefs?: TaskOriginRefs;
   /** Resolved gateway specialization record that shaped the task. */
   channelSpecializationId?: string;
   /** Explicit maximum number of LLM turns before forcing completion. Unset means no window cap for normal main-task routing. */

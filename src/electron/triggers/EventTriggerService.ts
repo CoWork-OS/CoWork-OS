@@ -23,6 +23,7 @@ import {
 } from "./types";
 import { evaluateConditions, substituteEventVariables } from "./condition-evaluator";
 import { ensureResponsibilitySnapshotColumn, ensureTriggerHistoryGateColumns } from "./trigger-sql";
+import { buildTriggerOriginRefs, withOriginRefs } from "../../shared/task-origin-refs";
 import {
   isEngineDeliveredThreadEvent,
   threadDeliveryIdentity,
@@ -697,9 +698,14 @@ export class EventTriggerService implements EventTriggerRegistry {
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: withThreadReplySurface(
-                prepared?.agentConfig ?? cfg.agentConfig,
-                threadKey,
+              // The task keeps the IDs of the event that created it (Chain of Recall).
+              agentConfig: withOriginRefs(
+                withThreadReplySurface(prepared?.agentConfig ?? cfg.agentConfig, threadKey),
+                buildTriggerOriginRefs({
+                  triggerId: trigger.id,
+                  occurrenceId: String(row.id),
+                  event,
+                }),
               ),
             });
             historyEntry.taskId = result.id;
@@ -959,9 +965,9 @@ export class EventTriggerService implements EventTriggerRegistry {
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: withThreadReplySurface(
-                prepared?.agentConfig ?? cfg.agentConfig,
-                threadKey,
+              agentConfig: withOriginRefs(
+                withThreadReplySurface(prepared?.agentConfig ?? cfg.agentConfig, threadKey),
+                buildTriggerOriginRefs({ triggerId: trigger.id, event }),
               ),
             });
             historyEntry.taskId = result.id;

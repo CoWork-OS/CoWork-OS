@@ -58,7 +58,7 @@ function getWrittenPaths(event: TaskEvent): { created: string[]; updated: string
     if (event.payload?.type === "directory") return { created: [], updated: [] };
     return { created: [normalizeOutputPath(event.payload?.path)], updated: [] };
   }
-  if (effectiveType === "artifact_created" || event.type === "timeline_artifact_emitted") {
+  if (effectiveType === "artifact_created") {
     return { created: [normalizeOutputPath(event.payload?.path)], updated: [] };
   }
   if (effectiveType === "file_modified") {
@@ -233,7 +233,7 @@ export function buildWrittenFileResolver(writtenPaths: string[]): (text: string)
  */
 export function isArtifactEventCoveredByFileWrite(event: TaskEvent, events: TaskEvent[]): boolean {
   const effectiveType = getEffectiveTaskEventType(event);
-  if (effectiveType !== "artifact_created" && event.type !== "timeline_artifact_emitted") {
+  if (effectiveType !== "artifact_created") {
     return false;
   }
   const path = normalizeOutputPath(event.payload?.path);

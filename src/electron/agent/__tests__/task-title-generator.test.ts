@@ -30,6 +30,20 @@ describe("sanitizeGeneratedTaskTitle", () => {
     expect(title).not.toContain("...");
   });
 
+  it("takes the title from JSON output and rejects other JSON", () => {
+    expect(sanitizeGeneratedTaskTitle('{"title":"Supplier dashboard"}')).toBe("Supplier dashboard");
+    // A provider that answered with its plan, whole or cut off at the token limit.
+    expect(
+      sanitizeGeneratedTaskTitle(
+        '{"steps":[{"id":"1","description":"Create and verify the app"}]}',
+      ),
+    ).toBe("");
+    expect(sanitizeGeneratedTaskTitle('{"steps":[{"id":"1","description":"Create and')).toBe("");
+    expect(sanitizeGeneratedTaskTitle("[Draft] Supplier dashboard")).toBe(
+      "[Draft] Supplier dashboard",
+    );
+  });
+
   it("rejects reasoning a reasoning model wrote instead of a name", () => {
     // Recorded from qwen3:4b via Ollama with think disabled and maxTokens 32.
     expect(

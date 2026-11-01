@@ -124,7 +124,10 @@ export class ComposerDraftStore {
   update(
     input: ComposerDraftKeyInput,
     patch: Partial<
-      Pick<ComposerDraft, "text" | "mentions" | "quotedAssistantMessage" | "attachments">
+      Pick<
+        ComposerDraft,
+        "text" | "interactionMode" | "mentions" | "quotedAssistantMessage" | "attachments"
+      >
     >,
   ): ComposerDraft {
     const current = this.ensure(input);
@@ -387,6 +390,7 @@ export class ComposerDraftStore {
     }
     this.update(to, {
       text: source.text,
+      interactionMode: source.interactionMode,
       mentions: source.mentions,
       quotedAssistantMessage: source.quotedAssistantMessage,
       attachments,

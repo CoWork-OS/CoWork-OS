@@ -3879,6 +3879,32 @@ relationship_memory:
     );
   });
 
+  it("completes a new workbook's inspection without requiring a file edit", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("list_directory", { path: "." }),
+        textResponse("No source document was supplied and workshop-budget.xlsx does not exist."),
+      ],
+      { list_directory: { success: true, files: [] } },
+    );
+    (executor as Any).toolRegistry.getTools = () => (executor as Any).getAvailableTools();
+    (executor as Any).task.prompt = "Create workshop-budget.xlsx with a total formula.";
+    const description =
+      "Inspect the supplied fields: item names Venue, Catering, Materials, and Credit; EUR amounts 900, 450, 125, and -50; and budget cap 2000. Confirm that this is a new workbook with no source document to modify, and check whether workshop-budget.xlsx already exists in the session workspace before writing.";
+    const step: Any = {
+      id: "inspect",
+      description,
+      status: "pending",
+    };
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect([...contract.requiredTools]).not.toContain("edit_file");
+    expect([...contract.requiredTools]).not.toContain("write_file");
+    expect([...contract.requiredTools]).not.toContain("create_spreadsheet");
+    expect(contract.mode).toBe("analysis_only");
+    await (executor as Any).executeStep(step);
+    expect(step.status, String(step.error || "")).toBe("completed");
+  });
+
   it.each([
     ["search_files", { query: "getUser", path: "src" }],
     ["run_command", { command: "rg -n getUser src" }],

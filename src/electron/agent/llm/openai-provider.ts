@@ -64,6 +64,7 @@ const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-6-astra",
   "gpt-6.1-sol",
+  "gpt-6.1-terra",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-5.6-sol",
@@ -103,9 +104,9 @@ const SIWC_UNSUPPORTED_RESPONSES_FIELDS = [
   "user",
 ] as const;
 const SIWC_TOOL_NAMESPACE = "cowork";
-// Models confirmed to work through SIWC plan usage even though OpenAI's /models
-// catalog does not list them (verified 2026-10-02 with gpt-6.1-sol).
-const SIWC_UNLISTED_MODEL_IDS = ["gpt-6.1-sol"];
+// Additional choices offered when the SIWC plan catalog lags new releases.
+// Access remains subject to the signed-in account's entitlements.
+const SIWC_UNLISTED_MODEL_IDS = ["gpt-6.1-sol", "gpt-6.1-terra"];
 // Each OpenAI route can reject individual prompt-cache fields per model. A rejection steps
 // that route+model down one tier (full -> key_only -> none) so prompt_cache_key routing
 // survives when only the optional options/retention fields are refused. Providers are
@@ -1333,7 +1334,14 @@ export class OpenAIProvider implements LLMProvider {
     if (this.getApiKeyClient) {
       try {
         const response = await (await this.apiKeyClient()).models.list();
-        const models = response.data
+        const listedModels = response.data.map(({ id }) => ({ id }));
+        if (
+          listedModels.length > 0 &&
+          !listedModels.some((model) => model.id === "gpt-6.1-terra")
+        ) {
+          listedModels.push({ id: "gpt-6.1-terra" });
+        }
+        const models = listedModels
           .filter((m) => m.id.startsWith("gpt-") || m.id.startsWith("o1") || m.id.startsWith("o3"))
           .map((m) => ({
             id: m.id,
@@ -1342,7 +1350,8 @@ export class OpenAIProvider implements LLMProvider {
           }))
           .sort((a, b) => {
             const priority = (id: string) => {
-              if (id === "gpt-6.1-sol") return -4;
+              if (id === "gpt-6.1-sol") return -5;
+              if (id === "gpt-6.1-terra") return -4;
               if (id === "gpt-6-astra") return -3;
               if (id === "gpt-6-sol") return -2;
               if (id === "gpt-6-luna") return -1;
@@ -1377,6 +1386,11 @@ export class OpenAIProvider implements LLMProvider {
         name: "GPT-6.1 Sol",
         description: "Complex coding and professional work",
       },
+      {
+        id: "gpt-6.1-terra",
+        name: "GPT-6.1 Terra",
+        description: "Visual reasoning, computer use, and writing",
+      },
       { id: "gpt-6-sol", name: "GPT-6 Sol", description: "Complex coding and agentic workflows" },
       { id: "gpt-6-luna", name: "GPT-6 Luna", description: "Efficient focused tasks" },
       { id: "gpt-4o", name: "GPT-4o", description: "Most capable model for complex tasks" },
@@ -1399,6 +1413,11 @@ export class OpenAIProvider implements LLMProvider {
         id: "gpt-6.1-sol",
         name: "GPT-6.1 Sol",
         description: "GPT-6.1 Sol for ChatGPT subscription access",
+      },
+      {
+        id: "gpt-6.1-terra",
+        name: "GPT-6.1 Terra",
+        description: "GPT-6.1 Terra for ChatGPT subscription access",
       },
       {
         id: "gpt-6-sol",
@@ -1482,6 +1501,7 @@ export class OpenAIProvider implements LLMProvider {
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra";
     if (modelId === "gpt-6.1-sol") return "GPT-6.1 Sol";
+    if (modelId === "gpt-6.1-terra") return "GPT-6.1 Terra";
     if (modelId === "gpt-6-sol") return "GPT-6 Sol";
     if (modelId === "gpt-6-luna") return "GPT-6 Luna";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol";
@@ -1514,6 +1534,7 @@ export class OpenAIProvider implements LLMProvider {
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra for ChatGPT subscription access";
     if (modelId === "gpt-6.1-sol") return "Complex coding and professional work";
+    if (modelId === "gpt-6.1-terra") return "Visual reasoning, computer use, and writing";
     if (modelId === "gpt-6-sol") return "GPT-6 Sol for ChatGPT subscription access";
     if (modelId === "gpt-6-luna") return "GPT-6 Luna for ChatGPT subscription access";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol for ChatGPT subscription access";

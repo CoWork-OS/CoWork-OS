@@ -17,6 +17,11 @@ describe("ContextManager.compactMessagesWithMeta", () => {
     expect(new ContextManager("openai/gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
   });
 
+  it.each(["gpt-6.1-terra", "openai/gpt-6.1-terra", "openai-codex/gpt-6.1-terra@fast"])(
+    "uses Terra's documented context window for %s",
+    (model) => expect(new ContextManager(model).getModelTokenLimit()).toBe(1_050_000),
+  );
+
   it("budgets for the runtime context window a local server actually uses", () => {
     let runtimeWindow = 32_768;
     const manager = new ContextManager("qwen3:32b", { contextWindowLimit: () => runtimeWindow });

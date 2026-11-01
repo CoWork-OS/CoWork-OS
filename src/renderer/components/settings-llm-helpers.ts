@@ -61,7 +61,8 @@ export function resolveOpenAIReasoningEffort(
   openai?: LLMSettingsData["openai"] | null,
 ): OpenAIReasoningEffort {
   const value = openai?.reasoningEffort;
-  return value === "low" ||
+  return value === "none" ||
+    value === "low" ||
     value === "medium" ||
     value === "high" ||
     value === "xhigh" ||

@@ -2201,17 +2201,8 @@ function SidebarComponent({
 
   const getStatusIndicator = (status: Task["status"], showCompletionAttention = false) => {
     if (isActiveSessionStatus(status)) {
-      return (
-        <>
-          <span className="terminal-only">[~]</span>
-          <span className="modern-only">
-            <span
-              className="cli-session-indicator cli-session-indicator-active"
-              aria-hidden="true"
-            />
-          </span>
-        </>
-      );
+      // A running session reads through its title's shimmer (task-item-running), not a spinner.
+      return <span className="terminal-only">[~]</span>;
     }
 
     if (isAwaitingSessionStatus(status)) {
@@ -2546,7 +2537,7 @@ function SidebarComponent({
 
     return (
       <div
-        className={`task-item cli-task-item ${activity ? "cli-task-item-with-activity" : ""} ${highlightSelection && selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""} ${showCompletionAttention ? "task-completion-unread" : ""}`}
+        className={`task-item cli-task-item ${activity ? "cli-task-item-with-activity" : ""} ${highlightSelection && selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""} ${showCompletionAttention ? "task-completion-unread" : ""} ${isActiveSessionStatus(rowStatus) ? "task-item-running" : ""}`}
         data-task-id={node.synthetic ? undefined : task.id}
         onClick={() => {
           if (node.synthetic) return;

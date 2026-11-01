@@ -171,6 +171,9 @@ const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
   task_events: "app",
   task_history: "app",
   text_metrics: "app",
+  // Thread subscriptions are CoWork task state; delivered events arrive as follow-ups.
+  thread_subscribe: "app",
+  thread_unsubscribe: "app",
   tool_search: "app",
   update_lore: "app",
   visual_open_annotator: "app",

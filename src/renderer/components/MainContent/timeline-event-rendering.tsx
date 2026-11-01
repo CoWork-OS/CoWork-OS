@@ -678,7 +678,7 @@ export function renderEventTitle(
       : "Attached evidence";
   }
 
-  if (event.type === "timeline_artifact_emitted") {
+  if (effectiveType === "artifact_created") {
     const path = typeof event.payload?.path === "string" ? event.payload.path : "";
     const label =
       typeof event.payload?.label === "string" && event.payload.label.trim().length > 0

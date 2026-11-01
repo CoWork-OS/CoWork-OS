@@ -102,6 +102,11 @@ const LIST_ITEM_WRITE_VERB_REGEX = new RegExp(
 // a protected file does not leak into the positive text.
 const NEGATED_CLAUSE_REGEX =
   /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b(?:[^,.;!?\n]|\.(?=[A-Za-z0-9_/-]))*/gi;
+// “No source document to modify” describes the absence of an edit target,
+// not an instruction to modify one. Stop at the infinitive so a subsequent
+// positive instruction in the same sentence remains enforceable.
+const NO_MUTATION_TARGET_REGEX =
+  /\bno\s+(?:(?:existing|current|source|input|prior|original)\s+){0,3}(?:files?|documents?|workbooks?|spreadsheets?|reports?)\s+to\s+(?:edit|modify|update|change|rewrite|replace|delete|remove|rename|move)\b/gi;
 const PASSIVE_ARTIFACT_WRITE_CUE_REGEX =
   /\b(saved|written|created|generated|produced|updated|edited|rewritten|appended|stored|placed)\s+(?:as|to|at|in|under)\b/;
 
@@ -384,7 +389,9 @@ function removePathTokens(text: string): string {
 }
 
 export function stripNegatedClauses(text: string): string {
-  return String(text || "").replace(NEGATED_CLAUSE_REGEX, " ");
+  return String(text || "")
+    .replace(NEGATED_CLAUSE_REGEX, " ")
+    .replace(NO_MUTATION_TARGET_REGEX, " ");
 }
 
 // Broader than the step write verbs on purpose: any of these in the user's

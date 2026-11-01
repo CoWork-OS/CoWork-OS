@@ -43,8 +43,12 @@ function extractStructuredTitle(value: string): string {
         const structured = compactText(record.title ?? record.name);
         if (structured) return structured;
       }
+      // Other JSON (a plan, a tool call) is not a name.
+      return "";
     } catch {
-      // Treat malformed structured output as ordinary text below.
+      // Output cut off by the token limit is still JSON, not a name.
+      if (/^[{[]\s*[{["]/.test(trimmed)) return "";
+      // Treat other malformed structured output as ordinary text below.
     }
   }
 

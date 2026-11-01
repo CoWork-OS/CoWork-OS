@@ -176,27 +176,30 @@ describe("output-token-policy", () => {
     ).toBe("max_output_tokens");
   });
 
-  it.each(["gpt-6-astra", "gpt-6.1-sol", "openai-codex/gpt-6.1-sol@fast"])(
-    "caps %s output budgets at the documented 128K limit",
-    (modelId) => {
-      process.env.COWORK_LLM_OUTPUT_POLICY = "adaptive";
-      process.env.COWORK_LLM_MAX_OUTPUT_TOKENS = "9999999";
+  it.each([
+    "gpt-6-astra",
+    "gpt-6.1-sol",
+    "openai-codex/gpt-6.1-sol@fast",
+    "gpt-6.1-terra",
+    "openai/gpt-6.1-terra@fast",
+  ])("caps %s output budgets at the documented 128K limit", (modelId) => {
+    process.env.COWORK_LLM_OUTPUT_POLICY = "adaptive";
+    process.env.COWORK_LLM_MAX_OUTPUT_TOKENS = "9999999";
 
-      const budget = resolveOutputTokenBudget({
-        providerType: "openai",
-        modelId,
-        messages: [{ role: "user", content: "hello" }],
-        system: "system",
-        contextManager: { estimateMaxOutputTokens: () => 500_000 } as Any,
-        taskMaxTokens: null,
-        requestKind: "agentic_main",
-        phase: "initial",
-      });
+    const budget = resolveOutputTokenBudget({
+      providerType: "openai",
+      modelId,
+      messages: [{ role: "user", content: "hello" }],
+      system: "system",
+      contextManager: { estimateMaxOutputTokens: () => 500_000 } as Any,
+      taskMaxTokens: null,
+      requestKind: "agentic_main",
+      phase: "initial",
+    });
 
-      expect(budget.knownHardCap).toBe(128_000);
-      expect(budget.transport.value).toBe(128_000);
-    },
-  );
+    expect(budget.knownHardCap).toBe(128_000);
+    expect(budget.transport.value).toBe(128_000);
+  });
 
   it("classifies thinking-only truncation as reasoning exhausted", () => {
     expect(

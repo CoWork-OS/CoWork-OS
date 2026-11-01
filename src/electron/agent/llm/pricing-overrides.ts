@@ -27,6 +27,19 @@ export const PRICING_OVERRIDES: Record<string, ModelPricing> = {
       cacheWritePer1M: 5,
     },
   },
+  "gpt-6.1-terra": {
+    inputPer1M: 1,
+    outputPer1M: 5,
+    cachedInputPer1M: 0.05,
+    cacheWritePer1M: 1.25,
+    longContext: {
+      thresholdTokens: 272_000,
+      inputPer1M: 2,
+      outputPer1M: 7.5,
+      cachedInputPer1M: 0.1,
+      cacheWritePer1M: 2.5,
+    },
+  },
   // Retired Anthropic models (list prices at retirement).
   "claude-sonnet-4": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
   "claude-3-5-sonnet": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },

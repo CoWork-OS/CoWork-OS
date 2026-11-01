@@ -125,8 +125,15 @@ describe("requestAsksForWorkspaceChange", () => {
     "Summarize the README. Keep it short.",
     "Review index.ts",
     "Tell me what's in README.md. Don't change anything.",
+    "Check that there is no source document to edit.",
   ])("reads %j as a question", (request) => {
     expect(requestAsksForWorkspaceChange(request)).toBe(false);
+  });
+
+  it("retains a separate write request after a negated edit target", () => {
+    expect(
+      requestAsksForWorkspaceChange("There is no source document to edit; create report.md."),
+    ).toBe(true);
   });
 
   it.each([
@@ -231,6 +238,8 @@ describe("step-contract read-only inspection steps", () => {
     // Live 2026-10-19 (task 34ca9a3e): "save" is a list noun; the overwrite is negated.
     "Inspect Git status, ProjectSettings/ProjectVersion.txt, Packages/manifest.json, and existing purchase, wallet, save, UI, and test code under Assets to identify the Unity version and integration points without overwriting uncommitted changes.",
     "Review scripts/update-version.sh and src/build/config.ts to understand the release flow.",
+    "Inspect the supplied fields: item names Venue, Catering, Materials, and Credit; EUR amounts 900, 450, 125, and -50; and budget cap 2000. Confirm that this is a new workbook with no source document to modify, and check whether workshop-budget.xlsx already exists in the session workspace before writing.",
+    "Check that there are no existing files to edit before writing the report.",
   ])("treats %s as read-only", (description) => {
     expect(isReadOnlyInspectionStep(description)).toBe(true);
   });
@@ -242,6 +251,8 @@ describe("step-contract read-only inspection steps", () => {
     "Inspect the purchase code and save the findings to notes/iap-scan.md.",
     "Review the draft; findings saved to review.md.",
     "Check the project and scaffold a new widget.",
+    "Inspect the workspace; there is no source document to modify, but update notes.md with the findings.",
+    "Check the existing document to modify and then edit notes.md.",
     // A prohibition is a guardrail, not an inspection cue.
     "Wait 55 seconds and only then overwrite `qa-cancel-mid-shell.txt` with the marker. Do not create or modify the file before the wait.",
   ])("keeps write intent in %s", (description) => {

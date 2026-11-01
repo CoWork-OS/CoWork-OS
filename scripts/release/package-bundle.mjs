@@ -192,6 +192,12 @@ export function validatePackageTarball(file, expected) {
       if (!existsSync(target) || !lstatSync(target).isFile())
         fail(`missing required package file: ${required}`);
     }
+    // npm packs every root README* whatever `files` says, and its package page shows the
+    // first one it finds. README.zh-CN.md at the root made 0.5.61/0.5.62 show in Chinese.
+    const otherReadme = readdirSync(root).find(
+      (name) => /^readme(\.|$)/i.test(name) && name !== "README.md",
+    );
+    if (otherReadme) fail(`package root has a README besides README.md: ${otherReadme}`);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

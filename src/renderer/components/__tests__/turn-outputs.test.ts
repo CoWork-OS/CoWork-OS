@@ -15,6 +15,7 @@ import {
   type TurnOutputSummary,
 } from "../MainContent/turn-outputs";
 import { TurnOutputsRow, describeTurnOutputs } from "../MainContent/TurnOutputsRow";
+import { renderEventTitle } from "../MainContent/timeline-event-rendering";
 import { buildMarkdownComponents } from "../markdown-components";
 
 function makeEvent(
@@ -94,6 +95,30 @@ describe("collectTurnOutputSummaries", () => {
     expect(collectTurnOutputSummaries(createAndEdit, { isTaskWorking: false })[0].files).toEqual([
       { path: "summary.md", action: "created" },
     ]);
+  });
+
+  it("treats canonical file-modified events as updates in a follow-up", () => {
+    const events = [
+      makeEvent("prompt", "user_message"),
+      makeEvent("create", "timeline_artifact_emitted", {
+        legacyType: "file_created",
+        path: "workshop-actions.md",
+      }),
+      makeEvent("follow-up", "timeline_step_updated", { legacyType: "user_message" }),
+      makeEvent("edit", "timeline_artifact_emitted", {
+        legacyType: "file_modified",
+        path: "workshop-actions.md",
+      }),
+      makeEvent("answer", "assistant_message"),
+    ];
+
+    const summaries = collectTurnOutputSummaries(events, { isTaskWorking: false });
+    expect(summaries.map(({ files }) => files)).toEqual([
+      [{ path: "workshop-actions.md", action: "created" }],
+      [{ path: "workshop-actions.md", action: "updated" }],
+    ]);
+    expect(describeTurnOutputs(summaries[1].files)).toBe("Updated 1 file");
+    expect(getFinishedTurnAutoOpen(events, new Set())).toBeNull();
   });
 
   it("skips directories and the agent's scratch files", () => {
@@ -215,6 +240,20 @@ describe("isArtifactEventCoveredByFileWrite", () => {
     expect(isArtifactEventCoveredByFileWrite(artifact, [write, artifact])).toBe(true);
     expect(isArtifactEventCoveredByFileWrite(lone, [write, lone])).toBe(false);
     expect(isArtifactEventCoveredByFileWrite(write, [write, artifact])).toBe(false);
+  });
+
+  it("does not treat a canonical modification as a redundant artifact", () => {
+    const edit = makeEvent("edit", "timeline_artifact_emitted", {
+      legacyType: "file_modified",
+      path: "report.md",
+    });
+    const earlierWrite = makeEvent("write", "file_created", { path: "report.md" });
+    expect(isArtifactEventCoveredByFileWrite(edit, [earlierWrite, edit])).toBe(false);
+    const title = renderToStaticMarkup(
+      React.createElement(React.Fragment, null, renderEventTitle(edit)),
+    );
+    expect(title).toContain("Updated:");
+    expect(title).not.toContain("Created:");
   });
 });
 

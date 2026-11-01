@@ -62,7 +62,10 @@ export function useComposerDraft(options: UseComposerDraftOptions) {
   const update = useCallback(
     (
       patch: Partial<
-        Pick<ComposerDraft, "text" | "mentions" | "quotedAssistantMessage" | "attachments">
+        Pick<
+          ComposerDraft,
+          "text" | "interactionMode" | "mentions" | "quotedAssistantMessage" | "attachments"
+        >
       >,
     ) => store.update(input, patch),
     [input, store],

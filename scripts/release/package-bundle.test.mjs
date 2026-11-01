@@ -29,7 +29,7 @@ const required = [
   "tsconfig.cli.json",
   "tsconfig.electron.json",
 ];
-async function fixture() {
+async function fixture(rootFiles = ["README.md"]) {
   const dir = mkdtempSync(join(tmpdir(), "bundle-test-"));
   const root = join(dir, "package");
   mkdirSync(root, { recursive: true });
@@ -37,7 +37,7 @@ async function fixture() {
     join(root, "package.json"),
     JSON.stringify({ name: "cowork-os", version: "1.2.3" }),
   );
-  for (const path of required) {
+  for (const path of [...required, ...rootFiles]) {
     mkdirSync(join(root, path, ".."), { recursive: true });
     writeFileSync(join(root, path), "x");
   }
@@ -93,6 +93,18 @@ test("readBundle validates a real package tarball and manifest", async () => {
   try {
     writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest(tgz, github)));
     assert.doesNotThrow(() => readBundle(dir, { tag: "v1.2.3", sha: "a".repeat(40) }));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rejects a package that ships a README besides README.md at its root", async () => {
+  const { dir, tgz } = await fixture(["README.md", "README.zh-CN.md"]);
+  try {
+    assert.throws(
+      () => validatePackageTarball(tgz, { name: "cowork-os", version: "1.2.3" }),
+      /README besides README\.md: README\.zh-CN\.md/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

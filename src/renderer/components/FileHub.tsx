@@ -335,6 +335,13 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
 
       {/* File list */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+        {((activeSource === "artifacts" && !showRecent) || searchQuery.trim()) && (
+          <p style={{ margin: "4px 16px 8px", fontSize: 12, color: "var(--text-tertiary, #666)" }}>
+            {searchQuery.trim()
+              ? "Search checks up to 200 files per source."
+              : "Showing up to 50 of the most recent artifacts."}
+          </p>
+        )}
         {browsingFolders && currentFolder && (
           <button
             type="button"

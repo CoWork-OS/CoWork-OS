@@ -5,7 +5,7 @@
  * webhooks, and other events to auto-create tasks or send messages.
  */
 
-import type { AgentConfig } from "../../shared/types";
+import type { AgentConfig, SpeculativeFixConfig } from "../../shared/types";
 
 export type TriggerSource =
   | "channel_message"
@@ -38,7 +38,7 @@ export interface TriggerCondition {
   value: string;
 }
 
-export type TriggerActionType = "create_task" | "send_message" | "wake_agent";
+export type TriggerActionType = "create_task" | "send_message" | "wake_agent" | "speculate_fix";
 
 export interface TriggerAction {
   type: TriggerActionType;
@@ -68,6 +68,11 @@ export interface TriggerAction {
      * event. It fires once (the runtime disables it), and is removed when the wait ends.
      */
     eventWait?: { taskId: string; expiresAt: number; reason?: string };
+    /**
+     * For speculate_fix: reproduce the reported problem in an isolated worktree and deliver a
+     * fix only when it is confirmed and small. Off unless a trigger is set to this action.
+     */
+    speculateFix?: SpeculativeFixConfig;
     /** MCP Events subscription bound to this trigger. */
     mcpEvent?: {
       serverId: string;
@@ -120,6 +125,23 @@ export interface TriggerHistoryEntry {
   sourceLabel?: string;
 }
 
+export interface SpeculateFixRequest {
+  trigger: EventTrigger;
+  event: TriggerEvent;
+  /** Stable occurrence identity: one key never starts a second run. */
+  idempotencyKey?: string;
+  /** Present when a bot responsibility prepared this event; such a trigger may not speculate. */
+  agentConfig?: AgentConfig;
+}
+
+export interface SpeculateFixStartResult {
+  started: boolean;
+  runId?: string;
+  taskId?: string;
+  /** Why no run started (for the trigger history). */
+  reason?: string;
+}
+
 /**
  * The trigger operations routines use to manage their backing triggers. Declared here so
  * type-only consumers (routine types shared with the renderer) do not import the service.
@@ -157,6 +179,8 @@ export interface EventTriggerServiceDeps {
     idempotencyKey?: string;
   }) => Promise<{ messageId: string }>;
   wakeAgent?: (agentRoleId: string, prompt: string) => void | Promise<void>;
+  /** Starts a speculative reproduce-and-fix run; without it, speculate_fix triggers fail. */
+  speculateFix?: (params: SpeculateFixRequest) => Promise<SpeculateFixStartResult>;
   getDefaultWorkspaceId: () => string;
   getActiveTaskCount?: () => number;
   log?: (...args: unknown[]) => void;

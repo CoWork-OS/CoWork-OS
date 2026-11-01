@@ -165,6 +165,7 @@ const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
   scratchpad_write: "app",
   send_agent_message: "app",
   spawn_agent: "app",
+  speculative_runs: "app",
   switch_workspace: "app",
   task_events: "app",
   task_history: "app",

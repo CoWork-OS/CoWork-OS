@@ -84,6 +84,7 @@ import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
+import { SpeculativeRunTools } from "./speculative-run-tools";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -754,6 +755,7 @@ export class ToolRegistry {
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
+  private speculativeRunTools: SpeculativeRunTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -847,6 +849,7 @@ export class ToolRegistry {
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
+    this.speculativeRunTools = new SpeculativeRunTools(() => this.workspace);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1809,6 +1812,10 @@ export class ToolRegistry {
     // Waiting on an event needs the runtime's event trigger engine.
     if (this.daemon.hasEventWaitSupport?.()) {
       allTools.push(...EventWaitTools.getToolDefinitions());
+    }
+    // Read-only history of speculate_fix runs; only where that runtime is running.
+    if (SpeculativeRunTools.isAvailable()) {
+      allTools.push(...SpeculativeRunTools.getToolDefinitions());
     }
     if (MCPEventService.getActive()) {
       allTools.push({
@@ -3970,6 +3977,11 @@ export class ToolRegistry {
       serialSchedulerSpec,
     );
     register(
+      "speculative_runs",
+      async ({ request }) => this.speculativeRunTools.listRuns(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
       serialSchedulerSpec,
@@ -5885,6 +5897,7 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
     if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
+    if (name === "speculative_runs") return await this.speculativeRunTools.listRuns(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Canvas tools

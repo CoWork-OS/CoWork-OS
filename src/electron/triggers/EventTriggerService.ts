@@ -668,6 +668,22 @@ export class EventTriggerService implements EventTriggerRegistry {
           receipt = { kind: "agent_wake", accepted: true };
           break;
         }
+        case "speculate_fix": {
+          if (!this.deps.speculateFix)
+            throw new Error("Speculative fix is not available in this runtime");
+          const result = await this.deps.speculateFix({
+            trigger,
+            event,
+            idempotencyKey: String(row.id),
+            agentConfig: prepared?.agentConfig,
+          });
+          if (result.taskId) historyEntry.taskId = result.taskId;
+          historyEntry.actionResult = result.started
+            ? "speculation_started"
+            : `speculation_skipped: ${result.reason || "unavailable"}`;
+          receipt = { kind: "speculative_run", ...result };
+          break;
+        }
         default:
           throw new Error(`Unsupported trigger action: ${String((action as Any).type)}`);
       }
@@ -903,6 +919,22 @@ export class EventTriggerService implements EventTriggerRegistry {
             const prompt = renderTriggerPrompt(cfg.prompt || "", event);
             await this.deps.wakeAgent(cfg.agentRoleId, prompt);
             historyEntry.actionResult = "agent_woken";
+          }
+          break;
+        }
+
+        case "speculate_fix": {
+          if (this.deps.speculateFix) {
+            const result = await this.deps.speculateFix({
+              trigger,
+              event,
+              idempotencyKey: historyEntry.id,
+              agentConfig: prepared?.agentConfig,
+            });
+            if (result.taskId) historyEntry.taskId = result.taskId;
+            historyEntry.actionResult = result.started
+              ? "speculation_started"
+              : `speculation_skipped: ${result.reason || "unavailable"}`;
           }
           break;
         }

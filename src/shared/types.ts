@@ -723,6 +723,7 @@ export type EventType =
   | "worktree_conflict" // Merge conflict detected
   | "resource_conflict" // Another task in the same folder is changing this file (write refused)
   | "worktree_cleaned" // Worktree removed after completion
+  | "speculative_outcome" // A speculative reproduce-and-fix run ended (delivered or discarded)
   // Collaborative Thoughts events (team multi-agent thinking)
   | "agent_thought" // Agent sharing analysis/reasoning with team
   | "synthesis_started" // Leader beginning synthesis of team thoughts
@@ -2503,6 +2504,14 @@ export interface AgentConfig {
   teamWorkItemLane?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
+  /**
+   * Speculative reproduce-and-fix worker started by a `speculate_fix` trigger. It runs in the
+   * background in its own worktree, is not a user task, and never raises a notification; its
+   * result reaches the user only when the delivery gate confirms a small fix.
+   */
+  speculative?: boolean;
+  /** The speculative run this task works for (see SpeculativeRun). */
+  speculativeRunId?: string;
   /** Per-task checkout choice. Omit to use the global worktree setting. */
   worktreeMode?: "local" | "worktree";
   /** Existing local branch to base a new isolated checkout on; omit for HEAD. */
@@ -3058,6 +3067,110 @@ export const DEFAULT_WORKTREE_SETTINGS: WorktreeSettings = {
   branchPrefix: "cowork/",
   commitMessagePrefix: "[cowork] ",
 };
+
+// ============ Speculative Fix (Acting Ahead) Types ============
+
+/** What happens to a confirmed speculative fix: keep it as a local draft, or open a pull request. */
+export type SpeculativeFixDelivery = "draft_only" | "open_pr";
+
+/**
+ * Where a delivered fix is announced: a reply in the chat thread that reported the problem, or
+ * only on the workspace repository (a pull request for `open_pr`; nothing posted for a draft).
+ */
+export type SpeculativeFixDestination = "origin_thread" | "workspace_pr";
+
+/** Per-trigger settings of the `speculate_fix` action. Every field is optional. */
+export interface SpeculativeFixConfig {
+  /** Workspace whose repository is copied into an isolated worktree; defaults to the trigger's. */
+  workspaceId?: string;
+  /** Hard wall-clock limit for the whole run, in minutes. */
+  maxMinutes?: number;
+  /** Most model calls (agent turns) the worker may make. */
+  maxLlmCalls?: number;
+  /** Largest fix, in changed lines (added + removed), that may be delivered. */
+  maxDiffLines?: number;
+  delivery?: SpeculativeFixDelivery;
+  destination?: SpeculativeFixDestination;
+}
+
+export const SPECULATIVE_FIX_DEFAULTS = {
+  maxMinutes: 20,
+  maxLlmCalls: 40,
+  maxDiffLines: 200,
+  delivery: "draft_only",
+  destination: "origin_thread",
+} as const satisfies Required<Omit<SpeculativeFixConfig, "workspaceId">>;
+
+/** The structured result a speculative worker reports at the end of its run. */
+export interface SpeculativeFixReport {
+  reproduced: boolean;
+  fixed: boolean;
+  summary: string;
+  diffStat: string;
+  testEvidence: string;
+}
+
+export type SpeculativeRunStatus = "running" | "delivered" | "discarded" | "failed";
+
+export type SpeculativeRunOutcome =
+  | "running"
+  | "not_reproduced"
+  | "not_fixed"
+  | "no_report"
+  | "no_changes"
+  | "diff_too_large"
+  | "timed_out"
+  | "task_failed"
+  | "task_cancelled"
+  | "delivery_failed"
+  | "draft_ready"
+  | "pr_opened";
+
+/** Where the report came from, so a delivered fix can answer in the same thread. */
+export interface SpeculativeRunOrigin {
+  source: string;
+  channelType?: string;
+  channelInstanceId?: string;
+  chatId?: string;
+  messageId?: string;
+  threadId?: string;
+  senderName?: string;
+}
+
+/** One speculative reproduce-and-fix run and its outcome. */
+export interface SpeculativeRun {
+  id: string;
+  triggerId: string;
+  triggerName: string;
+  workspaceId: string;
+  taskId?: string;
+  status: SpeculativeRunStatus;
+  outcome: SpeculativeRunOutcome;
+  delivery: SpeculativeFixDelivery;
+  destination: SpeculativeFixDestination;
+  maxDiffLines: number;
+  /** Bounded excerpt of the reported problem. */
+  issueExcerpt: string;
+  origin: SpeculativeRunOrigin;
+  startedAt: number;
+  deadlineAt: number;
+  finishedAt?: number;
+  report?: SpeculativeFixReport;
+  filesChanged?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  branchName?: string;
+  prUrl?: string;
+  /** True while the candidate fix's worktree is kept for a later pull request. */
+  worktreeKept?: boolean;
+  /** One-line reason for the outcome. */
+  note?: string;
+}
+
+export interface SpeculativeRunListQuery {
+  workspaceId?: string;
+  limit?: number;
+}
 
 // ============ Self-Improvement Types ============
 
@@ -9634,6 +9747,7 @@ export const IPC_CHANNELS = {
   TRIGGER_UPDATE: "trigger:update",
   TRIGGER_REMOVE: "trigger:remove",
   TRIGGER_HISTORY: "trigger:history",
+  SPECULATIVE_RUNS_LIST: "speculativeRuns:list",
   MCP_EVENTS_LIST: "mcpEvents:list",
   MCP_EVENTS_STATUS: "mcpEvents:status",
   MCP_EVENTS_RECEIVER_PORT: "mcpEvents:receiverPort",

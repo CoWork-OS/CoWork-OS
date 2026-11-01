@@ -319,6 +319,12 @@ import { pruneTempSandboxProfiles } from "./utils/temp-sandbox-profiles";
 // Gap features: triggers, briefing, file hub, web access
 import { EventTriggerService } from "./triggers/EventTriggerService";
 import { setupTriggerHandlers } from "./ipc/trigger-handlers";
+import { createSpeculativeFixRuntime } from "./triggers/speculative-fix-runtime";
+import {
+  getActiveSpeculativeFixService,
+  setActiveSpeculativeFixService,
+} from "./triggers/SpeculativeFixService";
+import { setupSpeculativeRunHandlers } from "./ipc/speculative-run-handlers";
 import { setupRoutineHandlers } from "./ipc/routine-handlers";
 import { RoutineService } from "./routines/service";
 import { createRoutineWorkflowActionExecutor } from "./routines/workflow/action-executor";
@@ -4192,6 +4198,14 @@ if (isMacSafeStorageMigrationWorker) {
             workspaces[0]
           );
         };
+        // Speculative reproduce-and-fix runs for `speculate_fix` triggers (off unless one exists).
+        const speculativeFix = createSpeculativeFixRuntime({
+          db,
+          agentDaemon,
+          channelGateway,
+          automationRuntime,
+          userDataDir: getUserDataDir(),
+        });
         // Event Triggers
         eventTriggerService = new EventTriggerService(
           {
@@ -4250,6 +4264,7 @@ if (isMacSafeStorageMigrationWorker) {
               if (result.status === "error")
                 throw new Error(result.error || "Agent wake was not accepted");
             },
+            speculateFix: (request) => speculativeFix.start(request),
             getDefaultWorkspaceId: () => "",
             getActiveTaskCount: () => agentDaemon.getQueueStatus().runningTaskIds.length,
             log: (...args: unknown[]) => console.log("[EventTriggers]", ...args),
@@ -4321,6 +4336,7 @@ if (isMacSafeStorageMigrationWorker) {
         });
         void syncMcpTriggerSubscriptions();
         setupTriggerHandlers(currentTriggerService, syncMcpTriggerSubscriptions, mcpEventService);
+        setupSpeculativeRunHandlers(getActiveSpeculativeFixService);
         const managedSessionService = new ManagedSessionService(db, agentDaemon, {
           workContextService: new WorkContextService(db),
         });
@@ -5199,6 +5215,8 @@ if (isMacSafeStorageMigrationWorker) {
           run: async () => {
             await automationRuntime.stop("event_triggers");
             eventTriggerService = null;
+            getActiveSpeculativeFixService()?.dispose();
+            setActiveSpeculativeFixService(null);
           },
         },
         { name: "channel gateway", run: () => channelGateway?.shutdown() },

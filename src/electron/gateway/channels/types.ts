@@ -222,6 +222,10 @@ export interface DiscordConfig extends ChannelConfig {
   applicationId: string;
   /** Guild IDs to operate in (empty = all guilds) */
   guildIds?: string[];
+  /** Guild message routing policy, as for Telegram (default: mentionsOnly). DMs always route. */
+  groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
+  /** Pass unaddressed guild messages on as ingest-only (stored, never answered). */
+  ambientMode?: boolean;
 }
 
 /**
@@ -236,6 +240,10 @@ export interface SlackConfig extends ChannelConfig {
   signingSecret?: string;
   /** Relay curated middle-step updates instead of suppressing all executor internals */
   progressRelayMode?: "minimal" | "curated";
+  /** Channel message routing policy, as for Telegram (default: mentionsOnly). DMs always route. */
+  groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
+  /** Pass unaddressed channel messages on as ingest-only (stored, never answered). */
+  ambientMode?: boolean;
 }
 
 /**

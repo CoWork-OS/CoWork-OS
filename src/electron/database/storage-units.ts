@@ -48,6 +48,7 @@ import { ResourceClaimStore } from "./resource-claims-sql";
 import { TaskLabelStore } from "./TaskLabelRepository";
 import { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";
+import { ThreadSubscriptionStore } from "./thread-subscriptions-sql";
 import { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
 
 /**
@@ -801,6 +802,36 @@ export const STORAGE_UNITS = {
     (db: Database.Database) => new DeviceProfileStore(db),
     "updateLastSeen",
     { readonly: false },
+  ),
+  threadSubscription_subscribe: storeUnit(
+    (db: Database.Database) => new ThreadSubscriptionStore(db),
+    "subscribe",
+    { readonly: false },
+  ),
+  threadSubscription_unsubscribe: storeUnit(
+    (db: Database.Database) => new ThreadSubscriptionStore(db),
+    "unsubscribe",
+    { readonly: false },
+  ),
+  threadSubscription_unsubscribeTask: storeUnit(
+    (db: Database.Database) => new ThreadSubscriptionStore(db),
+    "unsubscribeTask",
+    { readonly: false },
+  ),
+  threadSubscription_listForThread: storeUnit(
+    (db: Database.Database) => new ThreadSubscriptionStore(db),
+    "listForThread",
+    { readonly: true },
+  ),
+  threadSubscription_listForTask: storeUnit(
+    (db: Database.Database) => new ThreadSubscriptionStore(db),
+    "listForTask",
+    { readonly: true },
+  ),
+  threadSubscription_findActiveSubscribers: storeUnit(
+    (db: Database.Database) => new ThreadSubscriptionStore(db),
+    "findActiveSubscribers",
+    { readonly: true },
   ),
   channel_create: storeUnit(
     (db: Database.Database) => new ChannelStore(db, SEALED_CHANNEL_CONFIG_CODEC),

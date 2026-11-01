@@ -16,6 +16,10 @@ import {
 import { ActivityRepository } from "../activity/activity-repository-facades";
 import { TaskRepository } from "../database/repository-facades";
 import { EventTriggerService } from "../triggers/EventTriggerService";
+import {
+  attachThreadSubscriptionCleanup,
+  createEventRoutingDeps,
+} from "../triggers/event-routing-deps";
 import { channelMessageTriggerEvent } from "../triggers/gateway-message-event";
 import { RoutineService } from "../routines/service";
 import { HooksSettingsManager } from "../hooks/settings";
@@ -152,9 +156,16 @@ export function createHeadlessBotAutomation(input: {
       log: input.log,
       onTriggerFired: (payload) => routines.recordEventTriggerFire(payload).catch(input.log),
       onEventWaitFired: (params) => agentDaemon.resumeAfterEventWait(params),
+      // Semantic event gate and thread subscriptions, as on the desktop.
+      ...createEventRoutingDeps({
+        db,
+        agentDaemon,
+        assertOwnership: () => runtime.assertOwnership(),
+      }),
     },
     db,
   );
+  attachThreadSubscriptionCleanup({ db, daemon: agentDaemon, log: input.log });
   // wait_for_event parks tasks on temporary triggers in this engine.
   agentDaemon.setEventWaitRegistry?.(triggers);
   const mcpEvents = input.mcpClientManager

@@ -1,6 +1,12 @@
 import { truncateToolResult } from "./context-manager";
 import type { LLMImageMimeType, LLMToolResult, LLMToolResultCompanionContent } from "./llm";
 import { canonicalizeToolName } from "./tool-semantics";
+import {
+  LazyFieldSpill,
+  omittedCharsNotice,
+  TOOL_RESULT_READ_TOOL,
+  type ToolResultSpillSink,
+} from "./tool-result-spill";
 
 export interface NormalizedToolFailureReason {
   message: string;
@@ -541,8 +547,17 @@ const TOOL_FAILURE_RESULT_ITEM_FIELDS: ReadonlyArray<readonly [string, number]> 
 
 const ANSI_CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
-/** Keep the start and end of `text`, cut at line boundaries when one is close. */
-function clipFailureText(text: string, headChars: number, tailChars: number): string {
+/**
+ * Keep the start and end of `text`, cut at line boundaries when one is close. With
+ * `keepFullText`, the full text is kept under the handle it returns and the marker says
+ * where the omitted middle starts in it (Inline & Spill).
+ */
+function clipFailureText(
+  text: string,
+  headChars: number,
+  tailChars: number,
+  keepFullText?: (fullText: string) => string | undefined,
+): string {
   const headBudget = Math.max(0, Math.floor(headChars));
   const tailBudget = Math.max(0, Math.floor(tailChars));
   if (text.length <= headBudget + tailBudget) return text;
@@ -554,12 +569,27 @@ function clipFailureText(text: string, headChars: number, tailChars: number): st
   if (firstTailBreak >= 0 && firstTailBreak <= tailBudget * 0.25) {
     tail = tail.slice(firstTailBreak + 1);
   }
-  const marker = `[... ${text.length - head.length - tail.length} chars omitted ...]`;
+  const handle = keepFullText?.(text);
+  const marker = omittedCharsNotice(
+    text.length - head.length - tail.length,
+    handle ? { handle, offset: head.length } : undefined,
+  );
   return [head, marker, tail].filter(Boolean).join("\n");
 }
 
-function clipCommandOutput(text: string, headChars: number, tailChars: number): string {
-  return clipFailureText(text.replace(ANSI_CSI_SEQUENCE_REGEX, ""), headChars, tailChars);
+/** Command output without ANSI escapes, head+tail; `spill` keeps the cleaned full text. */
+function clipCommandOutput(
+  text: string,
+  headChars: number,
+  tailChars: number,
+  spill?: { fields: LazyFieldSpill; field: string },
+): string {
+  return clipFailureText(
+    text.replace(ANSI_CSI_SEQUENCE_REGEX, ""),
+    headChars,
+    tailChars,
+    spill ? (fullText) => spill.fields.handleFor(spill.field, fullText) : undefined,
+  );
 }
 
 function boundFailureDetailValue(value: unknown, maxChars: number): unknown {
@@ -600,6 +630,7 @@ function buildToolFailurePayload(
   failure: NormalizedToolFailureReason,
   guidance: string,
   scale: number,
+  spilledFields?: LazyFieldSpill,
 ): Record<string, unknown> {
   const source: Record<string, Any> = result && typeof result === "object" ? result : {};
   const errorText = failure.message;
@@ -629,13 +660,19 @@ function buildToolFailurePayload(
     payload.terminationReason = source.terminationReason;
   }
   if (typeof source.stderr === "string" && source.stderr.trim()) {
-    payload.stderr = clipCommandOutput(source.stderr, 0, TOOL_FAILURE_STDERR_TAIL_CHARS * scale);
+    payload.stderr = clipCommandOutput(
+      source.stderr,
+      0,
+      TOOL_FAILURE_STDERR_TAIL_CHARS * scale,
+      spilledFields && { fields: spilledFields, field: "stderr" },
+    );
   }
   if (typeof source.stdout === "string" && source.stdout.trim()) {
     payload.stdout = clipCommandOutput(
       source.stdout,
       TOOL_FAILURE_STDOUT_HEAD_CHARS * scale,
       TOOL_FAILURE_STDOUT_TAIL_CHARS * scale,
+      spilledFields && { fields: spilledFields, field: "stdout" },
     );
   }
   if (typeof source.truncated === "boolean") payload.truncated = source.truncated;
@@ -668,12 +705,18 @@ const RUN_COMMAND_STDOUT_HEAD_CHARS = 4_000;
 const RUN_COMMAND_STDOUT_TAIL_CHARS = 20_000;
 const RUN_COMMAND_STDERR_TAIL_CHARS = 6_000;
 
-function boundRunCommandOutputForModel(toolName: string, rawResult: string): string {
+function boundRunCommandOutputForModel(
+  toolName: string,
+  rawResult: string,
+  spill?: ToolResultSpillSink,
+): string {
   if (toolName !== "run_command" || rawResult.length <= RUN_COMMAND_RESULT_MAX_CHARS) {
     return rawResult;
   }
   const parsed = safeJsonParseValue(rawResult);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return rawResult;
+  // Each stream's cleaned full text is kept once, the first time it is cut.
+  const spilledFields = spill ? new LazyFieldSpill(spill) : undefined;
   let scale = 1;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const bounded = { ...parsed };
@@ -682,10 +725,16 @@ function boundRunCommandOutputForModel(toolName: string, rawResult: string): str
         parsed.stdout,
         RUN_COMMAND_STDOUT_HEAD_CHARS * scale,
         RUN_COMMAND_STDOUT_TAIL_CHARS * scale,
+        spilledFields && { fields: spilledFields, field: "stdout" },
       );
     }
     if (typeof parsed.stderr === "string") {
-      bounded.stderr = clipCommandOutput(parsed.stderr, 0, RUN_COMMAND_STDERR_TAIL_CHARS * scale);
+      bounded.stderr = clipCommandOutput(
+        parsed.stderr,
+        0,
+        RUN_COMMAND_STDERR_TAIL_CHARS * scale,
+        spilledFields && { fields: spilledFields, field: "stderr" },
+      );
     }
     const serialized = JSON.stringify(bounded);
     if (serialized.length <= RUN_COMMAND_RESULT_MAX_CHARS) return serialized;
@@ -703,10 +752,14 @@ function serializeToolFailureForModel(
   result: Any,
   failure: NormalizedToolFailureReason,
   guidance: string,
+  spill?: ToolResultSpillSink,
 ): string {
+  const spilledFields = spill ? new LazyFieldSpill(spill) : undefined;
   let scale = 1;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const serialized = JSON.stringify(buildToolFailurePayload(result, failure, guidance, scale));
+    const serialized = JSON.stringify(
+      buildToolFailurePayload(result, failure, guidance, scale, spilledFields),
+    );
     if (serialized.length <= TOOL_FAILURE_PAYLOAD_MAX_CHARS) return serialized;
     scale *= (TOOL_FAILURE_PAYLOAD_MAX_CHARS / serialized.length) * 0.9;
   }
@@ -851,7 +904,19 @@ export function buildNormalizedToolResult(opts: {
   getToolFailureReason: (result: Any, fallback: string) => string;
   includeRunCommandTerminationContext?: boolean;
   compactForLocalModel?: boolean;
+  /** Keeps what truncation omits, so the model can page it with tool_result_read. */
+  spill?: ToolResultSpillSink;
 }): { toolResult: LLMToolResult; resultIsError: boolean; toolFailureReason: string } {
+  const resultIsError = Boolean(opts.result && opts.result.success === false);
+  const advisoryFallbackFailure = isAdvisoryToolFailureResult(opts.result);
+  const normalizedFailure = resultIsError
+    ? normalizeToolFailureReason(opts.result, "Tool execution failed")
+    : null;
+  const toolFailureReason = normalizedFailure?.message || "";
+  const sendsFailurePayload = Boolean(normalizedFailure && !advisoryFallbackFailure);
+  // A page of a spilled result is already bounded; it is never spilled again.
+  const spill = opts.toolName === TOOL_RESULT_READ_TOOL ? undefined : opts.spill;
+
   const rawResultForModel = opts.compactForLocalModel
     ? compactNetworkToolResultForLocalModel({
         toolName: opts.toolName,
@@ -859,8 +924,11 @@ export function buildNormalizedToolResult(opts: {
         rawResult: opts.rawResult,
       })
     : opts.rawResult;
+  // The failure payload replaces this text, so only a sent result keeps what it omits.
+  const resultSpill = sendsFailurePayload ? undefined : spill;
   const truncatedResult = truncateToolResult(
-    boundRunCommandOutputForModel(opts.toolName, rawResultForModel),
+    boundRunCommandOutputForModel(opts.toolName, rawResultForModel, resultSpill),
+    { spill: resultSpill },
   );
   let sanitizedResult = opts.sanitizeToolResult(opts.toolName, truncatedResult);
   const includeTerminationContext =
@@ -870,24 +938,19 @@ export function buildNormalizedToolResult(opts: {
     sanitizedResult = prependRunCommandTerminationContext(sanitizedResult, opts.result);
   }
 
-  const resultIsError = Boolean(opts.result && opts.result.success === false);
-  const advisoryFallbackFailure = isAdvisoryToolFailureResult(opts.result);
-  const normalizedFailure = resultIsError
-    ? normalizeToolFailureReason(opts.result, "Tool execution failed")
-    : null;
-  const toolFailureReason = normalizedFailure?.message || "";
   const companion = !resultIsError
     ? buildComputerUseCompanionContent(opts.toolName, opts.result)
     : null;
   // Failure diagnostics go through the same sanitizer as success payloads.
   const failureContent =
-    normalizedFailure && !advisoryFallbackFailure
+    normalizedFailure && sendsFailurePayload
       ? opts.sanitizeToolResult(
           opts.toolName,
           serializeToolFailureForModel(
             opts.result,
             normalizedFailure,
             includeTerminationContext ? getRunCommandTerminationContext(opts.result) : "",
+            spill,
           ),
         )
       : null;
@@ -1047,6 +1110,8 @@ export function buildDuplicateToolResult(opts: {
   isIdempotentTool: (toolName: string) => boolean;
   suggestion: string;
   sanitizeToolResult?: (toolName: string, resultText: string) => string;
+  /** Keeps what truncation omits from a served cached result (tool_result_read). */
+  spill?: ToolResultSpillSink;
 }): { toolResult: LLMToolResult; hasDuplicateAttempt: boolean } {
   const reason =
     typeof opts.duplicateCheck.reason === "string" && opts.duplicateCheck.reason.trim()
@@ -1056,7 +1121,9 @@ export function buildDuplicateToolResult(opts: {
   if (opts.duplicateCheck.cachedResult && opts.isIdempotentTool(opts.toolName)) {
     // The cached result is the raw tool output: bound and sanitize it like a live result,
     // and say it is a repeat rather than a new run.
-    const bounded = truncateToolResult(opts.duplicateCheck.cachedResult);
+    const bounded = truncateToolResult(opts.duplicateCheck.cachedResult, {
+      spill: opts.toolName === TOOL_RESULT_READ_TOOL ? undefined : opts.spill,
+    });
     const sanitized = opts.sanitizeToolResult
       ? opts.sanitizeToolResult(opts.toolName, bounded)
       : bounded;

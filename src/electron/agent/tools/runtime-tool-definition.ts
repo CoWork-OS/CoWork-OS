@@ -42,11 +42,14 @@ const READ_PARALLEL_TOOLS = new Set([
   "git_blame",
   "git_refs",
   "task_history",
+  "task_get",
   "task_list_list",
   // Memory reads.
   "memory_recall",
   "context_recall",
   "scratchpad_read",
+  // Pages of this task's shortened tool results.
+  "tool_result_read",
   "browser_snapshot",
   "browser_tabs",
   "browser_history_search",
@@ -204,8 +207,12 @@ const ALWAYS_EXPOSE_TOOLS = new Set([
   "revise_plan",
   "request_user_input",
   "task_history",
+  // Recall by ID: task ids appear in task_history, memory_recall hits and the prompt.
+  "task_get",
   "scratchpad_write",
   "scratchpad_read",
+  // Omission markers name this tool, so it must be callable whenever a result was shortened.
+  "tool_result_read",
   // Memory (audit §8.3): recall, remember, forget, and active-task context recovery.
   "memory_recall",
   "memory_remember",

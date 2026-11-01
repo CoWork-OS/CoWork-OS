@@ -223,6 +223,10 @@ export function friendlyToolRunningLabel(toolName: string | undefined): string {
       return "Running a command";
     case "task_history":
       return "Checking task history";
+    case "task_get":
+      return "Recalling a task";
+    case "tool_result_read":
+      return "Reading more of a result";
     default:
       return `Using ${t.replace(/_/g, " ")}`;
   }
@@ -493,6 +497,10 @@ function friendlyPastVerb(tool: string): string {
       return "Matched files";
     case "task_history":
       return "Loaded task history";
+    case "task_get":
+      return "Recalled task";
+    case "tool_result_read":
+      return "Read more of a result";
     default:
       return `${tool.replace(/_/g, " ")} done`;
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ChannelPersonaAdapter } from "../ChannelPersonaAdapter";
+import { CHAT_REPLY_WORD_LIMIT, ChannelPersonaAdapter } from "../ChannelPersonaAdapter";
 
 // ── Mocks ─────────────────────────────────────────────────────────────
 
@@ -96,6 +96,28 @@ describe("ChannelPersonaAdapter", () => {
     it("allows longer responses for email", () => {
       const email = ChannelPersonaAdapter.adaptForChannel("email", "private");
       expect(email).toContain("Thorough");
+    });
+
+    it("caps chat replies at about 100 words, conclusions first, direct questions only", () => {
+      for (const channel of ["slack", "telegram", "whatsapp", "discord", "teams"] as const) {
+        const result = ChannelPersonaAdapter.adaptForChannel(channel, "group");
+        expect(result).toContain(`under about ${CHAT_REPLY_WORD_LIMIT} words`);
+        expect(result).toContain("conclusion or answer first");
+        expect(result).toContain("Ask only direct questions");
+        expect(result).not.toContain("Background (why)");
+      }
+      expect(CHAT_REPLY_WORD_LIMIT).toBe(100);
+    });
+
+    it("gives email and GitHub the dense background, change, verification shape", () => {
+      for (const surface of ["email", "github"] as const) {
+        const result = ChannelPersonaAdapter.adaptForChannel(surface, "private");
+        expect(result).toContain("Background (why)");
+        expect(result).toContain("Change (what was done or is proposed)");
+        expect(result).toContain("Verification (how it was checked");
+        expect(result).not.toContain(`under about ${CHAT_REPLY_WORD_LIMIT} words`);
+      }
+      expect(ChannelPersonaAdapter.adaptForChannel("github", "private")).toContain("GitHub");
     });
   });
 

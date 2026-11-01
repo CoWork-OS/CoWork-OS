@@ -32605,7 +32605,9 @@ You are continuing a previous conversation. The context from the previous conver
     );
 
     let channelAdaptedPersonality = personalityPrompt;
-    const originChannel = this.task.agentConfig?.originChannel;
+    // A gateway channel, or GitHub for tasks started from a PR or issue thread.
+    const originChannel =
+      this.task.agentConfig?.originChannel ?? this.task.agentConfig?.replySurface;
     if (originChannel) {
       try {
         const { ChannelPersonaAdapter } = await import("../memory/ChannelPersonaAdapter");
@@ -34812,7 +34814,9 @@ Return ONLY a JSON object:
     const visualQAContext = this.getVisualQAContextPrompt();
     // Channel-specific persona adaptation (append to personality prompt)
     let channelAdaptedPersonality = personalityPrompt;
-    const originChannel = this.task.agentConfig?.originChannel;
+    // A gateway channel, or GitHub for tasks started from a PR or issue thread.
+    const originChannel =
+      this.task.agentConfig?.originChannel ?? this.task.agentConfig?.replySurface;
     if (originChannel) {
       try {
         const { ChannelPersonaAdapter } = await import("../memory/ChannelPersonaAdapter");
@@ -42686,7 +42690,9 @@ Return ONLY a JSON object:
     const awarenessSnapshotBlock = this.buildAwarenessSnapshotBlock(memoryDecision);
     const roleContext = this.getRoleContextPrompt();
     let channelAdaptedPersonality = personalityPrompt;
-    const originChannel = this.task.agentConfig?.originChannel;
+    // A gateway channel, or GitHub for tasks started from a PR or issue thread.
+    const originChannel =
+      this.task.agentConfig?.originChannel ?? this.task.agentConfig?.replySurface;
     if (originChannel) {
       try {
         const { ChannelPersonaAdapter } = await import("../memory/ChannelPersonaAdapter");

@@ -6071,6 +6071,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeTrigger: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, id),
   getTriggerHistory: (triggerId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_HISTORY, triggerId),
+  // Semantic event gate (policies and per-source/per-chat modes)
+  getEventGateSettings: () => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_GET),
+  addEventGatePolicy: (text: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_ADD_POLICY, text),
+  removeEventGatePolicy: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_REMOVE_POLICY, id),
+  toggleEventGatePolicy: (id: string, enabled?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_TOGGLE_POLICY, { id, enabled }),
+  setEventGateSourceMode: (source: string, mode: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_SET_SOURCE_MODE, { source, mode }),
+  setEventGateChatMode: (chatKey: string, mode: string | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_SET_CHAT_MODE, { chatKey, mode }),
 
   // Routines
   listRoutines: () => ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_LIST),
@@ -6657,6 +6669,21 @@ export interface ElectronAPI {
   getRecentHubFiles: (limit?: number) => Promise<import("./file-hub/types").UnifiedFile[]>;
   trackHubFileAccess: (file: import("./file-hub/types").UnifiedFile) => Promise<void>;
   getHubSources: () => Promise<import("./file-hub/types").FileHubSource[]>;
+  getEventGateSettings: () => Promise<import("../shared/types").EventGateSettings>;
+  addEventGatePolicy: (text: string) => Promise<import("../shared/types").EventGateSettings>;
+  removeEventGatePolicy: (id: string) => Promise<import("../shared/types").EventGateSettings>;
+  toggleEventGatePolicy: (
+    id: string,
+    enabled?: boolean,
+  ) => Promise<import("../shared/types").EventGateSettings>;
+  setEventGateSourceMode: (
+    source: string,
+    mode: import("../shared/types").EventGateMode,
+  ) => Promise<import("../shared/types").EventGateSettings>;
+  setEventGateChatMode: (
+    chatKey: string,
+    mode: import("../shared/types").EventGateMode | null,
+  ) => Promise<import("../shared/types").EventGateSettings>;
   selectFolder: (defaultPath?: string) => Promise<string | null>;
   selectFiles: (defaultPath?: string) => Promise<
     Array<{

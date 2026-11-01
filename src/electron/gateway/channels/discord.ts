@@ -50,6 +50,12 @@ import {
   SelectMenuHandler,
 } from "./types";
 import { listNativeRemoteCommands } from "../remote-command-registry";
+import {
+  resolveGroupRoutingMode,
+  shouldIngestUnroutedGroupMessage,
+  shouldRouteGroupMessage,
+} from "./group-routing";
+import { EventGateSettingsManager } from "../../settings/event-gate-manager";
 
 /**
  * Embed color constants for different message types
@@ -280,20 +286,33 @@ export class DiscordAdapter implements ChannelAdapter {
           return;
         }
 
-        // Handle DMs and mentions in guilds
+        // DMs always route; guild messages follow the channel's group routing mode.
         const isDM = message.channel.type === DiscordChannelType.DM;
+        // `has` counts a reply to the bot's message as a mention.
         const isMentioned = message.mentions.has(this.client!.user!);
         const isThread = message.channel.isThread();
+        const routed =
+          isDM ||
+          shouldRouteGroupMessage(resolveGroupRoutingMode(this.config.groupRoutingMode), {
+            isMentioned,
+            isCommand: message.content.trim().startsWith("/"),
+          });
+        const ingestOnly =
+          !routed &&
+          shouldIngestUnroutedGroupMessage({
+            inExistingThread: isThread,
+            ambientMode: this.config.ambientMode === true,
+            chatGateMode: EventGateSettingsManager.resolveChatMode(
+              "discord",
+              isThread
+                ? (message.channel as ThreadChannel).parentId || message.channelId
+                : message.channelId,
+            ),
+          });
 
-        console.log(
-          `Discord message received: isDM=${isDM}, isMentioned=${isMentioned}, isThread=${isThread}, content="${message.content.slice(0, 50)}"`,
-        );
-
-        if (isDM || isMentioned) {
+        if (routed || ingestOnly) {
           const incomingMessage = this.mapMessageToIncoming(message);
-          console.log(
-            `Processing Discord message from ${message.author.username}: ${incomingMessage.text.slice(0, 50)}`,
-          );
+          if (ingestOnly) incomingMessage.ingestOnly = true;
           await this.handleIncomingMessage(incomingMessage);
         }
       });

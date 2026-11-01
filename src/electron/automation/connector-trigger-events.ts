@@ -1,5 +1,6 @@
 import type { MCPConnectorEvent } from "../mcp/client/MCPServerConnection";
 import type { EventTrigger, TriggerEvent } from "../triggers/types";
+import { githubThreadKeyFromPayload } from "../triggers/thread-subscriptions";
 export function connectorTriggerSubscription(trigger: Pick<EventTrigger, "source" | "conditions">) {
   if (trigger.source !== "connector_event") return null;
   const value = (...fields: string[]) =>
@@ -37,6 +38,9 @@ export function connectorTriggerEvents(event: MCPConnectorEvent): TriggerEvent[]
       keys.map((key) => fields[key]).find((value) => typeof value === "string") as
         | string
         | undefined;
+    const repository = text("repository", "repo") || "";
+    // The PR or issue thread this event belongs to (thread subscriptions).
+    const threadKey = githubThreadKeyFromPayload(repository, fields);
     events.push({
       source: "github_event",
       timestamp: event.timestamp,
@@ -44,10 +48,11 @@ export function connectorTriggerEvents(event: MCPConnectorEvent): TriggerEvent[]
         connectorId: "github",
         eventName: text("eventName", "event") || "",
         action: text("action") || "",
-        repository: text("repository", "repo") || "",
+        repository,
         ref: text("ref") || "",
         resourceUri: event.resourceUri || "",
         payload,
+        ...(threadKey ? { threadKey } : {}),
       },
     });
   }

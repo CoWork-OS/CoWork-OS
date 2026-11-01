@@ -292,6 +292,17 @@ export class ChannelRegistry extends EventEmitter {
               type: "array",
               description: "Guild IDs to operate in (empty = all)",
             },
+            groupRoutingMode: {
+              type: "string",
+              description:
+                "Guild message routing mode (all, mentionsOnly, mentionsOrCommands, commandsOnly)",
+              default: "mentionsOnly",
+            },
+            ambientMode: {
+              type: "boolean",
+              description: "Log unaddressed guild messages (never answered)",
+              default: false,
+            },
           },
           required: ["botToken", "applicationId"],
         },
@@ -348,6 +359,17 @@ export class ChannelRegistry extends EventEmitter {
               type: "string",
               description: "Signing secret for verifying requests",
               secret: true,
+            },
+            groupRoutingMode: {
+              type: "string",
+              description:
+                "Channel message routing mode (all, mentionsOnly, mentionsOrCommands, commandsOnly)",
+              default: "mentionsOnly",
+            },
+            ambientMode: {
+              type: "boolean",
+              description: "Log unaddressed channel messages (never answered)",
+              default: false,
             },
           },
           required: ["botToken", "appToken"],

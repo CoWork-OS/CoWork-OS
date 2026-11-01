@@ -46,6 +46,7 @@ import type { ComposerDraftStore } from "./composer-draft-repository";
 import type { TaskLabelStore } from "./TaskLabelRepository";
 import type { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import type { DeviceProfileStore } from "./DeviceProfileRepository";
+import type { ThreadSubscriptionStore } from "./thread-subscriptions-sql";
 import type { ToolAttemptStore } from "./tool-attempt-sql";
 import type { LifecycleMetaStore } from "./lifecycle-meta-sql";
 import type { ResourceClaimStore } from "./resource-claims-sql";
@@ -528,6 +529,23 @@ export const DeviceProfileRepository = repositoryFacade<
   DeviceProfileStore,
   (typeof DEVICEPROFILE_METHODS)[number]
 >("deviceProfile_", DEVICEPROFILE_METHODS);
+
+const THREAD_SUBSCRIPTION_METHODS = [
+  "subscribe",
+  "unsubscribe",
+  "unsubscribeTask",
+  "listForThread",
+  "listForTask",
+  "findActiveSubscribers",
+] as const;
+export type ThreadSubscriptionRepository = AsyncStore<
+  ThreadSubscriptionStore,
+  (typeof THREAD_SUBSCRIPTION_METHODS)[number]
+>;
+export const ThreadSubscriptionRepository = repositoryFacade<
+  ThreadSubscriptionStore,
+  (typeof THREAD_SUBSCRIPTION_METHODS)[number]
+>("threadSubscription_", THREAD_SUBSCRIPTION_METHODS);
 
 /**
  * Channels keep their config encrypted with OS secure storage, which only the host can

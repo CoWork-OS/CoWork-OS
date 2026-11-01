@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Trash2, ToggleLeft, ToggleRight, History, ChevronDown } from "lucide-react";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
+import { EventGateSettings } from "./EventGate/EventGateSettings";
 
 interface TriggerCondition {
   field: string;
@@ -37,6 +38,8 @@ interface TriggerHistoryEntry {
   eventData: Record<string, unknown>;
   actionResult?: string;
   taskId?: string;
+  gateDecision?: "act" | "ignore";
+  gateReason?: string;
 }
 
 interface MCPServerOption {
@@ -1093,6 +1096,12 @@ export const EventTriggersPanel: React.FC<{
                     </span>
                     <span>{h.actionResult || "fired"}</span>
                     {h.taskId && <span style={{ color: "var(--color-accent)" }}>→ task</span>}
+                    {h.gateDecision && (
+                      <span className="event-trigger-gate-note">
+                        gate: {h.gateDecision}
+                        {h.gateReason ? ` — ${h.gateReason}` : ""}
+                      </span>
+                    )}
                   </div>
                 ))
               )}
@@ -1100,6 +1109,8 @@ export const EventTriggersPanel: React.FC<{
           )}
         </div>
       ))}
+
+      <EventGateSettings />
     </div>
   );
 };

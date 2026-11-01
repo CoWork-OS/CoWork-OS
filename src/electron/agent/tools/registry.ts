@@ -86,6 +86,7 @@ import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
 import { WatchdogTools } from "./watchdog-tools";
+import { ThreadTools } from "./thread-tools";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -757,6 +758,7 @@ export class ToolRegistry {
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
   private watchdogTools: WatchdogTools;
+  private threadTools: ThreadTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -851,6 +853,7 @@ export class ToolRegistry {
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
     this.watchdogTools = new WatchdogTools(daemon, taskId);
+    this.threadTools = new ThreadTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1816,6 +1819,8 @@ export class ToolRegistry {
     }
     // Read-only explanation of the watchdog control loop's decisions for a task.
     allTools.push(...WatchdogTools.getToolDefinitions());
+    // Follow or leave a conversation thread's later events (thread subscriptions).
+    allTools.push(...ThreadTools.getToolDefinitions());
     if (MCPEventService.getActive()) {
       allTools.push({
         name: "manage_connector_events",
@@ -3976,6 +3981,16 @@ export class ToolRegistry {
       serialSchedulerSpec,
     );
     register(
+      "thread_subscribe",
+      async ({ request }) => this.threadTools.subscribe(request.input),
+      serialSchedulerSpec,
+    );
+    register(
+      "thread_unsubscribe",
+      async ({ request }) => this.threadTools.unsubscribe(request.input),
+      serialSchedulerSpec,
+    );
+    register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
       serialSchedulerSpec,
@@ -5269,6 +5284,10 @@ ${
       hasAnyVisibleTools("wait_for_event")
         ? "\n- wait_for_event: Pause this task until a workspace file change, GitHub event or webhook arrives, instead of polling or sleeping; then finish the turn"
         : ""
+    }${
+      hasAnyVisibleTools("thread_subscribe")
+        ? "\n- thread_subscribe / thread_unsubscribe: Receive (or stop receiving) a PR, issue, email chain or chat thread's later events in this task"
+        : ""
     }
 
 ${
@@ -5894,6 +5913,8 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
     if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
+    if (name === "thread_subscribe") return await this.threadTools.subscribe(input);
+    if (name === "thread_unsubscribe") return await this.threadTools.unsubscribe(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Canvas tools

@@ -3523,6 +3523,12 @@ export type FollowUpTextProvenance = "user_typed";
  */
 export type TaskPromptProvenance = "user_typed";
 
+/**
+ * A runtime notice that reaches the session as a follow-up event: work that finished outside
+ * the turn (a background job or a spawned child agent), or a watchdog steering nudge.
+ */
+export type RuntimeNotificationKind = "background_process" | "agent_output" | "watchdog";
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3550,9 +3556,11 @@ export interface TaskFollowUpInput {
   messageSource?: "user" | "agent";
   /**
    * Internal runtime notice; retains the current conversation instead of starting a bot handoff.
-   * "watchdog" is a steering nudge from the watchdog control loop.
+   * "background_process": a tracked run_command job finished. "agent_output": a child agent
+   * started with spawn_agent finished; its report is agent output, not user input.
+   * "watchdog": a steering nudge from the watchdog control loop.
    */
-  notificationKind?: "background_process" | "watchdog";
+  notificationKind?: RuntimeNotificationKind;
   /** Stable ID used to correlate an agent message with its delivery event. */
   messageId?: string;
   /** Parent/agent task that authored an agent message. */

@@ -58,7 +58,7 @@ import path from "path";
 import os from "os";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import { fileURLToPath, pathToFileURL } from "url";
 import {
   app,
@@ -323,6 +323,7 @@ import { getCustomSkillLoader } from "./agent/custom-skill-loader";
 import { pruneTempSandboxProfiles } from "./utils/temp-sandbox-profiles";
 // Gap features: triggers, briefing, file hub, web access
 import { EventTriggerService } from "./triggers/EventTriggerService";
+import { channelMessageTriggerEvent } from "./triggers/gateway-message-event";
 import { setupTriggerHandlers } from "./ipc/trigger-handlers";
 import { setupRoutineHandlers } from "./ipc/routine-handlers";
 import { RoutineService } from "./routines/service";
@@ -5024,30 +5025,10 @@ if (isMacSafeStorageMigrationWorker) {
 
         // Hook triggers into gateway message events
         channelGateway.onEvent((event) => {
-          if (event.type === "message:received" && event.data) {
-            const channelType = event.channel || "";
-            const chatId = (event.data.chatId as string) || "";
-            const messageId = (event.data.messageId as string) || "";
-            const channelDbId = (event.data.channelId as string) || "";
-            const identityParts = [channelType, channelDbId, chatId, messageId];
-            const eventId = identityParts.every((part) => part.length > 0 && part.length <= 1024)
-              ? `gateway-message-v1:${createHash("sha256")
-                  .update(JSON.stringify(["gateway-message-v1", ...identityParts]))
-                  .digest("hex")}`
-              : undefined;
+          const triggerEvent = channelMessageTriggerEvent(event);
+          if (triggerEvent) {
             void eventTriggerService
-              ?.evaluateEvent({
-                source: "channel_message",
-                ...(eventId ? { eventId } : {}),
-                fields: {
-                  channelType,
-                  channelInstanceId: channelDbId,
-                  chatId,
-                  text: (event.data.text as string) || "",
-                  senderName: (event.data.senderName as string) || "",
-                },
-                timestamp: event.timestamp.getTime(),
-              })
+              ?.evaluateEvent(triggerEvent)
               .catch((error) =>
                 logger.warn("[EventTriggers] Gateway event was not persisted:", error),
               );

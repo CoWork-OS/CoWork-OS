@@ -81,6 +81,14 @@ export type MailboxTodayBucket =
   | "good_to_know"
   | "more_to_browse";
 
+// The stored bucket is a broad classification, not a verified event date.
+export const MAILBOX_TODAY_BUCKET_LABELS: Record<MailboxTodayBucket, string> = {
+  needs_action: "Needs action",
+  happening_today: "Dates & plans",
+  good_to_know: "Good to know",
+  more_to_browse: "More to browse",
+};
+
 export type MailboxDomainCategory =
   | "travel"
   | "packages"

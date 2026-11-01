@@ -22,7 +22,7 @@ Inbox Agent helps you move from "read everything" to "act on what matters":
 
 - sync Gmail and IMAP/SMTP mail into a local encrypted cache, then keep it fresh with background autosync
 - classify threads into `Unread`, `Needs reply`, `Suggested actions`, and `Open commitments`
-- group the current inbox into Today lanes: `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- group the current inbox into Today lanes: `Needs action`, `Dates & plans`, `Good to know`, and `More to browse`
 - classify practical domains such as travel, packages, receipts, bills, shopping, newsletters, work, personal, and finance
 - keep `Inbox`, `Sent`, and `All` views separate so outbound mail does not clutter received mail
 - make unread mail visually distinct and update read/unread state through the provider when capability is available
@@ -43,7 +43,7 @@ Inbox Agent helps you move from "read everything" to "act on what matters":
 | Surface                 | Current Behavior                                                                                                                                                       |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Classic mode            | One canvas split into the thread list, the reader, and the Agent side panel.                                                                                           |
-| Today mode              | Groups current threads into `Needs action`, `Happening today`, `Good to know`, and `More to browse`.                                                                   |
+| Today mode              | Groups current threads into `Needs action`, `Dates & plans`, `Good to know`, and `More to browse`.                                                                   |
 | Focus filters           | Pills under the category tabs for unread, to-reply, suggested-action, and open-commitment counts; only non-zero (or active) ones show. Click to filter.                |
 | Mailbox menu            | The list title (`Inbox ▾`) switches between `Inbox`, `Sent`, and `All mail`, and between accounts when more than one is connected.                                     |
 | Category filters        | Filter by priority, calendar, follow-up, promotions, updates, and saved views.                                                                                         |

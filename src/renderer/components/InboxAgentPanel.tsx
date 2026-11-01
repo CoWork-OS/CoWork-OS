@@ -62,7 +62,7 @@ import {
   MailboxThreadDetail,
   MailboxThreadListItem,
   MailboxThreadMailboxView,
-  MailboxTodayDigest,
+  MAILBOX_TODAY_BUCKET_LABELS,
   getMailboxNoReplySender,
   stripMailboxSummaryHtmlArtifacts,
 } from "../../shared/mailbox";
@@ -755,11 +755,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [status, setStatus] = useState<MailboxSyncStatus | null>(null);
   const [mailboxClientState, setMailboxClientState] = useState<MailboxClientState | null>(null);
   const [digest, setDigest] = useState<MailboxDigestSnapshot | null>(null);
-  const [todayDigest, setTodayDigest] = useState<MailboxTodayDigest | null>(null);
   const [senderCleanupDigest, setSenderCleanupDigest] = useState<MailboxSenderCleanupDigest | null>(
     null,
   );
   const [threads, setThreads] = useState<MailboxThreadListItem[]>([]);
+  const [threadListAtLimit, setThreadListAtLimit] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
   const [threadDetail, setSelectedThread] = useState<MailboxThreadDetail | null>(null);
@@ -936,14 +936,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
 
   const loadDigest = async () => {
     const isCurrent = requests.capture("loadDigest");
-    const [next, today, senders] = await Promise.all([
+    const [next, senders] = await Promise.all([
       window.electronAPI.getMailboxDigest().catch(() => null),
-      window.electronAPI.getMailboxTodayDigest({ limitPerBucket: 8 }).catch(() => null),
       window.electronAPI.getMailboxSenderCleanupDigest({ limit: 6 }).catch(() => null),
     ]);
     if (!isCurrent()) return;
     setDigest(next);
-    setTodayDigest(today);
     setSenderCleanupDigest(senders);
   };
 
@@ -1022,6 +1020,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       limit: 40,
     });
     if (!isCurrent()) return;
+    setThreadListAtLimit(list.length === 40);
     const filteredList =
       nextDomainFilter === "work"
         ? list.filter((thread) => workDomains.includes(thread.domainCategory))
@@ -2477,19 +2476,19 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     if (inboxMode === "today") {
       const labels: Record<string, { label: string; description: string }> = {
         needs_action: {
-          label: "Needs action",
+          label: MAILBOX_TODAY_BUCKET_LABELS.needs_action,
           description: "Replies, approvals, and urgent threads",
         },
         happening_today: {
-          label: "Happening today",
-          description: "Dated travel, packages, bills, and events",
+          label: MAILBOX_TODAY_BUCKET_LABELS.happening_today,
+          description: "Travel, packages, bills, and events; check dates in each thread",
         },
         good_to_know: {
-          label: "Good to know",
+          label: MAILBOX_TODAY_BUCKET_LABELS.good_to_know,
           description: "Useful updates that do not need immediate action",
         },
         more_to_browse: {
-          label: "More to browse",
+          label: MAILBOX_TODAY_BUCKET_LABELS.more_to_browse,
           description: "Newsletters, promotions, and low-priority mail",
         },
       };
@@ -3314,6 +3313,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
 
           <div className="ibx-scroll">
             <div className={`ibx-list ${selectedThreadIds.length ? "has-selection" : ""}`}>
+              {threadListAtLimit && (
+                <div className="ibx-empty-text" style={{ padding: "8px 12px" }}>
+                  Showing up to 40 threads. Search or change filters to find others.
+                </div>
+              )}
               {displayedThreads.length === 0 && !busy && (
                 <div className="ibx-empty">
                   <Inbox size={28} strokeWidth={1.4} />
@@ -3350,12 +3354,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                         {group.description && inboxMode === "today" && (
                           <span title={group.description}>{group.description}</span>
                         )}
-                        <span className="ibx-count">
-                          {inboxMode === "today"
-                            ? (todayDigest?.buckets.find((bucket) => bucket.bucket === group.id)
-                                ?.count ?? group.threads.length)
-                            : group.threads.length}
-                        </span>
+                        <span className="ibx-count">{group.threads.length}</span>
                       </div>
                     )}
                     {group.threads.map((thread) => {

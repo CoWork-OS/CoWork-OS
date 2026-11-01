@@ -8,7 +8,7 @@ import { FileHubServiceDeps, UnifiedFile } from "../types";
 function makeDeps(overrides: Partial<FileHubServiceDeps> = {}): FileHubServiceDeps {
   return {
     getWorkspacePath: () => "",
-    getArtifacts: () => [],
+    getArtifacts: async () => [],
     getConnectedSources: () => [],
     log: vi.fn(),
     ...overrides,
@@ -278,14 +278,16 @@ describe("FileHubService", () => {
   it("lists task artifacts", async () => {
     const service = new FileHubService(
       makeDeps({
-        getArtifacts: () => [
+        getArtifacts: async () => [
           {
             id: "a1",
             path: "/output/report.pdf",
-            mime_type: "application/pdf",
+            mimeType: "application/pdf",
+            sha256: "hash",
             size: 5000,
-            created_at: Date.now(),
-            task_id: "t1",
+            createdAt: 12345,
+            taskId: "t1",
+            workspacePath: "/output",
           },
         ],
       }),
@@ -295,6 +297,9 @@ describe("FileHubService", () => {
     expect(files).toHaveLength(1);
     expect(files[0].name).toBe("report.pdf");
     expect(files[0].source).toBe("artifacts");
+    expect(files[0].mimeType).toBe("application/pdf");
+    expect(files[0].modifiedAt).toBe(12345);
+    expect(files[0].metadata).toEqual({ taskId: "t1", workspacePath: "/output" });
   });
 
   // ── Search ────────────────────────────────────────────────────

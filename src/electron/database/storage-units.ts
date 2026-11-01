@@ -276,6 +276,9 @@ export const STORAGE_UNITS = {
     "findByTaskIdPage",
     { readonly: true },
   ),
+  artifact_findRecent: storeUnit((db: Database.Database) => new ArtifactStore(db), "findRecent", {
+    readonly: true,
+  }),
   artifact_findById: storeUnit((db: Database.Database) => new ArtifactStore(db), "findById", {
     readonly: true,
   }),

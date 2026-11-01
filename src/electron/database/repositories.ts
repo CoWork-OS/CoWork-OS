@@ -4194,6 +4194,23 @@ export class ArtifactStore {
     return rows.map((row) => this.mapRowToArtifact(row));
   }
 
+  findRecent(limit: number): Array<Artifact & { workspacePath?: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT artifacts.*, workspaces.path AS workspace_path
+         FROM artifacts
+         JOIN tasks ON tasks.id = artifacts.task_id
+         JOIN workspaces ON workspaces.id = tasks.workspace_id
+         ORDER BY artifacts.created_at DESC, artifacts.id DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Any[];
+    return rows.map((row) => ({
+      ...this.mapRowToArtifact(row),
+      workspacePath: row.workspace_path,
+    }));
+  }
+
   findById(id: string): Artifact | undefined {
     const stmt = this.db.prepare("SELECT * FROM artifacts WHERE id = ?");
     const row = stmt.get(id) as Any;

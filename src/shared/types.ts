@@ -73,6 +73,35 @@ export interface MemoryRepoTeamRepoSetting {
   workspaceIds?: string[];
 }
 
+/**
+ * How an event source (a trigger source such as `github_event`, or one gateway chat) is
+ * treated before new work starts:
+ * - explicit_only: today's behaviour; code conditions alone decide.
+ * - candidate: after the code checks pass, a small model reads the event and the user's
+ *   event policies and decides act or ignore. Ambient chat messages are evaluated too.
+ * - ignore: events from this source never start work (thread follow-ups and waits still
+ *   arrive).
+ */
+export type EventGateMode = "explicit_only" | "candidate" | "ignore";
+
+export type EventGateDecision = "act" | "ignore";
+
+/** A user-written natural-language rule the semantic event gate applies. */
+export interface EventGatePolicy {
+  id: string;
+  text: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface EventGateSettings {
+  policies: EventGatePolicy[];
+  /** Mode per trigger source (`channel_message`, `github_event`, ...); absent = explicit_only. */
+  sourceModes: Record<string, EventGateMode>;
+  /** Mode per gateway chat, keyed `<channelType>:<chatId>`; overrides the source mode. */
+  chatModes: Record<string, EventGateMode>;
+}
+
 // Global memory feature toggles (applies across workspaces)
 export interface MemoryFeaturesSettings {
   /** Inject `.cowork/*` context pack into the agent prompt (workspace-scoped files). */
@@ -1613,6 +1642,8 @@ export type ToolType =
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
+  // Page through a tool result that was shortened to fit the context window
+  | "tool_result_read"
   // Hand a computer step to the person (passwords, codes, payments)
   | "request_takeover"
   // The bot's own desktop (Works on: Its own desktop)
@@ -1657,7 +1688,8 @@ export type ToolType =
   | "revise_plan"
   | "request_user_input"
   | "task_history"
-  | "task_events";
+  | "task_events"
+  | "task_get";
 
 export type ApprovalType =
   | "delete_file"
@@ -1722,6 +1754,8 @@ export const TOOL_GROUPS = {
     "email_imap_unread",
     // Session scratchpad (read)
     "scratchpad_read",
+    // Pages of this task's own shortened tool results
+    "tool_result_read",
     "youtube_ask_video",
     "youtube_search_ingested_segments",
     "youtube_list_ingested_videos",
@@ -1891,6 +1925,7 @@ export const TOOL_GROUPS = {
     "write_clipboard",
     "task_history",
     "task_events",
+    "task_get",
     // Privacy-sensitive: exposes prior chat logs across chats
     "channel_list_chats",
     "channel_history",
@@ -2117,6 +2152,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
+  tool_result_read: "read",
   // Only asks the person to take over; it changes nothing itself.
   request_takeover: "read",
   // The bot's own desktop is a separate container: actions there don't touch this computer.
@@ -2141,6 +2177,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   request_user_input: "read",
   task_history: "read",
   task_events: "read",
+  task_get: "read",
 };
 
 /**
@@ -2375,6 +2412,30 @@ export interface IntegrationMentionOption extends IntegrationMentionSelection {
  * Per-task agent configuration for customizing LLM and personality
  * Allows spawning agents with different models/personalities than the global settings
  */
+/**
+ * Identifiers of what a task came from, kept so later turns can recall related context by ID
+ * (task_get and the task's identity line). Set only by main-process creation paths; informational,
+ * never used for authorization.
+ */
+export interface TaskOriginRefs {
+  /** Event trigger that created the task. */
+  triggerId?: string;
+  /** Source event identity the ingress adapter supplied (for example a gateway message hash). */
+  triggerEventId?: string;
+  /** Durable trigger occurrence row that created the task. */
+  triggerOccurrenceId?: string;
+  /** Conversation the originating event belongs to (mail thread, chat, or chat thread). */
+  threadKey?: string;
+  /** Gateway channel type that delivered the originating message. */
+  gatewayChannel?: string;
+  /** Gateway channel session (chat) the task answers. */
+  gatewaySessionId?: string;
+  /** Chat identifier on the gateway channel. */
+  gatewayChatId?: string;
+  /** Thread identifier inside that chat, when the channel has threads. */
+  gatewayThreadId?: string;
+}
+
 export interface AgentConfig {
   /** Composer that created the task; preserved in sidebar summaries. */
   taskOrigin?: "build";
@@ -2430,6 +2491,11 @@ export interface AgentConfig {
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
   /**
+   * Where a task without a gateway origin replies, for reply-style norms
+   * (ChannelPersonaAdapter). Set by the event trigger engine for GitHub thread events.
+   */
+  replySurface?: "github";
+  /**
    * Set by the gateway router (never accepted from the renderer): whether the channel
    * sender is the workspace owner. Only the owner's messages may become facts about the
    * user (audit SEC-16); a channel task without it counts as third-party.
@@ -2437,6 +2503,8 @@ export interface AgentConfig {
   gatewaySenderIsOwner?: boolean;
   /** Contact reference of the channel sender (`gateway:<channel>:<user id>`), set with it. */
   gatewaySenderRef?: string;
+  /** Trigger, gateway chat and thread identifiers of the task's origin (see TaskOriginRefs). */
+  originRefs?: TaskOriginRefs;
   /** Resolved gateway specialization record that shaped the task. */
   channelSpecializationId?: string;
   /** Explicit maximum number of LLM turns before forcing completion. Unset means no window cap for normal main-task routing. */
@@ -3631,6 +3699,9 @@ export type FollowUpTextProvenance = "user_typed";
  */
 export type TaskPromptProvenance = "user_typed";
 
+/** Work that finished outside the turn and reports back to the session as a follow-up event. */
+export type RuntimeNotificationKind = "background_process" | "agent_output";
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3656,8 +3727,12 @@ export interface TaskFollowUpInput {
   deliveryMode?: "message" | "follow_up";
   /** Internal provenance for messages sent between parent and child tasks. */
   messageSource?: "user" | "agent";
-  /** Internal runtime notice; retains the current conversation instead of starting a bot handoff. */
-  notificationKind?: "background_process";
+  /**
+   * Internal runtime notice; retains the current conversation instead of starting a bot handoff.
+   * "background_process": a tracked run_command job finished. "agent_output": a child agent
+   * started with spawn_agent finished; its report is agent output, not user input.
+   */
+  notificationKind?: RuntimeNotificationKind;
   /** Stable ID used to correlate an agent message with its delivery event. */
   messageId?: string;
   /** Parent/agent task that authored an agent message. */
@@ -9748,6 +9823,12 @@ export const IPC_CHANNELS = {
   TRIGGER_REMOVE: "trigger:remove",
   TRIGGER_HISTORY: "trigger:history",
   SPECULATIVE_RUNS_LIST: "speculativeRuns:list",
+  EVENT_GATE_GET: "eventGate:get",
+  EVENT_GATE_ADD_POLICY: "eventGate:addPolicy",
+  EVENT_GATE_REMOVE_POLICY: "eventGate:removePolicy",
+  EVENT_GATE_TOGGLE_POLICY: "eventGate:togglePolicy",
+  EVENT_GATE_SET_SOURCE_MODE: "eventGate:setSourceMode",
+  EVENT_GATE_SET_CHAT_MODE: "eventGate:setChatMode",
   MCP_EVENTS_LIST: "mcpEvents:list",
   MCP_EVENTS_STATUS: "mcpEvents:status",
   MCP_EVENTS_RECEIVER_PORT: "mcpEvents:receiverPort",

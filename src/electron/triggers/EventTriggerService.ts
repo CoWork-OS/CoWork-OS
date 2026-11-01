@@ -22,10 +22,21 @@ import {
   type EventTriggerRegistry,
 } from "./types";
 import { evaluateConditions, substituteEventVariables } from "./condition-evaluator";
-import { ensureResponsibilitySnapshotColumn } from "./trigger-sql";
+import { ensureResponsibilitySnapshotColumn, ensureTriggerHistoryGateColumns } from "./trigger-sql";
+import { buildTriggerOriginRefs, withOriginRefs } from "../../shared/task-origin-refs";
+import {
+  isEngineDeliveredThreadEvent,
+  threadDeliveryIdentity,
+  threadKeyForEvent,
+} from "./thread-subscriptions";
+import type { AgentConfig, EventGateMode } from "../../shared/types";
 
 const DEFAULT_COOLDOWN_MS = 60_000; // 1 minute
 const MAX_HISTORY_PER_TRIGGER = 50;
+const THREAD_DELIVERY_DEDUPE_MS = 10 * 60_000;
+const MAX_THREAD_DELIVERY_ENTRIES = 1_000;
+/** Longest string field kept in trigger run history (full channel messages stay out). */
+export const MAX_HISTORY_FIELD_CHARS = 4_000;
 type TriggerDefinitionSnapshot = Pick<
   EventTrigger,
   | "id"
@@ -58,6 +69,18 @@ function triggerMatchesEventSource(triggerSource: string, eventSource: string): 
   return false;
 }
 
+/** Event fields as stored in run history, with long string values capped. */
+function historyEventData(fields: TriggerEvent["fields"]): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    data[key] =
+      typeof value === "string" && value.length > MAX_HISTORY_FIELD_CHARS
+        ? value.slice(0, MAX_HISTORY_FIELD_CHARS)
+        : value;
+  }
+  return data;
+}
+
 function renderTriggerPrompt(template: string, event: TriggerEvent): string {
   const instructions = substituteEventVariables(template, event);
   if (event.source !== "mcp_event") return instructions;
@@ -84,6 +107,8 @@ export class EventTriggerService implements EventTriggerRegistry {
   private drainingQueue = false;
   private drainPromise: Promise<void> | null = null;
   private readonly evaluations = new Set<Promise<void>>();
+  /** `<taskId>\n<event identity>` → delivery time, so one event reaches a subscriber once. */
+  private readonly recentThreadDeliveries = new Map<string, number>();
   private fireInterceptor:
     | ((
         trigger: EventTrigger,
@@ -236,6 +261,10 @@ export class EventTriggerService implements EventTriggerRegistry {
     await this.ready;
     if (!this.running) return;
 
+    // A thread whose task is still running gets its later events first and directly.
+    await this.deliverToThreadSubscribers(event);
+    if (!this.running) return;
+
     if (this.sql) {
       await this.acceptMatchingOccurrences(event);
       if ((this.deps.getActiveTaskCount?.() ?? 0) < 4) await this.drainQueuedEvents();
@@ -251,12 +280,15 @@ export class EventTriggerService implements EventTriggerRegistry {
       await this.drainOccurrencesUntilCapacity();
       return;
     }
+    const sourceIgnored = this.gateMode(event) === "ignore";
     for (const trigger of this.triggers.values()) {
       if (!this.running) return;
       if (!trigger.enabled) continue;
       if (!triggerMatchesEventSource(trigger.source, event.source)) continue;
       if (event.source === "mcp_event" && event.fields.subscriptionTriggerId !== trigger.id)
         continue;
+      // An ignored source starts no work; a task waiting on the event still gets it.
+      if (sourceIgnored && !trigger.action.config.eventWait) continue;
 
       // Cooldown check
       const cooldown = trigger.cooldownMs ?? DEFAULT_COOLDOWN_MS;
@@ -279,11 +311,14 @@ export class EventTriggerService implements EventTriggerRegistry {
   private async acceptMatchingOccurrences(event: TriggerEvent): Promise<void> {
     const sql = this.sql;
     if (!sql) return;
+    const sourceIgnored = this.gateMode(event) === "ignore";
     for (const trigger of this.triggers.values()) {
       if (!this.running) return;
       if (!trigger.enabled || !triggerMatchesEventSource(trigger.source, event.source)) continue;
       if (event.source === "mcp_event" && event.fields.subscriptionTriggerId !== trigger.id)
         continue;
+      // An ignored source starts no work; a task waiting on the event still gets it.
+      if (sourceIgnored && !trigger.action.config.eventWait) continue;
       let matched = false;
       try {
         matched = evaluateConditions(event, trigger.conditions, trigger.conditionLogic || "all");
@@ -411,7 +446,7 @@ export class EventTriggerService implements EventTriggerRegistry {
       id: randomUUID(),
       triggerId: String(row.trigger_id),
       firedAt: now,
-      eventData: event.fields as Record<string, unknown>,
+      eventData: historyEventData(event.fields),
       sourceLabel:
         configuredTrigger && isMailboxEventSource(configuredTrigger.source)
           ? "Inbox automation"
@@ -510,6 +545,31 @@ export class EventTriggerService implements EventTriggerRegistry {
           row.id,
           "completed",
           { kind: "no_signal" },
+          null,
+          trigger,
+          event,
+          historyEntry,
+        );
+        return;
+      }
+      if (!this.running) {
+        await sql.unit("eventTrigger_releaseOccurrence", [
+          row.id,
+          "Runtime stopped before action intent.",
+          Date.now(),
+        ]);
+        return;
+      }
+
+      // Thread subscriptions and the semantic gate run before action intent: a crash here
+      // only puts the occurrence back in the queue, and the gate is asked again.
+      const routed = await this.routeBeforeAction(trigger, event, historyEntry);
+      if (routed) {
+        await this.releaseCooldown(trigger.id, Number(row.created_at));
+        await this.completeOccurrence(
+          row.id,
+          "completed",
+          routed,
           null,
           trigger,
           event,
@@ -632,16 +692,29 @@ export class EventTriggerService implements EventTriggerRegistry {
             historyEntry.actionResult = "thread_follow_up_sent";
             receipt = { kind: "thread_follow_up", taskId: cfg.targetTaskId, queued: result.queued };
           } else {
+            const threadKey = threadKeyForEvent(event);
             const result = await this.deps.createTask({
               title,
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: prepared?.agentConfig ?? cfg.agentConfig,
+              // The task keeps the IDs of the event that created it (Chain of Recall).
+              agentConfig: withOriginRefs(
+                withThreadReplySurface(prepared?.agentConfig ?? cfg.agentConfig, threadKey),
+                buildTriggerOriginRefs({
+                  triggerId: trigger.id,
+                  occurrenceId: String(row.id),
+                  event,
+                }),
+              ),
             });
             historyEntry.taskId = result.id;
             historyEntry.actionResult = "task_created";
             receipt = { kind: "task", taskId: result.id };
+            if (threadKey) {
+              historyEntry.threadKey = threadKey;
+              await this.subscribeCreatedTask(threadKey, result.id);
+            }
           }
           break;
         }
@@ -806,17 +879,31 @@ export class EventTriggerService implements EventTriggerRegistry {
   private async fireTrigger(trigger: EventTrigger, event: TriggerEvent): Promise<void> {
     if (!this.running) return;
     const now = Date.now();
-    trigger.lastFiredAt = now;
-    trigger.fireCount += 1;
-    await this.saveToDB(trigger);
-
     const historyEntry: TriggerHistoryEntry = {
       id: randomUUID(),
       triggerId: trigger.id,
       firedAt: now,
-      eventData: event.fields as Record<string, unknown>,
+      eventData: historyEventData(event.fields),
       sourceLabel: isMailboxEventSource(trigger.source) ? "Inbox automation" : trigger.source,
     };
+
+    // A thread subscriber or the semantic gate may take the event; that is not a firing,
+    // so it neither counts nor starts the cooldown.
+    try {
+      if (await this.routeBeforeAction(trigger, event, historyEntry)) {
+        await this.recordHistory(trigger, event, historyEntry);
+        return;
+      }
+    } catch (error) {
+      historyEntry.actionResult = `error: ${error instanceof Error ? error.message : String(error)}`;
+      await this.recordHistory(trigger, event, historyEntry);
+      return;
+    }
+    if (!this.running) return;
+
+    trigger.lastFiredAt = now;
+    trigger.fireCount += 1;
+    await this.saveToDB(trigger);
 
     try {
       if (!this.running) {
@@ -888,15 +975,23 @@ export class EventTriggerService implements EventTriggerRegistry {
             historyEntry.taskId = cfg.targetTaskId;
             historyEntry.actionResult = "thread_follow_up_sent";
           } else {
+            const threadKey = threadKeyForEvent(event);
             const result = await this.deps.createTask({
               title,
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: prepared?.agentConfig ?? cfg.agentConfig,
+              agentConfig: withOriginRefs(
+                withThreadReplySurface(prepared?.agentConfig ?? cfg.agentConfig, threadKey),
+                buildTriggerOriginRefs({ triggerId: trigger.id, event }),
+              ),
             });
             historyEntry.taskId = result.id;
             historyEntry.actionResult = "task_created";
+            if (threadKey) {
+              historyEntry.threadKey = threadKey;
+              await this.subscribeCreatedTask(threadKey, result.id);
+            }
           }
           break;
         }
@@ -970,6 +1065,133 @@ export class EventTriggerService implements EventTriggerRegistry {
       await this.deps.onTriggerFired?.({ trigger, event, historyEntry });
     } catch (error) {
       this.deps.log?.(`Trigger "${trigger.name}" post-fire hook failed:`, error);
+    }
+  }
+
+  // ── Event gate and thread subscriptions ─────────────────────────
+
+  private gateMode(event: TriggerEvent): EventGateMode {
+    try {
+      return this.deps.resolveGateMode?.(event) ?? "explicit_only";
+    } catch (error) {
+      this.deps.log?.("[EventTriggerService] Could not resolve the event gate mode:", error);
+      return "explicit_only";
+    }
+  }
+
+  /**
+   * Decide, after the code checks passed, whether this trigger acts on the event. Returns a
+   * receipt when it does not: a task subscribed to the event's thread owns it, or the
+   * semantic gate ignored it. The verdict and reason go on the history entry either way.
+   * Triggers parked by wait_for_event always fire.
+   */
+  private async routeBeforeAction(
+    trigger: EventTrigger,
+    event: TriggerEvent,
+    historyEntry: TriggerHistoryEntry,
+  ): Promise<Record<string, unknown> | null> {
+    const cfg = trigger.action.config;
+    if (cfg.eventWait) return null;
+
+    if (trigger.action.type === "create_task" && cfg.runMode !== "thread_follow_up") {
+      const threadKey = threadKeyForEvent(event);
+      if (threadKey && this.deps.findActiveThreadSubscribers) {
+        const subscribers = await this.deps.findActiveThreadSubscribers(threadKey);
+        if (subscribers.length > 0) {
+          historyEntry.threadKey = threadKey;
+          historyEntry.taskId = subscribers[0];
+          historyEntry.actionResult = "thread_delivered";
+          return { kind: "thread_subscription", threadKey, taskIds: subscribers };
+        }
+      }
+    }
+
+    if (this.gateMode(event) !== "candidate") return null;
+    const verdict = this.deps.runSemanticGate
+      ? await this.deps.runSemanticGate({ trigger, event }).catch((error: unknown) => {
+          this.deps.log?.(`Trigger "${trigger.name}" semantic gate failed:`, error);
+          return { decision: "ignore" as const, reason: "Gate unavailable: the call failed." };
+        })
+      : { decision: "ignore" as const, reason: "The semantic gate is not available here." };
+    historyEntry.gateDecision = verdict.decision;
+    historyEntry.gateReason = verdict.reason;
+    if (verdict.decision === "act") return null;
+    historyEntry.actionResult = "gate_ignored";
+    return { kind: "gate_ignored", reason: verdict.reason };
+  }
+
+  /** Give back the cooldown an accepted occurrence reserved but did not use. */
+  private async releaseCooldown(triggerId: string, firedAt: number): Promise<void> {
+    if (!this.sql || !Number.isFinite(firedAt)) return;
+    try {
+      const updated = (await this.sql.unit("eventTrigger_releaseCooldown", [
+        triggerId,
+        firedAt,
+      ])) as { last_fired_at: number | null; fire_count: number } | undefined;
+      const trigger = this.triggers.get(triggerId);
+      if (trigger && updated) {
+        trigger.lastFiredAt = updated.last_fired_at || undefined;
+        trigger.fireCount = updated.fire_count;
+      }
+    } catch (error) {
+      this.log(`[EventTriggerService] Could not release the cooldown of ${triggerId}:`, error);
+    }
+  }
+
+  /** Best effort: the task exists already, so a failed subscription must not fail the run. */
+  private async subscribeCreatedTask(threadKey: string, taskId: string): Promise<void> {
+    if (!this.deps.subscribeThread) return;
+    try {
+      await this.deps.subscribeThread(threadKey, taskId);
+    } catch (error) {
+      this.deps.log?.(
+        `[EventTriggerService] Could not subscribe task ${taskId} to ${threadKey}:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Hand an event to the running tasks subscribed to its thread, once per task. Gateway
+   * threads are delivered by the router; this covers GitHub, mail and other sources.
+   */
+  private async deliverToThreadSubscribers(event: TriggerEvent): Promise<void> {
+    const { findActiveThreadSubscribers, deliverThreadEvent } = this.deps;
+    if (!findActiveThreadSubscribers || !deliverThreadEvent) return;
+    if (!isEngineDeliveredThreadEvent(event)) return;
+    const threadKey = threadKeyForEvent(event);
+    if (!threadKey) return;
+    let subscribers: string[];
+    try {
+      subscribers = await findActiveThreadSubscribers(threadKey);
+    } catch (error) {
+      this.deps.log?.(`[EventTriggerService] Could not read subscribers of ${threadKey}:`, error);
+      return;
+    }
+    if (subscribers.length === 0) return;
+    const identity = threadDeliveryIdentity(event);
+    this.pruneThreadDeliveries();
+    for (const taskId of subscribers) {
+      const key = `${taskId}\n${identity}`;
+      if (this.recentThreadDeliveries.has(key)) continue;
+      this.recentThreadDeliveries.set(key, Date.now());
+      try {
+        await deliverThreadEvent({ taskId, threadKey, event });
+      } catch (error) {
+        this.recentThreadDeliveries.delete(key);
+        this.deps.log?.(
+          `[EventTriggerService] Could not deliver a ${threadKey} event to task ${taskId}:`,
+          error,
+        );
+      }
+    }
+  }
+
+  private pruneThreadDeliveries(): void {
+    const cutoff = Date.now() - THREAD_DELIVERY_DEDUPE_MS;
+    for (const [key, deliveredAt] of this.recentThreadDeliveries) {
+      if (deliveredAt < cutoff || this.recentThreadDeliveries.size > MAX_THREAD_DELIVERY_ENTRIES)
+        this.recentThreadDeliveries.delete(key);
     }
   }
 
@@ -1095,6 +1317,7 @@ export class EventTriggerService implements EventTriggerRegistry {
       // Tables already exist
     }
     ensureResponsibilitySnapshotColumn(this.db as Database.Database);
+    ensureTriggerHistoryGateColumns(this.db as Database.Database);
   }
 
   private async loadFromDB(): Promise<void> {
@@ -1182,6 +1405,15 @@ function stableStringify(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+/** Tasks started for a GitHub thread reply in GitHub's dense structured style. */
+function withThreadReplySurface(
+  agentConfig: AgentConfig | undefined,
+  threadKey: string | undefined,
+): AgentConfig | undefined {
+  if (!threadKey?.startsWith("github:")) return agentConfig;
+  return { ...agentConfig, replySurface: "github" };
 }
 
 function triggerDefinitionSnapshot(trigger: EventTrigger): TriggerDefinitionSnapshot {

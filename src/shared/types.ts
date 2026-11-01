@@ -73,6 +73,35 @@ export interface MemoryRepoTeamRepoSetting {
   workspaceIds?: string[];
 }
 
+/**
+ * How an event source (a trigger source such as `github_event`, or one gateway chat) is
+ * treated before new work starts:
+ * - explicit_only: today's behaviour; code conditions alone decide.
+ * - candidate: after the code checks pass, a small model reads the event and the user's
+ *   event policies and decides act or ignore. Ambient chat messages are evaluated too.
+ * - ignore: events from this source never start work (thread follow-ups and waits still
+ *   arrive).
+ */
+export type EventGateMode = "explicit_only" | "candidate" | "ignore";
+
+export type EventGateDecision = "act" | "ignore";
+
+/** A user-written natural-language rule the semantic event gate applies. */
+export interface EventGatePolicy {
+  id: string;
+  text: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface EventGateSettings {
+  policies: EventGatePolicy[];
+  /** Mode per trigger source (`channel_message`, `github_event`, ...); absent = explicit_only. */
+  sourceModes: Record<string, EventGateMode>;
+  /** Mode per gateway chat, keyed `<channelType>:<chatId>`; overrides the source mode. */
+  chatModes: Record<string, EventGateMode>;
+}
+
 // Global memory feature toggles (applies across workspaces)
 export interface MemoryFeaturesSettings {
   /** Inject `.cowork/*` context pack into the agent prompt (workspace-scoped files). */
@@ -2428,6 +2457,11 @@ export interface AgentConfig {
   integrationMentions?: IntegrationMentionSelection[];
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
+  /**
+   * Where a task without a gateway origin replies, for reply-style norms
+   * (ChannelPersonaAdapter). Set by the event trigger engine for GitHub thread events.
+   */
+  replySurface?: "github";
   /**
    * Set by the gateway router (never accepted from the renderer): whether the channel
    * sender is the workspace owner. Only the owner's messages may become facts about the
@@ -9634,6 +9668,12 @@ export const IPC_CHANNELS = {
   TRIGGER_UPDATE: "trigger:update",
   TRIGGER_REMOVE: "trigger:remove",
   TRIGGER_HISTORY: "trigger:history",
+  EVENT_GATE_GET: "eventGate:get",
+  EVENT_GATE_ADD_POLICY: "eventGate:addPolicy",
+  EVENT_GATE_REMOVE_POLICY: "eventGate:removePolicy",
+  EVENT_GATE_TOGGLE_POLICY: "eventGate:togglePolicy",
+  EVENT_GATE_SET_SOURCE_MODE: "eventGate:setSourceMode",
+  EVENT_GATE_SET_CHAT_MODE: "eventGate:setChatMode",
   MCP_EVENTS_LIST: "mcpEvents:list",
   MCP_EVENTS_STATUS: "mcpEvents:status",
   MCP_EVENTS_RECEIVER_PORT: "mcpEvents:receiverPort",

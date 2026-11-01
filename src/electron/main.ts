@@ -318,6 +318,10 @@ import { getCustomSkillLoader } from "./agent/custom-skill-loader";
 import { pruneTempSandboxProfiles } from "./utils/temp-sandbox-profiles";
 // Gap features: triggers, briefing, file hub, web access
 import { EventTriggerService } from "./triggers/EventTriggerService";
+import {
+  attachThreadSubscriptionCleanup,
+  createEventRoutingDeps,
+} from "./triggers/event-routing-deps";
 import { setupTriggerHandlers } from "./ipc/trigger-handlers";
 import { setupRoutineHandlers } from "./ipc/routine-handlers";
 import { RoutineService } from "./routines/service";
@@ -4262,9 +4266,20 @@ if (isMacSafeStorageMigrationWorker) {
               });
             },
             onEventWaitFired: (params) => agentDaemon.resumeAfterEventWait(params),
+            // Semantic event gate and thread subscriptions.
+            ...createEventRoutingDeps({
+              db,
+              agentDaemon,
+              assertOwnership: () => automationRuntime.assertOwnership(),
+            }),
           },
           db,
         );
+        attachThreadSubscriptionCleanup({
+          db,
+          daemon: agentDaemon,
+          log: (...args: unknown[]) => logger.warn(...args),
+        });
         const currentTriggerService = eventTriggerService;
         // wait_for_event parks tasks on temporary triggers in this engine.
         agentDaemon.setEventWaitRegistry?.(currentTriggerService);

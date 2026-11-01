@@ -29,6 +29,13 @@ import {
   slackDecisionEvent,
   DECISION_ACTION_PREFIX,
 } from "./decision-cards";
+import {
+  resolveGroupRoutingMode,
+  shouldIngestUnroutedGroupMessage,
+  shouldRouteGroupMessage,
+  slackThreadId,
+} from "./group-routing";
+import { EventGateSettingsManager } from "../../settings/event-gate-manager";
 
 export function mapSlackSlashCommandToText(commandName: string, text?: string): string {
   return `/${String(commandName || "").replace(/^\//, "")} ${String(text || "")}`.trim();
@@ -142,21 +149,36 @@ export class SlackAdapter implements ChannelAdapter {
           return;
         }
 
-        // Check if it's a DM or mentions the bot
+        // DMs always route; channel messages follow the channel's group routing mode.
         const channelInfo = await client.conversations.info({ channel: message.channel });
         const isDirect = channelInfo.channel?.is_im === true;
         const isMultiPartyDm = channelInfo.channel?.is_mpim === true;
         const isGroup = isDirect ? false : true;
-        const isMentioned =
-          hasText && this._botId
-            ? String((message as Any).text).includes(`<@${this._botId}>`)
-            : false;
+        const rawText = hasText ? String((message as Any).text) : "";
+        const isMentioned = this._botId ? rawText.includes(`<@${this._botId}>`) : false;
+        const routed =
+          isDirect ||
+          isMultiPartyDm ||
+          shouldRouteGroupMessage(resolveGroupRoutingMode(this.config.groupRoutingMode), {
+            isMentioned,
+            isCommand: rawText.trim().startsWith("/"),
+          });
+        const ingestOnly =
+          !routed &&
+          shouldIngestUnroutedGroupMessage({
+            inExistingThread: typeof (message as Any).thread_ts === "string",
+            ambientMode: this.config.ambientMode === true,
+            chatGateMode: EventGateSettingsManager.resolveChatMode("slack", message.channel),
+          });
 
-        if (isDirect || isMultiPartyDm || isMentioned) {
-          const incomingMessage = await this.mapMessageToIncoming(message, client, isGroup);
-          console.log(
-            `Processing Slack message from ${incomingMessage.userName}: ${incomingMessage.text.slice(0, 50)}`,
+        if (routed || ingestOnly) {
+          const incomingMessage = await this.mapMessageToIncoming(
+            message,
+            client,
+            isGroup,
+            isDirect || isMultiPartyDm,
           );
+          if (ingestOnly) incomingMessage.ingestOnly = true;
           await this.handleIncomingMessage(incomingMessage);
         }
       });
@@ -239,7 +261,8 @@ export class SlackAdapter implements ChannelAdapter {
           channel: message.chatId,
           text: chunk,
           mrkdwn: true,
-          thread_ts: message.replyTo && i === 0 ? message.replyTo : undefined,
+          // A known thread keeps every chunk in it; otherwise only the first answers replyTo.
+          thread_ts: message.threadId || (message.replyTo && i === 0 ? message.replyTo : undefined),
         });
 
         lastMessageTs = result.ts || "";
@@ -249,7 +272,11 @@ export class SlackAdapter implements ChannelAdapter {
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes("invalid") || errorMessage.includes("parse")) {
         console.log("Markdown parsing failed, retrying without formatting");
-        return this.sendMessagePlain(message.chatId, message.text, message.replyTo);
+        return this.sendMessagePlain(
+          message.chatId,
+          message.text,
+          message.threadId || message.replyTo,
+        );
       }
       throw error;
     }
@@ -551,6 +578,7 @@ export class SlackAdapter implements ChannelAdapter {
     message: Any,
     client: Any,
     isGroup?: boolean,
+    isDirectConversation = false,
   ): Promise<IncomingMessage> {
     const hadFiles = Array.isArray(message?.files) && message.files.length > 0;
 
@@ -575,6 +603,7 @@ export class SlackAdapter implements ChannelAdapter {
     const commandText = this.parseCommand(text);
     const attachments = await this.buildAttachments(message);
     const finalText = (commandText || text || "").trim() || (hadFiles ? "<attachment>" : "");
+    const threadId = slackThreadId(message, isDirectConversation);
 
     return {
       messageId: message.ts || "",
@@ -586,6 +615,7 @@ export class SlackAdapter implements ChannelAdapter {
       text: finalText,
       timestamp: new Date(parseFloat(message.ts || "0") * 1000),
       replyTo: message.thread_ts,
+      ...(threadId ? { threadId } : {}),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       raw: message,
     };

@@ -661,6 +661,9 @@ const ALWAYS_MUTATING = new Set([
   "schedule_task",
   // Parks the task and adds a temporary trigger: not for plan or analyze modes.
   "wait_for_event",
+  // Change which external thread events reach this task: not for plan or analyze modes.
+  "thread_subscribe",
+  "thread_unsubscribe",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",

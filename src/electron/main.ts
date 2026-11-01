@@ -76,10 +76,15 @@ import {
   systemPreferences,
   webContents,
   WebContentsView,
+  powerMonitor,
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
 import { attachImageContextMenu } from "./utils/image-context-menu";
+import {
+  attachPowerMonitorSleepRecovery,
+  startAgentDaemonWatchdog,
+} from "./agent/watchdog/watchdog-runtime";
 import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
 import { closeMontyPool } from "./sandbox/monty-engine";
 import { installStdioErrorGuards } from "./utils/stdio-error-guards";
@@ -560,6 +565,8 @@ let coreHarnessExperimentRunner: CoreHarnessExperimentRunner | null = null;
 let coreLearningsService: CoreLearningsService | null = null;
 let coreLearningPipelineService: CoreLearningPipelineService | null = null;
 let detachTaskLifecycleSync: (() => void) | null = null;
+/** Stops the watchdog control loop and detaches its powerMonitor sleep recovery. */
+let stopWatchdog: (() => void) | null = null;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
 let memoryRetentionService: MemoryRetentionService | null = null;
 /** Stops the memory engine's deferred jobs (lane migration, read-side syncs). */
@@ -2878,6 +2885,27 @@ if (isMacSafeStorageMigrationWorker) {
         db: dbManager.getDatabase(),
         log: (...args) => logger.warn(...args),
       });
+      // Watchdog control loop (off until enabled in Settings) and sleep recovery (always on).
+      try {
+        const watchdog = startAgentDaemonWatchdog(agentDaemon, {
+          notify: async (notification) => {
+            await getNotificationService()?.add({
+              type: "warning",
+              title: notification.title,
+              message: notification.message,
+              taskId: notification.taskId,
+              ...(notification.workspaceId ? { workspaceId: notification.workspaceId } : {}),
+            });
+          },
+        });
+        const detachSleepRecovery = attachPowerMonitorSleepRecovery(powerMonitor, watchdog.service);
+        stopWatchdog = () => {
+          detachSleepRecovery();
+          watchdog.stop();
+        };
+      } catch (error) {
+        logger.warn("Failed to start the watchdog:", error);
+      }
 
       // Optional: bootstrap a default workspace on startup for headless/server deployments.
       // This makes a fresh VPS instance usable without first opening the desktop UI.
@@ -5220,6 +5248,13 @@ if (isMacSafeStorageMigrationWorker) {
         { name: "automation ownership", run: () => automationRuntime.shutdown() },
         // Keep lifecycle listeners, MCP, memory, and storage alive until tasks settle.
         { name: "private browser prompts", run: () => getBrowserCredentialService()?.dispose() },
+        {
+          name: "watchdog",
+          run: () => {
+            stopWatchdog?.();
+            stopWatchdog = null;
+          },
+        },
         { name: "agent daemon", run: () => agentDaemon?.shutdown() },
         {
           name: "task lifecycle sync",

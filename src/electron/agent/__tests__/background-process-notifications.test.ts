@@ -3,6 +3,7 @@ import type { Task } from "../../../shared/types";
 import {
   canReceiveBackgroundCompletion,
   isFreshAgentHandoff,
+  isRuntimeNoticeKind,
   pendingBackgroundCompletionNotices,
 } from "../background-process-notifications";
 import { AgentDaemon } from "../daemon";
@@ -14,6 +15,15 @@ describe("background completion delivery eligibility", () => {
       isFreshAgentHandoff({ messageSource: "agent", notificationKind: "background_process" }),
     ).toBe(false);
     expect(isFreshAgentHandoff({ messageSource: "agent" })).toBe(true);
+  });
+  it("keeps a watchdog steering note in the existing conversation too", () => {
+    expect(isFreshAgentHandoff({ messageSource: "agent", notificationKind: "watchdog" })).toBe(
+      false,
+    );
+    expect(isRuntimeNoticeKind("watchdog")).toBe(true);
+    expect(isRuntimeNoticeKind("background_process")).toBe(true);
+    expect(isRuntimeNoticeKind("handoff")).toBe(false);
+    expect(isRuntimeNoticeKind(undefined)).toBe(false);
   });
   function harness(status: Task["status"] = "executing") {
     let current = { ...task, status };

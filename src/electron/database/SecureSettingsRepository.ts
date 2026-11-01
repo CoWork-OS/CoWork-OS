@@ -139,6 +139,8 @@ export type SettingsCategory =
   | "tailscale"
   | "claude-auth"
   | "queue"
+  // Watchdog control loop: on/off, cadence and thresholds (src/electron/agent/watchdog).
+  | "watchdog"
   | "tray"
   | "notion"
   | "box"

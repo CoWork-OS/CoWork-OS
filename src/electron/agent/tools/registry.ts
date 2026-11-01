@@ -84,6 +84,7 @@ import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
+import { WatchdogTools } from "./watchdog-tools";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -754,6 +755,7 @@ export class ToolRegistry {
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
+  private watchdogTools: WatchdogTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -847,6 +849,7 @@ export class ToolRegistry {
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
+    this.watchdogTools = new WatchdogTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1810,6 +1813,8 @@ export class ToolRegistry {
     if (this.daemon.hasEventWaitSupport?.()) {
       allTools.push(...EventWaitTools.getToolDefinitions());
     }
+    // Read-only explanation of the watchdog control loop's decisions for a task.
+    allTools.push(...WatchdogTools.getToolDefinitions());
     if (MCPEventService.getActive()) {
       allTools.push({
         name: "manage_connector_events",
@@ -4164,6 +4169,9 @@ export class ToolRegistry {
     });
     register("task_history", async ({ request }) => this.taskHistory(request.input));
     register("task_events", async ({ request }) => this.taskEvents(request.input));
+    register("watchdog_status", async ({ request }) =>
+      this.watchdogTools.watchdogStatus(request.input),
+    );
     register("request_user_input", async ({ request }) => this.requestUserInput(request.input));
     register(
       "application_operation",
@@ -6033,6 +6041,7 @@ ${skillDescriptions}`;
     if (name === "task_events") {
       return this.taskEvents(input);
     }
+    if (name === "watchdog_status") return this.watchdogTools.watchdogStatus(input);
     if (name === "request_user_input") {
       return await this.requestUserInput(input);
     }

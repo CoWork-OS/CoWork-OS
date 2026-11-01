@@ -1,10 +1,20 @@
 import type { Task, TaskEvent, TaskFollowUpInput } from "../../shared/types";
 import { canAnswerInlineApproval } from "./approval-policy";
 
+/**
+ * Runtime notices (a finished background process, a watchdog steering note) continue the
+ * current conversation; they are not a handoff from another agent.
+ */
+export function isRuntimeNoticeKind(
+  kind: unknown,
+): kind is NonNullable<TaskFollowUpInput["notificationKind"]> {
+  return kind === "background_process" || kind === "watchdog";
+}
+
 export function isFreshAgentHandoff(
   input: Pick<TaskFollowUpInput, "messageSource" | "notificationKind"> | undefined,
 ): boolean {
-  return input?.messageSource === "agent" && input.notificationKind !== "background_process";
+  return input?.messageSource === "agent" && !isRuntimeNoticeKind(input.notificationKind);
 }
 
 /** A later turn is supported only for a human's native, interactive root session. */

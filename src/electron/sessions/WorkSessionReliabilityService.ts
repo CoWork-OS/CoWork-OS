@@ -488,6 +488,41 @@ export class WorkSessionReliabilityService {
     return lease;
   }
 
+  /**
+   * After the host slept, leases of operations that were running expired without anyone being
+   * at fault. Reclaim each remembered lease whose operation has not ended (a released lease
+   * means it did), so this instance renews it again. Fresh leases are left alone. Returns the
+   * number of leases reclaimed.
+   */
+  reclaimAfterSuspend(
+    entries: Array<{
+      sessionId: string;
+      turnId?: string;
+      kind: WorkSessionActivityLeaseKind;
+      operationKey: string;
+    }>,
+  ): number {
+    const now = this.now();
+    let reclaimed = 0;
+    for (const entry of entries) {
+      try {
+        const current = this.leases.getByOperationKey(entry.sessionId, entry.operationKey);
+        if (!current || current.status === "released") continue;
+        if (current.status === "active" && current.expiresAt > now) continue;
+        this.reclaimActivityLease({
+          sessionId: entry.sessionId,
+          ...(entry.turnId ? { turnId: entry.turnId } : {}),
+          kind: entry.kind,
+          operationKey: entry.operationKey,
+        });
+        reclaimed += 1;
+      } catch {
+        // A lease another writer just renewed (ACTIVE_NOT_STALE) needs nothing from us.
+      }
+    }
+    return reclaimed;
+  }
+
   projectSession(
     sessionId: string,
   ): WorkSessionProjectionUpdate<WorkSessionReliabilityProjectionState> {

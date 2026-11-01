@@ -138,6 +138,7 @@ keys and messaging channel tokens, still need the key itself.
 | MiniMax                       | API key in Settings                            | Provider billing                                                        |
 | MiniMax Portal                | API key in Settings                            | Provider billing                                                        |
 | Xiaomi MiMo                   | API key in Settings                            | Provider billing                                                        |
+| Obscurify.ai                  | API key in Settings                            | Provider billing                                                        |
 | Venice AI                     | API key in Settings                            | Provider billing                                                        |
 | Synthetic                     | API key in Settings                            | Provider billing                                                        |
 | Kimi Code                     | API key in Settings                            | Provider billing                                                        |

@@ -217,6 +217,23 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     description: "OpenAI-compatible NanoGPT endpoint with a prefilled base URL.",
   },
   {
+    id: "obscurify",
+    name: "Obscurify.ai",
+    compatibility: "openai",
+    baseUrl: "https://obscurify.ai/v1",
+    defaultModel: "z-ai/glm-5.3",
+    knownModels: [
+      "z-ai/glm-5.3",
+      "deepseek/deepseek-v4-flash",
+      "moonshotai/kimi-k3.1-pro",
+      "qwen/qwen3-coder",
+    ],
+    apiKeyLabel: "Obscurify.ai API Key",
+    apiKeyPlaceholder: "sk-obs1_...",
+    apiKeyUrl: "https://obscurify.ai/account",
+    description: "OpenAI-compatible Obscurify.ai endpoint with a prefilled base URL.",
+  },
+  {
     id: "qwen-portal",
     name: "Qwen",
     compatibility: "anthropic",

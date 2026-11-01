@@ -218,7 +218,7 @@ Prompt:
 
 ```
 Open Inbox Agent and switch to Today mode.
-Review Needs action, Happening today, Good to know, and More to browse.
+Review Needs action, Dates & plans, Good to know, and More to browse.
 For each lane, summarize the top threads and explain why they belong there.
 Do not archive, mark done, send, or trash anything. Ask me which lane to work through first.
 ```

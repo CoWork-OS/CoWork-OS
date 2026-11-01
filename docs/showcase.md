@@ -783,7 +783,7 @@ Triage email in the Inbox Agent workspace, work Today lanes, ask mailbox questio
 
 **What it handles:**
 
-- Classic inbox plus Today lanes for Needs action, Happening today, Good to know, and More to browse
+- Classic inbox plus Today lanes for Needs action, Dates & plans, Good to know, and More to browse
 - Unread, Needs reply, Suggested Actions, and Open Commitments at a glance
 - Inbox / Sent / All views plus Recent / Priority sorting, saved views, account filters, and domain chips
 - Manual reply, reply-all, and forward with To/Cc/Bcc, subject, and editable body

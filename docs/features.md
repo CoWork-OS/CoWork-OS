@@ -204,7 +204,7 @@ See [Chronicle](chronicle.md) for setup, testing, privacy, and contributor detai
 
 Local-first inbox workspace for email triage, normal email handling, follow-up, task capture, cross-channel identity, and operator handoff.
 
-- **Classic + Today modes**: the familiar three-pane inbox remains available, while Today groups work into `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- **Classic + Today modes**: the familiar three-pane inbox remains available, while Today groups work into `Needs action`, `Dates & plans`, `Good to know`, and `More to browse`
 - **Live inbox surfaces**: `Unread`, `Needs reply`, `Suggested Actions`, and `Open Commitments`
 - **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting, saved views, account filters, and domain filters
 - **Normal email actions**: manual reply, reply-all, forward, To/Cc/Bcc, editable subject/body, and provider-backed send

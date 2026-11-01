@@ -94,6 +94,7 @@ import {
   MailboxComposeDraftPatch,
   MailboxClientSettingsPatch,
   MailboxDomainCategory,
+  MAILBOX_TODAY_BUCKET_LABELS,
   MailboxDigestSnapshot,
   MailboxDraftOptions,
   MailboxDraftAttachmentInput,
@@ -2959,16 +2960,10 @@ export class MailboxService {
     input: { limitPerBucket?: number } = {},
   ): Promise<MailboxTodayDigest> {
     const limitPerBucket = Math.min(Math.max(input.limitPerBucket ?? 8, 1), 20);
-    const labels: Record<MailboxTodayBucket, string> = {
-      needs_action: "Needs action",
-      happening_today: "Happening today",
-      good_to_know: "Good to know",
-      more_to_browse: "More to browse",
-    };
     const buckets = await Promise.all(
       VALID_MAILBOX_TODAY_BUCKETS.map(async (bucket) => ({
         bucket,
-        label: labels[bucket],
+        label: MAILBOX_TODAY_BUCKET_LABELS[bucket],
         count: await this.countThreadsByTodayBucket(bucket),
         threads: await this.listThreads({
           todayBucket: bucket,

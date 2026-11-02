@@ -96,6 +96,10 @@ import {
 } from "../host/services/browser-app-control";
 import type { WebApplication } from "../host/web/WebApplication";
 import { NotificationService } from "../electron/notifications/service";
+import {
+  attachWallClockSleepRecovery,
+  startAgentDaemonWatchdog,
+} from "../electron/agent/watchdog/watchdog-runtime";
 
 interface StartedControlPlane {
   server: ControlPlaneServer;
@@ -466,6 +470,30 @@ async function main(): Promise<void> {
     db: dbManager.getDatabase(),
     log: (...args) => console.warn(...args),
   });
+
+  // Watchdog control loop (off until enabled; COWORK_WATCHDOG=1 turns it on here). There is no
+  // powerMonitor in Node, so a wall-clock jump between timer ticks triggers sleep recovery.
+  let stopWatchdog: (() => void) | null = null;
+  try {
+    const watchdog = startAgentDaemonWatchdog(agentDaemon, {
+      notify: async (notification) => {
+        await botInboxNotifications.add({
+          type: "warning",
+          title: notification.title,
+          message: notification.message,
+          taskId: notification.taskId,
+          ...(notification.workspaceId ? { workspaceId: notification.workspaceId } : {}),
+        });
+      },
+    });
+    const detachSleepRecovery = attachWallClockSleepRecovery(watchdog.service);
+    stopWatchdog = () => {
+      detachSleepRecovery();
+      watchdog.stop();
+    };
+  } catch (error) {
+    console.error("[Daemon] Failed to start the watchdog:", error);
+  }
 
   await maybeBootstrapWorkspace(agentDaemon);
 
@@ -924,6 +952,7 @@ async function main(): Promise<void> {
         // Stop automation ingress before fencing the agent; keep storage open for drains.
         { name: "bot automation", run: () => botAutomation?.stop() },
         { name: "automation ownership", run: () => automationRuntime.shutdown() },
+        { name: "watchdog", run: () => stopWatchdog?.() },
         // Fence and drain the agent before closing anything it may still use.
         { name: "agent daemon", run: () => agentDaemon.shutdown() },
         {

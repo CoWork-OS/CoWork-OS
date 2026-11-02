@@ -21,7 +21,12 @@ import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
-import type { ApprovalRequest, SpaceSandboxConfig, SandboxType } from "../shared/types";
+import type {
+  ApprovalRequest,
+  SpaceSandboxConfig,
+  SandboxType,
+  WatchdogSettings,
+} from "../shared/types";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   CuaSpaceConnectionResult,
@@ -4401,6 +4406,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveQueueSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, settings),
   clearQueue: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_CLEAR),
+  getWatchdogSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WATCHDOG_GET_SETTINGS),
+  saveWatchdogSettings: (settings: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS, settings),
   onQueueUpdate: (callback: (status: Any) => void) => {
     const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.QUEUE_UPDATE, subscription);
@@ -8675,6 +8683,10 @@ export interface ElectronAPI {
     taskTimeoutMinutes?: number;
   }) => Promise<{ success: boolean }>;
   clearQueue: () => Promise<{ success: boolean; clearedRunning: number; clearedQueued: number }>;
+  getWatchdogSettings: () => Promise<WatchdogSettings>;
+  saveWatchdogSettings: (
+    settings: Partial<WatchdogSettings>,
+  ) => Promise<{ success: boolean; settings: WatchdogSettings }>;
   onQueueUpdate: (
     callback: (status: {
       runningCount: number;

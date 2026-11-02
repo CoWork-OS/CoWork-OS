@@ -343,6 +343,12 @@ export class WorkSessionActivityLeaseRepository {
     return Number(result.changes || 0);
   }
 
+  /** The lease of one operation in any state (active, released or expired), without its token. */
+  getByOperationKey(sessionId: string, key: string): WorkSessionActivityLease | undefined {
+    const row = this.findRow(requiredId(sessionId, "sessionId"), operationKey(key));
+    return row ? this.map(row) : undefined;
+  }
+
   listActive(sessionId?: string): WorkSessionActivityLease[] {
     this.expireStale();
     if (sessionId) {

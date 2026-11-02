@@ -646,6 +646,9 @@ export type EventType =
   | "context_compaction_completed"
   | "context_compaction_failed"
   | "no_progress_circuit_breaker"
+  // A decision of the watchdog control loop (src/electron/agent/watchdog): a recovery, a
+  // steering nudge, a pause, or a progress verdict that needed no action.
+  | "watchdog"
   | "step_contract_escalated"
   | "task_interrupted"
   | "task_status"
@@ -1688,6 +1691,7 @@ export type ToolType =
   | "request_user_input"
   | "task_history"
   | "task_events"
+  | "watchdog_status"
   | "task_get";
 
 export type ApprovalType =
@@ -2176,6 +2180,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   request_user_input: "read",
   task_history: "read",
   task_events: "read",
+  watchdog_status: "read",
   task_get: "read",
 };
 
@@ -3586,8 +3591,11 @@ export type FollowUpTextProvenance = "user_typed";
  */
 export type TaskPromptProvenance = "user_typed";
 
-/** Work that finished outside the turn and reports back to the session as a follow-up event. */
-export type RuntimeNotificationKind = "background_process" | "agent_output";
+/**
+ * A runtime notice that reaches the session as a follow-up event: work that finished outside
+ * the turn (a background job or a spawned child agent), or a watchdog steering nudge.
+ */
+export type RuntimeNotificationKind = "background_process" | "agent_output" | "watchdog";
 
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
@@ -3618,6 +3626,7 @@ export interface TaskFollowUpInput {
    * Internal runtime notice; retains the current conversation instead of starting a bot handoff.
    * "background_process": a tracked run_command job finished. "agent_output": a child agent
    * started with spawn_agent finished; its report is agent output, not user input.
+   * "watchdog": a steering nudge from the watchdog control loop.
    */
   notificationKind?: RuntimeNotificationKind;
   /** Stable ID used to correlate an agent message with its delivery event. */
@@ -9144,6 +9153,10 @@ export const IPC_CHANNELS = {
   QUEUE_CLEAR: "queue:clear",
   QUEUE_UPDATE: "queue:update",
 
+  // Watchdog control loop
+  WATCHDOG_GET_SETTINGS: "watchdog:getSettings",
+  WATCHDOG_SAVE_SETTINGS: "watchdog:saveSettings",
+
   // MCP (Model Context Protocol)
   MCP_GET_SETTINGS: "mcp:getSettings",
   MCP_SAVE_SETTINGS: "mcp:saveSettings",
@@ -11535,6 +11548,78 @@ export const DEFAULT_QUEUE_SETTINGS: QueueSettings = {
   maxConcurrentTasks: 8,
   taskTimeoutMinutes: MAX_QUEUE_TASK_TIMEOUT_MINUTES,
 };
+
+// Watchdog control loop (src/electron/agent/watchdog): an independent schedule outside the
+// agent loop that recovers infrastructure failures and nudges tasks that drift.
+export interface WatchdogSettings {
+  /** Off until the user turns it on. */
+  enabled: boolean;
+  /** How often the watchdog runs, in minutes. */
+  intervalMinutes: number;
+  /** A running task with no event and no live activity lease for this long is stalled. */
+  stallMinutes: number;
+  /** A task must have run this long before the model judges its progress. */
+  progressCheckAfterMinutes: number;
+  /** Let the watchdog cancel a task that keeps drifting after it was paused once. */
+  allowCancel: boolean;
+}
+
+export const WATCHDOG_SETTINGS_LIMITS = {
+  intervalMinutes: { min: 1, max: 60 },
+  stallMinutes: { min: 5, max: 24 * 60 },
+  progressCheckAfterMinutes: { min: 5, max: 24 * 60 },
+} as const;
+
+export const DEFAULT_WATCHDOG_SETTINGS: WatchdogSettings = {
+  enabled: false,
+  intervalMinutes: 5,
+  stallMinutes: 20,
+  progressCheckAfterMinutes: 15,
+  allowCancel: false,
+};
+
+/** Which watchdog pass made a decision. */
+export type WatchdogPass = "infrastructure" | "progress" | "sleep_recovery";
+
+/** What the watchdog did about a task. "none" records a check that needed no action. */
+export type WatchdogAction =
+  | "none"
+  | "steer"
+  | "pause"
+  | "cancel"
+  | "resume"
+  | "requeue"
+  | "retry"
+  | "reclaim_leases";
+
+export type WatchdogVerdict = "progressing" | "drifting" | "unknown";
+
+/** One watchdog decision, as stored in the task event log (event type "watchdog"). */
+export interface WatchdogDecision {
+  taskId: string;
+  pass: WatchdogPass;
+  action: WatchdogAction;
+  /** Why, in a sentence a person can read. */
+  reason: string;
+  at: number;
+  verdict?: WatchdogVerdict;
+  /** What the task appeared to loop on, when the progress judge said "drifting". */
+  loopingOn?: string;
+  /** Who judged progress: "model:<provider>/<model>" or "heuristic". */
+  judge?: string;
+  /** Consecutive "drifting" verdicts, including this one. */
+  driftStrikes?: number;
+  /** Recovery attempt number for retries and resumes. */
+  attempt?: number;
+  /** Deterministic progress signals from the progress score engine. */
+  signals?: {
+    progressScore: number;
+    loopRiskIndex: number;
+    repeatedFingerprintCount: number;
+  };
+  /** Time the host spent suspended, for sleep recovery decisions. */
+  suspendedMs?: number;
+}
 
 // Toast notification types for UI
 export interface ToastNotification {

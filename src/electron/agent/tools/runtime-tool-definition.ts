@@ -179,6 +179,8 @@ const DEFERRED_BY_DEFAULT_TOOLS = new Set([
   "compile_latex",
   "link_project_workspace",
   "task_events",
+  // Found by tool_search, or exposed when the watchdog's steering note names it.
+  "watchdog_status",
 ]);
 
 const ALWAYS_EXPOSE_TOOLS = new Set([

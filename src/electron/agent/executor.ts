@@ -8,6 +8,7 @@ import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer"
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
 import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
 import { BotDesktopTools } from "./tools/bot-desktop-tools";
+import { isUserActionRequiredFailure } from "./user-action-failure";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
@@ -22969,50 +22970,6 @@ You are continuing a previous conversation. The context from the previous conver
     );
   }
 
-  private isUserActionRequiredFailure(reason: string): boolean {
-    const lower = String(reason || "").toLowerCase();
-    if (!lower) return false;
-
-    const rateLimitedExternalDependency =
-      lower.includes("429") ||
-      lower.includes("too many requests") ||
-      lower.includes("rate limit") ||
-      lower.includes("faucet has run dry") ||
-      lower.includes("airdrop limit");
-
-    const integrationActionSignal =
-      /\b(connect|reconnect|link|re-link|authorize|re-authorize|enable|configure|set up)\b.*\b(integration|account|provider|channel|wallet|api)\b/.test(
-        lower,
-      ) ||
-      /\b(integration|account|provider|channel|wallet|api)\b.*\b(disconnected|not connected|not configured|missing|required|expired|invalid)\b/.test(
-        lower,
-      );
-    const missingUserSpecificDatesOrYears =
-      ((/\b(user'?s|your|my)\b/.test(lower) &&
-        /\b(actual|exact|specific)\b/.test(lower) &&
-        /\b(date|dates|year|years|tax year|tax years|start date|end date|timeline)\b/.test(
-          lower,
-        )) ||
-        (/\b(include|provide|confirm|state)\b/.test(lower) &&
-          /\b(actual|exact|specific)\b/.test(lower) &&
-          /\b(date|dates|year|years|tax year|tax years|start date|end date)\b/.test(lower))) &&
-      /\b(cannot continue|can't continue|blocked|required|needs to change|what needs to change|missing)\b/.test(
-        lower,
-      );
-
-    return (
-      /action required/.test(lower) ||
-      /approve|approval|user denied|denied approval/.test(lower) ||
-      integrationActionSignal ||
-      missingUserSpecificDatesOrYears ||
-      /auth|authorization|unauthorized|credential|login/.test(lower) ||
-      /permission/.test(lower) ||
-      /api key|token required/.test(lower) ||
-      rateLimitedExternalDependency ||
-      /provide.*(path|value|input)/.test(lower)
-    );
-  }
-
   /**
    * Approval denials are terminal for the current follow-up attempt. Feeding the
    * denial back to the model as an ordinary tool error lets it immediately retry
@@ -23076,7 +23033,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     // Reuse the broader blocker detection first (auth/approval/permissions/etc.).
-    if (this.isUserActionRequiredFailure(text)) {
+    if (isUserActionRequiredFailure(text)) {
       return true;
     }
 
@@ -23116,7 +23073,7 @@ You are continuing a previous conversation. The context from the previous conver
       return "user_blocker";
     }
 
-    if (this.isUserActionRequiredFailure(reason)) {
+    if (isUserActionRequiredFailure(reason)) {
       return "user_blocker";
     }
 
@@ -39861,7 +39818,7 @@ Return ONLY a JSON object:
       const shouldPauseForFailureDerivedUserInput =
         stepFailed &&
         !awaitingUserInput &&
-        this.isUserActionRequiredFailure(lastFailureReason || "") &&
+        isUserActionRequiredFailure(lastFailureReason || "") &&
         (this.shouldPauseForQuestions || this.shouldPauseForRequiredDecision);
       if (shouldPauseForFailureDerivedUserInput) {
         awaitingUserInput = true;

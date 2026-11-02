@@ -1149,6 +1149,17 @@ describeWithSqlite("MailboxService", () => {
     extractAttachmentTextSpy.mockRestore();
   });
 
+  it("uses a date-neutral label for the broad plans bucket in the Today digest", async () => {
+    db.prepare("UPDATE mailbox_threads SET today_bucket = ? WHERE id = ?").run(
+      "happening_today",
+      "gmail-thread:alpha",
+    );
+    const digest = await service.getMailboxTodayDigest();
+    const bucket = digest.buckets.find((entry) => entry.bucket === "happening_today");
+    expect(bucket?.label).toBe("Dates & plans");
+    expect(bucket?.threads.map((thread) => thread.id)).toContain("gmail-thread:alpha");
+  });
+
   it("builds sender cleanup and mailbox ask results from local evidence", async () => {
     db.prepare(
       `INSERT INTO mailbox_threads

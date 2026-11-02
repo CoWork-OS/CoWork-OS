@@ -1,6 +1,7 @@
 import { isAssistantApprovalInputRequest } from "../agent/assistant-approval";
 import { deleteAnswerSurfaceStateForTask } from "../answer-surfaces/answer-surface-state-sql";
 import { deleteAnswerToolDataForTask } from "../answer-surfaces/tool-data-sql";
+import { deleteTaskProposalsForTask } from "../task-proposals/task-proposal-sql";
 import {
   assertApprovalDraftsCurrent,
   captureApprovalDrafts,
@@ -34,6 +35,7 @@ import {
   setAnnotationBaseRevision,
 } from "./annotation-results-sql";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
+import { type LibraryArtifact, listRecentArtifacts } from "./artifact-library-sql";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
 import { LIKE_ESCAPE_CLAUSE, likeContainsPattern, likeTermHitsSql } from "./fts-query";
@@ -1838,6 +1840,8 @@ export class TaskStore {
       deleteAnswerSurfaceStateForTask(this.db, taskId);
       // Tool results kept as data for this task's answers.
       deleteAnswerToolDataForTask(this.db, taskId);
+      // Tasks this task's agent proposed (suggested tasks).
+      deleteTaskProposalsForTask(this.db, taskId);
 
       // Delete hook_sessions (task_id NOT NULL)
       const deleteHookSessions = this.db.prepare("DELETE FROM hook_sessions WHERE task_id = ?");
@@ -4192,6 +4196,11 @@ export class ArtifactStore {
   findByTaskIdPage(taskId: string, limit: number, offset: number): Artifact[] {
     const rows = readArtifactRowsByTaskIdPage(this.db, taskId, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToArtifact(row));
+  }
+
+  /** See artifact-library-sql.ts. */
+  findRecent(limit: number): LibraryArtifact[] {
+    return listRecentArtifacts(this.db, limit);
   }
 
   findById(id: string): Artifact | undefined {

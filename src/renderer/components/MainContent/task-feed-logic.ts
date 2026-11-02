@@ -77,6 +77,15 @@ export type TaskFeedRow =
       visiblePerfEventId: null;
     }
   | {
+      /** The "N suggested tasks" card at the end of a finished turn (propose_task). */
+      kind: "suggested-tasks";
+      key: string;
+      estimatedHeight: number;
+      proposalIds: string[];
+      revision: string;
+      visiblePerfEventId: null;
+    }
+  | {
       kind: "timeline";
       key: string;
       estimatedHeight: number;
@@ -497,7 +506,11 @@ export function selectVisibleTaskFeedRows(
 
     for (const [rowIndex, row] of feedRows.entries()) {
       if (row.kind === "history-control" || row.kind === "turn-header") continue;
-      if (row.kind === "image-stack" || row.kind === "turn-outputs") {
+      if (
+        row.kind === "image-stack" ||
+        row.kind === "turn-outputs" ||
+        row.kind === "suggested-tasks"
+      ) {
         pushCandidate(rowIndex, row);
         continue;
       }
@@ -592,6 +605,7 @@ export function selectVisibleTaskFeedRows(
     if (
       row.kind === "turn-header" ||
       row.kind === "turn-outputs" ||
+      row.kind === "suggested-tasks" ||
       isConversationMessageRow(row) ||
       (row.kind === "timeline" &&
         (row.item.kind === "action_block" || row.item.kind === "agent-lifecycle"))

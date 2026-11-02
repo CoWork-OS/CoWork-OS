@@ -72,6 +72,10 @@ The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/l
 
 ## Features
 
+### Suggested tasks
+
+When the agent notices work outside your request, it proposes it as a suggested task under its answer and does not do it unasked. Click **Start** to run it as its own task (**Options** sets folder, worktree, model, effort and permissions), **Do it here** to have the same conversation do it, or **Start all**. Nothing runs until you choose. [Suggested Tasks](suggested-tasks.md)
+
 ### Composer predictions
 
 The empty composer can suggest your next message after a response. Press **Tab** to accept, then edit and send. Enable or disable predictions under **Settings → Appearance → Composer**; a first-use sidebar tooltip links to the setting. Prediction generation uses your selected LLM provider and consumes tokens, including suggestions you dismiss. [Composer Predictions](composer-predictions.md)
@@ -227,7 +231,7 @@ Unified AI gateway across 17 channels with security modes, rate limiting, ambien
 
 Local-first inbox workspace that turns email into an action queue while preserving normal email-client controls. It keeps cached mail visible on restart, syncs in the background, supports manual reply/reply-all/forward, and surfaces the right next step for each thread: triage, draft, cleanup, commitment tracking, and scheduling. [Learn more](inbox-agent.md)
 
-- **Classic + Today modes**: use the familiar three-pane inbox or the Today lanes for Needs action, Happening today, Good to know, and More to browse
+- **Classic + Today modes**: use the familiar three-pane inbox or the Today lanes for Needs action, Dates & plans, Good to know, and More to browse
 - **Action cards**: Unread, Needs reply, Suggested Actions, Open Commitments
 - **Mailbox views**: Inbox, Sent, All, plus Recent/Priority sorting, saved views, account filters, and practical domain filters
 - **Normal email actions**: manual Reply, Reply all, Forward, To/Cc/Bcc, editable subject/body, and provider-backed send

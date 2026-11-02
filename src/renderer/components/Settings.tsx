@@ -102,6 +102,7 @@ import {
   MODEL_ACCESS_GROUP_ORDER,
 } from "../../shared/model-access";
 import { getLlmModelReasoningEfforts } from "../../shared/llm-model-selection";
+import { secretFieldInputType } from "../../shared/secret-references";
 import { getLLMProviderIcon } from "./llm-provider-icons";
 import { providerBaseUrlProblem } from "../utils/provider-base-url";
 import {
@@ -1070,6 +1071,7 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "image generation",
         "text to image",
         "text-to-image",
+        "openai",
         "gpt-image",
         "gpt image",
         "nano-banana",
@@ -1221,6 +1223,27 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
       target: { tab: "access", accessSubTab: "webaccess" },
     },
   ],
+  browser: [
+    {
+      terms: [
+        "browser",
+        "search engine",
+        "restore tabs",
+        "user agent",
+        "browser downloads",
+        "browser uploads",
+        "browser engine",
+        "browser profile",
+        "browsing history",
+        "site permissions",
+        "cookies",
+        "saved logins",
+        "import passwords",
+        "browsing data",
+        "cache and storage",
+      ],
+    },
+  ],
   extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
   insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
   pulse: [
@@ -1250,6 +1273,18 @@ const matchesSettingsSidebarSearchQuery = (haystack: string, query: string): boo
   return tokens.every((token) => haystack.includes(token));
 };
 
+export const findSettingsSidebarSearchEntry = (
+  entries: SidebarSearchEntry[],
+  query: string,
+  contextTerms: string[] = [],
+): SidebarSearchEntry | undefined =>
+  entries.find((entry) =>
+    matchesSettingsSidebarSearchQuery(
+      [...contextTerms, ...entry.terms].join(" ").toLowerCase(),
+      query,
+    ),
+  );
+
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
   isMacPlatform: boolean;
@@ -1276,19 +1311,14 @@ const SettingsSidebar = memo(function SettingsSidebar({
           },
           ...(sidebarSearchEntries[item.tab] ?? []),
         ];
-        const searchBlob = entries
-          .flatMap((entry) => entry.terms)
-          .join(" ")
-          .toLowerCase();
-        const matchedEntry = entries.find((entry) =>
-          entry.terms.some((term) =>
-            matchesSettingsSidebarSearchQuery(term.toLowerCase(), deferredSidebarSearch),
-          ),
-        );
+        const matchedEntry = findSettingsSidebarSearchEntry(entries, deferredSidebarSearch, [
+          getSidebarItemLabel(item),
+          item.group,
+        ]);
         return {
           item,
           matchedTarget: matchedEntry?.target,
-          matches: matchesSettingsSidebarSearchQuery(searchBlob, deferredSidebarSearch),
+          matches: Boolean(matchedEntry),
         };
       })
       .filter((entry) => entry.matches);
@@ -4894,7 +4924,7 @@ export function Settings({
             <label htmlFor="jev-typesafe-api-key">TypeSafe API key</label>
             <input
               id="jev-typesafe-api-key"
-              type="password"
+              type={secretFieldInputType(jevTypesafeApiKey)}
               className="settings-input"
               placeholder={
                 jevTypesafeKeyConfigured
@@ -5315,7 +5345,7 @@ export function Settings({
             <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(imageOpenAIApiKey)}
               placeholder="Leave blank to use the OpenAI API key"
               value={imageOpenAIApiKey}
               onChange={(e) => setImageOpenAIApiKey(e.target.value)}
@@ -5351,7 +5381,7 @@ export function Settings({
             <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(imageAzureApiKey)}
               placeholder="Leave blank to use the Azure chat API key"
               value={imageAzureApiKey}
               onChange={(e) => setImageAzureApiKey(e.target.value)}
@@ -5403,7 +5433,7 @@ export function Settings({
             <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(imageGeminiApiKey)}
               placeholder="Leave blank to use the Gemini API key"
               value={imageGeminiApiKey}
               onChange={(e) => setImageGeminiApiKey(e.target.value)}
@@ -5433,7 +5463,7 @@ export function Settings({
             <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(imageOpenRouterApiKey)}
               placeholder="Leave blank to use the OpenRouter API key"
               value={imageOpenRouterApiKey}
               onChange={(e) => setImageOpenRouterApiKey(e.target.value)}
@@ -5601,7 +5631,7 @@ export function Settings({
             <label className="settings-label">API Key</label>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(videoOpenAICompatApiKey)}
               placeholder="Enter the service's API key"
               value={videoOpenAICompatApiKey}
               onChange={(e) => setVideoOpenAICompatApiKey(e.target.value)}
@@ -5756,7 +5786,7 @@ export function Settings({
             </p>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(videoVertexAccessToken)}
               placeholder="ya29...."
               value={videoVertexAccessToken}
               onChange={(e) => setVideoVertexAccessToken(e.target.value)}
@@ -5794,7 +5824,7 @@ export function Settings({
             <label className="settings-label">API Key</label>
             <input
               className="settings-input"
-              type="password"
+              type={secretFieldInputType(videoKlingApiKey)}
               placeholder="Enter Kling API key"
               value={videoKlingApiKey}
               onChange={(e) => setVideoKlingApiKey(e.target.value)}
@@ -6151,7 +6181,7 @@ export function Settings({
                   </a>
                 </p>
                 <input
-                  type="password"
+                  type={secretFieldInputType(anthropicApiKey)}
                   className="settings-input"
                   placeholder="sk-ant-..."
                   value={anthropicApiKey}
@@ -6174,7 +6204,7 @@ export function Settings({
                   eligibility, limits, and billing terms before using this route.
                 </p>
                 <input
-                  type="password"
+                  type={secretFieldInputType(anthropicSubscriptionToken)}
                   className="settings-input"
                   placeholder="sk-ant-oat..."
                   value={anthropicSubscriptionToken}
@@ -6234,7 +6264,7 @@ export function Settings({
               </p>
               <div className="settings-input-group">
                 <input
-                  type="password"
+                  type={secretFieldInputType(geminiApiKey)}
                   className="settings-input"
                   placeholder="AIza..."
                   value={geminiApiKey}
@@ -6330,7 +6360,7 @@ export function Settings({
               </p>
               <div className="settings-input-group">
                 <input
-                  type="password"
+                  type={secretFieldInputType(openrouterApiKey)}
                   className="settings-input"
                   placeholder="sk-or-..."
                   value={openrouterApiKey}
@@ -6713,7 +6743,7 @@ export function Settings({
                 </p>
                 <div className="settings-input-group">
                   <input
-                    type="password"
+                    type={secretFieldInputType(openaiApiKey)}
                     className="settings-input"
                     placeholder="sk-..."
                     value={openaiApiKey}
@@ -6890,7 +6920,7 @@ export function Settings({
                     Enter the API key for your Azure OpenAI resource.
                   </p>
                   <input
-                    type="password"
+                    type={secretFieldInputType(azureApiKey)}
                     className="settings-input"
                     placeholder="Azure API key"
                     value={azureApiKey}
@@ -6991,7 +7021,7 @@ export function Settings({
                     Enter the API key for your Azure OpenAI resource (same key as Azure OpenAI).
                   </p>
                   <input
-                    type="password"
+                    type={secretFieldInputType(azureAnthropicApiKey)}
                     className="settings-input"
                     placeholder="Azure API key"
                     value={azureAnthropicApiKey}
@@ -7058,7 +7088,7 @@ export function Settings({
               </p>
               <div className="settings-input-group">
                 <input
-                  type="password"
+                  type={secretFieldInputType(groqApiKey)}
                   className="settings-input"
                   placeholder="gsk_..."
                   value={groqApiKey}
@@ -7203,7 +7233,7 @@ export function Settings({
                 </p>
                 <div className="settings-input-group">
                   <input
-                    type="password"
+                    type={secretFieldInputType(xaiApiKey)}
                     className="settings-input"
                     placeholder="xai-..."
                     value={xaiApiKey}
@@ -7279,7 +7309,7 @@ export function Settings({
               </p>
               <div className="settings-input-group">
                 <input
-                  type="password"
+                  type={secretFieldInputType(deepseekApiKey)}
                   className="settings-input"
                   placeholder="sk-..."
                   value={deepseekApiKey}
@@ -7350,7 +7380,7 @@ export function Settings({
               </p>
               <div className="settings-input-group">
                 <input
-                  type="password"
+                  type={secretFieldInputType(kimiApiKey)}
                   className="settings-input"
                   placeholder="sk-..."
                   value={kimiApiKey}
@@ -7463,7 +7493,7 @@ export function Settings({
               </p>
               <div className="settings-input-group">
                 <input
-                  type="password"
+                  type={secretFieldInputType(piApiKey)}
                   className="settings-input"
                   placeholder="Enter API key..."
                   value={piApiKey}
@@ -7539,7 +7569,7 @@ export function Settings({
                 authentication.
               </p>
               <input
-                type="password"
+                type={secretFieldInputType(openaiCompatApiKey)}
                 className="settings-input"
                 placeholder="sk-..."
                 value={openaiCompatApiKey}
@@ -7862,7 +7892,7 @@ export function Settings({
                 <p className="settings-description">{selectedCustomProvider.description}</p>
               ) : null}
               <input
-                type="password"
+                type={secretFieldInputType(selectedCustomConfig.apiKey || "")}
                 className="settings-input"
                 placeholder={selectedCustomProvider.apiKeyPlaceholder || "sk-..."}
                 value={selectedCustomConfig.apiKey || ""}
@@ -8729,7 +8759,7 @@ export function Settings({
                     onChange={(e) => setAwsAccessKeyId(e.target.value)}
                   />
                   <input
-                    type="password"
+                    type={secretFieldInputType(awsSecretAccessKey)}
                     className="settings-input"
                     placeholder="AWS Secret Access Key"
                     value={awsSecretAccessKey}
@@ -8842,7 +8872,7 @@ export function Settings({
                 Only needed if connecting to a remote Ollama server that requires authentication.
               </p>
               <input
-                type="password"
+                type={secretFieldInputType(ollamaApiKey)}
                 className="settings-input"
                 placeholder="Optional API key for remote servers"
                 value={ollamaApiKey}

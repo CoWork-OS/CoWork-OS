@@ -125,6 +125,24 @@ describe("buildActionBlockSummary", () => {
     );
   });
 
+  it("says a page fetch fetched a page instead of searching the web", () => {
+    expect(buildActionBlockSummary([toolEvent("fetch", "web_fetch", 900)]).activityPhrase).toBe(
+      "Fetched a page",
+    );
+    // http_request is API traffic (a webhook POST is not a page read).
+    expect(buildActionBlockSummary([toolEvent("post", "http_request", 900)]).activityPhrase).toBe(
+      "Made a web request",
+    );
+    expect(
+      buildActionBlockSummary([
+        toolEvent("search", "web_search", 900),
+        toolEvent("fetch-1", "web_fetch", 1000),
+        toolEvent("fetch-2", "web_fetch", 1100),
+        toolEvent("post", "http_request", 1200),
+      ]).activityPhrase,
+    ).toBe("Searched the web, fetched pages, made a web request");
+  });
+
   it("counts a finished step's tool calls that precede its step markers", () => {
     // Summary-mode blocks can hold only the plan-step markers, which are logged after the
     // step's tool calls; the hidden internal step report must not cut those calls off.

@@ -48,5 +48,12 @@ npm start
 - `jira.search_issues`
 - `jira.create_issue`
 - `jira.update_issue`
+- `jira.describe_objects`
+
+## Object manifest
+
+`jira.describe_objects` returns issues and projects with their fields, status categories and relations, and which tools read or write them.
+Issues link to `<JIRA_BASE_URL>/browse/<key>` when `JIRA_BASE_URL` is an https site URL (not the `api.atlassian.com` OAuth gateway).
+CoWork calls it itself and hides it from the model; it makes no API call.
 
 See `docs/enterprise-connectors.md` for the contract.

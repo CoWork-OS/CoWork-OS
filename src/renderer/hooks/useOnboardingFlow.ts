@@ -7,6 +7,8 @@ import {
   deriveOnboardingPersonalityPreset,
   deriveOnboardingPersona,
   deriveResponseStylePreferences,
+  LM_STUDIO_BASE_URL,
+  pickLmStudioChatModel,
   type OnboardingAssistantTraitId,
   type OnboardingPriorityId,
   type OnboardingResponseStyleId,
@@ -119,6 +121,7 @@ const SCRIPT = {
       openai: "OpenAI. Classic and reliable.",
       gemini: "Gemini. Let's see what we can do together.",
       ollama: "Local with Ollama. I like the privacy.",
+      "openai-compatible": "Local with LM Studio. I like the privacy.",
       openrouter: "OpenRouter. Lots of options to explore.",
       bedrock: "AWS Bedrock. Enterprise-ready.",
       groq: "Groq. Speedy and efficient.",
@@ -173,6 +176,7 @@ interface OnboardingData {
   apiKey: string;
   ollamaUrl: string;
   detectedOllamaModel: string | null;
+  detectedLmStudioModel: string | null;
 }
 
 type RecapEditTarget =
@@ -215,6 +219,7 @@ const INITIAL_ONBOARDING_DATA: OnboardingData = {
   apiKey: "",
   ollamaUrl: "http://localhost:11434",
   detectedOllamaModel: null,
+  detectedLmStudioModel: null,
 };
 
 const ONBOARDING_RESUME_KEY = "cowork:onboarding:flow:v1";
@@ -703,6 +708,18 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
               .getOllamaModels()
               .then((m) => settle(m))
               .catch(() => settle(null));
+
+            // LM Studio is probed on its own, so a slow port 1234 never holds up Ollama. A probe
+            // must not replace the cached model list of a configured OpenAI-compatible endpoint.
+            window.electronAPI
+              .getOpenAICompatibleModels(LM_STUDIO_BASE_URL, undefined, { cacheModels: false })
+              .then(pickLmStudioChatModel)
+              .then((lmStudioModel) => {
+                if (lmStudioModel && isActiveAsyncMutation(mutationToken)) {
+                  setData((d) => ({ ...d, detectedLmStudioModel: lmStudioModel }));
+                }
+              })
+              .catch(() => undefined);
 
             // 3-second timeout fallback
             setTimeout(() => settle(null), 3000);
@@ -1723,6 +1740,49 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     stageLlmSettings,
   ]);
 
+  // Use the LM Studio chat model found by the provider-step probe
+  const acceptLmStudioDetection = useCallback(async () => {
+    if (!data.detectedLmStudioModel) return;
+    clearPendingTransition();
+    const mutationToken = beginAsyncMutation();
+    setShowProviders(false);
+    const modelName = data.detectedLmStudioModel;
+    setData((d) => ({ ...d, selectedProvider: "openai-compatible" }));
+    setCurrentText(SCRIPT.llm_selected("openai-compatible"));
+
+    timeoutRef.current = setTimeout(async () => {
+      if (!isActiveAsyncMutation(mutationToken)) {
+        return;
+      }
+      const existingSettings = await loadExistingLlmSettings();
+      if (!isActiveAsyncMutation(mutationToken)) {
+        return;
+      }
+      const settings = buildSaveSettings("openai-compatible", "", {
+        ...existingSettings,
+        providerType: "openai-compatible",
+        modelKey: modelName,
+      });
+      const existingCompatible = existingSettings?.openaiCompatible;
+      settings.openaiCompatible =
+        existingCompatible?.baseUrl === LM_STUDIO_BASE_URL
+          ? { ...existingCompatible, model: modelName }
+          : // Another endpoint's key must not follow to LM Studio; "" clears the saved one.
+            { baseUrl: LM_STUDIO_BASE_URL, model: modelName, apiKey: "" };
+      stageLlmSettings(settings);
+      setState("llm_confirmed");
+      setCurrentText(SCRIPT.llm_success);
+    }, 1500);
+  }, [
+    beginAsyncMutation,
+    buildSaveSettings,
+    clearPendingTransition,
+    data.detectedLmStudioModel,
+    isActiveAsyncMutation,
+    loadExistingLlmSettings,
+    stageLlmSettings,
+  ]);
+
   // Skip LLM setup means explore-only unless a previously configured provider exists.
   const skipLLMSetup = useCallback(async () => {
     clearPendingTransition();
@@ -2037,6 +2097,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     signInWithAccount,
     skipLLMSetup,
     acceptOllamaDetection,
+    acceptLmStudioDetection,
 
     // Update functions
     setApiKey: (key: string) => setData((d) => ({ ...d, apiKey: key })),

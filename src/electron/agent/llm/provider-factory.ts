@@ -4916,11 +4916,13 @@ export class LLMProviderFactory {
   }
 
   /**
-   * Fetch available models from an OpenAI-compatible endpoint
+   * Fetch available models from an OpenAI-compatible endpoint. `cacheModels: false` is for a
+   * probe of another endpoint, which must not replace the configured endpoint's cached list.
    */
   static async getOpenAICompatibleModels(
     baseUrl: string,
     apiKey?: string,
+    options: { cacheModels?: boolean } = {},
   ): Promise<CachedModelInfo[]> {
     const provider = new OpenAICompatibleProvider({
       type: "openai-compatible",
@@ -4937,7 +4939,7 @@ export class LLMProviderFactory {
       description: "OpenAI-compatible model",
     }));
 
-    this.saveCachedModels("openai-compatible", cachedModels);
+    if (options.cacheModels !== false) this.saveCachedModels("openai-compatible", cachedModels);
     return cachedModels;
   }
 

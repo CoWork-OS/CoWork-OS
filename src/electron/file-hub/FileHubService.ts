@@ -157,17 +157,17 @@ export class FileHubService {
     }
   }
 
-  private listArtifacts(options: FileHubListOptions): UnifiedFile[] {
-    const artifacts = this.deps.getArtifacts({ limit: options.limit || 50 });
-    return artifacts.map((a: Any) => ({
+  private async listArtifacts(options: FileHubListOptions): Promise<UnifiedFile[]> {
+    const artifacts = await this.deps.getArtifacts({ limit: options.limit || 50 });
+    return artifacts.map((a) => ({
       id: `artifact:${a.id}`,
       name: path.basename(a.path || "artifact"),
       path: a.path,
       source: "artifacts" as FileHubSource,
-      mimeType: a.mime_type || "application/octet-stream",
+      mimeType: a.mimeType || "application/octet-stream",
       size: a.size || 0,
-      modifiedAt: a.created_at || Date.now(),
-      metadata: { taskId: a.task_id },
+      modifiedAt: a.createdAt,
+      metadata: { taskId: a.taskId, workspacePath: a.workspacePath },
     }));
   }
 

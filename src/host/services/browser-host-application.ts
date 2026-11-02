@@ -556,6 +556,12 @@ async function readBrowserSessionBootstrap(
     onboardingCompleted: appearance.onboardingCompleted === true,
     disclaimerAccepted: appearance.disclaimerAccepted === true,
     activeWorkspaceId: activeWorkspace?.id ?? null,
+    appearance: {
+      themeMode: appearance.themeMode,
+      visualTheme: appearance.visualTheme,
+      accentColor: appearance.accentColor,
+      uiDensity: appearance.uiDensity,
+    },
     capabilities: browserHostCapabilities(taskCreationAvailable, true),
   };
 }

@@ -1,0 +1,287 @@
+/* Live view of computer use at the top of the right sidebar. Matches the session cards. */
+.computer-use-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 10px 2px;
+  padding: 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  isolation: isolate;
+  animation: computer-use-live-in 200ms var(--ease-out);
+}
+
+.computer-use-live-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.computer-use-live-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.computer-use-live-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.computer-use-live-icon-button,
+.computer-use-live-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease-out),
+    color 120ms var(--ease-out);
+}
+
+.computer-use-live-icon-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+
+.computer-use-live-text-button {
+  height: 22px;
+  padding: 0 7px;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.computer-use-live-icon-button:hover:not(:disabled),
+.computer-use-live-text-button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.computer-use-live-icon-button.is-primary {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.computer-use-live-icon-button:disabled,
+.computer-use-live-text-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.computer-use-live-screen:focus-visible,
+.computer-use-live-icon-button:focus-visible,
+.computer-use-live-text-button:focus-visible,
+.computer-use-live-trigger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Windows it used before peek out above the live one, like a stack of cards. */
+.computer-use-live-stage {
+  position: relative;
+  transition: margin-top 220ms var(--ease-out);
+}
+
+.computer-use-live.has-stack .computer-use-live-stage {
+  margin-top: 10px;
+}
+
+.computer-use-live-behind {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-hover);
+  transform-origin: top center;
+  pointer-events: none;
+}
+
+.computer-use-live-behind.is-1 {
+  transform: translateY(-8px) scale(0.92);
+}
+
+.computer-use-live-behind.is-2 {
+  z-index: -2;
+  opacity: 0.75;
+  transform: translateY(-15px) scale(0.84);
+}
+
+.computer-use-live-screen {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.computer-use-live-screen img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-hover);
+}
+
+.computer-use-live.is-held .computer-use-live-screen img {
+  filter: grayscale(0.8) brightness(0.8);
+}
+
+.computer-use-live-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.computer-use-live-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.computer-use-live-dot.is-live {
+  background: var(--color-success);
+  animation: computer-use-live-pulse 1.6s ease-in-out infinite;
+}
+
+.computer-use-live-dot.is-attention {
+  background: var(--color-warning);
+}
+
+.computer-use-live-dot.is-waiting {
+  background: var(--color-info);
+}
+
+/* Minimized: one row, like the other collapsed session cards. */
+.computer-use-live-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 20px);
+  margin: 8px 10px 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.computer-use-live-trigger:hover {
+  color: var(--color-text-primary);
+}
+
+.computer-use-live-trigger-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Larger: the live window over the app, closed with Esc or a click outside. */
+.computer-use-live-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-lightbox);
+  display: grid;
+  place-items: center;
+  padding: 48px;
+  background: rgba(8, 8, 10, 0.6);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  animation: computer-use-live-fade 160ms ease-out;
+}
+
+.computer-use-live-overlay:focus {
+  outline: none;
+}
+
+.computer-use-live-overlay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(1200px, 100%);
+  max-height: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 14px;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lg);
+  animation: computer-use-live-in 200ms var(--ease-out);
+}
+
+.computer-use-live-overlay-panel .computer-use-live-status {
+  font-size: 13px;
+}
+
+.computer-use-live-overlay-image {
+  display: block;
+  min-height: 0;
+  max-width: 100%;
+  max-height: calc(100vh - 160px);
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--color-bg-hover);
+}
+
+@keyframes computer-use-live-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+@keyframes computer-use-live-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes computer-use-live-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .computer-use-live,
+  .computer-use-live-overlay,
+  .computer-use-live-overlay-panel,
+  .computer-use-live-dot.is-live {
+    animation: none;
+  }
+
+  .computer-use-live-stage {
+    transition: none;
+  }
+}

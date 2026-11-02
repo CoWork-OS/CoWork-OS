@@ -23,7 +23,7 @@ export interface ActionBlockSummary {
   summary: string;
   /**
    * Count-free phrase for the compact (Verbose off) row, e.g. "Read files, ran commands,
-   * searched the web". Kinds always appear in the same order and only the first is capitalized.
+   * searched the web, fetched pages". Kinds always appear in the same order and only the first is capitalized.
    */
   activityPhrase: string;
   /** Semantic icon category for the collapsed header. */
@@ -388,14 +388,15 @@ export function buildActionBlockSummary(
     (summaryToolCounts.get("run_command") || 0) +
     (summaryToolCounts.get("run_skill") || 0) +
     (summaryToolCounts.get("execute_code") || 0);
-  const webLookups =
-    (summaryToolCounts.get("web_fetch") || 0) +
-    (summaryToolCounts.get("web_search") || 0) +
-    (summaryToolCounts.get("http_request") || 0) +
-    Array.from(summaryToolCounts.entries()).reduce(
-      (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
-      0,
-    );
+  const browserActions = Array.from(summaryToolCounts.entries()).reduce(
+    (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
+    0,
+  );
+  const webSearches = summaryToolCounts.get("web_search") || 0;
+  const pageFetches = summaryToolCounts.get("web_fetch") || 0;
+  // http_request is mostly API traffic (webhooks, REST writes), not reading pages.
+  const webRequests = summaryToolCounts.get("http_request") || 0;
+  const webLookups = webSearches + pageFetches + webRequests + browserActions;
   const summarizedToolNames = new Set([
     "read_file",
     "read_files",
@@ -490,17 +491,16 @@ export function buildActionBlockSummary(
       ([tool, count]) => count > 0 && !summarizedToolNames.has(tool) && !isBrowserToolName(tool),
     )
     .map(([tool]) => tool);
-  const browserActions = Array.from(summaryToolCounts.entries()).reduce(
-    (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
-    0,
-  );
-  const webRequests = webLookups - browserActions;
   const phraseParts: string[] = [];
   if (browserActions > 0) phraseParts.push("used the browser");
   if (writes > 0) phraseParts.push(writes === 1 ? "edited a file" : "edited files");
   if (readFiles > 0 || searches > 0) phraseParts.push("read files");
   if (commands > 0) phraseParts.push(commands === 1 ? "ran a command" : "ran commands");
-  if (webRequests > 0) phraseParts.push("searched the web");
+  if (webSearches > 0) phraseParts.push("searched the web");
+  if (pageFetches > 0) phraseParts.push(pageFetches === 1 ? "fetched a page" : "fetched pages");
+  if (webRequests > 0) {
+    phraseParts.push(webRequests === 1 ? "made a web request" : "made web requests");
+  }
   if (unclassifiedTools.length > 2) {
     phraseParts.push("called tools");
   } else {

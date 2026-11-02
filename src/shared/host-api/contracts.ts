@@ -81,6 +81,16 @@ export interface WebSessionBootstrap {
   onboardingCompleted: boolean;
   disclaimerAccepted: boolean;
   activeWorkspaceId: string | null;
+  /**
+   * The desktop's look, used by a browser until it saves its own. Plain strings: the browser
+   * validates each value before applying it.
+   */
+  appearance?: {
+    themeMode?: string;
+    visualTheme?: string;
+    accentColor?: string;
+    uiDensity?: string;
+  };
   /** Exact reviewed desktop operations mounted by this host. */
   desktopMethods?: Record<string, { mutation: boolean }>;
 }

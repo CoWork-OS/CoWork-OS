@@ -3,8 +3,9 @@ import { createRequire } from "node:module";
  * The live view of a task's computer for the bot's panel, and take-over by the person.
  *
  * - Frames come from captures the tools already make (each computer-use action takes a
- *   screenshot) and, while someone watches, from the in-app browser every few seconds.
- *   They are downscaled, kept in memory only (the latest per task) and sent to the app.
+ *   screenshot) and, while someone watches, from the window the task controls about every
+ *   second and the in-app browser every few seconds. They are downscaled, kept in memory only
+ *   (the latest per task) and sent to the app.
  * - While the person has taken over, the bot's computer and browser actions are refused, not
  *   queued, and nothing is captured.
  * - A bot can ask the person to take over for steps it must not do itself (passwords,
@@ -14,6 +15,7 @@ import { createRequire } from "node:module";
 import {
   COMPUTER_TAKEOVER_REASON_MAX_LENGTH,
   COMPUTER_VIEW_FRAME_MAX_WIDTH,
+  COMPUTER_VIEW_LIVE_POLL_MS,
   COMPUTER_VIEW_POLL_MS,
   type ComputerViewFrame,
   type ComputerViewState,
@@ -25,6 +27,15 @@ export interface EncodedFrame {
   width: number;
   height: number;
 }
+
+/** The window a task controls on this computer, captured live while someone watches. */
+export interface LiveWindow {
+  label?: string;
+  /** Captures the window in the background; returns PNG bytes or base64, or null. */
+  capture: () => Promise<Buffer | string | null>;
+}
+
+type FrameCapturer = (taskId: string) => Promise<{ png: Buffer | string; label?: string } | null>;
 
 export interface ComputerViewDeps {
   /** Scales a PNG down and encodes it as a JPEG data URL; null when it can't be decoded. */
@@ -75,7 +86,11 @@ export class ComputerViewService {
 
   private readonly states = new Map<string, ComputerViewState>();
   private readonly watchers = new Map<string, number>();
-  private readonly pollers = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly pollers = new Map<
+    string,
+    { timer: ReturnType<typeof setInterval>; ms: number }
+  >();
+  private readonly liveWindows = new Map<string, LiveWindow>();
   private readonly capturing = new Set<string>();
   private readonly environments = new Map<string, string>();
   private readonly environmentHolds = new Map<string, string>();
@@ -193,6 +208,14 @@ export class ComputerViewService {
       ...(label ? { label: label.slice(0, 200) } : {}),
     };
     this.update(taskId, { status: "working", surface, frame, waitingSince: undefined });
+    this.syncPoller(taskId);
+  }
+
+  /** The task now controls this window: keep it live while someone watches. */
+  setLiveWindow(taskId: string, window: LiveWindow | null): void {
+    if (window) this.liveWindows.set(taskId, window);
+    else this.liveWindows.delete(taskId);
+    this.syncPoller(taskId);
   }
 
   /** The task started using a computer (or a surface), even before any frame. */
@@ -211,6 +234,7 @@ export class ComputerViewService {
 
   /** The task stopped using this computer (its session ended). */
   noteReleased(taskId: string, surface: ComputerViewSurface): void {
+    if (surface === "this_computer") this.liveWindows.delete(taskId);
     const current = this.states.get(taskId);
     if (!current || current.status === "held" || current.surface !== surface) return;
     this.update(taskId, { status: "idle" });
@@ -262,6 +286,7 @@ export class ComputerViewService {
    */
   noteTaskEnded(taskId: string): void {
     const current = this.states.get(taskId);
+    this.liveWindows.delete(taskId);
     this.stopPoller(taskId);
     if (!current || current.status === "held" || current.status === "idle") return;
     this.update(taskId, { status: "idle", waitingSince: undefined });
@@ -278,6 +303,7 @@ export class ComputerViewService {
     this.deps.revokeViewer?.(taskId);
     if (this.isHeldByPerson(taskId)) this.deps.setBrowserPaused?.(taskId, false);
     this.states.delete(taskId);
+    this.liveWindows.delete(taskId);
     this.unbindEnvironment(taskId);
     this.stopPoller(taskId);
     this.deps.notify?.({ taskId, status: "idle", updatedAt: this.now() });
@@ -286,6 +312,7 @@ export class ComputerViewService {
   dispose(): void {
     for (const taskId of Array.from(this.pollers.keys())) this.stopPoller(taskId);
     this.states.clear();
+    this.liveWindows.clear();
     this.watchers.clear();
     this.environments.clear();
     this.environmentHolds.clear();
@@ -307,35 +334,55 @@ export class ComputerViewService {
   }
 
   /**
-   * Captures the browser or the bot's own desktop every few seconds while someone watches a
-   * task working there. This computer is captured only by its own actions.
+   * Captures what a task works on while someone watches it working: the window it controls on
+   * this computer about every second, the browser or the bot's own desktop every few seconds.
+   * On this computer only the task's own window is captured, never the screen.
    */
   private syncPoller(taskId: string): void {
     const state = this.states.get(taskId);
     const shouldPoll =
-      Boolean(this.capturerFor(state?.surface)) &&
+      Boolean(this.capturerFor(taskId, state?.surface)) &&
       this.isWatched(taskId) &&
       state?.status === "working";
     if (!shouldPoll) {
       this.stopPoller(taskId);
       return;
     }
-    if (this.pollers.has(taskId)) return;
-    const timer = setInterval(() => void this.captureNow(taskId), COMPUTER_VIEW_POLL_MS);
+    const ms =
+      state?.surface === "this_computer" ? COMPUTER_VIEW_LIVE_POLL_MS : COMPUTER_VIEW_POLL_MS;
+    if (this.pollers.get(taskId)?.ms === ms) return;
+    this.stopPoller(taskId);
+    const timer = setInterval(() => void this.pollFrame(taskId, ms), ms);
     (timer as { unref?: () => void }).unref?.();
-    this.pollers.set(taskId, timer);
+    this.pollers.set(taskId, { timer, ms });
   }
 
   private stopPoller(taskId: string): void {
-    const timer = this.pollers.get(taskId);
-    if (timer) clearInterval(timer);
+    const poller = this.pollers.get(taskId);
+    if (poller) clearInterval(poller.timer);
     this.pollers.delete(taskId);
   }
 
-  private capturerFor(surface: ComputerViewSurface | undefined) {
+  /** A timed capture, skipped when an action just captured a fresher frame. */
+  private async pollFrame(taskId: string, ms: number): Promise<void> {
+    const frame = this.states.get(taskId)?.frame;
+    if (frame && this.now() - frame.capturedAt < ms / 2) return;
+    await this.captureNow(taskId);
+  }
+
+  private capturerFor(
+    taskId: string,
+    surface: ComputerViewSurface | undefined,
+  ): FrameCapturer | undefined {
     if (surface === "browser") return this.deps.captureBrowser;
     if (surface === "own_desktop") return this.deps.captureDesktop;
-    return undefined;
+    if (surface !== "this_computer") return undefined;
+    const live = this.liveWindows.get(taskId);
+    if (!live) return undefined;
+    return async () => {
+      const png = await live.capture();
+      return png ? { png, label: live.label } : null;
+    };
   }
 
   /** Captures the task's browser now (after a browser action). */
@@ -344,17 +391,20 @@ export class ComputerViewService {
     await this.captureNow(taskId);
   }
 
-  /** Captures what the task works on now, if it can be captured without its tools. */
+  /** Captures what the task works on now, if it can be captured outside its actions. */
   async captureNow(taskId: string): Promise<void> {
     const surface = this.states.get(taskId)?.surface;
-    const capture = this.capturerFor(surface);
+    const capture = this.capturerFor(taskId, surface);
     if (!surface || !capture || this.capturing.has(taskId) || this.isHeldByPerson(taskId)) {
       return;
     }
     this.capturing.add(taskId);
     try {
       const captured = await capture(taskId);
-      if (captured) this.publishFrame(taskId, surface, captured.png, captured.label);
+      // A run that ended (or moved elsewhere) during the capture stays as it is now.
+      const current = this.states.get(taskId);
+      if (captured && current?.status === "working" && current.surface === surface)
+        this.publishFrame(taskId, surface, captured.png, captured.label);
     } catch {
       // A tab that closed or navigated away just skips this frame.
     } finally {

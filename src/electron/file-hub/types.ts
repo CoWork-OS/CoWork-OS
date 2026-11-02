@@ -2,6 +2,8 @@
  * File Hub types — unified file browsing across local, artifacts, and cloud.
  */
 
+import type { Artifact } from "../../shared/types";
+
 export const FILE_HUB_SOURCES = [
   "local",
   "artifacts",
@@ -57,7 +59,7 @@ export interface FileHubListOptions {
 
 export interface FileHubServiceDeps {
   getWorkspacePath: (workspaceId: string) => string;
-  getArtifacts: (query?: { taskId?: string; limit?: number }) => Any[];
+  getArtifacts: (query: { limit: number }) => Promise<Array<Artifact & { workspacePath?: string }>>;
   /** Check which cloud connectors are configured */
   getConnectedSources: () => FileHubSource[];
   log?: (...args: unknown[]) => void;

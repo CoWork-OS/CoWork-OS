@@ -85,6 +85,9 @@ import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
+import { TASK_PROPOSAL_TOOL_NAMES, TaskProposalTools } from "./task-proposal-tools";
+import { TaskProposalService } from "../../task-proposals/TaskProposalService";
+import { SpeculativeRunTools } from "./speculative-run-tools";
 import { WatchdogTools } from "./watchdog-tools";
 import { ThreadTools } from "./thread-tools";
 import { CronTools } from "./cron-tools";
@@ -424,6 +427,8 @@ const SPREADSHEET_CELL_SCHEMA = {
 const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
   // A sub-agent never acts with the owner's business identity or grants (PACT).
   ...PACT_TOOL_NAMES,
+  // Suggested tasks come from the task the person talks to, not from delegated work.
+  ...TASK_PROPOSAL_TOOL_NAMES,
   "spawn_agent",
   "wait_for_agent",
   "get_agent_status",
@@ -759,6 +764,8 @@ export class ToolRegistry {
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
+  private taskProposalTools: TaskProposalTools;
+  private speculativeRunTools: SpeculativeRunTools;
   private watchdogTools: WatchdogTools;
   private threadTools: ThreadTools;
   private canvasTools: CanvasTools;
@@ -855,6 +862,8 @@ export class ToolRegistry {
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
+    this.taskProposalTools = new TaskProposalTools(new TaskProposalService(daemon), taskId);
+    this.speculativeRunTools = new SpeculativeRunTools(() => this.workspace);
     this.watchdogTools = new WatchdogTools(daemon, taskId);
     this.threadTools = new ThreadTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
@@ -1383,6 +1392,11 @@ export class ToolRegistry {
     this.canvasTools.setSessionCutoff(cutoff);
   }
 
+  /** A follow-up turn begins: the per-turn limit on proposed tasks counts afresh. */
+  beginTaskProposalTurn(): void {
+    this.taskProposalTools.beginTurn();
+  }
+
   getLatestCanvasSessionId(): string | null {
     const latestSession = this.canvasTools.getLatestActiveSessionForTask();
     return latestSession?.id || null;
@@ -1820,6 +1834,16 @@ export class ToolRegistry {
     // Waiting on an event needs the runtime's event trigger engine.
     if (this.daemon.hasEventWaitSupport?.()) {
       allTools.push(...EventWaitTools.getToolDefinitions());
+    }
+    // Suggested tasks: only the task the person talks to proposes; delegated work does not.
+    const proposingTask =
+      typeof this.daemon.getTask === "function" ? this.daemon.getTask(this.taskId) : undefined;
+    if (!proposingTask?.parentTaskId) {
+      allTools.push(...TaskProposalTools.getToolDefinitions());
+    }
+    // Read-only history of speculate_fix runs; only where that runtime is running.
+    if (SpeculativeRunTools.isAvailable()) {
+      allTools.push(...SpeculativeRunTools.getToolDefinitions());
     }
     // Read-only explanation of the watchdog control loop's decisions for a task.
     allTools.push(...WatchdogTools.getToolDefinitions());
@@ -3991,6 +4015,21 @@ export class ToolRegistry {
       serialSchedulerSpec,
     );
     register(
+      "propose_task",
+      async ({ request }) => this.taskProposalTools.proposeTask(request.input),
+      serialSchedulerSpec,
+    );
+    register(
+      "withdraw_task_proposal",
+      async ({ request }) => this.taskProposalTools.withdrawTaskProposal(request.input),
+      serialSchedulerSpec,
+    );
+    register(
+      "speculative_runs",
+      async ({ request }) => this.speculativeRunTools.listRuns(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
       "thread_subscribe",
       async ({ request }) => this.threadTools.subscribe(request.input),
       serialSchedulerSpec,
@@ -5949,6 +5988,11 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
     if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
+    if (name === "propose_task") return await this.taskProposalTools.proposeTask(input);
+    if (name === "withdraw_task_proposal") {
+      return await this.taskProposalTools.withdrawTaskProposal(input);
+    }
+    if (name === "speculative_runs") return await this.speculativeRunTools.listRuns(input);
     if (name === "thread_subscribe") return await this.threadTools.subscribe(input);
     if (name === "thread_unsubscribe") return await this.threadTools.unsubscribe(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
@@ -6963,12 +7007,8 @@ ${skillDescriptions}`;
       await computer.close();
     }
     await this._codeExecTools?.cleanup().catch(() => undefined);
-    // Shortened tool results are kept only while the task runs.
-    try {
-      this.spillTools.expireIfTaskFinished(this.daemon.getTask?.(this.taskId)?.status);
-    } catch {
-      // The 24-hour sweep removes them instead.
-    }
+    // Shortened tool results stay for follow-up turns; the daemon removes them when
+    // the task is cancelled or deleted (see cancelTask), else the 24-hour sweep does.
     this.codexConsentClosed = true;
     this.codexTaskConsents?.clear();
     await this.browserTools.cleanup();

@@ -1,0 +1,463 @@
+/* Suggested tasks: the card under a turn's answer and its Options popover. */
+.suggested-tasks {
+  width: 100%;
+  max-width: 640px;
+  margin: 6px 0 16px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-bg-primary);
+  font-family: var(--cw-transcript-font, var(--font-ui));
+}
+
+.suggested-tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.suggested-tasks-start-all,
+.suggested-task-do-here,
+.suggested-task-open {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.suggested-tasks-start-all {
+  margin-right: -8px;
+}
+
+.suggested-tasks-start-all:hover:not(:disabled),
+.suggested-tasks-start-all:focus-visible,
+.suggested-task-do-here:hover:not(:disabled),
+.suggested-task-do-here:focus-visible,
+.suggested-task-open:hover,
+.suggested-task-open:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+.suggested-tasks-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggested-task {
+  padding: 12px 16px 10px;
+  animation: suggested-task-enter 180ms ease-out;
+}
+
+.suggested-task + .suggested-task {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.suggested-task-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.suggested-task-title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.suggested-task-dismiss {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -2px -6px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.suggested-task-dismiss:hover:not(:disabled),
+.suggested-task-dismiss:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  outline: none;
+}
+
+.suggested-task-summary {
+  display: block;
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+/*
+ * Clamped on an inner span. App buttons clip their overflow, and at a fractional offset that
+ * shaves the first glyph of each line, so the button may overflow and the span's clip box
+ * reaches 2px past the text edge.
+ */
+.suggested-task-summary-text {
+  display: -webkit-box;
+  margin-left: -2px;
+  padding-left: 2px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.suggested-task-summary.expanded .suggested-task-summary-text {
+  display: block;
+}
+
+.suggested-task-summary:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.suggested-task-brief {
+  max-height: 260px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.suggested-task-error {
+  margin: 6px 0 0;
+  color: var(--color-error);
+  font-size: 12.5px;
+}
+
+.suggested-task-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.suggested-task-options-anchor {
+  margin-left: -9px;
+}
+
+.suggested-task-options-button {
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.suggested-task-options-button:hover:not(:disabled),
+.suggested-task-options-button:focus-visible,
+.suggested-task-options-button.open {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+.suggested-task-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.suggested-task-start {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--color-text);
+  color: var(--color-bg-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.suggested-task-start:hover:not(:disabled),
+.suggested-task-start:focus-visible {
+  opacity: 0.86;
+  outline: none;
+}
+
+.suggested-tasks button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A started task: one line that follows its status and opens it. */
+.suggested-task-started {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  font-size: 13.5px;
+}
+
+.suggested-task-status-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.suggested-task-status-dot.running {
+  background: var(--color-accent);
+  animation: suggested-task-pulse 1.6s ease-in-out infinite;
+}
+
+.suggested-task-status-dot.done {
+  background: var(--color-success);
+}
+
+.suggested-task-status-dot.failed {
+  background: var(--color-error);
+}
+
+.suggested-task-status-dot.attention {
+  background: var(--color-warning);
+}
+
+.suggested-task-started-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggested-task-status {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.suggested-task-status.failed {
+  color: var(--color-error);
+}
+
+.suggested-task-open {
+  margin: -4px -8px -4px auto;
+}
+
+/* Options popover (portaled, fixed under its button). */
+.suggested-task-options {
+  position: fixed;
+  z-index: var(--layer-popover);
+  width: min(380px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-primary);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  font-family: var(--font-ui);
+}
+
+.suggested-task-options-environment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.suggested-task-options-environment-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text);
+  font-size: 13.5px;
+}
+
+.suggested-task-options-folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 4px;
+  color: var(--color-text-muted);
+}
+
+.suggested-task-options-folder svg,
+.suggested-task-options-environment-value svg {
+  flex: 0 0 auto;
+}
+
+.suggested-task-options-folder-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.suggested-task-options-folder-name {
+  color: var(--color-text);
+  font-size: 13.5px;
+}
+
+.suggested-task-options-folder-path {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggested-task-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 2px 10px;
+}
+
+.suggested-task-options-label {
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+}
+
+.suggested-task-options-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  color: var(--color-text-muted);
+}
+
+.suggested-task-options-select select {
+  max-width: 220px;
+  padding: 4px 20px 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  appearance: none;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13.5px;
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.suggested-task-options-select select:hover,
+.suggested-task-options-select select:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+.suggested-task-options-select svg {
+  position: absolute;
+  right: 4px;
+  pointer-events: none;
+}
+
+.suggested-task-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--color-border);
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.suggested-task-switch.on {
+  background: var(--color-accent);
+}
+
+.suggested-task-switch:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.suggested-task-switch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.suggested-task-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  transition: transform 160ms ease;
+}
+
+.suggested-task-switch.on .suggested-task-switch-thumb {
+  transform: translateX(14px);
+}
+
+@keyframes suggested-task-enter {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes suggested-task-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggested-task,
+  .suggested-task-status-dot.running {
+    animation: none;
+  }
+
+  .suggested-task-switch,
+  .suggested-task-switch-thumb {
+    transition: none;
+  }
+}

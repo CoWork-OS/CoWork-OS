@@ -21,10 +21,18 @@ describe("ChannelPersonaAdapter", () => {
   });
 
   describe("adaptForChannel", () => {
-    it("returns empty when disabled", () => {
+    it("keeps only the reply norms when the persona guardrail is off", () => {
       mockGuardrails.channelPersonaEnabled = false;
-      const result = ChannelPersonaAdapter.adaptForChannel("slack", "private");
-      expect(result).toBe("");
+      const chat = ChannelPersonaAdapter.adaptForChannel("slack", "group");
+      expect(chat).toContain("CHANNEL REPLY NORMS");
+      expect(chat).toContain(`under about ${CHAT_REPLY_WORD_LIMIT} words`);
+      expect(chat).not.toContain("CHANNEL COMMUNICATION GUIDELINES");
+      expect(chat).not.toContain("Slack");
+      expect(chat).not.toContain("group conversation");
+      const dense = ChannelPersonaAdapter.adaptForChannel("github", "private");
+      expect(dense).toContain("Background (why)");
+      expect(dense).not.toContain("GitHub");
+      expect(ChannelPersonaAdapter.adaptForChannel(undefined, "private")).toBe("");
     });
 
     it("returns empty when no channel type provided", () => {

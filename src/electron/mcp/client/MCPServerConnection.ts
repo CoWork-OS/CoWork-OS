@@ -34,6 +34,12 @@ import { StreamableHttpTransport } from "./transports/StreamableHttpTransport";
 import { redactMcpCallResult, resolveMcpServerSecrets } from "./secret-references";
 import { createLogger } from "../../utils/logger";
 import { isLikelyIntegrationAuthError } from "../../notifications/integration-auth";
+import {
+  isObjectManifestTool,
+  manifestFromToolResult,
+  validateObjectManifest,
+  type ConnectorObjectManifest,
+} from "../object-manifest";
 
 // MCP Protocol version we support
 /** Latest MCP revision the client implements; servers may answer with an older one. */
@@ -52,6 +58,10 @@ const CLIENT_INFO = {
   version: "1.0.0",
 };
 const logger = createLogger("MCPServerConnection");
+
+/** A read object manifest is kept this long; a failed read is retried sooner. */
+const OBJECT_MANIFEST_TTL_MS = 6 * 60 * 60 * 1000;
+const OBJECT_MANIFEST_RETRY_MS = 60 * 1000;
 
 export interface MCPServerConnectionEvents {
   status_changed: (status: MCPConnectionStatus, error?: string) => void;
@@ -107,7 +117,14 @@ export class MCPServerConnection extends EventEmitter {
   private status: MCPConnectionStatus = "disconnected";
   private serverInfo: MCPServerInfo | null = null;
   private modernProtocol = false;
+  /** Every tool the server lists, its object manifest tool included. */
   private tools: MCPTool[] = [];
+  /** The tools offered to callers: the object manifest tool is CoWork's, not the model's. */
+  private exposedTools: MCPTool[] = [];
+  private objectManifest: { value: ConnectorObjectManifest | null; at: number } | null = null;
+  private objectManifestRequest: Promise<ConnectorObjectManifest | null> | null = null;
+  /** Bumped whenever the tool list changes, so an older manifest read is not kept. */
+  private toolsGeneration = 0;
   private resources: MCPResource[] = [];
   private prompts: MCPPrompt[] = [];
   private reconnectAttempts = 0;
@@ -142,7 +159,7 @@ export class MCPServerConnection extends EventEmitter {
       name: this.config.name,
       status: this.status,
       error: this.config.lastError,
-      tools: this.tools,
+      tools: this.exposedTools,
       resources: this.resources,
       prompts: this.prompts,
       serverInfo: this.serverInfo || undefined,
@@ -155,7 +172,75 @@ export class MCPServerConnection extends EventEmitter {
    * Get available tools from this server
    */
   getTools(): MCPTool[] {
-    return this.tools;
+    return this.exposedTools;
+  }
+
+  /**
+   * The connector's object manifest, read through the tool it marks with
+   * `_meta["cowork.objectManifest"]`. Read once per tool list and kept for six hours; a failed
+   * or invalid read gives null and is retried after a minute. Null when the server has no such
+   * tool. The call carries no arguments, so remote servers are asked too.
+   */
+  async getObjectManifest(
+    options: Pick<MCPToolCallOptions, "beforeSend"> = {},
+  ): Promise<ConnectorObjectManifest | null> {
+    if (this.status !== "connected") return null;
+    const tool = this.tools.find((entry) => isObjectManifestTool(entry));
+    if (!tool) return null;
+    const cached = this.objectManifest;
+    const ttl = cached?.value ? OBJECT_MANIFEST_TTL_MS : OBJECT_MANIFEST_RETRY_MS;
+    if (cached && Date.now() - cached.at < ttl) return cached.value;
+    if (!this.objectManifestRequest) {
+      const request = this.readObjectManifest(
+        tool.name,
+        this.exposedTools,
+        this.toolsGeneration,
+        options,
+      );
+      this.objectManifestRequest = request;
+      void request.finally(() => {
+        if (this.objectManifestRequest === request) this.objectManifestRequest = null;
+      });
+    }
+    return this.objectManifestRequest;
+  }
+
+  /**
+   * One manifest read, checked against the tool list it was asked for. It waits its turn like
+   * any call on a stdio server; the transport's request timeout bounds it, and the bundled
+   * connectors bound their own live reads.
+   */
+  private async readObjectManifest(
+    toolName: string,
+    tools: MCPTool[],
+    generation: number,
+    options: Pick<MCPToolCallOptions, "beforeSend">,
+  ): Promise<ConnectorObjectManifest | null> {
+    let value: ConnectorObjectManifest | null = null;
+    try {
+      const result = await this.callTool(toolName, {}, { beforeSend: options.beforeSend });
+      const parsed = validateObjectManifest(manifestFromToolResult(result), tools);
+      if (parsed.ok) {
+        value = parsed.manifest;
+        for (const warning of parsed.warnings.slice(0, 10))
+          logger.debug(`Object manifest from ${this.config.name}: ${warning}`);
+      } else {
+        logger.warn(`Ignoring the object manifest from ${this.config.name}: ${parsed.error}`);
+      }
+    } catch (error) {
+      logger.warn(`Could not read the object manifest from ${this.config.name}:`, error);
+    }
+    if (generation === this.toolsGeneration) this.objectManifest = { value, at: Date.now() };
+    return value;
+  }
+
+  /** Replace the tool list; a cached object manifest belongs to the old one. */
+  private setTools(tools: MCPTool[]): void {
+    this.tools = Array.isArray(tools) ? tools : [];
+    this.exposedTools = this.tools.filter((tool) => !isObjectManifestTool(tool));
+    this.objectManifest = null;
+    this.objectManifestRequest = null;
+    this.toolsGeneration += 1;
   }
 
   getResources(): MCPResource[] {
@@ -530,9 +615,9 @@ export class MCPServerConnection extends EventEmitter {
     if (this.serverInfo?.capabilities?.tools) {
       try {
         const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_LIST);
-        this.tools = result.tools || [];
+        this.setTools(result.tools || []);
         logger.debug(`Discovered ${this.tools.length} tools from ${this.config.name}`);
-        this.emit("tools_changed", this.tools);
+        this.emit("tools_changed", this.exposedTools);
       } catch (error) {
         logger.warn("Failed to list tools:", error);
       }
@@ -718,8 +803,8 @@ export class MCPServerConnection extends EventEmitter {
 
     try {
       const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_LIST);
-      this.tools = result.tools || [];
-      this.emit("tools_changed", this.tools);
+      this.setTools(result.tools || []);
+      this.emit("tools_changed", this.exposedTools);
     } catch (error) {
       logger.warn("Failed to refresh tools:", error);
     }
@@ -829,7 +914,7 @@ export class MCPServerConnection extends EventEmitter {
     if (this.transport) {
       this.transport = null;
     }
-    this.tools = [];
+    this.setTools([]);
     this.resources = [];
     this.prompts = [];
     this.subscribedResourceUris.clear();

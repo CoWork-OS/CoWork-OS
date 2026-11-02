@@ -23,6 +23,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/database/artifact-library-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Library Artifacts source: one read of the newest saved task artifacts with their workspace folders, as a storage-domain read unit behind the async ArtifactRepository facade in repository-facades.ts; nothing calls it on the host outside a unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/database/follow-up-recovery-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Startup follow-up recovery scan: one read of every user follow-up receipt, as a storage-domain report unit on the reporting reader. AgentDaemon starts it during initialize and consumes it with the delayed task resume, so it never holds up the first window; on the host backend it runs when that resume consumes it.",
@@ -209,6 +216,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/task-proposals/task-proposal-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Tasks an agent proposed (suggested tasks): services-domain units behind the static TaskProposalStore, which creates the schema on the host first, plus the delete that runs inside the task-delete transaction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/answer-surfaces/tool-data-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Tool results kept as answer data: services-domain units behind the static AnswerToolDataStore, which creates the schema on the host first, plus the delete that runs inside the task-delete transaction.",
@@ -336,7 +350,7 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/(agents/AgentTeamOrchestrator|chronicle/ChronicleObservationRepository|hooks/agent-ingress|tray/TrayManager|youtube/YouTubeTranscriptStore|answer-surfaces/AnswerSurfaceStateStore|answer-surfaces/AnswerToolDataStore|agent/decisions/decision-usage-telemetry|agent/llm/usage-telemetry|agent/tools/(mention-tools|registry|system-tools)|ipc/handlers|control-plane/handlers|main)\\.ts$|^src/daemon/(main|control-plane-methods)\\.ts$",
+      "pattern": "^src/electron/(agents/AgentTeamOrchestrator|chronicle/ChronicleObservationRepository|hooks/agent-ingress|tray/TrayManager|youtube/YouTubeTranscriptStore|answer-surfaces/AnswerSurfaceStateStore|answer-surfaces/AnswerToolDataStore|task-proposals/TaskProposalStore|agent/decisions/decision-usage-telemetry|agent/llm/usage-telemetry|agent/tools/(mention-tools|registry|system-tools)|ipc/handlers|control-plane/handlers|main)\\.ts$|^src/daemon/(main|control-plane-methods)\\.ts$",
       "domain": "runtime wiring",
       "access": "Connection handles passed to worker-backed facades and statement ports, which key their routing by connection. No SQL runs here.",
       "plan": "stays: handles only; the host backend behind them is the rollback path",

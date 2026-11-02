@@ -271,19 +271,23 @@ export class ChannelPersonaAdapter {
    *
    * @param channelType - The channel this task originates from
    * @param gatewayContext - Whether this is a private, group, or public conversation
-   * @returns Channel-specific directive string (empty if disabled or desktop)
+   * @returns Channel-specific directive string (empty for desktop; only the reply norms
+   *   when the cross-channel persona guardrail is off)
    */
   static adaptForChannel(channelType?: PersonaSurface, gatewayContext?: GatewayContext): string {
-    // Check guardrail
-    const settings = GuardrailManager.loadSettings();
-    if (!settings.channelPersonaEnabled) {
-      return "";
-    }
-
     if (!channelType) return "";
 
     const profile = CHANNEL_PROFILES[channelType];
     if (!profile) return "";
+
+    const replyNorm = profile.replyNorm === "chat" ? CHAT_REPLY_NORM : STRUCTURED_REPLY_NORM;
+
+    // The persona guardrail gates tone and style. The reply norms (chat word cap,
+    // dense reports) are how the surface itself is read, so they apply regardless.
+    const settings = GuardrailManager.loadSettings();
+    if (!settings.channelPersonaEnabled) {
+      return ["CHANNEL REPLY NORMS:", ...replyNorm].join("\n");
+    }
 
     const lines: string[] = [];
 
@@ -315,7 +319,7 @@ export class ChannelPersonaAdapter {
     }
 
     // Hard reply norms
-    lines.push(...(profile.replyNorm === "chat" ? CHAT_REPLY_NORM : STRUCTURED_REPLY_NORM));
+    lines.push(...replyNorm);
 
     // Group/public context overlay
     if (gatewayContext === "group") {

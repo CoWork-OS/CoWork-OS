@@ -8,6 +8,7 @@ import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer"
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
 import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
 import { BotDesktopTools } from "./tools/bot-desktop-tools";
+import { isUserActionRequiredFailure } from "./user-action-failure";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
@@ -19633,6 +19634,16 @@ ${transcript}
       TASK_KICKOFF_PROMPT_RULES,
       "- Do not append trailing offer questions by default.",
       "",
+      ...(!this.task.parentTaskId
+        ? [
+            "SUGGESTED TASKS (propose_task):",
+            "- When you notice real work outside the current request (a bug found in passing, a cost too large to fix here, a missing test, stale docs), propose it with propose_task instead of doing it unasked or only mentioning it. If your reply calls something a follow-up or a separate PR, propose it.",
+            "- Never propose what the user asked you to do, what you are about to do anyway, one-line tweaks, or speculation. The one fix that acts on what you just found stays here: ask about it in your reply instead.",
+            "- At most 3 per turn, never the same task twice. Write the brief so it stands alone: the goal, what you found, the files (repository-relative paths) and what done looks like.",
+            "- If a proposal goes stale (you did it here, or it proved unnecessary), withdraw it with withdraw_task_proposal.",
+            "",
+          ]
+        : []),
       "HONESTY & UNCERTAINTY:",
       "- State uncertainty explicitly when it matters.",
       "- Never fabricate tool outputs or claim a tool succeeded when it did not.",
@@ -20784,6 +20795,10 @@ ${transcript}
       "tool_result_read",
       "task_history",
       "task_get",
+      // Work worth suggesting turns up in any step (suggested tasks); the registry offers
+      // these only to the task the person talks to.
+      "propose_task",
+      "withdraw_task_proposal",
       "list_directory",
       "glob",
       "grep",
@@ -21005,6 +21020,13 @@ ${transcript}
     if (REPO_STATUS_INTENT_PATTERN.test(String(stepText || ""))) {
       base.add("git_status");
       base.add("git_diff");
+    }
+    // A step that may start a background command must also be able to read and stop
+    // it: run_command's own result says "read new output with process_output", and the
+    // completion push arms only after two quiet process_output polls.
+    if (base.has("run_command")) {
+      base.add("process_output");
+      base.add("stop_process");
     }
     return base;
   }
@@ -22948,50 +22970,6 @@ You are continuing a previous conversation. The context from the previous conver
     );
   }
 
-  private isUserActionRequiredFailure(reason: string): boolean {
-    const lower = String(reason || "").toLowerCase();
-    if (!lower) return false;
-
-    const rateLimitedExternalDependency =
-      lower.includes("429") ||
-      lower.includes("too many requests") ||
-      lower.includes("rate limit") ||
-      lower.includes("faucet has run dry") ||
-      lower.includes("airdrop limit");
-
-    const integrationActionSignal =
-      /\b(connect|reconnect|link|re-link|authorize|re-authorize|enable|configure|set up)\b.*\b(integration|account|provider|channel|wallet|api)\b/.test(
-        lower,
-      ) ||
-      /\b(integration|account|provider|channel|wallet|api)\b.*\b(disconnected|not connected|not configured|missing|required|expired|invalid)\b/.test(
-        lower,
-      );
-    const missingUserSpecificDatesOrYears =
-      ((/\b(user'?s|your|my)\b/.test(lower) &&
-        /\b(actual|exact|specific)\b/.test(lower) &&
-        /\b(date|dates|year|years|tax year|tax years|start date|end date|timeline)\b/.test(
-          lower,
-        )) ||
-        (/\b(include|provide|confirm|state)\b/.test(lower) &&
-          /\b(actual|exact|specific)\b/.test(lower) &&
-          /\b(date|dates|year|years|tax year|tax years|start date|end date)\b/.test(lower))) &&
-      /\b(cannot continue|can't continue|blocked|required|needs to change|what needs to change|missing)\b/.test(
-        lower,
-      );
-
-    return (
-      /action required/.test(lower) ||
-      /approve|approval|user denied|denied approval/.test(lower) ||
-      integrationActionSignal ||
-      missingUserSpecificDatesOrYears ||
-      /auth|authorization|unauthorized|credential|login/.test(lower) ||
-      /permission/.test(lower) ||
-      /api key|token required/.test(lower) ||
-      rateLimitedExternalDependency ||
-      /provide.*(path|value|input)/.test(lower)
-    );
-  }
-
   /**
    * Approval denials are terminal for the current follow-up attempt. Feeding the
    * denial back to the model as an ordinary tool error lets it immediately retry
@@ -23055,7 +23033,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     // Reuse the broader blocker detection first (auth/approval/permissions/etc.).
-    if (this.isUserActionRequiredFailure(text)) {
+    if (isUserActionRequiredFailure(text)) {
       return true;
     }
 
@@ -23095,7 +23073,7 @@ You are continuing a previous conversation. The context from the previous conver
       return "user_blocker";
     }
 
-    if (this.isUserActionRequiredFailure(reason)) {
+    if (isUserActionRequiredFailure(reason)) {
       return "user_blocker";
     }
 
@@ -39840,7 +39818,7 @@ Return ONLY a JSON object:
       const shouldPauseForFailureDerivedUserInput =
         stepFailed &&
         !awaitingUserInput &&
-        this.isUserActionRequiredFailure(lastFailureReason || "") &&
+        isUserActionRequiredFailure(lastFailureReason || "") &&
         (this.shouldPauseForQuestions || this.shouldPauseForRequiredDecision);
       if (shouldPauseForFailureDerivedUserInput) {
         awaitingUserInput = true;
@@ -42686,6 +42664,7 @@ Return ONLY a JSON object:
       this.task.prompt = `${this.task.prompt}\n\nUSER UPDATE:\n${executionMessage}`;
     }
     this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
+    this.toolRegistry.beginTaskProposalTurn();
     // Reset deduplicator so follow-up messages can re-invoke tools used in the previous run
     this.toolCallDeduplicator.reset();
     if (shouldStartNewCanvasSession) {

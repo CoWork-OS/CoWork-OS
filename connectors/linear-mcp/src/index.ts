@@ -37,6 +37,8 @@ type MCPToolProperty = {
 type MCPTool = {
   name: string;
   description?: string;
+  /** `cowork.objectManifest: true`: the tool returns this connector's object manifest. */
+  _meta?: Record<string, any>;
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;
@@ -424,6 +426,84 @@ class StdioMCPServer {
 const CONNECTOR_PREFIX = "linear";
 const DEFAULT_BASE_URL = "https://api.linear.app/graphql";
 
+// ==================== Object manifest ====================
+//
+// `linear.describe_objects` lists the objects this connector reads, their fields and status
+// values, and which tools read them. CoWork calls it itself, never shows it to the model, and it
+// makes no API call. Nested values are named by path (`state.name`). Workflow states differ per
+// team; the status values are Linear's defaults. Each issue carries its own `url`. Fields are
+// only those the `LinearClient` queries select; add one here only with its query.
+
+const OBJECT_MANIFEST_TOOL_META = { "cowork.objectManifest": true };
+
+const OBJECT_MANIFEST = {
+  version: 1,
+  connector: CONNECTOR_PREFIX,
+  objects: [
+    {
+      type: "issue",
+      label: "Issue",
+      entityType: "issue",
+      keyField: "id",
+      titleField: "title",
+      fields: [
+        { name: "id", type: "id", label: "Issue ID" },
+        { name: "identifier", type: "string", label: "Identifier" },
+        { name: "title", type: "string", label: "Title" },
+        // Only `get_issue` selects the description and the assignee.
+        { name: "description", type: "text", label: "Description", pii: true },
+        { name: "url", type: "url", label: "Link" },
+        { name: "state.name", type: "string", label: "State" },
+        { name: "assignee.id", type: "reference", label: "Assignee" },
+        { name: "team.id", type: "reference", label: "Team" },
+        { name: "project.id", type: "reference", label: "Project" },
+      ],
+      statusField: {
+        name: "state.name",
+        values: ["Backlog", "Todo", "In Progress", "Done", "Canceled"],
+        closed: ["Done", "Canceled"],
+      },
+      relations: [{ field: "project.id", targetType: "project", edgeType: "part_of" }],
+    },
+    {
+      type: "project",
+      label: "Project",
+      entityType: "project",
+      keyField: "id",
+      titleField: "name",
+      fields: [
+        { name: "id", type: "id", label: "Project ID" },
+        { name: "name", type: "string", label: "Name" },
+        { name: "state.name", type: "string", label: "State" },
+      ],
+    },
+  ],
+  tools: [
+    {
+      name: `${CONNECTOR_PREFIX}.list_projects`,
+      effect: "read",
+      risk: "read",
+      objects: ["project"],
+      resultPath: "data.nodes",
+    },
+    {
+      name: `${CONNECTOR_PREFIX}.search_issues`,
+      effect: "read",
+      risk: "read",
+      objects: ["issue"],
+      resultPath: "data.nodes",
+    },
+    {
+      name: `${CONNECTOR_PREFIX}.get_issue`,
+      effect: "read",
+      risk: "read",
+      objects: ["issue"],
+      recordIdArg: "id",
+      resultPath: "data",
+    },
+  ],
+};
+
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
@@ -470,6 +550,13 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: `${CONNECTOR_PREFIX}.describe_objects`,
+    description:
+      "Describe the business objects this connector holds, their fields and which tools read or write them. CoWork reads this itself.",
+    _meta: OBJECT_MANIFEST_TOOL_META,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const config: LinearConfig = {
@@ -488,6 +575,10 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       await client.searchIssues(args.query, args.limit, args.cursor, args.projectId, args.teamId),
     ),
   [`${CONNECTOR_PREFIX}.get_issue`]: async (args) => buildEnvelope(await client.getIssue(args.id)),
+  [`${CONNECTOR_PREFIX}.describe_objects`]: async () => ({
+    content: [{ type: "text", text: JSON.stringify(OBJECT_MANIFEST) }],
+    structuredContent: OBJECT_MANIFEST,
+  }),
 };
 
 const toolProvider: ToolProvider = {
@@ -510,8 +601,23 @@ const serverInfo: MCPServerInfo = {
   },
 };
 
-const server = new StdioMCPServer(toolProvider, serverInfo);
-server.start();
+export function startLinearMcpServer(): void {
+  new StdioMCPServer(toolProvider, serverInfo).start();
+}
+
+/** Test hook: one `tools/call` request through the server. */
+export async function callLinearToolForTest(params: any): Promise<any> {
+  return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+/** Test hook: the tools `tools/list` returns. */
+export function listLinearToolsForTest(): MCPTool[] {
+  return toolProvider.getTools();
+}
+
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
+  startLinearMcpServer();
+}
 
 function buildEnvelope(result: RequestResult): any {
   return {

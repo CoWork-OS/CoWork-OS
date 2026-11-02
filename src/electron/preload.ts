@@ -3676,7 +3676,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Artifact APIs
   listArtifacts: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARTIFACT_LIST, taskId),
-  previewArtifact: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.ARTIFACT_PREVIEW, id),
 
   // Agents Hub APIs
   listManagedAgents: (params?: {
@@ -7677,7 +7676,6 @@ export interface ElectronAPI {
     requestId: string;
   }>;
   listArtifacts: (taskId: string) => Promise<Any[]>;
-  previewArtifact: (id: string) => Promise<Any>;
   listManagedAgents: (params?: {
     limit?: number;
     offset?: number;

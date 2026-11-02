@@ -7154,12 +7154,8 @@ export async function setupIpcHandlers(
 
   // Artifact handlers
   handleTaskRead(IPC_CHANNELS.ARTIFACT_LIST, async (_, taskId: string) => {
-    return artifactRepo.findByTaskId(taskId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.ARTIFACT_PREVIEW, async () => {
-    // TODO: Implement artifact preview
-    return null;
+    const validatedId = validateInput(UUIDSchema, taskId, "task ID");
+    return artifactRepo.findByTaskId(validatedId);
   });
 
   // Agents Hub handlers

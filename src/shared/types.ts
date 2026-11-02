@@ -9040,7 +9040,6 @@ export const IPC_CHANNELS = {
 
   // Artifact operations
   ARTIFACT_LIST: "artifact:list",
-  ARTIFACT_PREVIEW: "artifact:preview",
 
   // Skills
   SKILL_LIST: "skill:list",

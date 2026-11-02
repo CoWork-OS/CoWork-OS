@@ -59,6 +59,7 @@ import {
   createWhatsAppAdapter,
   loadChannelAdapterModule,
 } from "./channels/lazy-adapters";
+import { resolveGroupRoutingMode } from "./channels/group-routing";
 import { createImessageAdapter } from "./channels/imessage";
 import { createSignalAdapter } from "./channels/signal";
 import { createFeishuAdapter } from "./channels/feishu";
@@ -2386,6 +2387,8 @@ export class ChannelGateway {
           botToken: channel.config.botToken as string,
           applicationId: channel.config.applicationId as string,
           guildIds: channel.config.guildIds as string[] | undefined,
+          groupRoutingMode: resolveGroupRoutingMode(channel.config.groupRoutingMode),
+          ambientMode: channel.config.ambientMode === true,
         });
 
       case "slack":
@@ -2394,6 +2397,8 @@ export class ChannelGateway {
           botToken: channel.config.botToken as string,
           appToken: channel.config.appToken as string,
           signingSecret: channel.config.signingSecret as string | undefined,
+          groupRoutingMode: resolveGroupRoutingMode(channel.config.groupRoutingMode),
+          ambientMode: channel.config.ambientMode === true,
         });
 
       case "teams": {

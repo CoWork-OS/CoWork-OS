@@ -4,6 +4,7 @@ import {
   DEFAULT_QUEUE_SETTINGS,
   MAX_QUEUE_TASK_TIMEOUT_MINUTES,
 } from "../../shared/types";
+import { WatchdogSettingsSection } from "./WatchdogSettingsSection";
 
 export function QueueSettings() {
   const [settings, setSettings] = useState<QueueSettingsType | null>(null);
@@ -154,6 +155,8 @@ export function QueueSettings() {
           without being cut off by the old 60-minute timeout.
         </p>
       </div>
+
+      <WatchdogSettingsSection />
 
       {/* Queue Behavior Info Section */}
       <div className="settings-section">

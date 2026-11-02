@@ -53,6 +53,7 @@ import { instrumentDatabase } from "./sqlite-instrumentation";
 import { TimelineProjectionOutboxRepository } from "./TimelineProjectionOutboxRepository";
 import { applyConnectionPragmas, HOST_BUSY_TIMEOUT_MS, resolveDatabasePath } from "./connection";
 import { initializeMailboxSearchIndex } from "./mailbox-search-index-schema";
+import { THREAD_SUBSCRIPTIONS_SCHEMA_SQL } from "./thread-subscriptions-schema";
 import { TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK } from "../../shared/task-event-mutation-journal-limits";
 
 const schemaLogger = createLogger("DatabaseManager");
@@ -6249,6 +6250,9 @@ export class DatabaseManager {
         updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
       );
     `);
+
+    // Thread subscriptions: tasks that receive later events of an IM thread, PR or email chain.
+    this.db.exec(THREAD_SUBSCRIPTIONS_SCHEMA_SQL);
 
     // Migration: Add body_html column to mailbox_messages for rendering original HTML email content
     try {

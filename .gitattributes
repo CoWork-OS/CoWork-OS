@@ -1,1 +1,2 @@
 resources/numbat/patches/*.patch text eol=lf -whitespace
+scripts/qa/*.cmd text eol=crlf

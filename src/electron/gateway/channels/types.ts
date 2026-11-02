@@ -222,6 +222,10 @@ export interface DiscordConfig extends ChannelConfig {
   applicationId: string;
   /** Guild IDs to operate in (empty = all guilds) */
   guildIds?: string[];
+  /** Guild message routing policy, as for Telegram (default: mentionsOnly). DMs always route. */
+  groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
+  /** Pass unaddressed guild messages on as ingest-only (stored, never answered). */
+  ambientMode?: boolean;
 }
 
 /**
@@ -236,6 +240,10 @@ export interface SlackConfig extends ChannelConfig {
   signingSecret?: string;
   /** Relay curated middle-step updates instead of suppressing all executor internals */
   progressRelayMode?: "minimal" | "curated";
+  /** Channel message routing policy, as for Telegram (default: mentionsOnly). DMs always route. */
+  groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
+  /** Pass unaddressed channel messages on as ingest-only (stored, never answered). */
+  ambientMode?: boolean;
 }
 
 /**
@@ -1010,6 +1018,25 @@ export interface GatewayEvent {
   channel?: ChannelType;
   timestamp: Date;
   data?: Record<string, unknown>;
+}
+
+/**
+ * `data` of a `message:received` gateway event. Event triggers evaluate their
+ * `channel_message` conditions (`text`, `senderName`, ...) against these fields.
+ */
+export interface MessageReceivedEventData {
+  /** Configured channel (database id) that received the message */
+  channelId: string;
+  messageId: string;
+  chatId: string;
+  /** Sender's user id on the channel */
+  userId: string;
+  /** Sender display name; the channel user id when the channel gave none */
+  senderName: string;
+  /** Full message text (after routing normalization and any audio transcription) */
+  text: string;
+  /** First 100 characters of `text`, for logs and notifications */
+  preview: string;
 }
 
 /**

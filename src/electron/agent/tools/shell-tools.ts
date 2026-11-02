@@ -1705,7 +1705,11 @@ export class ShellTools {
       ...(notify
         ? {
             notify_on_complete: true,
-            note: "This process is quiet. Its exit code and final output will reach this session automatically. Do not poll or sleep to wait for it again. Do other work, or end this turn with a brief status.",
+            // A child agent or automation run ends with its turn, and a later notice would be lost.
+            note:
+              this.daemon.canReceiveCompletionAfterTurn?.(this.taskId) === false
+                ? "This process is quiet. Its exit code and final output will reach this session automatically while you are still working. Do other work meanwhile. This task ends when your turn ends, so if nothing else remains, wait for it with process_output wait_ms instead of ending the turn."
+                : "This process is quiet. Its exit code and final output will reach this session automatically. Do not poll or sleep to wait for it again. Do other work, or end this turn with a brief status.",
           }
         : {}),
     };

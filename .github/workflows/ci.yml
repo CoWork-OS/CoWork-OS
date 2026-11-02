@@ -149,8 +149,7 @@ jobs:
 
   test:
     name: Tests
-    # Playwright 1.58 does not support the Ubuntu 26.04 image behind ubuntu-latest.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04 # Playwright has no Chromium build for the ubuntu-latest 26.04 image yet
 
     steps:
       - name: Checkout code

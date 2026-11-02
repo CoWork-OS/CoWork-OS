@@ -67,6 +67,7 @@ import {
 import { termCoverage } from "../../database/fts-query";
 import type { MemoryType } from "../../database/repositories";
 import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
+import { sanitizeRefId, taskGetCall } from "../../../shared/task-origin-refs";
 import {
   containsNoMemoryDirective,
   taskDisablesMemoryCapture,
@@ -622,6 +623,9 @@ export class MemoryTools {
     const provenance = Object.fromEntries(
       Object.entries(hit.provenance ?? {}).filter(([, value]) => value !== undefined),
     );
+    // The task a hit came from, as the call that recalls it (Chain of Recall).
+    const sourceTaskId = sanitizeRefId(provenance.taskId);
+    if (sourceTaskId) provenance.taskId = taskGetCall(sourceTaskId);
     return {
       id: hit.ref,
       lane: hit.lane,

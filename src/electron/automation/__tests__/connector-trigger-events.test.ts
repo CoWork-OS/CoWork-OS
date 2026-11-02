@@ -23,6 +23,30 @@ describe("shared connector trigger ingress", () => {
       fields: { eventName: "push", repository: "me/repo", action: "created" },
     });
   });
+  it("names the PR or issue thread of a GitHub event for thread subscriptions", () => {
+    const [, prComment] = connectorTriggerEvents({
+      serverId: "s",
+      serverName: "GitHub",
+      connectorId: "github",
+      type: "resource_updated",
+      timestamp: 5,
+      payload: {
+        event: "issue_comment",
+        repository: "me/repo",
+        issue: { number: 9, pull_request: { url: "u" } },
+      },
+    });
+    expect(prComment.fields.threadKey).toBe("github:me/repo:pr:9");
+    const [, push] = connectorTriggerEvents({
+      serverId: "s",
+      serverName: "GitHub",
+      connectorId: "github",
+      type: "resource_updated",
+      timestamp: 6,
+      payload: { event: "push", repo: "me/repo" },
+    });
+    expect(push.fields).not.toHaveProperty("threadKey");
+  });
   it("does not treat another connector as GitHub and keeps subscription scope", () => {
     expect(
       connectorTriggerEvents({

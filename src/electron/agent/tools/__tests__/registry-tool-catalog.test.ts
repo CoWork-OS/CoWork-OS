@@ -359,6 +359,46 @@ describe("ToolRegistry tool catalog versioning", () => {
     }
   });
 
+  it("always offers task_get and tool_result_read, and recalls a task by ID", async () => {
+    const recalled = {
+      id: "task-2",
+      title: "Earlier deploy",
+      prompt: "deploy",
+      status: "completed",
+      workspaceId: "workspace-1",
+      createdAt: 1,
+      updatedAt: 1,
+      parentTaskId: "task-1",
+      resultSummary: "Deployed v2.",
+    };
+    const daemon = {
+      ...createDaemon(),
+      getTask: vi.fn(() => undefined),
+      getTaskById: vi.fn(async (id: string) => (id === "task-2" ? recalled : undefined)),
+      getChildTasks: vi.fn(async () => []),
+      getTaskEvents: vi.fn(() => []),
+      queryTaskHistory: vi.fn(() => ({ success: true, tasks: [] })),
+      getWorkspaceById: vi.fn(() => undefined),
+    };
+    const registry = new ToolRegistry(createWorkspace() as never, daemon as Any, "task");
+    const tools = registry.getTools();
+    for (const name of ["task_get", "tool_result_read"]) {
+      expect(tools.find((tool) => tool.name === name)?.runtime).toMatchObject({
+        alwaysExpose: true,
+        deferLoad: false,
+        readOnly: true,
+      });
+    }
+
+    const result = await registry.executeToolWithRuntime("task_get", { taskId: "task-2" });
+    expect(result.result).toMatchObject({
+      success: true,
+      id: "task-2",
+      summary: "Deployed v2.",
+      links: { parent: { id: "task-1", recall: "task_get(task-1)" } },
+    });
+  });
+
   it("hides and refuses task-restricted scripting tools at execution", async () => {
     const platform = process.platform;
     Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });

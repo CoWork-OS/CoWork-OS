@@ -36,7 +36,10 @@ export const MEMORY_RECALL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kg_add_observation",
   "task_events",
   "task_history",
+  "task_get",
   "scratchpad_read",
+  // A page of an earlier tool result of this task, which was already seen.
+  "tool_result_read",
 ]);
 
 export function isMemoryRecallTool(name: unknown): boolean {

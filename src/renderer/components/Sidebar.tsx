@@ -21,6 +21,7 @@ import {
   EyeOff,
   AppWindow,
   Bell,
+  FlaskConical,
   Archive,
   Folder,
   FolderOpen,
@@ -45,7 +46,7 @@ import {
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, isTempWorkspaceId } from "../../shared/types";
-import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import { isAutomatedTaskLike, isSpeculativeTask } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import {
@@ -186,7 +187,7 @@ export function getSessionMode(task: Task): SessionMode {
  *  directly). These are grouped into a collapsible "Automated" folder at the
  *  bottom of the sidebar so they don't push user sessions off screen. */
 export function isAutomatedSession(task: Task): boolean {
-  return isAutomatedTaskLike(task);
+  return isSpeculativeTask(task) || isAutomatedTaskLike(task);
 }
 
 const HIDDEN_FOCUSED_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);
@@ -2412,9 +2413,12 @@ function SidebarComponent({
     const isChatSession =
       task.agentConfig?.executionMode === "chat" &&
       task.agentConfig?.executionModeSource === "user";
+    // A speculative worker reports through its delivery gate only, never an unread dot.
+    const isSpeculative = isSpeculativeTask(task);
     const showCompletionAttention =
       task.status === "completed" &&
       !isChatSession &&
+      !isSpeculative &&
       selectedTaskId !== task.id &&
       completionAttentionSet.has(task.id);
     const activity = activityOf(task);
@@ -2573,6 +2577,18 @@ function SidebarComponent({
 
         {/* Lucide icon for sub-agents */}
         {getSubagentIcon(task)}
+
+        {/* Speculative reproduce-and-fix worker: background run, not a user session */}
+        {isSpeculative && (
+          <span
+            className="cli-task-speculative-badge"
+            role="img"
+            aria-label="Speculative fix"
+            title="Speculative fix: a background run that stays silent unless it confirms a small fix"
+          >
+            <FlaskConical size={11} strokeWidth={2.2} aria-hidden="true" />
+          </span>
+        )}
 
         {/* Git branch indicator for worktree-isolated tasks */}
         {task.worktreeBranch && (

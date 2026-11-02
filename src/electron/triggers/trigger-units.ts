@@ -13,6 +13,7 @@ export const TRIGGER_UNITS = {
   eventTrigger_saveTrigger: storeUnit(make, "saveTrigger", { readonly: false }),
   eventTrigger_deleteTrigger: storeUnit(make, "deleteTrigger", { readonly: false }),
   eventTrigger_saveHistory: storeUnit(make, "saveHistory", { readonly: false }),
+  eventTrigger_releaseCooldown: storeUnit(make, "releaseCooldown", { readonly: false }),
   eventTrigger_acceptOccurrence: storeUnit(make, "acceptOccurrence", { readonly: false }),
   eventTrigger_claimNextOccurrence: storeUnit(make, "claimNextOccurrence", { readonly: false }),
   eventTrigger_markOccurrenceIntent: storeUnit(make, "markOccurrenceIntent", { readonly: false }),

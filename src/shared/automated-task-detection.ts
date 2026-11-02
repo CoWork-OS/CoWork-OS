@@ -13,6 +13,15 @@ export function hasAutomatedTaskTitle(title: string | undefined): boolean {
   return AUTOMATED_TITLE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+/**
+ * A background worker started by a `speculate_fix` trigger (see AgentConfig.speculative). The
+ * sidebar files it with automated sessions, but it is deliberately not `isAutomatedTaskLike`:
+ * that would redirect the new test files it writes into the managed output folder.
+ */
+export function isSpeculativeTask(task: Pick<Task, "agentConfig"> | null | undefined): boolean {
+  return task?.agentConfig?.speculative === true;
+}
+
 export function isAutomatedTaskLike(task: Task | null | undefined): boolean {
   if (!task) return false;
   if (task.source === "managed_agent_panel") return false;

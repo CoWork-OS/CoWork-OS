@@ -73,6 +73,35 @@ export interface MemoryRepoTeamRepoSetting {
   workspaceIds?: string[];
 }
 
+/**
+ * How an event source (a trigger source such as `github_event`, or one gateway chat) is
+ * treated before new work starts:
+ * - explicit_only: today's behaviour; code conditions alone decide.
+ * - candidate: after the code checks pass, a small model reads the event and the user's
+ *   event policies and decides act or ignore. Ambient chat messages are evaluated too.
+ * - ignore: events from this source never start work (thread follow-ups and waits still
+ *   arrive).
+ */
+export type EventGateMode = "explicit_only" | "candidate" | "ignore";
+
+export type EventGateDecision = "act" | "ignore";
+
+/** A user-written natural-language rule the semantic event gate applies. */
+export interface EventGatePolicy {
+  id: string;
+  text: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface EventGateSettings {
+  policies: EventGatePolicy[];
+  /** Mode per trigger source (`channel_message`, `github_event`, ...); absent = explicit_only. */
+  sourceModes: Record<string, EventGateMode>;
+  /** Mode per gateway chat, keyed `<channelType>:<chatId>`; overrides the source mode. */
+  chatModes: Record<string, EventGateMode>;
+}
+
 // Global memory feature toggles (applies across workspaces)
 export interface MemoryFeaturesSettings {
   /** Inject `.cowork/*` context pack into the agent prompt (workspace-scoped files). */
@@ -617,6 +646,9 @@ export type EventType =
   | "context_compaction_completed"
   | "context_compaction_failed"
   | "no_progress_circuit_breaker"
+  // A decision of the watchdog control loop (src/electron/agent/watchdog): a recovery, a
+  // steering nudge, a pause, or a progress verdict that needed no action.
+  | "watchdog"
   | "step_contract_escalated"
   | "task_interrupted"
   | "task_status"
@@ -723,6 +755,7 @@ export type EventType =
   | "worktree_conflict" // Merge conflict detected
   | "resource_conflict" // Another task in the same folder is changing this file (write refused)
   | "worktree_cleaned" // Worktree removed after completion
+  | "speculative_outcome" // A speculative reproduce-and-fix run ended (delivered or discarded)
   // Collaborative Thoughts events (team multi-agent thinking)
   | "agent_thought" // Agent sharing analysis/reasoning with team
   | "synthesis_started" // Leader beginning synthesis of team thoughts
@@ -1612,6 +1645,8 @@ export type ToolType =
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
+  // Page through a tool result that was shortened to fit the context window
+  | "tool_result_read"
   // Hand a computer step to the person (passwords, codes, payments)
   | "request_takeover"
   // The bot's own desktop (Works on: Its own desktop)
@@ -1656,7 +1691,9 @@ export type ToolType =
   | "revise_plan"
   | "request_user_input"
   | "task_history"
-  | "task_events";
+  | "task_events"
+  | "watchdog_status"
+  | "task_get";
 
 export type ApprovalType =
   | "delete_file"
@@ -1721,6 +1758,8 @@ export const TOOL_GROUPS = {
     "email_imap_unread",
     // Session scratchpad (read)
     "scratchpad_read",
+    // Pages of this task's own shortened tool results
+    "tool_result_read",
     "youtube_ask_video",
     "youtube_search_ingested_segments",
     "youtube_list_ingested_videos",
@@ -1890,6 +1929,7 @@ export const TOOL_GROUPS = {
     "write_clipboard",
     "task_history",
     "task_events",
+    "task_get",
     // Privacy-sensitive: exposes prior chat logs across chats
     "channel_list_chats",
     "channel_history",
@@ -2116,6 +2156,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
+  tool_result_read: "read",
   // Only asks the person to take over; it changes nothing itself.
   request_takeover: "read",
   // The bot's own desktop is a separate container: actions there don't touch this computer.
@@ -2140,6 +2181,8 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   request_user_input: "read",
   task_history: "read",
   task_events: "read",
+  watchdog_status: "read",
+  task_get: "read",
 };
 
 /**
@@ -2374,6 +2417,30 @@ export interface IntegrationMentionOption extends IntegrationMentionSelection {
  * Per-task agent configuration for customizing LLM and personality
  * Allows spawning agents with different models/personalities than the global settings
  */
+/**
+ * Identifiers of what a task came from, kept so later turns can recall related context by ID
+ * (task_get and the task's identity line). Set only by main-process creation paths; informational,
+ * never used for authorization.
+ */
+export interface TaskOriginRefs {
+  /** Event trigger that created the task. */
+  triggerId?: string;
+  /** Source event identity the ingress adapter supplied (for example a gateway message hash). */
+  triggerEventId?: string;
+  /** Durable trigger occurrence row that created the task. */
+  triggerOccurrenceId?: string;
+  /** Conversation the originating event belongs to (mail thread, chat, or chat thread). */
+  threadKey?: string;
+  /** Gateway channel type that delivered the originating message. */
+  gatewayChannel?: string;
+  /** Gateway channel session (chat) the task answers. */
+  gatewaySessionId?: string;
+  /** Chat identifier on the gateway channel. */
+  gatewayChatId?: string;
+  /** Thread identifier inside that chat, when the channel has threads. */
+  gatewayThreadId?: string;
+}
+
 export interface AgentConfig {
   /** Composer that created the task; preserved in sidebar summaries. */
   taskOrigin?: "build";
@@ -2429,6 +2496,11 @@ export interface AgentConfig {
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
   /**
+   * Where a task without a gateway origin replies, for reply-style norms
+   * (ChannelPersonaAdapter). Set by the event trigger engine for GitHub thread events.
+   */
+  replySurface?: "github";
+  /**
    * Set by the gateway router (never accepted from the renderer): whether the channel
    * sender is the workspace owner. Only the owner's messages may become facts about the
    * user (audit SEC-16); a channel task without it counts as third-party.
@@ -2436,6 +2508,8 @@ export interface AgentConfig {
   gatewaySenderIsOwner?: boolean;
   /** Contact reference of the channel sender (`gateway:<channel>:<user id>`), set with it. */
   gatewaySenderRef?: string;
+  /** Trigger, gateway chat and thread identifiers of the task's origin (see TaskOriginRefs). */
+  originRefs?: TaskOriginRefs;
   /** Resolved gateway specialization record that shaped the task. */
   channelSpecializationId?: string;
   /** Explicit maximum number of LLM turns before forcing completion. Unset means no window cap for normal main-task routing. */
@@ -2503,6 +2577,14 @@ export interface AgentConfig {
   teamWorkItemLane?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
+  /**
+   * Speculative reproduce-and-fix worker started by a `speculate_fix` trigger. It runs in the
+   * background in its own worktree, is not a user task, and never raises a notification; its
+   * result reaches the user only when the delivery gate confirms a small fix.
+   */
+  speculative?: boolean;
+  /** The speculative run this task works for (see SpeculativeRun). */
+  speculativeRunId?: string;
   /** Per-task checkout choice. Omit to use the global worktree setting. */
   worktreeMode?: "local" | "worktree";
   /** Existing local branch to base a new isolated checkout on; omit for HEAD. */
@@ -3059,6 +3141,110 @@ export const DEFAULT_WORKTREE_SETTINGS: WorktreeSettings = {
   commitMessagePrefix: "[cowork] ",
 };
 
+// ============ Speculative Fix (Acting Ahead) Types ============
+
+/** What happens to a confirmed speculative fix: keep it as a local draft, or open a pull request. */
+export type SpeculativeFixDelivery = "draft_only" | "open_pr";
+
+/**
+ * Where a delivered fix is announced: a reply in the chat thread that reported the problem, or
+ * only on the workspace repository (a pull request for `open_pr`; nothing posted for a draft).
+ */
+export type SpeculativeFixDestination = "origin_thread" | "workspace_pr";
+
+/** Per-trigger settings of the `speculate_fix` action. Every field is optional. */
+export interface SpeculativeFixConfig {
+  /** Workspace whose repository is copied into an isolated worktree; defaults to the trigger's. */
+  workspaceId?: string;
+  /** Hard wall-clock limit for the whole run, in minutes. */
+  maxMinutes?: number;
+  /** Most model calls (agent turns) the worker may make. */
+  maxLlmCalls?: number;
+  /** Largest fix, in changed lines (added + removed), that may be delivered. */
+  maxDiffLines?: number;
+  delivery?: SpeculativeFixDelivery;
+  destination?: SpeculativeFixDestination;
+}
+
+export const SPECULATIVE_FIX_DEFAULTS = {
+  maxMinutes: 20,
+  maxLlmCalls: 40,
+  maxDiffLines: 200,
+  delivery: "draft_only",
+  destination: "origin_thread",
+} as const satisfies Required<Omit<SpeculativeFixConfig, "workspaceId">>;
+
+/** The structured result a speculative worker reports at the end of its run. */
+export interface SpeculativeFixReport {
+  reproduced: boolean;
+  fixed: boolean;
+  summary: string;
+  diffStat: string;
+  testEvidence: string;
+}
+
+export type SpeculativeRunStatus = "running" | "delivered" | "discarded" | "failed";
+
+export type SpeculativeRunOutcome =
+  | "running"
+  | "not_reproduced"
+  | "not_fixed"
+  | "no_report"
+  | "no_changes"
+  | "diff_too_large"
+  | "timed_out"
+  | "task_failed"
+  | "task_cancelled"
+  | "delivery_failed"
+  | "draft_ready"
+  | "pr_opened";
+
+/** Where the report came from, so a delivered fix can answer in the same thread. */
+export interface SpeculativeRunOrigin {
+  source: string;
+  channelType?: string;
+  channelInstanceId?: string;
+  chatId?: string;
+  messageId?: string;
+  threadId?: string;
+  senderName?: string;
+}
+
+/** One speculative reproduce-and-fix run and its outcome. */
+export interface SpeculativeRun {
+  id: string;
+  triggerId: string;
+  triggerName: string;
+  workspaceId: string;
+  taskId?: string;
+  status: SpeculativeRunStatus;
+  outcome: SpeculativeRunOutcome;
+  delivery: SpeculativeFixDelivery;
+  destination: SpeculativeFixDestination;
+  maxDiffLines: number;
+  /** Bounded excerpt of the reported problem. */
+  issueExcerpt: string;
+  origin: SpeculativeRunOrigin;
+  startedAt: number;
+  deadlineAt: number;
+  finishedAt?: number;
+  report?: SpeculativeFixReport;
+  filesChanged?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  branchName?: string;
+  prUrl?: string;
+  /** True while the candidate fix's worktree is kept for a later pull request. */
+  worktreeKept?: boolean;
+  /** One-line reason for the outcome. */
+  note?: string;
+}
+
+export interface SpeculativeRunListQuery {
+  workspaceId?: string;
+  limit?: number;
+}
+
 // ============ Self-Improvement Types ============
 
 export type ImprovementCandidateSource =
@@ -3518,6 +3704,12 @@ export type FollowUpTextProvenance = "user_typed";
  */
 export type TaskPromptProvenance = "user_typed";
 
+/**
+ * A runtime notice that reaches the session as a follow-up event: work that finished outside
+ * the turn (a background job or a spawned child agent), or a watchdog steering nudge.
+ */
+export type RuntimeNotificationKind = "background_process" | "agent_output" | "watchdog";
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3543,8 +3735,13 @@ export interface TaskFollowUpInput {
   deliveryMode?: "message" | "follow_up";
   /** Internal provenance for messages sent between parent and child tasks. */
   messageSource?: "user" | "agent";
-  /** Internal runtime notice; retains the current conversation instead of starting a bot handoff. */
-  notificationKind?: "background_process";
+  /**
+   * Internal runtime notice; retains the current conversation instead of starting a bot handoff.
+   * "background_process": a tracked run_command job finished. "agent_output": a child agent
+   * started with spawn_agent finished; its report is agent output, not user input.
+   * "watchdog": a steering nudge from the watchdog control loop.
+   */
+  notificationKind?: RuntimeNotificationKind;
   /** Stable ID used to correlate an agent message with its delivery event. */
   messageId?: string;
   /** Parent/agent task that authored an agent message. */
@@ -9069,6 +9266,10 @@ export const IPC_CHANNELS = {
   QUEUE_CLEAR: "queue:clear",
   QUEUE_UPDATE: "queue:update",
 
+  // Watchdog control loop
+  WATCHDOG_GET_SETTINGS: "watchdog:getSettings",
+  WATCHDOG_SAVE_SETTINGS: "watchdog:saveSettings",
+
   // MCP (Model Context Protocol)
   MCP_GET_SETTINGS: "mcp:getSettings",
   MCP_SAVE_SETTINGS: "mcp:saveSettings",
@@ -9634,6 +9835,13 @@ export const IPC_CHANNELS = {
   TRIGGER_UPDATE: "trigger:update",
   TRIGGER_REMOVE: "trigger:remove",
   TRIGGER_HISTORY: "trigger:history",
+  SPECULATIVE_RUNS_LIST: "speculativeRuns:list",
+  EVENT_GATE_GET: "eventGate:get",
+  EVENT_GATE_ADD_POLICY: "eventGate:addPolicy",
+  EVENT_GATE_REMOVE_POLICY: "eventGate:removePolicy",
+  EVENT_GATE_TOGGLE_POLICY: "eventGate:togglePolicy",
+  EVENT_GATE_SET_SOURCE_MODE: "eventGate:setSourceMode",
+  EVENT_GATE_SET_CHAT_MODE: "eventGate:setChatMode",
   MCP_EVENTS_LIST: "mcpEvents:list",
   MCP_EVENTS_STATUS: "mcpEvents:status",
   MCP_EVENTS_RECEIVER_PORT: "mcpEvents:receiverPort",
@@ -11454,6 +11662,78 @@ export const DEFAULT_QUEUE_SETTINGS: QueueSettings = {
   maxConcurrentTasks: 8,
   taskTimeoutMinutes: MAX_QUEUE_TASK_TIMEOUT_MINUTES,
 };
+
+// Watchdog control loop (src/electron/agent/watchdog): an independent schedule outside the
+// agent loop that recovers infrastructure failures and nudges tasks that drift.
+export interface WatchdogSettings {
+  /** Off until the user turns it on. */
+  enabled: boolean;
+  /** How often the watchdog runs, in minutes. */
+  intervalMinutes: number;
+  /** A running task with no event and no live activity lease for this long is stalled. */
+  stallMinutes: number;
+  /** A task must have run this long before the model judges its progress. */
+  progressCheckAfterMinutes: number;
+  /** Let the watchdog cancel a task that keeps drifting after it was paused once. */
+  allowCancel: boolean;
+}
+
+export const WATCHDOG_SETTINGS_LIMITS = {
+  intervalMinutes: { min: 1, max: 60 },
+  stallMinutes: { min: 5, max: 24 * 60 },
+  progressCheckAfterMinutes: { min: 5, max: 24 * 60 },
+} as const;
+
+export const DEFAULT_WATCHDOG_SETTINGS: WatchdogSettings = {
+  enabled: false,
+  intervalMinutes: 5,
+  stallMinutes: 20,
+  progressCheckAfterMinutes: 15,
+  allowCancel: false,
+};
+
+/** Which watchdog pass made a decision. */
+export type WatchdogPass = "infrastructure" | "progress" | "sleep_recovery";
+
+/** What the watchdog did about a task. "none" records a check that needed no action. */
+export type WatchdogAction =
+  | "none"
+  | "steer"
+  | "pause"
+  | "cancel"
+  | "resume"
+  | "requeue"
+  | "retry"
+  | "reclaim_leases";
+
+export type WatchdogVerdict = "progressing" | "drifting" | "unknown";
+
+/** One watchdog decision, as stored in the task event log (event type "watchdog"). */
+export interface WatchdogDecision {
+  taskId: string;
+  pass: WatchdogPass;
+  action: WatchdogAction;
+  /** Why, in a sentence a person can read. */
+  reason: string;
+  at: number;
+  verdict?: WatchdogVerdict;
+  /** What the task appeared to loop on, when the progress judge said "drifting". */
+  loopingOn?: string;
+  /** Who judged progress: "model:<provider>/<model>" or "heuristic". */
+  judge?: string;
+  /** Consecutive "drifting" verdicts, including this one. */
+  driftStrikes?: number;
+  /** Recovery attempt number for retries and resumes. */
+  attempt?: number;
+  /** Deterministic progress signals from the progress score engine. */
+  signals?: {
+    progressScore: number;
+    loopRiskIndex: number;
+    repeatedFingerprintCount: number;
+  };
+  /** Time the host spent suspended, for sleep recovery decisions. */
+  suspendedMs?: number;
+}
 
 // Toast notification types for UI
 export interface ToastNotification {

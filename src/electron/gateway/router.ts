@@ -15,6 +15,11 @@ import {
   OPENROUTER_DEFAULT_MODEL_ID,
 } from "../../shared/llm-provider-catalog";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { ThreadSubscriptionRepository } from "../database/repository-facades";
+import { EventGateSettingsManager } from "../settings/event-gate-manager";
+import { runSemanticGate } from "../triggers/semantic-gate";
+import { formatThreadChatMessage, gatewayThreadKey } from "../triggers/thread-subscriptions";
+import { createLogger } from "../utils/logger";
 import {
   ChannelRepository,
   ChannelSessionRepository,
@@ -35,6 +40,7 @@ import {
   ChannelType,
   GatewayEvent,
   GatewayEventHandler,
+  MessageReceivedEventData,
   CallbackQuery,
   InlineKeyboardButton,
   MessageAttachment,
@@ -61,6 +67,7 @@ import {
 
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
+import { buildGatewayOriginRefs } from "../../shared/task-origin-refs";
 import * as os from "os";
 import { LLMProviderFactory, LLMSettings } from "../agent/llm/provider-factory";
 import { LLMProviderType } from "../agent/llm/types";
@@ -178,6 +185,8 @@ export interface ConnectAllOptions {
   timeoutMs?: number;
 }
 
+const eventGateLogger = createLogger("GatewayEventGate");
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number | undefined,
@@ -217,6 +226,7 @@ export class MessageRouter {
   private specializationRepo: ChannelSpecializationRepository;
   private workspaceRepo: WorkspaceRepository;
   private taskRepo: TaskRepository;
+  private threadSubscriptionRepo?: ThreadSubscriptionRepository;
   private artifactRepo: ArtifactRepository;
   private agentRoleRepo: AgentRoleRepository;
   private deliveryService: ChannelDeliveryService;
@@ -971,6 +981,94 @@ export class MessageRouter {
     }
 
     return true;
+  }
+
+  private getThreadSubscriptions(): ThreadSubscriptionRepository {
+    this.threadSubscriptionRepo ??= new ThreadSubscriptionRepository(this.db);
+    return this.threadSubscriptionRepo;
+  }
+
+  /**
+   * An ingest-only message (ambient chat, unaddressed group message) is stored and nothing
+   * more, unless:
+   * - it is in a thread whose task is still running: the task gets it as an untrusted
+   *   follow-up (thread subscription), and it is not routed further;
+   * - its chat is in `candidate` mode and the semantic gate decides it deserves action:
+   *   it is routed like an addressed message (returns true).
+   * Only messages from authorized senders are delivered or evaluated.
+   */
+  private async admitIngestOnlyMessage(
+    adapter: ChannelAdapter,
+    channelId: string,
+    message: IncomingMessage,
+    security: { allowed: boolean },
+  ): Promise<boolean> {
+    if (!security.allowed || message.direction === "outgoing_user") return false;
+    const text = (message.text || "").trim();
+    if (!text) return false;
+    try {
+      const threadKey = message.threadId
+        ? gatewayThreadKey(adapter.type, channelId, message.chatId, message.threadId)
+        : undefined;
+      if (threadKey && this.agentDaemon) {
+        const subscribers = await this.getThreadSubscriptions().findActiveSubscribers(threadKey);
+        for (const taskId of subscribers) {
+          await this.agentDaemon
+            .sendMessage(
+              taskId,
+              formatThreadChatMessage(threadKey, {
+                channelType: adapter.type,
+                senderName: message.userName,
+                text,
+              }),
+            )
+            .catch((error: unknown) =>
+              eventGateLogger.warn(`Could not deliver a ${threadKey} message to ${taskId}:`, error),
+            );
+        }
+        if (subscribers.length > 0) return false;
+      }
+
+      if (EventGateSettingsManager.resolveChatMode(adapter.type, message.chatId) !== "candidate")
+        return false;
+      const verdict = await runSemanticGate({
+        source: "channel_message",
+        fields: {
+          channelType: adapter.type,
+          chatId: message.chatId,
+          ...(message.threadId ? { threadId: message.threadId } : {}),
+          isGroup: message.isGroup === true,
+          senderName: message.userName,
+          text,
+        },
+        policies: EventGateSettingsManager.enabledPolicyTexts(),
+        sourceId: `${adapter.type}:${message.chatId}`,
+      });
+      eventGateLogger.info(
+        `Ambient ${adapter.type} message ${verdict.decision === "act" ? "admitted" : "ignored"}: ${verdict.reason}`,
+      );
+      return verdict.decision === "act";
+    } catch (error) {
+      eventGateLogger.warn("Could not evaluate an ingest-only message:", error);
+      return false;
+    }
+  }
+
+  /** The task created for a thread's first message receives its later messages. */
+  private async subscribeTaskToMessageThread(
+    taskId: string,
+    channelType: string,
+    channelId: string,
+    message: IncomingMessage,
+  ): Promise<void> {
+    if (!message.threadId) return;
+    const threadKey = gatewayThreadKey(channelType, channelId, message.chatId, message.threadId);
+    if (!threadKey) return;
+    try {
+      await this.getThreadSubscriptions().subscribe(threadKey, taskId, Date.now());
+    } catch (error) {
+      eventGateLogger.warn(`Could not subscribe task ${taskId} to ${threadKey}:`, error);
+    }
   }
 
   private getSessionChatKey(message: IncomingMessage): string {
@@ -2149,13 +2247,21 @@ export class MessageRouter {
         messageId: message.messageId,
         chatId: message.chatId,
         userId: message.userId,
+        senderName: (message.userName || "").trim() || message.userId,
+        text: message.text,
         preview: message.text.slice(0, 100),
-      },
+      } satisfies MessageReceivedEventData,
     });
 
-    // Ingest-only mode: persist the message but do not route to the agent or reply.
+    // Ingest-only mode: persist the message but do not route to the agent or reply, unless
+    // a task subscribed to its thread takes it, or the chat is a semantic-gate candidate
+    // and the gate decides it deserves action.
     if (ingestOnly) {
-      return;
+      const admitted = await this.admitIngestOnlyMessage(adapter, channel.id, message, {
+        allowed: securityResult.allowed,
+      });
+      if (!admitted) return;
+      await transcribeAudioAttachments(message);
     }
 
     if (!securityResult.allowed) {
@@ -4631,6 +4737,12 @@ export class MessageRouter {
           gatewayContext,
           toolRestrictions,
           originChannel: adapter.type,
+          originRefs: buildGatewayOriginRefs({
+            channelType: adapter.type,
+            sessionId,
+            chatId: message.chatId,
+            threadId: message.threadId,
+          }),
           allowUserInput: false,
           retainMemory: false,
           readOnlyExecution: true,
@@ -4762,6 +4874,12 @@ export class MessageRouter {
           gatewayContext,
           ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
           originChannel: adapter.type,
+          originRefs: buildGatewayOriginRefs({
+            channelType: adapter.type,
+            sessionId,
+            chatId: message.chatId,
+            threadId: message.threadId,
+          }),
         },
         PermissionSettingsManager.loadSettings(),
       ),
@@ -7015,6 +7133,12 @@ export class MessageRouter {
             ? { channelSpecializationId: securityContext.channelSpecialization.id }
             : {}),
           originChannel: adapter.type,
+          originRefs: buildGatewayOriginRefs({
+            channelType: adapter.type,
+            sessionId,
+            chatId: message.chatId,
+            threadId: message.threadId,
+          }),
           ...senderConfig,
           ...(securityContext?.researchWorkflowPreset
             ? {
@@ -7048,6 +7172,8 @@ export class MessageRouter {
     if (!sessionChannelId) {
       throw new Error(`Unable to resolve channel id for ${adapter.type} task routing`);
     }
+    // Later messages in this thread that are not addressed to the agent reach this task.
+    await this.subscribeTaskToMessageThread(task.id, adapter.type, sessionChannelId, message);
 
     // Track this task for response handling
     this.pendingTaskResponses.set(task.id, {

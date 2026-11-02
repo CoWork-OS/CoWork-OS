@@ -283,6 +283,17 @@ export class TaskQueueManager {
   }
 
   /**
+   * The host was suspended (laptop sleep) for `ms`. No task ran during that time, so it does not
+   * count toward the session timeout: every tracked start moves forward by the suspended time.
+   */
+  creditSuspendedTime(ms: number): void {
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    for (const [taskId, startTime] of this.taskStartTimes) {
+      this.taskStartTimes.set(taskId, startTime + ms);
+    }
+  }
+
+  /**
    * Called when a task finishes (completed, failed, or cancelled)
    */
   async onTaskFinished(taskId: string): Promise<void> {

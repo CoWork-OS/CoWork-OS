@@ -24,6 +24,18 @@ export function ensureResponsibilitySnapshotColumn(db: Database.Database): void 
     db.exec("ALTER TABLE event_trigger_occurrences ADD COLUMN responsibility_snapshot_json TEXT");
 }
 
+/** Compatibility columns for profiles created before the semantic event gate. */
+export function ensureTriggerHistoryGateColumns(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(event_trigger_history)").all() as Array<{
+    name: string;
+  }>;
+  if (columns.length === 0) return;
+  for (const name of ["gate_decision", "gate_reason", "thread_key"]) {
+    if (!columns.some((column) => column.name === name))
+      db.exec(`ALTER TABLE event_trigger_history ADD COLUMN ${name} TEXT`);
+  }
+}
+
 export type TriggerOccurrenceAdmission = {
   disposition: "accepted" | "duplicate" | "cooldown" | "disabled";
   row?: Row;
@@ -123,8 +135,9 @@ export class EventTriggerStore {
   saveHistory(entry: TriggerHistoryEntry): void {
     this.db
       .prepare(
-        `INSERT INTO event_trigger_history (id, trigger_id, fired_at, event_data, action_result, task_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO event_trigger_history
+         (id, trigger_id, fired_at, event_data, action_result, task_id, gate_decision, gate_reason, thread_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.id,
@@ -133,7 +146,33 @@ export class EventTriggerStore {
         JSON.stringify(entry.eventData),
         entry.actionResult || null,
         entry.taskId || null,
+        entry.gateDecision || null,
+        entry.gateReason || null,
+        entry.threadKey || null,
       );
+  }
+
+  /**
+   * An accepted occurrence that did not fire (the semantic gate ignored it, or a thread
+   * subscriber took it) gives back the cooldown it reserved: it was not a firing. The
+   * cooldown passed before its acceptance, so clearing `last_fired_at` restores an
+   * equivalent state; a later acceptance's timestamp is left alone.
+   */
+  releaseCooldown(
+    triggerId: string,
+    firedAt: number,
+  ): { last_fired_at: number | null; fire_count: number } | undefined {
+    this.db
+      .prepare(
+        `UPDATE event_triggers
+         SET fire_count = MAX(fire_count - 1, 0),
+             last_fired_at = CASE WHEN last_fired_at = ? THEN NULL ELSE last_fired_at END
+         WHERE id = ?`,
+      )
+      .run(firedAt, triggerId);
+    return this.db
+      .prepare("SELECT last_fired_at, fire_count FROM event_triggers WHERE id = ?")
+      .get(triggerId) as { last_fired_at: number | null; fire_count: number } | undefined;
   }
 
   /**

@@ -977,6 +977,24 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   height: 13px;
 }
 
+/* A speculative fix worker carries a small accent pill so it never reads as a user session. */
+.cli-task-speculative-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 2px 0 4px;
+  border-radius: 999px;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.sidebar-panel .cli-task-speculative-badge {
+  order: 3;
+}
+
 /* The Pinned section already says so. */
 .sidebar-panel .cli-task-pinned {
   display: none;

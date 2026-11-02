@@ -271,9 +271,16 @@ export async function checkCamofoxConnection(
   }
 }
 
+/** A Camofox identity for one task; its session is deleted when the task closes Camofox. */
+function taskIdentity(taskId: string): string {
+  return `cowork-task-${hash(taskId, 12)}-${randomBytes(4).toString("hex")}`;
+}
+
 export class CamofoxBrowserSession {
   private lease: CamofoxProxyLease | null = null;
-  private readonly userId: string;
+  private userId: string;
+  /** The identity is the workspace's, kept after the task; saved cookies never go into it. */
+  private sharedIdentity: boolean;
   private readonly sessionKey: string;
   private tabs: string[] = [];
   private activeTabId: string | null = null;
@@ -289,9 +296,10 @@ export class CamofoxBrowserSession {
     private readonly ctx: CamofoxSessionContext,
   ) {
     // A persistent identity is one Camofox context per workspace; otherwise a fresh one per task.
-    this.userId = settings.persistentIdentity
+    this.sharedIdentity = settings.persistentIdentity;
+    this.userId = this.sharedIdentity
       ? `cowork-${hash(ctx.identityScope, 20)}`
-      : `cowork-task-${hash(ctx.taskId, 12)}-${randomBytes(4).toString("hex")}`;
+      : taskIdentity(ctx.taskId);
     this.sessionKey = `cowork-${hash(ctx.taskId, 12)}`;
     this.startCommand = camofoxStartCommand(settings.serverUrl, settings.proxyPort);
   }
@@ -356,7 +364,7 @@ export class CamofoxBrowserSession {
     this.tabs = [];
     this.activeTabId = null;
     try {
-      if (!this.settings.persistentIdentity) {
+      if (!this.sharedIdentity) {
         await this.client.deleteSession(this.userId).catch(() => {});
       } else {
         for (const tabId of tabs) await this.client.closeTab(this.userId, tabId).catch(() => {});
@@ -382,6 +390,7 @@ export class CamofoxBrowserSession {
           return this.fail("Saved cookies belong to the user and are not available to a bot.");
         }
         if (!this.activeTabId || useSavedCookies) await this.openTab();
+        const wasShared = this.sharedIdentity;
         let cookiesLoaded: number | undefined;
         if (useSavedCookies) {
           const loaded = await this.loadSavedCookies(url);
@@ -389,6 +398,7 @@ export class CamofoxBrowserSession {
           cookiesLoaded = loaded;
           await this.beforeEffect();
         }
+        const leftSharedIdentity = wasShared && !this.sharedIdentity;
         const result = await this.client.navigate(this.userId, this.activeTabId!, url);
         this.noteUrl(result.url);
         this.ctx.logEvent({
@@ -415,7 +425,11 @@ export class CamofoxBrowserSession {
           ...base,
           message:
             "Opened in Camofox. Later browser tools use Camofox until browser_close. Call " +
-            "browser_snapshot for element refs (like e12).",
+            "browser_snapshot for element refs (like e12)." +
+            (leftSharedIdentity
+              ? " Saved cookies load into a Camofox identity for this task only, so the " +
+                "workspace's Camofox identity and its earlier tabs are closed for the rest of it."
+              : ""),
         };
       }
       case "browser_new_tab": {
@@ -642,6 +656,25 @@ export class CamofoxBrowserSession {
     );
   }
 
+  /**
+   * Moves this task off the workspace's shared identity before approved saved cookies are
+   * loaded. The user approves one load for one task; in the shared identity the sign-in would
+   * carry over to every later task in the workspace without asking. Camofox cannot remove
+   * cookies from an identity, so the task switches to its own, deleted at browser_close.
+   * Closes the shared identity's tabs; the caller opens a checked tab in the new one. True if
+   * it switched.
+   */
+  private async leaveSharedIdentity(): Promise<boolean> {
+    if (!this.sharedIdentity) return false;
+    const tabs = [...this.tabs];
+    this.tabs = [];
+    this.activeTabId = null;
+    for (const tabId of tabs) await this.client.closeTab(this.userId, tabId).catch(() => {});
+    this.userId = taskIdentity(this.ctx.taskId);
+    this.sharedIdentity = false;
+    return true;
+  }
+
   /** Opens a tab that first proves Camofox browses through CoWork's proxy, then goes to `url`. */
   private async openTab(): Promise<void> {
     const tabId = await openCheckedCamofoxTab(
@@ -685,6 +718,7 @@ export class CamofoxBrowserSession {
     if (cookies.length === 0) return 0;
     const approved = await this.ctx.approveSavedCookies(host, cookies.length);
     if (!approved) return `The user did not allow loading saved cookies for ${host}.`;
+    if (await this.leaveSharedIdentity()) await this.openTab();
     await this.beforeEffect();
     const imported = await this.client.importCookies(this.userId, cookies);
     for (const cookie of cookies) cookie.value = "";

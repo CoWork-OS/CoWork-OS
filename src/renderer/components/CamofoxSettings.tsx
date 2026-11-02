@@ -223,6 +223,10 @@ export function CamofoxSettingsGroup() {
         Keep one Camofox identity per workspace (cookies and sign-ins carry across tasks)
       </label>
       <p className="settings-description">
+        Saved cookies you let CoWork load never go into this shared identity. They load into one for
+        that task only, so each task asks again.
+      </p>
+      <p className="settings-description">
         Camofox keeps each identity&apos;s cookies unencrypted in ~/.camofox/profiles unless you set{" "}
         <code>
           &quot;persistence&quot;: {"{"} &quot;enabled&quot;: false {"}"}

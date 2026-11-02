@@ -835,8 +835,9 @@ export class BrowserTools {
       this.taskId,
       "protected_credential",
       `Load ${count} saved cookie${count === 1 ? "" : "s"} for ${host} into the Camofox browser? ` +
-        `They can sign CoWork in to ${host} there. Unless you turned Camofox's persistence off, ` +
-        "Camofox also keeps them unencrypted in ~/.camofox/profiles on this Mac.",
+        `They can sign CoWork in to ${host} there for this task only; later tasks ask again. ` +
+        "Unless you turned Camofox's persistence off, Camofox also keeps them unencrypted in " +
+        "~/.camofox/profiles on this Mac.",
       { kind: "camofox_saved_cookies", host, count },
       { allowAutoApprove: false, noStandingApproval: true },
     );
@@ -1524,7 +1525,7 @@ export class BrowserTools {
           description:
             "Camofox only: load the user's saved cookies for this site (imported from a " +
             "cookies.txt file) before opening it, so the page opens signed in. The user is asked " +
-            "first each time.",
+            "first each time. The cookies stay in a Camofox identity for this task only.",
         },
       });
     }

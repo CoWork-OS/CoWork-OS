@@ -35,7 +35,11 @@ interface FakeCamofox {
   /** CAMOFOX_ACCESS_KEY the fake was "started" with; "" accepts unauthenticated requests. */
   accessKey: string;
   openTabs: Set<string>;
+  /** Camofox userId (identity) each tab was opened in. */
+  tabUsers: Map<string, string>;
   cookieImports: unknown[][];
+  /** Camofox userId each cookie import went to, in order. */
+  cookieUsers: string[];
   deletedSessions: string[];
   close(): Promise<void>;
 }
@@ -127,7 +131,9 @@ async function startFakeCamofox(
     mode,
     accessKey,
     openTabs: new Set(),
+    tabUsers: new Map(),
     cookieImports: [],
+    cookieUsers: [],
     deletedSessions: [],
     close: async () => {},
   };
@@ -174,6 +180,7 @@ async function startFakeCamofox(
         const tabId = `tab-${++next}`;
         pages.set(tabId, { url: body.url, body: page.body });
         fake.openTabs.add(tabId);
+        fake.tabUsers.set(tabId, body.userId);
         return send(200, {
           tabId,
           url: body.url,
@@ -191,6 +198,7 @@ async function startFakeCamofox(
       url.pathname.endsWith("/cookies")
     ) {
       fake.cookieImports.push(body.cookies);
+      fake.cookieUsers.push(decodeURIComponent(url.pathname.split("/")[2]));
       return send(200, { ok: true, count: body.cookies.length });
     }
     if (req.method === "DELETE" && url.pathname.startsWith("/sessions/")) {
@@ -463,19 +471,32 @@ describe("saved cookies", () => {
     expirationDate: 2_000_000_000,
   };
 
-  async function sessionWith(overrides: Partial<CamofoxSessionContext>) {
+  async function sessionWith(
+    overrides: Partial<CamofoxSessionContext>,
+    persistentIdentity = false,
+  ) {
     const sitePort = await targetSite();
     vi.spyOn(dns, "lookup").mockResolvedValue([{ address: "127.0.0.1", family: 4 }] as Any);
     const proxyPort = await freePort();
     const fake = await startFakeCamofox("proxied", proxyPort);
-    const session = new CamofoxBrowserSession(
-      settingsFor(fake.origin, proxyPort),
-      clientFor(fake.origin),
-      proxy,
-      context({ savedCookiesForHost: () => [{ ...savedCookie }], ...overrides }),
-    );
-    return { session, fake, url: `http://allowed.test:${sitePort}/` };
+    const newSession = (taskId: string) =>
+      new CamofoxBrowserSession(
+        settingsFor(fake.origin, proxyPort, persistentIdentity),
+        clientFor(fake.origin),
+        proxy,
+        context({ taskId, savedCookiesForHost: () => [{ ...savedCookie }], ...overrides }),
+      );
+    return {
+      session: newSession("task-1"),
+      newSession,
+      fake,
+      url: `http://allowed.test:${sitePort}/`,
+    };
   }
+
+  /** The identities of the tabs Camofox has open. */
+  const openIdentities = (fake: FakeCamofox) =>
+    [...fake.openTabs].map((tabId) => fake.tabUsers.get(tabId));
 
   it("loads them only after the user approves", async () => {
     const approve = vi.fn(async () => true);
@@ -526,6 +547,54 @@ describe("saved cookies", () => {
     expect(bot.fake.cookieImports).toHaveLength(0);
     expect(bot.fake.openTabs.size).toBe(0);
     await bot.session.close();
+  }, 20_000);
+
+  it("never loads them into the workspace's shared identity", async () => {
+    const { session, newSession, fake, url } = await sessionWith({}, true);
+    await session.execute("browser_navigate", { url }, noEffect);
+    const [shared] = openIdentities(fake);
+    expect(shared).toMatch(/^cowork-(?!task-)/);
+
+    const result = await session.execute(
+      "browser_navigate",
+      { url, use_saved_cookies: true },
+      noEffect,
+    );
+    expect(result).toMatchObject({ success: true, savedCookiesLoaded: 1 });
+    expect(String(result.message)).toMatch(/this task only/);
+    const [taskOnly] = fake.cookieUsers;
+    expect(taskOnly).toMatch(/^cowork-task-/);
+    // The shared identity's tabs are closed; the task goes on in its own identity.
+    expect(openIdentities(fake)).toEqual([taskOnly]);
+    expect(await session.execute("browser_snapshot", {}, noEffect)).toMatchObject({
+      success: true,
+    });
+
+    await session.close();
+    expect(fake.deletedSessions).toEqual([taskOnly]);
+
+    // A later task in the workspace gets the shared identity, which never held the cookies.
+    const later = newSession("task-2");
+    await later.execute("browser_navigate", { url }, noEffect);
+    expect(openIdentities(fake)).toEqual([shared]);
+    expect(fake.cookieUsers).toEqual([taskOnly]);
+    await later.close();
+  }, 20_000);
+
+  it("stays in the shared identity when the user declines", async () => {
+    const approve = vi.fn(async () => false);
+    const { session, fake, url } = await sessionWith({ approveSavedCookies: approve }, true);
+    const result = await session.execute(
+      "browser_navigate",
+      { url, use_saved_cookies: true },
+      noEffect,
+    );
+    expect(result).toMatchObject({ success: false });
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(fake.cookieImports).toHaveLength(0);
+    expect(openIdentities(fake)).toEqual([expect.stringMatching(/^cowork-(?!task-)/)]);
+    await session.close();
+    expect(fake.deletedSessions).toHaveLength(0);
   }, 20_000);
 
   it("maps vault cookies to Camofox cookies", () => {

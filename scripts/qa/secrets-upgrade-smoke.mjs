@@ -226,29 +226,56 @@ async function hangReport(label, pid) {
   ].join("\n");
 }
 
+/**
+ * The wrapper that copies the app's stdout and stderr to a file from process start. It is
+ * run as the executable: Playwright spawns it directly on POSIX (shebang) and through its
+ * .cmd shim on Windows, where Playwright runs the command through the shell.
+ */
+const launchWrapper = path.join(
+  root,
+  "scripts",
+  "qa",
+  process.platform === "win32"
+    ? "secrets-upgrade-smoke-launch.cmd"
+    : "secrets-upgrade-smoke-launch.mjs",
+);
+
 async function runApp(label, spec, fn) {
   console.log(`${label}: starting`);
+  // The app runs through the launch wrapper: Playwright reads the app's stdio itself from
+  // the moment it spawns the process, so a listener added here after launch would miss
+  // the startup lines. The wrapper appends everything to this file instead.
+  const logFile = path.join(out, `${label}.log`);
+  const pidFile = path.join(out, `${label}.pid`);
+  fs.rmSync(logFile, { force: true });
+  fs.rmSync(pidFile, { force: true });
+  const readLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "");
   let app;
   try {
     app = await _electron.launch({
-      executablePath: spec.executablePath,
+      executablePath: launchWrapper,
       args: [...options["electron-arg"], ...spec.appArgs],
       cwd: spec.appDir ?? path.dirname(spec.executablePath),
       timeout: 180_000,
-      env,
+      env: {
+        ...env,
+        COWORK_SMOKE_NODE: process.execPath,
+        COWORK_SMOKE_EXECUTABLE: spec.executablePath,
+        COWORK_SMOKE_LOG_FILE: logFile,
+        COWORK_SMOKE_PID_FILE: pidFile,
+      },
     });
   } catch (error) {
     const output = await plainLaunchOutput(spec);
-    fs.writeFileSync(path.join(out, `${label}.log`), output);
+    fs.writeFileSync(logFile, output);
     console.log(`${label}: could not launch; the app's own output:\n${output.slice(-4000)}`);
     results[label] = { error: String(error?.message || error), ...summarizeLog(output) };
     return;
   }
   console.log(`${label}: launched`);
-  const pid = app.process().pid;
-  let log = "";
-  app.process().stdout?.on("data", (d) => (log += d));
-  app.process().stderr?.on("data", (d) => (log += d));
+  // The app's own pid (the wrapper writes it at spawn); the wrapper's pid is the fallback.
+  const appPid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, "utf8")) : NaN;
+  const pid = Number.isInteger(appPid) && appPid > 0 ? appPid : app.process().pid;
   // Every call into the app has a deadline: a blocked main process otherwise hangs the run.
   const deadline = (promise, what) => withDeadline(promise, 180_000, `${label}: ${what}`);
   try {
@@ -283,7 +310,7 @@ async function runApp(label, spec, fn) {
     results[label] = { error: String(error?.stack || error) };
     const report = await hangReport(label, pid);
     if (report) results[label].hang = report;
-    const tail = log.split("\n").slice(-60).join("\n");
+    const tail = readLog().split("\n").slice(-60).join("\n");
     console.log(
       `${label}: ${error?.message || error}\n${report}\napp output (last 60 lines):\n${tail}`,
     );
@@ -293,9 +320,8 @@ async function runApp(label, spec, fn) {
         process.kill(pid, "SIGKILL");
       } catch {}
     });
-    fs.writeFileSync(path.join(out, `${label}.log`), log);
   }
-  Object.assign(results[label], summarizeLog(log));
+  Object.assign(results[label], summarizeLog(readLog()));
   console.log(`${label}: ${results[label].error ? "failed" : "done"}`);
 }
 

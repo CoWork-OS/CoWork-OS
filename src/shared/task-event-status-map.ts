@@ -64,12 +64,24 @@ export const TASK_EVENT_STATUS_MAP: Readonly<Partial<Record<string, Task["status
 };
 
 /** Resolve payload-sensitive progress without reactivating a paused session. */
+/**
+ * Events that never change their task's status: a suggested task can be started or dismissed
+ * long after the proposing task finished its turn.
+ */
+const STATUS_NEUTRAL_EVENT_TYPES = new Set(["task_proposal_created", "task_proposal_updated"]);
+
 export function getTaskEventStatus(
   type: string,
   payload?: TaskEvent["payload"],
 ): Task["status"] | undefined {
   // Live renderer events arrive as timeline envelopes that carry the legacy type.
   const legacyType = typeof payload?.legacyType === "string" ? payload.legacyType : undefined;
+  if (
+    STATUS_NEUTRAL_EVENT_TYPES.has(type) ||
+    (legacyType && STATUS_NEUTRAL_EVENT_TYPES.has(legacyType))
+  ) {
+    return undefined;
+  }
   const progressType = type.startsWith("timeline_") && legacyType ? legacyType : type;
   if (progressType === "progress_update" && payload?.message === "Paused - awaiting user input") {
     return "paused";

@@ -72,6 +72,10 @@ The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/l
 
 ## Features
 
+### Suggested tasks
+
+When the agent notices work outside your request, it proposes it as a suggested task under its answer and does not do it unasked. Click **Start** to run it as its own task (**Options** sets folder, worktree, model, effort and permissions), **Do it here** to have the same conversation do it, or **Start all**. Nothing runs until you choose. [Suggested Tasks](suggested-tasks.md)
+
 ### Composer predictions
 
 The empty composer can suggest your next message after a response. Press **Tab** to accept, then edit and send. Enable or disable predictions under **Settings → Appearance → Composer**; a first-use sidebar tooltip links to the setting. Prediction generation uses your selected LLM provider and consumes tokens, including suggestions you dismiss. [Composer Predictions](composer-predictions.md)

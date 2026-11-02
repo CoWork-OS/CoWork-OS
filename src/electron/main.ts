@@ -5837,6 +5837,18 @@ if (isMacSafeStorageMigrationWorker) {
             : await dialog.showOpenDialog(options);
         return result.canceled ? null : (result.filePaths[0] ?? null);
       },
+      pickCookiesFile: async () => {
+        const options = {
+          title: "Choose a cookies.txt file",
+          properties: ["openFile" as const],
+          filters: [{ name: "cookies.txt", extensions: ["txt"] }],
+        };
+        const result =
+          mainWindow && !mainWindow.isDestroyed()
+            ? await dialog.showOpenDialog(mainWindow, options)
+            : await dialog.showOpenDialog(options);
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
       confirm: async ({ message, detail, confirmLabel }) => {
         const options = {
           type: "question" as const,

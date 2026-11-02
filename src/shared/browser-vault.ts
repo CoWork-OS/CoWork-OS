@@ -12,6 +12,19 @@ export interface BrowserVaultItem {
   hasOtp?: boolean;
   source: BrowserVaultSource;
 }
+/**
+ * An imported cookie jar (a cookies.txt file), saved encrypted for the Camofox browser.
+ * Metadata only: cookie values never leave the main process.
+ */
+export interface BrowserCookieJarListing {
+  id: string;
+  label: string;
+  source: string;
+  /** Distinct cookie domains without a leading dot, sorted; at most 12. */
+  sites: string[];
+  cookies: number;
+  createdAt: number;
+}
 export interface BrowserVaultPrompt {
   id: string;
   taskId: string;

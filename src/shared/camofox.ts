@@ -1,0 +1,63 @@
+/**
+ * Camofox browser provider: the renderer-facing shapes. Camofox is a Firefox-based browser
+ * server the user runs on this Mac; CoWork only drives it when the agent asks for
+ * `browser_provider: "camofox"`. Its keys stay in the main process; the renderer only
+ * learns whether one is stored.
+ */
+
+export const CAMOFOX_DEFAULT_SERVER_URL = "http://127.0.0.1:9377";
+/** Loopback port of CoWork's network-policy proxy that Camofox must send its traffic through. */
+export const CAMOFOX_DEFAULT_PROXY_PORT = 9378;
+
+export interface CamofoxDisplaySettings {
+  enabled: boolean;
+  /** Camofox server base URL; loopback only. */
+  serverUrl: string;
+  proxyPort: number;
+  /** Keep one Camofox identity per workspace (cookies and logins carry across tasks). */
+  persistentIdentity: boolean;
+  /** CAMOFOX_ACCESS_KEY is stored (sent as a bearer token on every request; required). */
+  accessKeyConfigured: boolean;
+  /** CAMOFOX_API_KEY is stored (sent only when loading saved cookies). */
+  apiKeyConfigured: boolean;
+}
+
+/** Key fields: omitted keeps the stored key, `null` clears it. */
+export interface CamofoxSettingsUpdate {
+  enabled?: boolean;
+  serverUrl?: string;
+  proxyPort?: number;
+  persistentIdentity?: boolean;
+  accessKey?: string | null;
+  apiKey?: string | null;
+}
+
+export interface CamofoxConnectionResult {
+  /** The server answered /health. */
+  reachable: boolean;
+  /** The server's traffic provably goes through CoWork's policy proxy. */
+  proxied?: boolean;
+  error?: string;
+  /** The command to start Camofox so it passes the check. */
+  startCommand?: string;
+}
+
+/**
+ * How to start Camofox so it listens on loopback only, requires the access key, and browses
+ * through CoWork's proxy. The key itself stays out of the UI; the user fills it in.
+ */
+export function camofoxStartCommand(serverUrl: string, proxyPort: number): string {
+  let host = "127.0.0.1";
+  let port = "9377";
+  try {
+    const parsed = new URL(serverUrl);
+    host = parsed.hostname.replace(/^\[|\]$/g, "") || host;
+    port = parsed.port || port;
+  } catch {
+    // Fall back to Camofox's defaults.
+  }
+  return (
+    `CAMOFOX_BIND_HOST=${host} CAMOFOX_PORT=${port} CAMOFOX_ACCESS_KEY=<your access key> ` +
+    `PROXY_HOST=127.0.0.1 PROXY_PORT=${proxyPort} npm start`
+  );
+}

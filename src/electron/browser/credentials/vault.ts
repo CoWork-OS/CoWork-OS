@@ -8,10 +8,15 @@
  *   `withSecret`, and the listing has sites and user names only. There is no way to read,
  *   copy or export a password from the app.
  * - A login belongs to one exact origin (see login-origin.ts) and one browser profile.
+ * - Imported cookie jars (cookies.txt files) are kept per profile for the Camofox browser.
+ *   Each jar's cookies are sealed together as one blob; only its label, sites, count and date
+ *   are stored beside it. Cookie values leave this module only through `cookiesForHost`,
+ *   which is for the main process.
  */
 
 import { randomUUID } from "crypto";
 import type {
+  BrowserCookieJarListing,
   BrowserVaultFields,
   BrowserVaultItem,
   BrowserVaultKind,
@@ -22,10 +27,14 @@ import { parseAuthenticator } from "./totp";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 import { getSafeStorage } from "../../utils/safe-storage";
 import type { ImportedLogin } from "./password-csv";
+import { MAX_COOKIES, type CookieSetDetails } from "./cookie-import";
 
 const CATEGORY = "browser-vault" as const;
 const SEALED_PREFIX = "os1:";
 export const MAX_VAULT_ENTRIES_PER_PROFILE = 20_000;
+export const MAX_COOKIE_JARS_PER_PROFILE = 50;
+const MAX_COOKIE_JAR_CHARS = 8 * 1024 * 1024;
+const MAX_JAR_LISTING_SITES = 12;
 
 export type VaultErrorCode = "encryption_unavailable" | "too_many" | "storage_failed" | "not_found";
 
@@ -109,9 +118,23 @@ interface StoredEntry {
   lastUsedAt?: number;
 }
 
+interface StoredCookieJar {
+  id: string;
+  label: string;
+  source: string;
+  /** Every distinct cookie domain, without a leading dot, sorted. */
+  sites: string[];
+  cookies: number;
+  createdAt: number;
+  /** The jar's whole cookie list as JSON, sealed as one blob. */
+  sealed: string;
+}
+
 export interface VaultFile {
   version: 1;
   profiles: Record<string, StoredEntry[]>;
+  /** Cookie jars per profile; files written before jars existed have none. */
+  cookieJars?: Record<string, StoredCookieJar[]>;
 }
 
 /** What the app may show about a saved login. */
@@ -135,6 +158,42 @@ function listingOf(entry: StoredEntry): VaultListing {
     username: entry.username,
     createdAt: entry.createdAt,
     ...(entry.lastUsedAt ? { lastUsedAt: entry.lastUsedAt } : {}),
+  };
+}
+
+function jarListingOf(jar: StoredCookieJar): BrowserCookieJarListing {
+  return {
+    id: jar.id,
+    label: jar.label,
+    source: jar.source,
+    sites: jar.sites.slice(0, MAX_JAR_LISTING_SITES),
+    cookies: jar.cookies,
+    createdAt: jar.createdAt,
+  };
+}
+
+/** A cookie's domain without the dot, or its URL's host when it is host-only. */
+function cookieSite(cookie: CookieSetDetails): string {
+  if (cookie.domain) return cookie.domain.toLowerCase().replace(/^\./, "");
+  try {
+    return new URL(cookie.url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/** Only the fields a browser needs, so nothing else is sealed into a jar. */
+function copyCookie(cookie: CookieSetDetails): CookieSetDetails {
+  return {
+    url: cookie.url,
+    name: cookie.name,
+    value: cookie.value,
+    ...(cookie.domain ? { domain: cookie.domain } : {}),
+    path: cookie.path,
+    secure: cookie.secure,
+    httpOnly: cookie.httpOnly,
+    ...(cookie.expirationDate !== undefined ? { expirationDate: cookie.expirationDate } : {}),
+    sameSite: cookie.sameSite,
   };
 }
 
@@ -247,14 +306,113 @@ export class BrowserVault {
     return true;
   }
 
+  /** Removes every saved login, autofill item and cookie jar of a profile. */
   clear(profileKey: string): number {
     const file = this.read();
-    const count = this.entries(file, profileKey).length;
+    const count = this.entries(file, profileKey).length + this.jars(file, profileKey).length;
     if (count === 0) return 0;
     const profiles = { ...file.profiles };
     delete profiles[profileKey];
-    this.write({ ...file, profiles });
+    const cookieJars = { ...file.cookieJars };
+    delete cookieJars[profileKey];
+    this.write({ ...file, profiles, cookieJars });
     return count;
+  }
+
+  /** Saves imported cookies as one sealed jar. Like passwords, never without OS encryption. */
+  addCookieJar(
+    profileKey: string,
+    jar: { label: string; source: string; cookies: CookieSetDetails[] },
+  ): BrowserCookieJarListing {
+    if (!this.sealer.available()) {
+      throw new VaultError("encryption_unavailable", "OS encryption is unavailable.");
+    }
+    if (jar.cookies.length === 0) throw new Error("There are no cookies to save.");
+    if (jar.cookies.length > MAX_COOKIES) {
+      throw new VaultError("too_many", "There are too many cookies to save.");
+    }
+    const file = this.read();
+    const jars = [...this.jars(file, profileKey)];
+    if (jars.length >= MAX_COOKIE_JARS_PER_PROFILE) {
+      throw new VaultError("too_many", "There are too many saved cookie files. Remove one first.");
+    }
+    const cookies = jar.cookies.map(copyCookie);
+    const plain = JSON.stringify(cookies);
+    for (const cookie of cookies) cookie.value = "";
+    if (plain.length > MAX_COOKIE_JAR_CHARS) {
+      throw new VaultError("too_many", "These cookies are too large to save.");
+    }
+    const stored: StoredCookieJar = {
+      id: this.newId(),
+      label: jar.label.trim().slice(0, 80) || "Cookies",
+      source: jar.source.trim().slice(0, 80) || "Imported cookies",
+      sites: [...new Set(cookies.map(cookieSite).filter(Boolean))].sort(),
+      cookies: cookies.length,
+      createdAt: this.now(),
+      sealed: this.sealer.seal(plain),
+    };
+    jars.push(stored);
+    this.write({ ...file, cookieJars: { ...file.cookieJars, [profileKey]: jars } });
+    return jarListingOf(stored);
+  }
+
+  /** Newest first; metadata only. */
+  listCookieJars(profileKey: string): BrowserCookieJarListing[] {
+    return this.jars(this.read(), profileKey)
+      .map(jarListingOf)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  removeCookieJar(profileKey: string, id: string): boolean {
+    const file = this.read();
+    const jars = this.jars(file, profileKey);
+    const next = jars.filter((jar) => jar.id !== id);
+    if (next.length === jars.length) return false;
+    const cookieJars = { ...file.cookieJars, [profileKey]: next };
+    if (next.length === 0) delete cookieJars[profileKey];
+    this.write({ ...file, cookieJars });
+    return true;
+  }
+
+  /**
+   * Main process only: the saved cookies a request to `host` (a bare hostname, no port) would
+   * carry, unsealed. A host-only cookie matches its exact host; a domain cookie `.example.com`
+   * matches example.com and its subdomains. Expired cookies are left out, paths and `secure`
+   * are left to the caller, and when jars hold the same cookie (name, domain, path) the
+   * newest jar wins. Only jars that can match are unsealed.
+   */
+  cookiesForHost(
+    profileKey: string,
+    host: string,
+    nowSeconds: number = Math.floor(this.now() / 1000),
+  ): CookieSetDetails[] {
+    const target = host.trim().toLowerCase().replace(/\.$/, "");
+    if (!/^[a-z0-9.-]+$/.test(target)) return [];
+    const covers = (site: string) => target === site || target.endsWith(`.${site}`);
+    const jars = this.jars(this.read(), profileKey).filter((jar) => jar.sites.some(covers));
+    if (jars.length === 0) return [];
+    if (!this.sealer.available()) {
+      throw new VaultError("encryption_unavailable", "OS encryption is unavailable.");
+    }
+    const found = new Map<string, CookieSetDetails>();
+    // Jars are stored oldest first, so a newer jar's copy of a cookie replaces an older one.
+    for (const jar of jars) {
+      let cookies: unknown;
+      try {
+        cookies = JSON.parse(this.sealer.open(jar.sealed));
+      } catch {
+        // A jar that can no longer be opened is skipped; the others still work.
+        continue;
+      }
+      if (!Array.isArray(cookies)) continue;
+      for (const cookie of cookies as CookieSetDetails[]) {
+        if (cookie.expirationDate !== undefined && cookie.expirationDate <= nowSeconds) continue;
+        const site = cookieSite(cookie);
+        if (!(cookie.domain ? covers(site) : site === target)) continue;
+        found.set(`${cookie.name}\n${cookie.domain ?? site}\n${cookie.path}`, cookie);
+      }
+    }
+    return [...found.values()];
   }
 
   /**
@@ -358,11 +516,24 @@ export class BrowserVault {
     if (!loaded || loaded.version !== 1 || typeof loaded.profiles !== "object") {
       return { version: 1, profiles: {} };
     }
+    if (
+      loaded.cookieJars !== undefined &&
+      (typeof loaded.cookieJars !== "object" ||
+        loaded.cookieJars === null ||
+        Array.isArray(loaded.cookieJars))
+    ) {
+      return { ...loaded, cookieJars: undefined };
+    }
     return loaded;
   }
 
   private entries(file: VaultFile, profileKey: string): StoredEntry[] {
     const list = file.profiles[profileKey];
+    return Array.isArray(list) ? list : [];
+  }
+
+  private jars(file: VaultFile, profileKey: string): StoredCookieJar[] {
+    const list = file.cookieJars?.[profileKey];
     return Array.isArray(list) ? list : [];
   }
 

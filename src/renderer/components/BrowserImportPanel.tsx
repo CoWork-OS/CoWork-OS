@@ -1,11 +1,14 @@
-import type { BrowserVaultItem } from "../../shared/browser-vault";
+import type { BrowserCookieJarListing, BrowserVaultItem } from "../../shared/browser-vault";
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Trash2 } from "lucide-react";
+import { Cookie, KeyRound, Trash2 } from "lucide-react";
 import type { BrowserImportableBrowser, BrowserImportPrepareResult } from "../../electron/preload";
 
 type Staged = Extract<BrowserImportPrepareResult, { success: true }>;
 
-/** Settings > Browser: bring cookies and saved logins in from another browser or a CSV file. */
+/**
+ * Settings > Browser: bring cookies and saved logins in from another browser or a CSV file,
+ * and cookies from a cookies.txt file (saved encrypted for Camofox, the in-app browser, or both).
+ */
 export function BrowserImportPanel({
   workspaceId,
   onNotice,
@@ -23,7 +26,11 @@ export function BrowserImportPanel({
   const [error, setError] = useState("");
   const [staged, setStaged] = useState<Staged | null>(null);
   const [fileToken, setFileToken] = useState("");
+  const [fileHoldsCookies, setFileHoldsCookies] = useState(false);
   const [logins, setLogins] = useState<BrowserVaultItem[]>([]);
+  const [jars, setJars] = useState<BrowserCookieJarListing[]>([]);
+  const [saveJar, setSaveJar] = useState(true);
+  const [applyJar, setApplyJar] = useState(false);
 
   const api = window.electronAPI;
   const selected = browsers.find((browser) => browser.id === browserId);
@@ -41,6 +48,7 @@ export function BrowserImportPanel({
           source: "local",
         })),
     );
+    setJars(result?.cookieJars ?? []);
   }, [api, workspaceId]);
 
   useEffect(() => {
@@ -91,27 +99,43 @@ export function BrowserImportPanel({
     setBusy(true);
     setError("");
     const token = staged.token;
+    const cookiesFile = staged.kind === "cookies_txt";
     try {
       const result = await api.browserImportCommit({
         workspaceId,
         token,
         cookies: cookies || staged.logins === 0,
         passwords: passwords || staged.cookies === 0,
+        ...(cookiesFile ? { saveToVault: saveJar && canStore, applyToBrowser: applyJar } : {}),
       });
       setStaged(null);
       if (!result.success) {
         if (result.code !== "cancelled") setError(result.error);
         return;
       }
-      const parts = [
-        result.logins + result.loginsUpdated > 0
-          ? `${result.logins + result.loginsUpdated} saved logins`
-          : "",
-        result.cookies > 0 ? `${result.cookies} cookies` : "",
-      ].filter(Boolean);
-      onNotice(`Imported ${parts.join(" and ") || "nothing"}`);
+      if (cookiesFile) {
+        onNotice(
+          [
+            result.cookiesSaved > 0 ? `Saved ${result.cookiesSaved} cookies for Camofox` : "",
+            result.cookies > 0 ? `Added ${result.cookies} cookies to the in-app browser` : "",
+          ]
+            .filter(Boolean)
+            .join(". ") || "No cookies were imported",
+        );
+      } else {
+        const parts = [
+          result.logins + result.loginsUpdated > 0
+            ? `${result.logins + result.loginsUpdated} saved logins`
+            : "",
+          result.cookies > 0 ? `${result.cookies} cookies` : "",
+        ].filter(Boolean);
+        onNotice(`Imported ${parts.join(" and ") || "nothing"}`);
+      }
       void loadLogins();
-      if (result.canDeleteFile) setFileToken(token);
+      if (result.canDeleteFile) {
+        setFileToken(token);
+        setFileHoldsCookies(cookiesFile);
+      }
     } finally {
       setBusy(false);
     }
@@ -215,6 +239,18 @@ export function BrowserImportPanel({
             >
               Import passwords from a CSV file…
             </button>
+            <button
+              type="button"
+              className="settings-button small"
+              disabled={busy || !workspaceId}
+              onClick={() => {
+                setSaveJar(true);
+                setApplyJar(false);
+                void prepare({ workspaceId, kind: "cookies_txt" });
+              }}
+            >
+              Import cookies.txt…
+            </button>
           </div>
           {!canStore && (
             <p className="settings-description">
@@ -245,11 +281,34 @@ export function BrowserImportPanel({
               {staged.logins + staged.cookies > staged.sampleSites.length ? " and more" : ""}.
             </p>
           )}
+          {staged.kind === "cookies_txt" && (
+            <div className="browser-settings-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={saveJar && canStore}
+                  disabled={!canStore}
+                  onChange={(event) => setSaveJar(event.target.checked)}
+                />{" "}
+                Save encrypted for Camofox
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={applyJar}
+                  onChange={(event) => setApplyJar(event.target.checked)}
+                />{" "}
+                Also sign in the in-app browser
+              </label>
+            </div>
+          )}
           <div className="browser-settings-row">
             <button
               type="button"
               className="settings-button small"
-              disabled={busy}
+              disabled={
+                busy || (staged.kind === "cookies_txt" && !(saveJar && canStore) && !applyJar)
+              }
               onClick={() => void commit()}
             >
               Import
@@ -263,7 +322,9 @@ export function BrowserImportPanel({
 
       {fileToken && (
         <div className="browser-import-review">
-          <p>The password file is still on your Mac in plain text.</p>
+          <p>
+            The {fileHoldsCookies ? "cookies" : "password"} file is still on your Mac in plain text.
+          </p>
           <div className="browser-settings-row">
             <button
               type="button"
@@ -271,7 +332,8 @@ export function BrowserImportPanel({
               onClick={() =>
                 void api.browserImportDeleteFile?.({ token: fileToken }).then((result) => {
                   setFileToken("");
-                  if (result?.deleted) onNotice("Password file deleted");
+                  if (result?.deleted)
+                    onNotice(fileHoldsCookies ? "Cookies file deleted" : "Password file deleted");
                 })
               }
             >
@@ -321,6 +383,42 @@ export function BrowserImportPanel({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {jars.length > 0 && (
+        <div className="browser-saved-logins">
+          <label>Saved cookies for Camofox ({jars.length})</label>
+          <ul className="browser-settings-list">
+            {jars.map((jar) => (
+              <li key={jar.id}>
+                <Cookie size={13} aria-hidden="true" />
+                <span className="browser-settings-list-main">
+                  <strong>{jar.label}</strong>
+                  <span>
+                    {jar.cookies} cookie{jar.cookies === 1 ? "" : "s"} ·{" "}
+                    {jar.sites.slice(0, 3).join(", ")}
+                    {jar.sites.length > 3 ? " and more" : ""} ·{" "}
+                    {new Date(jar.createdAt).toLocaleDateString()}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove saved cookies from ${jar.label}`}
+                  onClick={() =>
+                    void api.removeBrowserCookieJar?.({ workspaceId, id: jar.id }).then(loadLogins)
+                  }
+                >
+                  <Trash2 size={13} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {logins.length + jars.length > 0 && (
+        <div className="browser-saved-logins">
           <button
             type="button"
             className="settings-button small"

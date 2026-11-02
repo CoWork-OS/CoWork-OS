@@ -179,6 +179,8 @@ export type SettingsCategory =
   | "browser"
   // Computer Use backend that drives a Cua Space; holds its bearer token.
   | "cua-space"
+  // Opt-in Camofox browser provider (loopback server); holds its access and API keys.
+  | "camofox"
   | "adaptive-style-engine"
   | "routine-workflow-secrets"
   | "acp-remote-agent-secrets"

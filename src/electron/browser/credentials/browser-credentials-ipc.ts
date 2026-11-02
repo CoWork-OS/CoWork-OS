@@ -1,5 +1,6 @@
 /**
- * IPC for importing cookies and saved logins, and for filling a saved login.
+ * IPC for importing cookies and saved logins, and for filling a saved login. A cookies.txt
+ * file can also be saved as an encrypted cookie jar for the Camofox browser.
  *
  * Trust rules enforced here (the renderer is a web context and is not trusted):
  * - Only the app's main window may call these handlers.
@@ -10,6 +11,7 @@
  */
 
 import * as fs from "fs/promises";
+import * as path from "path";
 import { browserPartitionFor, browserProfileKey } from "../../../shared/browser-profile";
 import { IPC_CHANNELS } from "../../../shared/types";
 import { fillLogin, registerFilledPassword, type FillTarget } from "./autofill";
@@ -25,6 +27,7 @@ import {
   type ExternalBrowserDeps,
 } from "./external-browsers";
 import { ImportSessions, type StagedImport } from "./import-session";
+import { MAX_COOKIES_TXT_BYTES, parseNetscapeCookies } from "./netscape-cookies";
 import { parsePasswordCsv, type ImportedLogin } from "./password-csv";
 import { VaultError, type BrowserVault } from "./vault";
 
@@ -44,6 +47,8 @@ export interface CredentialsIpcDeps {
   getTabContents: (taskId: string, sessionId: string) => Promise<FillTarget | null>;
   /** Native file picker (main-owned). Returns the chosen path or null. */
   pickPasswordFile: () => Promise<string | null>;
+  /** Native picker for a cookies.txt file (main-owned). Returns the chosen path or null. */
+  pickCookiesFile?: () => Promise<string | null>;
   /** Native yes/no confirmation. */
   confirm: (options: { message: string; detail: string; confirmLabel: string }) => Promise<boolean>;
   /** Touch ID when available; null when this Mac cannot do it. */
@@ -91,6 +96,7 @@ function summarize(staged: StagedImport) {
   for (const login of staged.logins) sites.add(hostOf(login.origin));
   for (const cookie of staged.cookies) sites.add(hostOf(cookie.url));
   return {
+    kind: staged.kind ?? "browser",
     source: staged.source,
     cookies: staged.cookies.length,
     logins: staged.logins.length,
@@ -105,7 +111,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
   let busy = false;
   let fillCooldownUntil = 0;
   // The picked file's path outlives the staged secrets only until the user answers the delete prompt.
-  const stagedFiles = new Map<string, string | undefined>();
+  const stagedFiles = new Map<string, { file: string; holds: "passwords" | "cookies" }>();
 
   const guarded = (
     channel: string,
@@ -121,7 +127,10 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
     if (error instanceof ImportError || error instanceof VaultError || error instanceof CsvError) {
       return { success: false as const, code: error.code, error: error.message };
     }
-    if (error instanceof Error && error.name === "PasswordCsvError") {
+    if (
+      error instanceof Error &&
+      (error.name === "PasswordCsvError" || error.name === "CookiesTxtError")
+    ) {
       return { success: false as const, code: "bad_file", error: error.message };
     }
     return { success: false as const, code: "failed", error: "The import could not be completed." };
@@ -130,6 +139,58 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
   const profileOf = (data: Any): { workspaceId: string; profileKey: string } | null => {
     const workspaceId = readString(data?.workspaceId);
     return workspaceId ? { workspaceId, profileKey: browserProfileKey(workspaceId) } : null;
+  };
+
+  // A cookies.txt import goes to the vault (for Camofox), the in-app browser, or both.
+  const commitCookiesFile = async (
+    profile: { workspaceId: string; profileKey: string },
+    staged: StagedImport,
+    data: Any,
+  ) => {
+    const saveToVault = data?.saveToVault !== false;
+    const applyToBrowser = data?.applyToBrowser === true;
+    const cookies = staged.cookies;
+    if ((!saveToVault && !applyToBrowser) || cookies.length === 0)
+      return { success: false as const, code: "empty", error: "Nothing selected." };
+    if (saveToVault && !vault.canStore()) {
+      return {
+        success: false as const,
+        code: "encryption_unavailable",
+        error: "This Mac's secure storage isn't available, so cookies can't be saved safely.",
+      };
+    }
+    const sites = [...new Set(cookies.map((cookie) => hostOf(cookie.url)))];
+    const destinations = [
+      saveToVault ? "saved encrypted with this Mac's secure storage for the Camofox browser" : "",
+      applyToBrowser ? "added to the in-app browser" : "",
+    ].filter(Boolean);
+    const approved = await deps.confirm({
+      message: `Import ${cookies.length} cookie${cookies.length === 1 ? "" : "s"} from ${staged.label || staged.source}?`,
+      detail:
+        `Including ${sites.slice(0, 6).join(", ")}${sites.length > 6 ? " and more" : ""}.\n\n` +
+        `They will be ${destinations.join(" and ")}. Cookies can sign CoWork in to these sites.`,
+      confirmLabel: "Import",
+    });
+    if (!approved)
+      return { success: false as const, code: "cancelled", error: "Import cancelled." };
+
+    const result = { cookies: 0, cookiesRejected: 0, cookiesSaved: 0, logins: 0, loginsUpdated: 0 };
+    if (saveToVault) {
+      result.cookiesSaved = vault.addCookieJar(profile.profileKey, {
+        label: staged.label || staged.source,
+        source: staged.source,
+        cookies,
+      }).cookies;
+    }
+    if (applyToBrowser) {
+      const applied = await applyCookies(
+        deps.cookieJar(browserPartitionFor(profile.workspaceId)),
+        cookies,
+      );
+      result.cookies = applied.imported;
+      result.cookiesRejected = applied.rejected;
+    }
+    return { success: true as const, ...result, canDeleteFile: Boolean(staged.sourceFile) };
   };
 
   guarded(
@@ -147,7 +208,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
     async (data) => {
       const profile = profileOf(data);
       const kind = data?.kind;
-      if (!profile || (kind !== "browser" && kind !== "csv")) {
+      if (!profile || (kind !== "browser" && kind !== "csv" && kind !== "cookies_txt")) {
         return { success: false as const, code: "invalid", error: "Invalid request." };
       }
       if (busy)
@@ -159,9 +220,33 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
         let logins: ImportedLogin[] = [];
         let source = "";
         let sourceFile: string | undefined;
+        let label: string | undefined;
         let skipped: Record<string, number> = {};
 
-        if (kind === "csv") {
+        if (kind === "cookies_txt") {
+          const file = deps.pickCookiesFile ? await deps.pickCookiesFile() : null;
+          if (!file)
+            return { success: false as const, code: "cancelled", error: "No file chosen." };
+          const stat = await fs.stat(file);
+          if (!stat.isFile() || stat.size > MAX_COOKIES_TXT_BYTES) {
+            return {
+              success: false as const,
+              code: "bad_file",
+              error: "That file is not a usable cookies.txt file.",
+            };
+          }
+          const parsed = parseNetscapeCookies(decodeCsvBytes(await fs.readFile(file)));
+          const mapped = mapCookies(parsed.cookies, nowSeconds);
+          cookies = mapped.cookies;
+          skipped = {
+            invalid: parsed.skipped.invalid + mapped.skipped.invalid,
+            expired: mapped.skipped.expired,
+            tooMany: parsed.skipped.tooMany + mapped.skipped.tooMany,
+          };
+          source = "cookies.txt file";
+          sourceFile = file;
+          label = path.basename(file).slice(0, 80);
+        } else if (kind === "csv") {
           const file = await deps.pickPasswordFile();
           if (!file)
             return { success: false as const, code: "cancelled", error: "No file chosen." };
@@ -231,10 +316,12 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
         }
         const staged: StagedImport = {
           profileKey: profile.profileKey,
+          kind,
           cookies,
           logins,
           source,
           sourceFile,
+          label,
         };
         const token = sessions.stage(staged);
         return { success: true as const, token, skipped, ...summarize(staged) };
@@ -260,6 +347,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
           error: "This import expired. Start it again.",
         };
       try {
+        if (staged.kind === "cookies_txt") return await commitCookiesFile(profile, staged, data);
         const includeCookies = data?.cookies !== false;
         const includePasswords = data?.passwords !== false;
         const cookies = includeCookies ? staged.cookies : [];
@@ -288,7 +376,13 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
         if (!approved)
           return { success: false as const, code: "cancelled", error: "Import cancelled." };
 
-        const result = { cookies: 0, cookiesRejected: 0, logins: 0, loginsUpdated: 0 };
+        const result = {
+          cookies: 0,
+          cookiesRejected: 0,
+          cookiesSaved: 0,
+          logins: 0,
+          loginsUpdated: 0,
+        };
         if (logins.length > 0) {
           const added = vault.addMany(profile.profileKey, logins);
           result.logins = added.added;
@@ -310,7 +404,10 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
         for (const login of staged.logins) login.password = "";
         for (const cookie of staged.cookies) cookie.value = "";
         if (staged.sourceFile) {
-          stagedFiles.set(String(data?.token ?? ""), staged.sourceFile);
+          stagedFiles.set(String(data?.token ?? ""), {
+            file: staged.sourceFile,
+            holds: staged.kind === "cookies_txt" ? "cookies" : "passwords",
+          });
           while (stagedFiles.size > 8)
             stagedFiles.delete(stagedFiles.keys().next().value as string);
         }
@@ -323,19 +420,24 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
     IPC_CHANNELS.BROWSER_IMPORT_DELETE_FILE,
     async (data) => {
       const token = typeof data?.token === "string" ? data.token : "";
-      const file = stagedFiles.get(token);
+      const picked = stagedFiles.get(token);
       stagedFiles.delete(token);
-      if (!file) return { success: false as const, code: "not_found", error: "No file to delete." };
+      if (!picked)
+        return { success: false as const, code: "not_found", error: "No file to delete." };
+      const cookiesFile = picked.holds === "cookies";
       const approved = await deps.confirm({
-        message: "Delete the password file?",
+        message: cookiesFile ? "Delete the cookies file?" : "Delete the password file?",
         detail:
-          "It holds your passwords in plain text. The file will be overwritten and removed. " +
+          (cookiesFile
+            ? "It holds sign-in cookies in plain text, and anyone with it can use them. "
+            : "It holds your passwords in plain text. ") +
+          "The file will be overwritten and removed. " +
           "On SSDs an overwrite can't be guaranteed, so also empty the Trash and keep disk encryption on.",
         confirmLabel: "Delete file",
       });
       if (!approved) return { success: true as const, deleted: false };
       try {
-        await deps.shredFile(file);
+        await deps.shredFile(picked.file);
         return { success: true as const, deleted: true };
       } catch {
         return { success: false as const, code: "failed", error: "The file could not be deleted." };
@@ -363,6 +465,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
             success: true as const,
             logins: vault.list(profile.profileKey),
             items: vault.listItems(profile.profileKey),
+            cookieJars: vault.listCookieJars(profile.profileKey),
             canStore: vault.canStore(),
           }
         : { success: false as const, logins: [], canStore: false };
@@ -392,7 +495,14 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
     (data) => {
       const profile = profileOf(data);
       const id = readString(data?.id, 80);
-      return { success: Boolean(profile && id && vault.remove(profile.profileKey, id)) };
+      const kind = data?.kind ?? "item";
+      if (!profile || !id || (kind !== "item" && kind !== "cookie_jar")) return { success: false };
+      return {
+        success:
+          kind === "cookie_jar"
+            ? vault.removeCookieJar(profile.profileKey, id)
+            : vault.remove(profile.profileKey, id),
+      };
     },
     () => ({ success: false }),
   );
@@ -403,7 +513,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
       const profile = profileOf(data);
       if (!profile) return { success: false as const, removed: 0 };
       const approved = await deps.confirm({
-        message: "Remove all saved passwords and autofill items?",
+        message: "Remove all saved passwords, autofill items and cookies?",
         detail: "They are deleted from this app. Your other browsers are not affected.",
         confirmLabel: "Remove all",
       });

@@ -269,6 +269,7 @@ How it is kept safe:
 - **Other browsers' files are never modified.** Their databases are copied to a private temporary folder, read read-only with the system `sqlite3`, and the copies are deleted. Profile ids are validated and never used as paths directly.
 - **CSV files are untrusted input.** Size, row and field limits apply; binary or non-UTF-8 files, non-web and `http://` (non-loopback) logins and rows without a password are skipped and counted. After importing, you can delete the plain-text file (overwrite then remove; on SSDs this can't be guaranteed, so keep disk encryption on and empty the Trash).
 - Cookies are validated (host, name, value and prefix rules, expiry) before being set on the workspace profile; partitioned, container and expired cookies are skipped.
+- **cookies.txt files** (the Netscape format browser extensions and `yt-dlp` export) can be imported too. By default their cookies are saved **encrypted in the vault** for the [Camofox browser](#camofox-browser) (one sealed blob per file, OS keychain); you can also sign the in-app browser in with them. The vault list shows each file's sites and cookie count with a remove button. After importing you can delete the plain-text file.
 
 Limits worth knowing: a page you fill a login into can read that field, as with any password manager; JavaScript strings holding a secret can't be wiped from memory on demand; Chrome-family Windows and Linux browsers aren't read directly (export a CSV).
 
@@ -362,6 +363,32 @@ Important behavior:
 - Use the visible Browser Workbench for local dev servers, private networks, generated HTML files, and cases where the user should watch the page and cursor.
 
 Browser Use Cloud API errors, live URLs, and CDP URLs are redacted before entering logs or model-visible output.
+
+## Camofox Browser
+
+[Camofox](https://github.com/jo-inc/camofox-browser) is a Firefox build with fingerprint spoofing that runs as a small REST server. CoWork can drive one you run on your own Mac. It is off by default and is used only when you ask for it ("open my feed in Camofox"); the agent then calls `browser_navigate` with `browser_provider: "camofox"`, and later browser tools stay on Camofox until `browser_close`. Respect each site's terms when you use it.
+
+Setup:
+
+1. Install Camofox (`git clone https://github.com/jo-inc/camofox-browser && cd camofox-browser && npm install`).
+2. Open **Settings > Browser > Camofox**, turn on **Let CoWork use Camofox when you ask for it**, and keep the default server URL (`http://127.0.0.1:9377`) and policy proxy port (`9378`) unless they clash with something.
+3. Start Camofox with the command the panel shows, for example:
+
+   ```bash
+   CAMOFOX_BIND_HOST=127.0.0.1 CAMOFOX_PORT=9377 PROXY_HOST=127.0.0.1 PROXY_PORT=9378 npm start
+   ```
+
+4. Press **Check connection**.
+
+How it is kept within CoWork's boundaries:
+
+- **Loopback only.** The server URL must be `127.0.0.1`, `::1` or `localhost`. Camofox has no authentication unless `CAMOFOX_ACCESS_KEY` is set, so a server on the network would let anyone there drive your sessions. Bind it with `CAMOFOX_BIND_HOST=127.0.0.1` (Camofox listens on every interface by default). If you set `CAMOFOX_ACCESS_KEY` or `CAMOFOX_API_KEY`, enter them in the panel; they are stored encrypted and never shown again.
+- **Every request goes through CoWork's network policy.** Like the in-app browser, Camofox must send its traffic through CoWork's policy proxy, which refuses cloud metadata and private network addresses, pins DNS, and applies the workspace's domain rules to every request, redirect and subresource. Camofox is started by you, so it reaches the proxy through `PROXY_HOST`/`PROXY_PORT`. Before every new tab CoWork opens a check page under `.invalid` that only its proxy can serve, with a one-time token; if Camofox shows anything else, CoWork refuses to use it and shows the start command. The proxy runs only while a task is using Camofox, so Camofox cannot reach anything on its own; when several tasks share it, a request must pass each one's policy.
+- **Identities.** By default each task gets a fresh Camofox identity whose session is closed on `browser_close`. **Keep one Camofox identity per workspace** keeps cookies and sign-ins across tasks. Bots get their own identities and never your saved cookies.
+- **Saved cookies.** `browser_navigate` with `use_saved_cookies: true` loads the vault cookies that apply to that site into Camofox. You are asked every time; cookie values go from the vault straight to Camofox and never reach the model. Cookies scoped to a whole suffix such as `.co.uk` are never sent. Camofox needs `CAMOFOX_API_KEY` for cookie import unless it runs in development mode on loopback.
+- **Camofox's own storage is not encrypted.** Camofox saves each identity's cookies in plain files under `~/.camofox/profiles` by default, including cookies CoWork loaded into it. Turn that off with `"persistence": { "enabled": false }` in `camofox.config.json` if you only want them in CoWork's vault.
+
+What Camofox supports: navigate, accessibility snapshots with refs (`e12`), click, fill, type, press, scroll, select, wait, back, forward, reload, screenshots, tabs and `browser_evaluate` (Developer mode). Hover, drag, uploads, dialogs, downloads, storage, emulation, traces and PDFs are refused while Camofox is active; `browser_close` returns to the in-app browser.
 
 ## Implementation Notes
 

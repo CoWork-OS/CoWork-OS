@@ -23,6 +23,13 @@ export interface BrowserNetworkProxyOptions {
   idleTimeoutMs?: number;
   /** Idle limit for established tunnels, which carry WebSockets and HTTP/2 sessions. */
   tunnelIdleTimeoutMs?: number;
+  /** Fixed loopback port, for a browser CoWork does not launch (Camofox). Default: any free port. */
+  port?: number;
+  /**
+   * Answers a plain-http request locally instead of fetching it, when it returns a body. Lets
+   * CoWork prove a browser really sends its traffic here (a name only this proxy can serve).
+   */
+  answer?: (target: URL) => string | null;
 }
 
 const IDLE_TIMEOUT_MS = 30_000;
@@ -58,6 +65,16 @@ export async function createBrowserNetworkProxy(
       const target = new URL(req.url || "");
       if (target.protocol !== "http:" || target.username || target.password)
         throw new Error("Invalid proxy target");
+      const answered = options.answer?.(target);
+      if (typeof answered === "string") {
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        res.end(answered);
+        req.resume();
+        return;
+      }
       assertAllowed(target.href);
       const headers: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers)) {
@@ -204,7 +221,7 @@ export async function createBrowserNetworkProxy(
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(options.port ?? 0, "127.0.0.1", resolve);
   });
   const port = (server.address() as { port: number }).port;
   return {

@@ -1297,6 +1297,18 @@ export const CuaSpaceSettingsSchema = z
   })
   .strict();
 
+export const CamofoxSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    serverUrl: z.string().max(200).optional(),
+    proxyPort: z.number().int().min(1024).max(65535).optional(),
+    persistentIdentity: z.boolean().optional(),
+    // null clears a stored key; omitted keeps it.
+    accessKey: z.string().max(512).nullable().optional(),
+    apiKey: z.string().max(512).nullable().optional(),
+  })
+  .strict();
+
 // ============ Notion Settings Schema ============
 
 export const NotionSettingsSchema = z.object({

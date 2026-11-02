@@ -28,6 +28,11 @@ import {
   normalizeBrowserUseTimeoutMinutes,
   redactBrowserUseUrl,
 } from "../browser/browser-use-cloud-client";
+import { CamofoxClient } from "../browser/camofox-client";
+import { getCamofoxPolicyProxy } from "../browser/camofox-policy-proxy";
+import { CAMOFOX_PROVIDER, CamofoxBrowserSession } from "../browser/camofox-session";
+import { CamofoxSettingsManager } from "../browser/camofox-settings";
+import { getBrowserVault } from "../../browser/credentials/vault";
 import {
   BrowserWorkbenchService,
   getBrowserWorkbenchService,
@@ -215,6 +220,8 @@ export class BrowserTools {
   };
   private browserUseCloudClient: BrowserUseCloudClient | null = null;
   private browserUseCloudSession: BrowserUseCloudSessionState | null = null;
+  /** Set while the agent browses with `browser_provider: "camofox"`, until browser_close. */
+  private camofoxSession: CamofoxBrowserSession | null = null;
   private visibleWorkbenchApprovals = new Set<string>();
   private historySearchApproved = false;
   private developerAccessApprovals = new Set<string>();
@@ -240,6 +247,8 @@ export class BrowserTools {
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
+    // A Camofox identity and policy lease belong to the workspace they started in.
+    void this.closeCamofox();
     // Recreate browser service with new workspace (and reset to defaults)
     this.browserService = new BrowserService(workspace, {
       headless: true,
@@ -714,6 +723,138 @@ export class BrowserTools {
     return await this.requestVisibleWorkbenchApproval(input, url);
   }
 
+  private isCamofoxProviderRequested(input: unknown): boolean {
+    const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    return (
+      typeof toolInput.browser_provider === "string" &&
+      toolInput.browser_provider.trim() === CAMOFOX_PROVIDER
+    );
+  }
+
+  /** Camofox handles this call: it is open for the task, or browser_navigate asks for it. */
+  private isCamofoxRouted(toolName: string, input: unknown): boolean {
+    if (!toolName.startsWith("browser_")) return false;
+    if (this.camofoxSession?.active) return true;
+    return toolName === "browser_navigate" && this.isCamofoxProviderRequested(input);
+  }
+
+  private async executeCamofoxTool(
+    toolName: string,
+    input: Any,
+    beforeEffect: () => Promise<void>,
+  ): Promise<Any> {
+    const settings = CamofoxSettingsManager.loadEnabled();
+    if (!settings) {
+      await this.closeCamofox();
+      return {
+        success: false,
+        browserProvider: CAMOFOX_PROVIDER,
+        error:
+          "The Camofox browser is not set up. The user can turn it on in Settings > Browser > Camofox.",
+      };
+    }
+    if (!this.camofoxSession?.active) {
+      const botId = this.getOwningBotId();
+      this.camofoxSession = new CamofoxBrowserSession(
+        settings,
+        new CamofoxClient({
+          origin: settings.origin,
+          accessKey: settings.accessKey,
+          apiKey: settings.apiKey,
+        }),
+        getCamofoxPolicyProxy(),
+        {
+          taskId: this.taskId,
+          identityScope: botId === null ? `${this.workspace.id}` : `bot-${botId}-${this.workspace.id}`,
+          // A bot, or a task a bot started, never signs in as the user.
+          mayUseSavedCookies: botId === null,
+          assertRequestAllowed: (url) => this.assertCamofoxRequestAllowed(url),
+          preflightNavigation: (url) => this.ensureVisibleNavigationAllowed(url),
+          savedCookiesForHost: (host) =>
+            getBrowserVault().cookiesForHost(browserProfileKey(this.workspace.id), host),
+          approveSavedCookies: (host, count) => this.approveCamofoxSavedCookies(host, count),
+          resolveScreenshotPath: async (filename) => {
+            const output = await this.resolveBrowserOutputPath(
+              filename,
+              `screenshot-${Date.now()}.png`,
+              "browser screenshot path",
+            );
+            const absolutePath = assertWorkspaceFilesystemAccess(
+              this.workspace,
+              output.path,
+              "write",
+              "browser screenshot path",
+              { externalApprovalGranted: output.externalApprovalGranted },
+            );
+            return {
+              absolutePath,
+              relativePath:
+                path.relative(this.workspace.path, absolutePath) || path.basename(absolutePath),
+            };
+          },
+          registerScreenshot: async (absolutePath, relativePath) => {
+            this.daemon.logEvent(this.taskId, "file_created", {
+              path: relativePath,
+              type: "screenshot",
+            });
+            await this.daemon.registerArtifact(this.taskId, absolutePath, "image/png");
+          },
+          logEvent: (payload) => this.daemon.logEvent(this.taskId, "browser_action", payload),
+        },
+      );
+    }
+    return await this.camofoxSession.execute(toolName, input, beforeEffect);
+  }
+
+  /** The workspace's network policy for one request Camofox makes through the policy proxy. */
+  private assertCamofoxRequestAllowed(rawUrl: string): void {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `Camofox may only reach http:// and https:// targets, not ${parsed.protocol}`,
+      );
+    }
+    const decision = evaluateNetworkPolicy({
+      url: parsed.toString(),
+      toolName: "browser_request",
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+    if (decision.action !== "allow") {
+      throw new Error(`Network access denied for "${parsed.toString()}": ${decision.reason}`);
+    }
+  }
+
+  private async approveCamofoxSavedCookies(host: string, count: number): Promise<boolean> {
+    const requester = (this.daemon as Any)?.requestApproval;
+    if (typeof requester !== "function") return false;
+    return await requester.call(
+      this.daemon,
+      this.taskId,
+      "protected_credential",
+      `Load ${count} saved cookie${count === 1 ? "" : "s"} for ${host} into the Camofox browser? ` +
+        `They can sign CoWork in to ${host} there. Unless you turned Camofox's persistence off, ` +
+        "Camofox also keeps them unencrypted in ~/.camofox/profiles on this Mac.",
+      { kind: "camofox_saved_cookies", host, count },
+      { allowAutoApprove: false, noStandingApproval: true },
+    );
+  }
+
+  private async closeCamofox(): Promise<void> {
+    const session = this.camofoxSession;
+    this.camofoxSession = null;
+    if (!session) return;
+    try {
+      await session.close();
+    } catch (error) {
+      this.daemon.logEvent(this.taskId, "browser_action", {
+        action: "camofox_close_failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private isBrowserUseCloudProviderRequested(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
     const provider =
@@ -968,18 +1109,22 @@ export class BrowserTools {
       };
     }
     const sessionId = this.getSessionId(input);
+    const camofox = this.camofoxSession?.active ? this.camofoxSession : null;
     const pageUrl =
-      (this.hasVisibleWorkbenchSession(input)
-        ? this.browserWorkbenchService.getSession(this.taskId, sessionId)?.url
-        : undefined) || "";
+      (camofox
+        ? camofox.currentUrl
+        : this.hasVisibleWorkbenchSession(input)
+          ? this.browserWorkbenchService.getSession(this.taskId, sessionId)?.url
+          : undefined) || "";
     let origin = "";
     try {
       origin = new URL(pageUrl).origin;
     } catch {
       origin = "";
     }
-    const key = origin || "page";
-    if (this.developerAccessApprovals.has(key)) return null;
+    // A Camofox page with no known origin is asked about every time.
+    const key = camofox ? (origin ? `camofox:${origin}` : "") : origin || "page";
+    if (key && this.developerAccessApprovals.has(key)) return null;
     const requester = (this.daemon as Any)?.requestApproval;
     const approved =
       typeof requester === "function" &&
@@ -994,7 +1139,7 @@ export class BrowserTools {
     if (!approved) {
       return { success: false, error: "The user did not allow full DevTools access on this site." };
     }
-    this.developerAccessApprovals.add(key);
+    if (key) this.developerAccessApprovals.add(key);
     return null;
   }
 
@@ -1158,6 +1303,23 @@ export class BrowserTools {
   }
 
   /** `bot-<id>-` when a bot does this task, else empty. */
+  /**
+   * The bot that runs this task, directly or through a task it delegated; null for the user.
+   * "unknown" when the task chain cannot be read, so a credential decision fails closed.
+   */
+  private getOwningBotId(): string | null {
+    try {
+      let task = this.daemon.getTask?.(this.taskId);
+      for (let depth = 0; task && depth < 16; depth += 1) {
+        if (task.assignedAgentRoleId) return String(task.assignedAgentRoleId);
+        task = task.parentTaskId ? this.daemon.getTask?.(task.parentTaskId) : undefined;
+      }
+      return null;
+    } catch {
+      return "unknown";
+    }
+  }
+
   private getBotProfilePrefix(): string {
     let botId: string | undefined;
     try {
@@ -1339,6 +1501,27 @@ export class BrowserTools {
         allow_resizing: {
           type: "boolean",
           description: "Allow Browser Use Cloud viewport resizing for this session.",
+        },
+      });
+    }
+    if (CamofoxSettingsManager.loadEnabled()) {
+      const providers: string[] = browserNavigateProperties.browser_provider?.enum ?? [];
+      Object.assign(browserNavigateProperties, {
+        browser_provider: {
+          type: "string",
+          enum: [...providers, CAMOFOX_PROVIDER],
+          description:
+            "Omit for the normal in-app browser. 'camofox' opens the page in the user's own Camofox " +
+            "browser (a Firefox build running on their Mac): use it only when the user asks for " +
+            "Camofox. Camofox stays active for later browser tools until browser_close." +
+            (providers.length ? " 'browser-use-cloud' uses Browser Use Cloud." : ""),
+        },
+        use_saved_cookies: {
+          type: "boolean",
+          description:
+            "Camofox only: load the user's saved cookies for this site (imported from a " +
+            "cookies.txt file) before opening it, so the page opens signed in. The user is asked " +
+            "first each time.",
         },
       });
     }
@@ -2189,7 +2372,8 @@ export class BrowserTools {
       : undefined;
     // Tool calls on the visible workbench show "CoWork is using this tab" and stop
     // while the user has taken over the tab.
-    const drives = this.drivesVisibleWorkbench(toolName, input);
+    const drives =
+      !this.isCamofoxRouted(toolName, input) && this.drivesVisibleWorkbench(toolName, input);
     const sessionId = this.getSessionId(input);
     // Right after the user fills a saved login, anything that could capture the password
     // as pixels or by script is held back on that tab.
@@ -2310,6 +2494,12 @@ export class BrowserTools {
     };
     await beforeEffect();
     this.syncVisibleAccessPolicy(input);
+    if (toolName === "browser_close") {
+      // Closes Camofox too, then the local browser below.
+      await this.closeCamofox();
+    } else if (this.isCamofoxRouted(toolName, input)) {
+      return await this.executeCamofoxTool(toolName, input, beforeEffect);
+    }
     switch (toolName) {
       case "browser_vault": {
         if (
@@ -4031,8 +4221,13 @@ export class BrowserTools {
    * Close the browser when done
    */
   async cleanup(): Promise<void> {
-    getBrowserCredentialService()?.cancelTask(this.taskId);
-    await this.browserService.close();
-    await this.stopBrowserUseCloudSession().catch(() => {});
+    try {
+      getBrowserCredentialService()?.cancelTask(this.taskId);
+      await this.browserService.close();
+      await this.stopBrowserUseCloudSession().catch(() => {});
+    } finally {
+      // Always ends the proxy lease, so Camofox never keeps a finished task's policy.
+      await this.closeCamofox();
+    }
   }
 }

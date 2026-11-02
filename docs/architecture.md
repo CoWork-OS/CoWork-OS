@@ -493,3 +493,19 @@ cancelled delivery. See [Tracked background jobs](background-jobs.md).
 Desktop exposes Resume and Discard in the conversation. Discard validates the interrupted
 revision and fences resume during cleanup. Existing transcript and outputs remain saved.
 See [Interrupted turn recovery](interrupted-turn-recovery.md).
+
+## Watchdog and sleep recovery
+
+`WatchdogService` (`src/electron/agent/watchdog`) is a control loop outside the agent loop,
+started by the desktop app and the headless daemon. It is off until enabled in Settings >
+Automations > Queue (`COWORK_WATCHDOG=1` on the daemon) and runs every 5 minutes. Its
+infrastructure pass resumes tasks that are running in the database with nothing running them,
+re-queues stuck transient retries, retries recent transient provider failures with backoff, and
+pauses tasks whose running executor went silent or whose provider keeps failing. Its progress
+pass asks the cheap model whether tasks running over 15 minutes still progress: the first
+"drifting" verdict sends a steering note (a `watchdog` runtime notice), the second pauses the
+task with a notification. It cancels only when the user allows it. Every decision is a
+`watchdog` task event, readable with the `watchdog_status` tool. Sleep recovery always runs:
+Electron `powerMonitor` suspend/resume (a wall-clock jump detector on the daemon) reclaims
+activity leases that expired while asleep, re-arms background-process completion delivery,
+excludes the slept time from the queue timeout, and resumes interrupted tasks.

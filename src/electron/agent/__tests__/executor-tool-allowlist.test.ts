@@ -82,6 +82,34 @@ describe("TaskExecutor tool allow-list semantics", () => {
     for (const name of ["run_command", "computer_environment", "process_output", "stop_process"])
       expect(allowed.has(name)).toBe(true);
   });
+  it("offers process_output and stop_process wherever run_command is offered", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { title: "Start the dev server", prompt: "Run the build", agentConfig: {} };
+    executor.toolRegistry = { isTaskComputerSelected: () => false };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+    for (const kind of ["analysis", "mutation_required", "verification"] as const) {
+      const allowed = executor.buildStepToolAllowlist(
+        { requiredTools: new Set() },
+        kind,
+        "code",
+        "Start the dev server in the background and check its output",
+      );
+      expect(allowed.has("run_command")).toBe(true);
+      expect(allowed.has("process_output")).toBe(true);
+      expect(allowed.has("stop_process")).toBe(true);
+    }
+    // A native GUI step without explicit shell intent drops run_command and its helpers.
+    const gui = executor.buildStepToolAllowlist(
+      { requiredTools: new Set() },
+      "mutation_required",
+      "general",
+      "Open Calculator and press the buttons",
+      "Open Calculator on this Mac and press the buttons",
+    );
+    expect(gui.has("run_command")).toBe(false);
+    expect(gui.has("process_output")).toBe(false);
+  });
+
   it("keeps phone tools and the durable gateway together for Android steps", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: {} };

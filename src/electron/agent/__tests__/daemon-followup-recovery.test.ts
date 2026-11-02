@@ -420,4 +420,41 @@ describe("AgentDaemon follow-up turn-boundary drain", () => {
     await vi.waitFor(() => expect(daemonLike.drainingFollowUps.has("task")).toBe(false));
     expect(queue).toHaveLength(0);
   });
+
+  it("drains a follow-up queued during the turn's last model call once the executor is idle", async () => {
+    // A turn's finally runs processOrphanedFollowUps while the lifecycle mutex is
+    // still held; the item queued during its final model call must not be stranded.
+    const queue: Any[] = [{ message: "Background process bg-1 finished with exit code 0." }];
+    const daemonLike = Object.create(AgentDaemon.prototype) as Any;
+    let releaseIdle!: () => void;
+    const idle = new Promise<void>((resolve) => {
+      releaseIdle = resolve;
+    });
+    const executor = {
+      isRunning: true,
+      waitForIdle: vi.fn(() => idle),
+      takeNextFollowUpAtTurnBoundary: vi.fn(() => queue.shift()),
+      get hasPendingFollowUps() {
+        return queue.length > 0;
+      },
+      suppressNextUserMessageEvent: vi.fn(),
+    };
+    daemonLike.drainingFollowUps = new Set();
+    daemonLike.logEvent = vi.fn();
+    daemonLike.sendMessage = vi.fn().mockResolvedValue({ queued: false });
+
+    daemonLike.processOrphanedFollowUps("task", executor);
+    daemonLike.processOrphanedFollowUps("task", executor);
+    expect(executor.waitForIdle).toHaveBeenCalledTimes(1);
+    expect(executor.takeNextFollowUpAtTurnBoundary).not.toHaveBeenCalled();
+
+    executor.isRunning = false;
+    releaseIdle();
+
+    await vi.waitFor(() => expect(daemonLike.sendMessage).toHaveBeenCalledTimes(1));
+    expect(daemonLike.sendMessage.mock.calls[0]?.[1]).toBe(
+      "Background process bg-1 finished with exit code 0.",
+    );
+    expect(queue).toHaveLength(0);
+  });
 });

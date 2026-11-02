@@ -978,7 +978,7 @@ Notes persist to `.cowork/scratchpad-{taskId}.json` for crash recovery. The scra
 | `tool_result_read` | Page through the omitted part of a tool result that was shortened to fit the context window          |
 | `task_get`         | Recall a task by ID: status, summary, and the IDs of its parent, children, origin and related tasks  |
 
-When a tool result is too long for the context window, the agent sees its start and end and a marker such as `[... 51234 chars omitted; call tool_result_read(handle="sp…", offset=4000) to continue ...]`. The full text is kept privately in the app's data folder for the task that produced it, and is deleted when the task finishes or after 24 hours. Compaction keeps these handles in its summary.
+When a tool result is too long for the context window, the agent sees its start and end and a marker such as `[... 51234 chars omitted; call tool_result_read(handle="sp…", offset=4000) to continue ...]`. The full text is kept privately in the app's data folder for the task that produced it, stays readable in later turns of that task, and is deleted when the task is cancelled or deleted, or after 24 hours. Compaction keeps these handles in its summary.
 
 Every task's system prompt carries a one-line list of its own ID and the IDs it came from (parent task, session, trigger event, chat thread). `task_history` results and `memory_recall` hits name the `task_get` call for each task, so the agent can follow related work hop by hop.
 

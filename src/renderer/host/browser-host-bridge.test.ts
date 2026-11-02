@@ -1109,6 +1109,37 @@ describe("browser host bridge", () => {
     dispose();
   });
 
+  it("follows the desktop's appearance until the browser saves its own", async () => {
+    const fakeWindow = stubBrowserWindow({ getPlatform: () => "win32" });
+    const transport = { request: vi.fn() } as unknown as BrowserHostTransport;
+    const dispose = installBrowserHostBridge(transport, {
+      ...session,
+      appearance: {
+        themeMode: "light",
+        visualTheme: "calm",
+        accentColor: "teal",
+        uiDensity: "mood",
+      },
+    });
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+
+    const desktopLook = await api.getAppearanceSettings();
+    expect(desktopLook).toMatchObject({
+      themeMode: "light",
+      visualTheme: "calm",
+      accentColor: "teal",
+    });
+    // An unknown value from the host falls back to the browser default.
+    expect(desktopLook.uiDensity).toBe("focused");
+
+    await api.saveAppearanceSettings({ themeMode: "dark" } as never);
+    await expect(api.getAppearanceSettings()).resolves.toMatchObject({
+      themeMode: "dark",
+      visualTheme: "calm",
+    });
+    dispose();
+  });
+
   it("installs truthful first-paint reads and persists appearance locally", async () => {
     const previousApi = { getPlatform: () => "win32" };
     const fakeWindow = stubBrowserWindow(previousApi);

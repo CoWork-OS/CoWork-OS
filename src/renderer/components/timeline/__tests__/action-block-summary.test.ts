@@ -125,6 +125,19 @@ describe("buildActionBlockSummary", () => {
     );
   });
 
+  it("says a page fetch fetched a page instead of searching the web", () => {
+    expect(buildActionBlockSummary([toolEvent("fetch", "http_request", 900)]).activityPhrase).toBe(
+      "Fetched a page",
+    );
+    expect(
+      buildActionBlockSummary([
+        toolEvent("search", "web_search", 900),
+        toolEvent("fetch-1", "web_fetch", 1000),
+        toolEvent("fetch-2", "http_request", 1100),
+      ]).activityPhrase,
+    ).toBe("Searched the web, fetched pages");
+  });
+
   it("counts a finished step's tool calls that precede its step markers", () => {
     // Summary-mode blocks can hold only the plan-step markers, which are logged after the
     // step's tool calls; the hidden internal step report must not cut those calls off.

@@ -23,7 +23,7 @@ export interface ActionBlockSummary {
   summary: string;
   /**
    * Count-free phrase for the compact (Verbose off) row, e.g. "Read files, ran commands,
-   * searched the web". Kinds always appear in the same order and only the first is capitalized.
+   * searched the web, fetched pages". Kinds always appear in the same order and only the first is capitalized.
    */
   activityPhrase: string;
   /** Semantic icon category for the collapsed header. */
@@ -494,13 +494,16 @@ export function buildActionBlockSummary(
     (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
     0,
   );
-  const webRequests = webLookups - browserActions;
+  const webSearches = summaryToolCounts.get("web_search") || 0;
+  const pageFetches =
+    (summaryToolCounts.get("web_fetch") || 0) + (summaryToolCounts.get("http_request") || 0);
   const phraseParts: string[] = [];
   if (browserActions > 0) phraseParts.push("used the browser");
   if (writes > 0) phraseParts.push(writes === 1 ? "edited a file" : "edited files");
   if (readFiles > 0 || searches > 0) phraseParts.push("read files");
   if (commands > 0) phraseParts.push(commands === 1 ? "ran a command" : "ran commands");
-  if (webRequests > 0) phraseParts.push("searched the web");
+  if (webSearches > 0) phraseParts.push("searched the web");
+  if (pageFetches > 0) phraseParts.push(pageFetches === 1 ? "fetched a page" : "fetched pages");
   if (unclassifiedTools.length > 2) {
     phraseParts.push("called tools");
   } else {

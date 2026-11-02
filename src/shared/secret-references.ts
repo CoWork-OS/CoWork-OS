@@ -51,6 +51,14 @@ export function looksLikeSecretReference(value: unknown): value is string {
 }
 
 /**
+ * Input type for a key field. A vault reference names where the key lives rather than holding
+ * it, so it stays readable; a pasted key stays masked.
+ */
+export function secretFieldInputType(value: unknown): "text" | "password" {
+  return looksLikeSecretReference(value) ? "text" : "password";
+}
+
+/**
  * Parse a settings value. Returns null for a value that is not written as a reference (a plain
  * key), so callers use it unchanged; a value with a reference prefix but a bad shape is an error
  * rather than a key, so it is never sent to a provider.

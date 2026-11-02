@@ -33,9 +33,7 @@ export function isUserActionRequiredFailure(reason: string): boolean {
   const missingUserSpecificDatesOrYears =
     ((/\b(user'?s|your|my)\b/.test(lower) &&
       /\b(actual|exact|specific)\b/.test(lower) &&
-      /\b(date|dates|year|years|tax year|tax years|start date|end date|timeline)\b/.test(
-        lower,
-      )) ||
+      /\b(date|dates|year|years|tax year|tax years|start date|end date|timeline)\b/.test(lower)) ||
       (/\b(include|provide|confirm|state)\b/.test(lower) &&
         /\b(actual|exact|specific)\b/.test(lower) &&
         /\b(date|dates|year|years|tax year|tax years|start date|end date)\b/.test(lower))) &&

@@ -751,6 +751,140 @@ class StdioMCPServer {
 const CONNECTOR_PREFIX = "jira";
 const DEFAULT_API_VERSION = "3";
 
+// ==================== Object manifest ====================
+//
+// `jira.describe_objects` lists the objects this connector reads and writes, their fields and
+// status values, and which tools act on them with what risk. CoWork calls it itself, never shows
+// it to the model, and it makes no API call. An issue's fields sit under `fields`; nested values
+// are named by path (`status.name`). Statuses differ per workflow, so the status field is the
+// workflow-independent status category.
+
+const OBJECT_MANIFEST_TOOL_META = { "cowork.objectManifest": true };
+
+/** An issue's page, when the site's https base URL is configured (not the OAuth API gateway). */
+function issueUrlTemplate(): string | undefined {
+  try {
+    const url = new URL(config.baseUrl ?? "");
+    if (url.protocol !== "https:" || url.hostname === "api.atlassian.com") return undefined;
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}/browse/{id}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function objectManifest(): Record<string, any> {
+  const urlTemplate = issueUrlTemplate();
+  return {
+    version: 1,
+    connector: CONNECTOR_PREFIX,
+    objects: [
+      {
+        type: "issue",
+        label: "Issue",
+        entityType: "issue",
+        keyField: "key",
+        titleField: "summary",
+        fieldsPath: "fields",
+        ...(urlTemplate ? { urlTemplate } : {}),
+        fields: [
+          { name: "summary", type: "string", label: "Summary" },
+          { name: "description", type: "text", label: "Description", pii: true },
+          { name: "status.name", type: "string", label: "Status" },
+          // The category key is the same in every workflow and language; its name is not.
+          {
+            name: "status.statusCategory.key",
+            type: "enum",
+            label: "Status category",
+            enum: ["new", "indeterminate", "done"],
+          },
+          {
+            name: "priority.name",
+            type: "enum",
+            label: "Priority",
+            enum: ["Highest", "High", "Medium", "Low", "Lowest"],
+          },
+          { name: "issuetype.name", type: "string", label: "Issue type" },
+          { name: "labels", type: "json", label: "Labels" },
+          { name: "assignee.accountId", type: "reference", label: "Assignee" },
+          { name: "reporter.accountId", type: "reference", label: "Reporter" },
+          { name: "parent.key", type: "reference", label: "Parent issue" },
+          { name: "project.key", type: "reference", label: "Project" },
+          { name: "duedate", type: "date", label: "Due date" },
+          { name: "created", type: "datetime", label: "Created" },
+          { name: "updated", type: "datetime", label: "Updated" },
+          { name: "resolutiondate", type: "datetime", label: "Resolved" },
+        ],
+        statusField: {
+          name: "status.statusCategory.key",
+          values: ["new", "indeterminate", "done"],
+          closed: ["done"],
+        },
+        relations: [
+          { field: "parent.key", targetType: "issue", edgeType: "child_of" },
+          { field: "project.key", targetType: "project", edgeType: "part_of" },
+        ],
+      },
+      {
+        type: "project",
+        label: "Project",
+        entityType: "project",
+        keyField: "key",
+        titleField: "name",
+        fields: [
+          { name: "id", type: "id", label: "Project ID" },
+          { name: "key", type: "string", label: "Key" },
+          { name: "name", type: "string", label: "Name" },
+          {
+            name: "projectTypeKey",
+            type: "enum",
+            label: "Project type",
+            enum: ["software", "service_desk", "business"],
+          },
+        ],
+      },
+    ],
+    tools: [
+      {
+        name: `${CONNECTOR_PREFIX}.list_projects`,
+        effect: "read",
+        risk: "read",
+        objects: ["project"],
+        resultPath: "data.values",
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.get_issue`,
+        effect: "read",
+        risk: "read",
+        objects: ["issue"],
+        recordIdArg: "id",
+        resultPath: "data",
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.search_issues`,
+        effect: "read",
+        risk: "read",
+        objects: ["issue"],
+        resultPath: "data.issues",
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.create_issue`,
+        effect: "create",
+        risk: "external_write",
+        objects: ["issue"],
+        preview: true,
+        receipt: true,
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.update_issue`,
+        effect: "update",
+        risk: "external_write",
+        objects: ["issue"],
+        recordIdArg: "id",
+      },
+    ],
+  };
+}
+
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
@@ -846,6 +980,13 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: `${CONNECTOR_PREFIX}.describe_objects`,
+    description:
+      "Describe the business objects this connector holds, their fields and which tools read or write them. CoWork reads this itself.",
+    _meta: OBJECT_MANIFEST_TOOL_META,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const config: JiraConfig = {
@@ -937,6 +1078,13 @@ const handlers: Record<string, ToolHandler> = {
     const result = await client.updateIssue(args.id, { fields: args.fields });
     return buildEnvelope(result, args.requestId, warnings);
   },
+  [`${CONNECTOR_PREFIX}.describe_objects`]: async () => {
+    const manifest = objectManifest();
+    return {
+      content: [{ type: "text", text: JSON.stringify(manifest) }],
+      structuredContent: manifest,
+    };
+  },
 };
 
 const toolProvider: ToolProvider = {
@@ -966,6 +1114,11 @@ export function startJiraMcpServer(): void {
 /** Test hook: one `tools/call` request through the server, `_meta` included. */
 export async function callJiraToolForTest(params: any): Promise<any> {
   return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+/** Test hook: the tools `tools/list` returns. */
+export function listJiraToolsForTest(): MCPTool[] {
+  return toolProvider.getTools();
 }
 
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {

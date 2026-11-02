@@ -37,5 +37,12 @@ npm start
 - `zendesk.get_ticket`
 - `zendesk.create_ticket`
 - `zendesk.update_ticket`
+- `zendesk.describe_objects`
+
+## Object manifest
+
+`zendesk.describe_objects` returns tickets, users and organizations with their fields, ticket statuses and relations, and which tools read or write tickets.
+When `ZENDESK_SUBDOMAIN` or `ZENDESK_BASE_URL` is set, tickets link to their agent page.
+CoWork calls it itself and hides it from the model; it makes no API call.
 
 See `docs/enterprise-connectors.md` for the connector contract.

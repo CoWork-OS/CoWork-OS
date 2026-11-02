@@ -275,6 +275,60 @@ object, Resend the email and its last event. When the read-back fails, the recei
 `unavailable` and the write still counts as done. A retry that finds an earlier write
 (`already_exists`) carries no receipt. Resend's `create_webhook` has a preview and no receipt.
 
+### Object Manifest
+
+A connector for a business system can say which objects it holds and what each of its tools
+does to them. It lists one tool, conventionally `<connector>.describe_objects`, with
+`"_meta": { "cowork.objectManifest": true }` and no arguments. CoWork calls that tool itself,
+when something needs the manifest, and never offers it to the model or to workflows. The tool
+answers with the manifest in `structuredContent` (and the same JSON as text):
+
+```
+{ "version": 1, "connector": "salesforce",
+  "objects": [ { "type": "Opportunity", "label": "Opportunity", "entityType": "deal",
+    "keyField": "Id", "titleField": "Name",
+    "urlTemplate": "https://acme.my.salesforce.com/lightning/r/Opportunity/{id}/view",
+    "fields": [ { "name": "StageName", "type": "enum", "enum": ["Prospecting", "Closed Won"] },
+                { "name": "Amount", "type": "currency" } ],
+    "statusField": { "name": "StageName", "values": ["Prospecting", "Closed Won"],
+                     "closed": ["Closed Won"] },
+    "relations": [ { "field": "AccountId", "targetType": "Account", "edgeType": "belongs_to" } ] } ],
+  "tools": [ { "name": "salesforce.update_record", "effect": "update", "risk": "external_write",
+    "objectArg": "object", "recordIdArg": "id" } ] }
+```
+
+- `objects[]`: the connector's own type name, a suggested graph `entityType` (`person`,
+  `organization`, `deal`, `ticket`, `issue`, …), the key and title fields, `fieldsPath` when a
+  record nests its fields (HubSpot `properties`, Jira `fields`; field names are dot paths under
+  it, such as `status.statusCategory.key`, and the key field is read at the record's top
+  level), an optional `https://` page
+  template with one `{id}`, fields (`type`, `label`, `enum`, `pii`), an ordered `statusField`
+  with its closed values, and `relations` to other declared objects.
+- `tools[]`: each tool that reads or writes a declared object, with `effect` (`read`, `create`,
+  `update`, `delete`), `risk` (`read`, `external_write`, `data_export`), the objects it covers,
+  the arguments that name the object type and the record (`objectArg`, `recordIdArg`), where a
+  read puts its records (`resultPath`), and whether it gives a preview and a receipt.
+- Mark personal data `pii: true` (emails, phone numbers, addresses, person names, free text
+  written by customers). CoWork keeps those fields out of the knowledge graph by default.
+
+The manifest is untrusted input, local or remote. CoWork rejects one larger than 256 KB or
+with more than 24 objects, 120 fields per object, 64 enum values, 16 relations per object or
+64 tools, and one that does not match the schema; keys it does not know are ignored, and a
+change older clients must not read needs a new `version`. It drops entries naming tools the
+server does not list or objects the manifest does not declare. A manifest can only make CoWork
+more careful than the tool's own definition: a read claimed for a tool that advertises a
+preview or says `readOnlyHint: false` or `destructiveHint: true` is dropped, a `preview` claim
+counts only when the tool advertises `cowork.preview`, and `objectArg`/`recordIdArg` must be
+arguments the tool takes. A url template must keep `{id}` in the path or query. A connection
+reads the manifest once per tool list and keeps it for six hours; a failed read is retried after
+a minute. A stdio connector answers tool calls one at a time, so keep `describe_objects` fast
+(the bundled live reads give up after 12 seconds and answer with the built-in manifest). A
+connector without the tool keeps today's behavior.
+
+The bundled Salesforce and ServiceNow connectors start from a built-in manifest and add the
+org's live fields and picklist or choice values; when the API cannot be read they return the
+built-in one. HubSpot, Zendesk, Jira and Linear return built-in manifests.
+
 ### Required Baseline Tools
 
 Every connector should provide:

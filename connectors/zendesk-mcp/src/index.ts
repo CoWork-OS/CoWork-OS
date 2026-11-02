@@ -37,6 +37,8 @@ type MCPToolProperty = {
 type MCPTool = {
   name: string;
   description?: string;
+  /** `cowork.objectManifest: true`: the tool returns this connector's object manifest. */
+  _meta?: Record<string, any>;
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;
@@ -96,6 +98,15 @@ type RequestResult = {
   meta: RequestMeta;
 };
 
+/**
+ * Zendesk's search also returns users, organizations and groups. `search_tickets` reads tickets
+ * only, so a query that names no `type:` gets `type:ticket` in front.
+ */
+function ticketSearchQuery(query: string): string {
+  const text = String(query ?? "");
+  return /\btype:/i.test(text) ? text : `type:ticket ${text}`;
+}
+
 class ZendeskClient {
   constructor(private config: ZendeskConfig) {}
 
@@ -104,7 +115,7 @@ class ZendeskClient {
   }
 
   async searchTickets(query: string): Promise<RequestResult> {
-    const params = new URLSearchParams({ query });
+    const params = new URLSearchParams({ query: ticketSearchQuery(query) });
     return this.requestJson("GET", `api/v2/search.json?${params.toString()}`);
   }
 
@@ -456,6 +467,148 @@ const config: ZendeskConfig = {
 
 const client = new ZendeskClient(config);
 
+// ==================== Object manifest ====================
+//
+// `zendesk.describe_objects` lists the objects this connector reads and writes, their fields and
+// status values, and which tools act on them with what risk. CoWork calls it itself, never shows
+// it to the model, and it makes no API call. Users and organizations have no tools of their own;
+// they are declared so tickets can point at them.
+
+const OBJECT_MANIFEST_TOOL_META = { "cowork.objectManifest": true };
+
+/** A ticket's agent page, when the account's https base URL is configured. */
+function ticketUrlTemplate(): string | undefined {
+  try {
+    const url = new URL(baseUrl);
+    return url.protocol === "https:" ? `${url.origin}/agent/tickets/{id}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function objectManifest(): Record<string, any> {
+  const urlTemplate = ticketUrlTemplate();
+  const timestamps = [
+    { name: "created_at", type: "datetime", label: "Created" },
+    { name: "updated_at", type: "datetime", label: "Updated" },
+  ];
+  return {
+    version: 1,
+    connector: CONNECTOR_PREFIX,
+    objects: [
+      {
+        type: "ticket",
+        label: "Ticket",
+        entityType: "ticket",
+        keyField: "id",
+        titleField: "subject",
+        ...(urlTemplate ? { urlTemplate } : {}),
+        fields: [
+          { name: "id", type: "id", label: "Ticket ID" },
+          { name: "subject", type: "string", label: "Subject" },
+          { name: "description", type: "text", label: "Description", pii: true },
+          {
+            name: "status",
+            type: "enum",
+            label: "Status",
+            enum: ["new", "open", "pending", "hold", "solved", "closed"],
+          },
+          {
+            name: "priority",
+            type: "enum",
+            label: "Priority",
+            enum: ["low", "normal", "high", "urgent"],
+          },
+          {
+            name: "type",
+            type: "enum",
+            label: "Type",
+            enum: ["problem", "incident", "question", "task"],
+          },
+          { name: "requester_id", type: "reference", label: "Requester" },
+          { name: "assignee_id", type: "reference", label: "Assignee" },
+          { name: "group_id", type: "reference", label: "Group" },
+          { name: "organization_id", type: "reference", label: "Organization" },
+          { name: "tags", type: "json", label: "Tags" },
+          { name: "due_at", type: "datetime", label: "Due" },
+          ...timestamps,
+        ],
+        statusField: {
+          name: "status",
+          values: ["new", "open", "pending", "hold", "solved", "closed"],
+          closed: ["solved", "closed"],
+        },
+        relations: [
+          { field: "requester_id", targetType: "user", edgeType: "reported_by" },
+          { field: "assignee_id", targetType: "user", edgeType: "assigned_to" },
+          { field: "organization_id", targetType: "organization", edgeType: "belongs_to" },
+        ],
+      },
+      {
+        type: "user",
+        label: "User",
+        entityType: "person",
+        keyField: "id",
+        titleField: "name",
+        fields: [
+          { name: "id", type: "id", label: "User ID" },
+          { name: "name", type: "string", label: "Name", pii: true },
+          { name: "email", type: "email", label: "Email", pii: true },
+          { name: "phone", type: "phone", label: "Phone", pii: true },
+          { name: "role", type: "enum", label: "Role", enum: ["end-user", "agent", "admin"] },
+          { name: "organization_id", type: "reference", label: "Organization" },
+          ...timestamps,
+        ],
+        relations: [{ field: "organization_id", targetType: "organization", edgeType: "works_at" }],
+      },
+      {
+        type: "organization",
+        label: "Organization",
+        entityType: "organization",
+        keyField: "id",
+        titleField: "name",
+        fields: [
+          { name: "id", type: "id", label: "Organization ID" },
+          { name: "name", type: "string", label: "Name" },
+          { name: "domain_names", type: "json", label: "Domains" },
+          { name: "tags", type: "json", label: "Tags" },
+          ...timestamps,
+        ],
+      },
+    ],
+    tools: [
+      {
+        name: `${CONNECTOR_PREFIX}.search_tickets`,
+        effect: "read",
+        risk: "read",
+        objects: ["ticket"],
+        resultPath: "data.results",
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.get_ticket`,
+        effect: "read",
+        risk: "read",
+        objects: ["ticket"],
+        recordIdArg: "id",
+        resultPath: "data.ticket",
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.create_ticket`,
+        effect: "create",
+        risk: "external_write",
+        objects: ["ticket"],
+      },
+      {
+        name: `${CONNECTOR_PREFIX}.update_ticket`,
+        effect: "update",
+        risk: "external_write",
+        objects: ["ticket"],
+        recordIdArg: "id",
+      },
+    ],
+  };
+}
+
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
@@ -464,7 +617,8 @@ const tools: MCPTool[] = [
   },
   {
     name: `${CONNECTOR_PREFIX}.search_tickets`,
-    description: "Search Zendesk tickets with a query string",
+    description:
+      "Search Zendesk tickets only (not users, organizations or groups) with a query string. A query without a type: term is limited to type:ticket.",
     inputSchema: {
       type: "object",
       properties: {
@@ -511,6 +665,13 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: `${CONNECTOR_PREFIX}.describe_objects`,
+    description:
+      "Describe the business objects this connector holds, their fields and which tools read or write them. CoWork reads this itself.",
+    _meta: OBJECT_MANIFEST_TOOL_META,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
@@ -523,6 +684,13 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
     buildEnvelope(await client.createTicket({ ticket: args.ticket })),
   [`${CONNECTOR_PREFIX}.update_ticket`]: async (args) =>
     buildEnvelope(await client.updateTicket(args.id, { ticket: args.ticket })),
+  [`${CONNECTOR_PREFIX}.describe_objects`]: async () => {
+    const manifest = objectManifest();
+    return {
+      content: [{ type: "text", text: JSON.stringify(manifest) }],
+      structuredContent: manifest,
+    };
+  },
 };
 
 const toolProvider: ToolProvider = {
@@ -545,8 +713,23 @@ const serverInfo: MCPServerInfo = {
   },
 };
 
-const server = new StdioMCPServer(toolProvider, serverInfo);
-server.start();
+export function startZendeskMcpServer(): void {
+  new StdioMCPServer(toolProvider, serverInfo).start();
+}
+
+/** Test hook: one `tools/call` request through the server. */
+export async function callZendeskToolForTest(params: any): Promise<any> {
+  return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+/** Test hook: the tools `tools/list` returns. */
+export function listZendeskToolsForTest(): MCPTool[] {
+  return toolProvider.getTools();
+}
+
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
+  startZendeskMcpServer();
+}
 
 function buildEnvelope(result: RequestResult): any {
   return {

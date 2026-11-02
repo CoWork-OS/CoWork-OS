@@ -666,6 +666,189 @@ class StdioMCPServer {
 const CONNECTOR_PREFIX = "hubspot";
 const DEFAULT_BASE_URL = "https://api.hubapi.com";
 
+// ==================== Object manifest ====================
+//
+// `hubspot.describe_objects` lists the CRM objects this connector reads and writes, their fields
+// and status values, and which tools act on them with what risk. CoWork calls it itself, never
+// shows it to the model, and it makes no API call. Object types are the `objectType` values the
+// tools take; a record's fields sit under `properties`. Stage ids are HubSpot's defaults (the
+// default sales pipeline for deals, the default support pipeline for tickets).
+
+const OBJECT_MANIFEST_TOOL_META = { "cowork.objectManifest": true };
+
+const LIFECYCLE_STAGES = [
+  "subscriber",
+  "lead",
+  "marketingqualifiedlead",
+  "salesqualifiedlead",
+  "opportunity",
+  "customer",
+  "evangelist",
+  "other",
+];
+
+const DEAL_STAGES = [
+  "appointmentscheduled",
+  "qualifiedtobuy",
+  "presentationscheduled",
+  "decisionmakerboughtin",
+  "contractsent",
+  "closedwon",
+  "closedlost",
+];
+
+const TICKET_STAGES = ["1", "2", "3", "4"];
+
+const RECORD_FIELDS = {
+  id: { name: "hs_object_id", type: "id", label: "Record ID" },
+  owner: { name: "hubspot_owner_id", type: "reference", label: "Owner" },
+  created: { name: "createdate", type: "datetime", label: "Created" },
+  modified: { name: "hs_lastmodifieddate", type: "datetime", label: "Last modified" },
+};
+
+const OBJECT_MANIFEST = {
+  version: 1,
+  connector: CONNECTOR_PREFIX,
+  objects: [
+    {
+      type: "contacts",
+      label: "Contact",
+      entityType: "person",
+      keyField: "id",
+      titleField: "email",
+      fieldsPath: "properties",
+      fields: [
+        RECORD_FIELDS.id,
+        { name: "email", type: "email", label: "Email", pii: true },
+        { name: "firstname", type: "string", label: "First name", pii: true },
+        { name: "lastname", type: "string", label: "Last name", pii: true },
+        { name: "phone", type: "phone", label: "Phone", pii: true },
+        { name: "mobilephone", type: "phone", label: "Mobile phone", pii: true },
+        { name: "jobtitle", type: "string", label: "Job title" },
+        { name: "company", type: "string", label: "Company name" },
+        { name: "associatedcompanyid", type: "reference", label: "Primary company" },
+        { name: "lifecyclestage", type: "enum", label: "Lifecycle stage", enum: LIFECYCLE_STAGES },
+        RECORD_FIELDS.owner,
+        RECORD_FIELDS.created,
+        { name: "lastmodifieddate", type: "datetime", label: "Last modified" },
+      ],
+      relations: [{ field: "associatedcompanyid", targetType: "companies", edgeType: "works_at" }],
+    },
+    {
+      type: "companies",
+      label: "Company",
+      entityType: "organization",
+      keyField: "id",
+      titleField: "name",
+      fieldsPath: "properties",
+      fields: [
+        RECORD_FIELDS.id,
+        { name: "name", type: "string", label: "Name" },
+        { name: "domain", type: "string", label: "Domain" },
+        { name: "industry", type: "string", label: "Industry" },
+        { name: "phone", type: "phone", label: "Phone", pii: true },
+        { name: "city", type: "string", label: "City" },
+        { name: "country", type: "string", label: "Country" },
+        { name: "numberofemployees", type: "number", label: "Employees" },
+        { name: "annualrevenue", type: "currency", label: "Annual revenue" },
+        { name: "lifecyclestage", type: "enum", label: "Lifecycle stage", enum: LIFECYCLE_STAGES },
+        RECORD_FIELDS.owner,
+        RECORD_FIELDS.created,
+        RECORD_FIELDS.modified,
+      ],
+    },
+    {
+      type: "deals",
+      label: "Deal",
+      entityType: "deal",
+      keyField: "id",
+      titleField: "dealname",
+      fieldsPath: "properties",
+      fields: [
+        RECORD_FIELDS.id,
+        { name: "dealname", type: "string", label: "Deal name" },
+        { name: "amount", type: "currency", label: "Amount" },
+        { name: "dealstage", type: "enum", label: "Deal stage", enum: DEAL_STAGES },
+        { name: "pipeline", type: "string", label: "Pipeline" },
+        { name: "closedate", type: "date", label: "Close date" },
+        {
+          name: "dealtype",
+          type: "enum",
+          label: "Deal type",
+          enum: ["newbusiness", "existingbusiness"],
+        },
+        RECORD_FIELDS.owner,
+        RECORD_FIELDS.created,
+        RECORD_FIELDS.modified,
+      ],
+      statusField: { name: "dealstage", values: DEAL_STAGES, closed: ["closedwon", "closedlost"] },
+    },
+    {
+      type: "tickets",
+      label: "Ticket",
+      entityType: "ticket",
+      keyField: "id",
+      titleField: "subject",
+      fieldsPath: "properties",
+      fields: [
+        RECORD_FIELDS.id,
+        { name: "subject", type: "string", label: "Subject" },
+        { name: "content", type: "text", label: "Description", pii: true },
+        { name: "hs_pipeline", type: "string", label: "Pipeline" },
+        {
+          name: "hs_pipeline_stage",
+          type: "enum",
+          label: "Status (1 new, 2 waiting on contact, 3 waiting on us, 4 closed)",
+          enum: TICKET_STAGES,
+        },
+        {
+          name: "hs_ticket_priority",
+          type: "enum",
+          label: "Priority",
+          enum: ["LOW", "MEDIUM", "HIGH", "URGENT"],
+        },
+        { name: "hs_ticket_category", type: "string", label: "Category" },
+        RECORD_FIELDS.owner,
+        RECORD_FIELDS.created,
+        RECORD_FIELDS.modified,
+      ],
+      statusField: { name: "hs_pipeline_stage", values: TICKET_STAGES, closed: ["4"] },
+    },
+  ],
+  tools: [
+    {
+      name: `${CONNECTOR_PREFIX}.search_objects`,
+      effect: "read",
+      risk: "read",
+      objectArg: "objectType",
+      resultPath: "data.results",
+    },
+    {
+      name: `${CONNECTOR_PREFIX}.get_object`,
+      effect: "read",
+      risk: "read",
+      objectArg: "objectType",
+      recordIdArg: "id",
+      resultPath: "data",
+    },
+    {
+      name: `${CONNECTOR_PREFIX}.create_object`,
+      effect: "create",
+      risk: "external_write",
+      objectArg: "objectType",
+      preview: true,
+      receipt: true,
+    },
+    {
+      name: `${CONNECTOR_PREFIX}.update_object`,
+      effect: "update",
+      risk: "external_write",
+      objectArg: "objectType",
+      recordIdArg: "id",
+    },
+  ],
+};
+
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
@@ -754,6 +937,13 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: `${CONNECTOR_PREFIX}.describe_objects`,
+    description:
+      "Describe the business objects this connector holds, their fields and which tools read or write them. CoWork reads this itself.",
+    _meta: OBJECT_MANIFEST_TOOL_META,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const config: HubSpotConfig = {
@@ -827,6 +1017,10 @@ const handlers: Record<string, ToolHandler> = {
     const result = await client.updateObject(args.objectType, args.id, args.properties || {});
     return buildEnvelope(result);
   },
+  [`${CONNECTOR_PREFIX}.describe_objects`]: async () => ({
+    content: [{ type: "text", text: JSON.stringify(OBJECT_MANIFEST) }],
+    structuredContent: OBJECT_MANIFEST,
+  }),
 };
 
 const toolProvider: ToolProvider = {
@@ -856,6 +1050,11 @@ export function startHubSpotMcpServer(): void {
 /** Test hook: one `tools/call` request through the server, `_meta` included. */
 export async function callHubSpotToolForTest(params: any): Promise<any> {
   return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+/** Test hook: the tools `tools/list` returns. */
+export function listHubSpotToolsForTest(): MCPTool[] {
+  return toolProvider.getTools();
 }
 
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {

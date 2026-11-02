@@ -37,4 +37,10 @@ ComfyUI, must scope file and directory arguments to a configured project root
 the bridge/API. They should also reject non-local bridge URLs and undeclared
 tool names.
 
+Business-system connectors (Salesforce, HubSpot, Zendesk, ServiceNow, Jira,
+Linear) also list a `<connector>.describe_objects` tool marked
+`_meta: { "cowork.objectManifest": true }`. It returns the objects the connector
+holds and which tools read or write them. CoWork calls it itself and never
+offers it to the model; see "Object Manifest" in the contract.
+
 See `docs/enterprise-connectors.md` for the Phase 1 connector contract.

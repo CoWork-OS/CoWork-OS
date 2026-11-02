@@ -771,6 +771,8 @@ class StdioMCPServer {
 
 const CONNECTOR_PREFIX = "salesforce";
 const DEFAULT_API_VERSION = "60.0";
+/** On `describe_objects`: CoWork reads the object manifest from it; the model never sees it. */
+const OBJECT_MANIFEST_TOOL_META = { "cowork.objectManifest": true };
 
 const tools: MCPTool[] = [
   {
@@ -879,6 +881,13 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: `${CONNECTOR_PREFIX}.describe_objects`,
+    _meta: OBJECT_MANIFEST_TOOL_META,
+    description:
+      "Describe the business objects this connector holds, their fields and which tools read or write them. CoWork reads this itself.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const config: SalesforceConfig = {
@@ -892,6 +901,524 @@ const config: SalesforceConfig = {
 };
 
 const client = new SalesforceClient(config);
+
+// ==================== Object manifest ====================
+//
+// `salesforce.describe_objects` tells CoWork which business objects this connector holds, their
+// fields, status values and relations, and which tools read or write them. CoWork calls it
+// itself; the model never sees it. The manifest starts from the standard objects declared below
+// and, when the org is configured, takes labels, active picklist values and custom fields from
+// each object's describe. An object whose describe fails stays as declared, a live read that
+// takes longer than 12 seconds gives the declared objects, and the tool never fails. It only
+// reads.
+
+type ManifestFieldType =
+  | "id"
+  | "string"
+  | "text"
+  | "number"
+  | "currency"
+  | "percent"
+  | "boolean"
+  | "date"
+  | "datetime"
+  | "enum"
+  | "reference"
+  | "email"
+  | "phone"
+  | "url"
+  | "json";
+
+type ManifestField = {
+  name: string;
+  type: ManifestFieldType;
+  label?: string;
+  enum?: string[];
+  pii?: boolean;
+};
+
+type ManifestObject = {
+  type: string;
+  label: string;
+  entityType: string;
+  keyField: string;
+  titleField?: string;
+  urlTemplate?: string;
+  fields: ManifestField[];
+  statusField?: { name: string; values: string[]; closed?: string[] };
+  relations?: Array<{ field: string; targetType: string; edgeType: string }>;
+};
+
+type ManifestTool = {
+  name: string;
+  effect: "read" | "create" | "update" | "delete";
+  risk: "read" | "external_write" | "data_export";
+  objects?: string[];
+  objectArg?: string;
+  recordIdArg?: string;
+  resultPath?: string;
+  preview?: boolean;
+  receipt?: boolean;
+};
+
+type ObjectManifest = {
+  version: 1;
+  connector: string;
+  objects: ManifestObject[];
+  tools: ManifestTool[];
+};
+
+const MANIFEST_MAX_FIELDS = 120;
+const MANIFEST_MAX_ENUM_VALUES = 64;
+/** Kept under CoWork's 256 KB limit for one manifest. */
+const MANIFEST_MAX_BYTES = 240 * 1024;
+/**
+ * The whole live read gets this long. CoWork runs one call at a time per connector, so a slow
+ * org would hold up the model's own calls; past the deadline the declared manifest goes back.
+ */
+const LIVE_MANIFEST_DEADLINE_MS = 12_000;
+const MANIFEST_FIELD_NAME = /^[A-Za-z_$][A-Za-z0-9_.$:-]{0,119}$/;
+/** On a person object, a live field whose name looks personal is marked pii as well. */
+const PERSONAL_FIELD_NAME =
+  /name|e_?mail|phone|mobile|fax|street|address|city|zip|postal|birth|photo|avatar/i;
+
+const OPPORTUNITY_STAGES = [
+  "Prospecting",
+  "Qualification",
+  "Needs Analysis",
+  "Value Proposition",
+  "Id. Decision Makers",
+  "Perception Analysis",
+  "Proposal/Price Quote",
+  "Negotiation/Review",
+  "Closed Won",
+  "Closed Lost",
+];
+const CASE_STATUSES = ["New", "Working", "Escalated", "Closed"];
+const LEAD_STATUSES = [
+  "Open - Not Contacted",
+  "Working - Contacted",
+  "Closed - Converted",
+  "Closed - Not Converted",
+];
+const TASK_STATUSES = [
+  "Not Started",
+  "In Progress",
+  "Completed",
+  "Waiting on someone else",
+  "Deferred",
+];
+
+const SALESFORCE_AUDIT_FIELDS: ManifestField[] = [
+  { name: "OwnerId", type: "reference", label: "Owner ID" },
+  { name: "CreatedDate", type: "datetime", label: "Created Date" },
+  { name: "LastModifiedDate", type: "datetime", label: "Last Modified Date" },
+];
+
+const SALESFORCE_OBJECTS: ManifestObject[] = [
+  {
+    type: "Account",
+    label: "Account",
+    entityType: "organization",
+    keyField: "Id",
+    titleField: "Name",
+    fields: [
+      { name: "Id", type: "id", label: "Account ID" },
+      { name: "Name", type: "string", label: "Account Name" },
+      { name: "Type", type: "enum", label: "Account Type" },
+      { name: "Industry", type: "enum", label: "Industry" },
+      { name: "Website", type: "url", label: "Website" },
+      { name: "Phone", type: "phone", label: "Account Phone", pii: true },
+      { name: "BillingAddress", type: "json", label: "Billing Address", pii: true },
+      { name: "AnnualRevenue", type: "currency", label: "Annual Revenue" },
+      { name: "NumberOfEmployees", type: "number", label: "Employees" },
+      { name: "Description", type: "text", label: "Account Description", pii: true },
+      { name: "ParentId", type: "reference", label: "Parent Account ID" },
+      ...SALESFORCE_AUDIT_FIELDS,
+    ],
+    relations: [{ field: "ParentId", targetType: "Account", edgeType: "child_of" }],
+  },
+  {
+    type: "Contact",
+    label: "Contact",
+    entityType: "person",
+    keyField: "Id",
+    titleField: "Name",
+    fields: [
+      { name: "Id", type: "id", label: "Contact ID" },
+      { name: "Name", type: "string", label: "Full Name", pii: true },
+      { name: "FirstName", type: "string", label: "First Name", pii: true },
+      { name: "LastName", type: "string", label: "Last Name", pii: true },
+      { name: "Email", type: "email", label: "Email", pii: true },
+      { name: "Phone", type: "phone", label: "Business Phone", pii: true },
+      { name: "MobilePhone", type: "phone", label: "Mobile Phone", pii: true },
+      { name: "MailingAddress", type: "json", label: "Mailing Address", pii: true },
+      { name: "Birthdate", type: "date", label: "Birthdate", pii: true },
+      { name: "Title", type: "string", label: "Title" },
+      { name: "Department", type: "string", label: "Department" },
+      { name: "AccountId", type: "reference", label: "Account ID" },
+      { name: "LeadSource", type: "enum", label: "Lead Source" },
+      ...SALESFORCE_AUDIT_FIELDS,
+    ],
+    relations: [{ field: "AccountId", targetType: "Account", edgeType: "works_at" }],
+  },
+  {
+    type: "Lead",
+    label: "Lead",
+    entityType: "person",
+    keyField: "Id",
+    titleField: "Name",
+    fields: [
+      { name: "Id", type: "id", label: "Lead ID" },
+      { name: "Name", type: "string", label: "Full Name", pii: true },
+      { name: "FirstName", type: "string", label: "First Name", pii: true },
+      { name: "LastName", type: "string", label: "Last Name", pii: true },
+      { name: "Email", type: "email", label: "Email", pii: true },
+      { name: "Phone", type: "phone", label: "Phone", pii: true },
+      { name: "MobilePhone", type: "phone", label: "Mobile Phone", pii: true },
+      { name: "Address", type: "json", label: "Address", pii: true },
+      { name: "Company", type: "string", label: "Company" },
+      { name: "Title", type: "string", label: "Title" },
+      { name: "Status", type: "enum", label: "Lead Status", enum: LEAD_STATUSES },
+      { name: "LeadSource", type: "enum", label: "Lead Source" },
+      { name: "Industry", type: "enum", label: "Industry" },
+      { name: "Rating", type: "enum", label: "Rating", enum: ["Hot", "Warm", "Cold"] },
+      { name: "IsConverted", type: "boolean", label: "Converted" },
+      { name: "ConvertedAccountId", type: "reference", label: "Converted Account ID" },
+      { name: "ConvertedContactId", type: "reference", label: "Converted Contact ID" },
+      { name: "ConvertedOpportunityId", type: "reference", label: "Converted Opportunity ID" },
+      ...SALESFORCE_AUDIT_FIELDS,
+    ],
+    statusField: {
+      name: "Status",
+      values: LEAD_STATUSES,
+      closed: ["Closed - Converted", "Closed - Not Converted"],
+    },
+    relations: [
+      { field: "ConvertedAccountId", targetType: "Account", edgeType: "related_to" },
+      { field: "ConvertedContactId", targetType: "Contact", edgeType: "related_to" },
+      { field: "ConvertedOpportunityId", targetType: "Opportunity", edgeType: "related_to" },
+    ],
+  },
+  {
+    type: "Opportunity",
+    label: "Opportunity",
+    entityType: "deal",
+    keyField: "Id",
+    titleField: "Name",
+    fields: [
+      { name: "Id", type: "id", label: "Opportunity ID" },
+      { name: "Name", type: "string", label: "Name" },
+      { name: "AccountId", type: "reference", label: "Account ID" },
+      { name: "StageName", type: "enum", label: "Stage", enum: OPPORTUNITY_STAGES },
+      { name: "Amount", type: "currency", label: "Amount" },
+      { name: "Probability", type: "percent", label: "Probability (%)" },
+      { name: "CloseDate", type: "date", label: "Close Date" },
+      { name: "Type", type: "enum", label: "Opportunity Type" },
+      { name: "LeadSource", type: "enum", label: "Lead Source" },
+      { name: "ForecastCategoryName", type: "enum", label: "Forecast Category" },
+      { name: "NextStep", type: "string", label: "Next Step" },
+      { name: "IsClosed", type: "boolean", label: "Closed" },
+      { name: "IsWon", type: "boolean", label: "Won" },
+      { name: "Description", type: "text", label: "Description", pii: true },
+      ...SALESFORCE_AUDIT_FIELDS,
+    ],
+    statusField: {
+      name: "StageName",
+      values: OPPORTUNITY_STAGES,
+      closed: ["Closed Won", "Closed Lost"],
+    },
+    relations: [{ field: "AccountId", targetType: "Account", edgeType: "belongs_to" }],
+  },
+  {
+    type: "Case",
+    label: "Case",
+    entityType: "ticket",
+    keyField: "Id",
+    titleField: "Subject",
+    fields: [
+      { name: "Id", type: "id", label: "Case ID" },
+      { name: "CaseNumber", type: "string", label: "Case Number" },
+      { name: "Subject", type: "string", label: "Subject" },
+      { name: "Description", type: "text", label: "Description", pii: true },
+      { name: "Status", type: "enum", label: "Status", enum: CASE_STATUSES },
+      { name: "Priority", type: "enum", label: "Priority", enum: ["High", "Medium", "Low"] },
+      { name: "Origin", type: "enum", label: "Case Origin", enum: ["Phone", "Email", "Web"] },
+      { name: "Type", type: "enum", label: "Case Type" },
+      { name: "Reason", type: "enum", label: "Case Reason" },
+      { name: "AccountId", type: "reference", label: "Account ID" },
+      { name: "ContactId", type: "reference", label: "Contact ID" },
+      { name: "SuppliedName", type: "string", label: "Web Name", pii: true },
+      { name: "SuppliedEmail", type: "email", label: "Web Email", pii: true },
+      { name: "SuppliedPhone", type: "phone", label: "Web Phone", pii: true },
+      { name: "IsClosed", type: "boolean", label: "Closed" },
+      { name: "ClosedDate", type: "datetime", label: "Closed Date" },
+      ...SALESFORCE_AUDIT_FIELDS,
+    ],
+    statusField: { name: "Status", values: CASE_STATUSES, closed: ["Closed"] },
+    relations: [
+      { field: "AccountId", targetType: "Account", edgeType: "belongs_to" },
+      { field: "ContactId", targetType: "Contact", edgeType: "reported_by" },
+    ],
+  },
+  {
+    type: "Task",
+    label: "Task",
+    entityType: "activity",
+    keyField: "Id",
+    titleField: "Subject",
+    fields: [
+      { name: "Id", type: "id", label: "Activity ID" },
+      { name: "Subject", type: "string", label: "Subject" },
+      { name: "Status", type: "enum", label: "Status", enum: TASK_STATUSES },
+      { name: "Priority", type: "enum", label: "Priority", enum: ["High", "Normal", "Low"] },
+      { name: "ActivityDate", type: "date", label: "Due Date" },
+      // Logged emails and call notes land here.
+      { name: "Description", type: "text", label: "Comments", pii: true },
+      { name: "TaskSubtype", type: "enum", label: "Task Subtype" },
+      { name: "WhatId", type: "reference", label: "Related To ID" },
+      { name: "WhoId", type: "reference", label: "Name ID" },
+      { name: "AccountId", type: "reference", label: "Account ID" },
+      { name: "IsClosed", type: "boolean", label: "Closed" },
+      ...SALESFORCE_AUDIT_FIELDS,
+    ],
+    statusField: { name: "Status", values: TASK_STATUSES, closed: ["Completed"] },
+    // WhatId and WhoId point at several object types, so they carry no relation.
+    relations: [{ field: "AccountId", targetType: "Account", edgeType: "related_to" }],
+  },
+];
+
+const SALESFORCE_MANIFEST_TOOLS: ManifestTool[] = [
+  {
+    name: `${CONNECTOR_PREFIX}.get_record`,
+    effect: "read",
+    risk: "read",
+    objectArg: "object",
+    recordIdArg: "id",
+    resultPath: "data",
+  },
+  {
+    name: `${CONNECTOR_PREFIX}.search_records`,
+    effect: "read",
+    risk: "read",
+    resultPath: "data.records",
+  },
+  {
+    name: `${CONNECTOR_PREFIX}.create_record`,
+    effect: "create",
+    risk: "external_write",
+    objectArg: "object",
+    preview: true,
+    receipt: true,
+  },
+  {
+    name: `${CONNECTOR_PREFIX}.update_record`,
+    effect: "update",
+    risk: "external_write",
+    objectArg: "object",
+    recordIdArg: "id",
+  },
+];
+
+/** Salesforce describe field types as manifest types; anything else reads as a string. */
+const SALESFORCE_FIELD_TYPES: Record<string, ManifestFieldType> = {
+  id: "id",
+  string: "string",
+  textarea: "text",
+  picklist: "enum",
+  multipicklist: "enum",
+  currency: "currency",
+  double: "number",
+  int: "number",
+  long: "number",
+  percent: "percent",
+  boolean: "boolean",
+  date: "date",
+  datetime: "datetime",
+  reference: "reference",
+  email: "email",
+  phone: "phone",
+  url: "url",
+  address: "json",
+};
+/**
+ * Describe types that hold personal data on any object. `textarea` covers long and rich text
+ * areas too (they differ only in `extraTypeInfo`): free text often quotes people.
+ */
+const SALESFORCE_PII_TYPES = new Set(["email", "phone", "address", "textarea"]);
+
+function manifestLabel(value: unknown): string | undefined {
+  const label = typeof value === "string" ? value.trim().slice(0, 120).trim() : "";
+  return label || undefined;
+}
+
+/** Distinct values the manifest accepts, in order, at most 64. */
+function manifestEnum(values: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const value of values) {
+    if (out.size >= MANIFEST_MAX_ENUM_VALUES) break;
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed && trimmed.length <= 120) out.add(trimmed);
+  }
+  return [...out];
+}
+
+/** A describe field as a manifest field; `declared` is the built-in field it updates. */
+function salesforceManifestField(
+  object: ManifestObject,
+  raw: any,
+  declared?: ManifestField,
+): ManifestField {
+  const type = SALESFORCE_FIELD_TYPES[String(raw.type)] ?? "string";
+  const field: ManifestField = { name: String(raw.name), type };
+  const label = manifestLabel(raw.label) ?? declared?.label;
+  if (label) field.label = label;
+  if (type === "enum") {
+    const picklist: any[] = Array.isArray(raw.picklistValues) ? raw.picklistValues : [];
+    const live = manifestEnum(
+      picklist.filter((entry) => entry?.active !== false).map((entry) => entry?.value),
+    );
+    const values = live.length > 0 ? live : declared?.enum;
+    if (values) field.enum = values;
+  }
+  const personal =
+    !declared && object.entityType === "person" && PERSONAL_FIELD_NAME.test(field.name);
+  if (declared?.pii || personal || SALESFORCE_PII_TYPES.has(String(raw.type))) field.pii = true;
+  return field;
+}
+
+/** The status field with the live values; closed values the org no longer has drop out. */
+function liveStatusField(
+  object: ManifestObject,
+  fields: ManifestField[],
+): ManifestObject["statusField"] {
+  const status = object.statusField;
+  const values = status && fields.find((field) => field.name === status.name)?.enum;
+  if (!status || !values || values.length === 0) return status;
+  const closed = (status.closed ?? []).filter((value) => values.includes(value));
+  return { name: status.name, values, ...(closed.length > 0 ? { closed } : {}) };
+}
+
+/** A declared object updated from its describe; custom fields follow the declared ones. */
+function enrichSalesforceObject(object: ManifestObject, describe: any): ManifestObject {
+  const live = new Map<string, any>();
+  for (const raw of Array.isArray(describe?.fields) ? describe.fields : []) {
+    if (typeof raw?.name === "string" && MANIFEST_FIELD_NAME.test(raw.name)) {
+      live.set(raw.name, raw);
+    }
+  }
+  if (live.size === 0) return object;
+  const declared = new Set(object.fields.map((field) => field.name));
+  const fields = object.fields.map((field) => {
+    const raw = live.get(field.name);
+    return raw ? salesforceManifestField(object, raw, field) : field;
+  });
+  for (const raw of live.values()) {
+    if (fields.length >= MANIFEST_MAX_FIELDS) break;
+    if (raw.custom === true && !raw.deprecatedAndHidden && !declared.has(raw.name)) {
+      fields.push(salesforceManifestField(object, raw));
+    }
+  }
+  const statusField = liveStatusField(object, fields);
+  return { ...object, fields, ...(statusField ? { statusField } : {}) };
+}
+
+/** Custom fields without their picklist values, for an org whose manifest is too large. */
+function withoutCustomEnums(objects: ManifestObject[]): ManifestObject[] {
+  return objects.map((object) => {
+    const declared = SALESFORCE_OBJECTS.find((entry) => entry.type === object.type);
+    const names = new Set(declared?.fields.map((field) => field.name));
+    const fields = object.fields.map((field) => {
+      if (names.has(field.name) || !field.enum) return field;
+      const { enum: _values, ...rest } = field;
+      return rest;
+    });
+    return { ...object, fields };
+  });
+}
+
+/** The instance's https origin for record links; none when the instance is not https. */
+function salesforceRecordPageBase(): string | undefined {
+  try {
+    const url = new URL(String(config.instanceUrl ?? ""));
+    return url.protocol === "https:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function salesforceManifest(objects: ManifestObject[]): ObjectManifest {
+  const base = salesforceRecordPageBase();
+  return {
+    version: 1,
+    connector: CONNECTOR_PREFIX,
+    objects: objects.map((object) =>
+      base ? { ...object, urlTemplate: `${base}/lightning/r/${object.type}/{id}/view` } : object,
+    ),
+    tools: SALESFORCE_MANIFEST_TOOLS,
+  };
+}
+
+function manifestBytes(manifest: ObjectManifest): number {
+  return Buffer.byteLength(JSON.stringify(manifest), "utf8");
+}
+
+/** Whether the org can be asked at all: an instance plus a token or refresh credentials. */
+function salesforceConfigured(): boolean {
+  return Boolean(
+    config.instanceUrl &&
+    (config.accessToken || (config.clientId && config.clientSecret && config.refreshToken)),
+  );
+}
+
+/** `work`'s value, or `fallback` once `ms` pass first; the timer never outlives the race. */
+async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+    (timer as { unref?: () => unknown }).unref?.();
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The declared objects updated from their describes; a failed describe leaves one as is. */
+async function liveSalesforceObjects(): Promise<ManifestObject[]> {
+  const enrich = async (object: ManifestObject): Promise<ManifestObject> => {
+    try {
+      return enrichSalesforceObject(object, (await client.describeObject(object.type)).data);
+    } catch {
+      return object;
+    }
+  };
+  // One describe first, so a token refresh happens once rather than once per object.
+  const [first, ...rest] = SALESFORCE_OBJECTS;
+  return [await enrich(first), ...(await Promise.all(rest.map(enrich)))];
+}
+
+async function describeSalesforceObjects(): Promise<ObjectManifest> {
+  try {
+    let objects = SALESFORCE_OBJECTS;
+    if (salesforceConfigured()) {
+      objects = await withDeadline(
+        liveSalesforceObjects(),
+        LIVE_MANIFEST_DEADLINE_MS,
+        SALESFORCE_OBJECTS,
+      );
+    }
+    for (const candidate of [objects, withoutCustomEnums(objects)]) {
+      const manifest = salesforceManifest(candidate);
+      if (manifestBytes(manifest) <= MANIFEST_MAX_BYTES) return manifest;
+    }
+  } catch {
+    // Fall back to the declared objects below.
+  }
+  return salesforceManifest(SALESFORCE_OBJECTS);
+}
 
 type ToolHandler = (args: Record<string, any>, context: CallContext) => Promise<any>;
 
@@ -964,6 +1491,13 @@ const handlers: Record<string, ToolHandler> = {
     const result = await client.updateRecord(args.object, args.id, args.fields || {});
     return buildEnvelope(result, args.requestId, warnings);
   },
+  [`${CONNECTOR_PREFIX}.describe_objects`]: async () => {
+    const manifest = await describeSalesforceObjects();
+    return {
+      content: [{ type: "text", text: JSON.stringify(manifest) }],
+      structuredContent: manifest,
+    };
+  },
 };
 
 const toolProvider: ToolProvider = {
@@ -993,6 +1527,11 @@ export function startSalesforceMcpServer(): void {
 /** Test hook: one `tools/call` request through the server, `_meta` included. */
 export async function callSalesforceToolForTest(params: any): Promise<any> {
   return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+/** Test hook: the tools `tools/list` returns. */
+export function listSalesforceToolsForTest(): MCPTool[] {
+  return toolProvider.getTools();
 }
 
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {

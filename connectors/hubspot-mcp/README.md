@@ -31,5 +31,11 @@ npm start
 - `hubspot.get_object`
 - `hubspot.create_object`
 - `hubspot.update_object`
+- `hubspot.describe_objects`
+
+## Object manifest
+
+`hubspot.describe_objects` returns the CRM objects this connector holds (contacts, companies, deals, tickets), their fields, default pipeline stages and which tools read or write them.
+CoWork calls it itself and hides it from the model; it makes no API call.
 
 See `docs/enterprise-connectors.md` for the connector contract.

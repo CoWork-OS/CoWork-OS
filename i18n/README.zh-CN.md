@@ -117,7 +117,7 @@ Linux 服务器请使用[打包好的无界面服务端](../docs/vps-linux.md)�
 3. **描述任务**，比如“把 ~/Downloads 里最近十张发票整理成一个表格”，也可以从用例库里选一个现成的任务。
 4. **观察并批准。**时间线会显示每一步。工作区内的操作会自动进行；凡是发送、联网、使用凭据或离开工作区的操作，都会等你回答。
 
-在终端中：`cowork` 打开终端界面，`cowork run "你是谁？"` 运行一次性任务，两者使用同一份本地配置。[入门指南](../docs/getting-started.md) · [CoWork CLI](../docs/cli.md)
+在终端中：`cowork` 打开终端界面，`cowork run "你是谁？"` 运行一次性任务，两者使用同一份本地配置。[入门指南](../docs/getting-started.md)（[快速上手中文版](../docs/zh-CN/getting-started.md)） · [CoWork CLI](../docs/cli.md)
 
 ## 从 Hermes 或 OpenClaw 迁移
 
@@ -132,11 +132,11 @@ OpenClaw 请使用 `--from openclaw`，也可以在应用的 **Settings > Import
 
 ## 文档
 
-以下文档目前为英文。
+以下文档目前为英文；[入门指南的快速上手部分](../docs/zh-CN/getting-started.md)已有简体中文版。
 
 | | |
 | --- | --- |
-| [Getting Started](../docs/getting-started.md) | 安装、第一个模型、第一个任务 |
+| [Getting Started](../docs/getting-started.md)（[快速上手中文版](../docs/zh-CN/getting-started.md)） | 安装、第一个模型、第一个任务 |
 | [Feature Tour](../docs/feature-tour.md) | 为什么做 CoWork OS、任务如何运行、完整功能清单 |
 | [Features](../docs/features.md) | 按类别整理的功能参考 |
 | [Models & Access](../docs/providers.md) | 模型接入方式、账号登录、本地模型、备用链路 |

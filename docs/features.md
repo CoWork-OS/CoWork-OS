@@ -60,6 +60,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Persistent Bots**: the **Bots** rail item opens the Bots page (what your bots need from you, what is running and scheduled, templates for new bots) and the bot roster. Bots give reusable agent roles a stable identity across many durable conversations, open or create dormant conversations, keep history separate from Sessions, support profile editing/deactivation, expose notification and host-computer state, and can take **responsibilities** (a trigger, sources, a mode, a review boundary and a budget; saved paused). Bots you add to a team you configure can message verified teammates; CoWork no longer installs a default bot team. See [Bots, conversations, and tasks](bots-and-conversations.md).
 - **Runtime Orchestration**: SessionRuntime owns task-session state, session checklists, resume snapshots, recovery state, and task projection while the turn kernel handles each individual step, follow-up, or text turn; metadata-driven tool scheduling, graph-backed delegation, typed worker roles, verifier verdicts, semantic tool-batch summaries, and terminal-state reconciliation keep delegated work coherent across tasks, follow-ups, teams, and ACP runs.
 - **Prompt-Aware Tooling**: visible tools receive concise prompt-local guidance after policy filtering, and planning plus execution share the same render source for compact tool text and provider-facing tool descriptions.
+- **Suggested Tasks**: when the agent notices work outside your request, such as a bug found in passing or a cost too large to fix in the same change, it proposes it as a card under its answer. You can **Start** it as its own task (Options sets folder, worktree, model, effort and permissions), use **Do it here** to send it to the same conversation, **Start all**, or dismiss it. Nothing runs until you choose. Started tasks keep the proposing task's access limits and never count as text you typed. See [Suggested Tasks](suggested-tasks.md).
 - **Composer Predictions**: an empty composer can suggest your next message after a response. Tab accepts without sending; Escape or typing dismisses. Enable or disable it in Settings > Appearance > Composer, with a one-time sidebar tooltip when the first suggestion is available. Generation uses your selected LLM provider and consumes tokens even for discarded suggestions; enabled profile routing uses the configured Cheap model. See [Composer Predictions](composer-predictions.md).
 - **Composer Mentions**: type `@` in the main composer to choose Agents, configured Integrations, or Files. Integration mentions render as icon+name chips and add soft runtime routing guidance without changing permissions. See [Composer Mentions](composer-mentions.md).
 - **Message Box Shortcuts**: type `/` in the main composer to search deterministic app commands and skill-backed workflow shortcuts in one picker. App commands include `/side`, `/schedule`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, and `/undo`; `/side ...` opens a read-only side conversation about the selected running session, and `/schedule here ...` targets the selected thread for a scheduled follow-up. Plugin-pack aliases resolve to their target skills through the existing skills runtime. Skill-backed selections insert the command token so users can add context before sending. See [Message Box Shortcuts](message-box-shortcuts.md), [Side Chat](side-chat.md), and [Multitask Command](multitask.md).
@@ -204,7 +205,7 @@ See [Chronicle](chronicle.md) for setup, testing, privacy, and contributor detai
 
 Local-first inbox workspace for email triage, normal email handling, follow-up, task capture, cross-channel identity, and operator handoff.
 
-- **Classic + Today modes**: the familiar three-pane inbox remains available, while Today groups work into `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- **Classic + Today modes**: the familiar three-pane inbox remains available, while Today groups work into `Needs action`, `Dates & plans`, `Good to know`, and `More to browse`
 - **Live inbox surfaces**: `Unread`, `Needs reply`, `Suggested Actions`, and `Open Commitments`
 - **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting, saved views, account filters, and domain filters
 - **Normal email actions**: manual reply, reply-all, forward, To/Cc/Bcc, editable subject/body, and provider-backed send
@@ -967,6 +968,19 @@ Session-scoped note-taking system for agents during long-running tasks.
 | `scratchpad_read`  | Retrieve all notes or a specific note by key                                       |
 
 Notes persist to `.cowork/scratchpad-{taskId}.json` for crash recovery. The scratchpad is ephemeral per task — useful for agents to track intermediate findings, partial results, and working state during complex multi-step tasks.
+
+---
+
+## Shortened Results and Recall by ID
+
+| Tool               | Description                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `tool_result_read` | Page through the omitted part of a tool result that was shortened to fit the context window          |
+| `task_get`         | Recall a task by ID: status, summary, and the IDs of its parent, children, origin and related tasks  |
+
+When a tool result is too long for the context window, the agent sees its start and end and a marker such as `[... 51234 chars omitted; call tool_result_read(handle="sp…", offset=4000) to continue ...]`. The full text is kept privately in the app's data folder for the task that produced it, and is deleted when the task finishes or after 24 hours. Compaction keeps these handles in its summary.
+
+Every task's system prompt carries a one-line list of its own ID and the IDs it came from (parent task, session, trigger event, chat thread). `task_history` results and `memory_recall` hits name the `task_get` call for each task, so the agent can follow related work hop by hop.
 
 ---
 

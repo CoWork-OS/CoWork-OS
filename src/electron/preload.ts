@@ -21,7 +21,12 @@ import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
-import type { ApprovalRequest, SpaceSandboxConfig, SandboxType } from "../shared/types";
+import type {
+  ApprovalRequest,
+  SpaceSandboxConfig,
+  SandboxType,
+  WatchdogSettings,
+} from "../shared/types";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   CuaSpaceConnectionResult,
@@ -76,6 +81,7 @@ import type {
   AgentImportSource,
 } from "../shared/types";
 import type { BotOutcomeMetrics, BotOutcomeMetricsRequest } from "../shared/bot-outcome-metrics";
+import type { TaskProposal, TaskProposalStartOptions } from "../shared/task-proposals";
 import type { BotCapabilitiesRequest, BotCapabilitySummary } from "../shared/bot-capabilities";
 import type {
   ChannelHealthResponse,
@@ -3453,6 +3459,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     sideChat?: boolean;
     initialMessage?: string;
   }) => ipcRenderer.invoke(IPC_CHANNELS.TASK_FORK_SESSION, data),
+  listTaskProposals: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_LIST, { taskId }),
+  startTaskProposal: (proposalId: string, options?: TaskProposalStartOptions) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_START, {
+      proposalId,
+      ...(options ? { options } : {}),
+    }),
+  startAllTaskProposals: (taskId: string, proposalIds: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, { taskId, proposalIds }),
+  doTaskProposalHere: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE, { proposalId }),
+  dismissTaskProposal: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PROPOSAL_DISMISS, { proposalId }),
   sendStdin: (taskId: string, input: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_SEND_STDIN, { taskId, input }),
   killCommand: (taskId: string, force?: boolean) =>
@@ -4401,6 +4420,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveQueueSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, settings),
   clearQueue: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_CLEAR),
+  getWatchdogSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WATCHDOG_GET_SETTINGS),
+  saveWatchdogSettings: (settings: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS, settings),
   onQueueUpdate: (callback: (status: Any) => void) => {
     const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.QUEUE_UPDATE, subscription);
@@ -6063,6 +6085,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeTrigger: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, id),
   getTriggerHistory: (triggerId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_HISTORY, triggerId),
+  listSpeculativeRuns: (query?: { workspaceId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SPECULATIVE_RUNS_LIST, query ?? {}),
+  // Semantic event gate (policies and per-source/per-chat modes)
+  getEventGateSettings: () => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_GET),
+  addEventGatePolicy: (text: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_ADD_POLICY, text),
+  removeEventGatePolicy: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_REMOVE_POLICY, id),
+  toggleEventGatePolicy: (id: string, enabled?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_TOGGLE_POLICY, { id, enabled }),
+  setEventGateSourceMode: (source: string, mode: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_SET_SOURCE_MODE, { source, mode }),
+  setEventGateChatMode: (chatKey: string, mode: string | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_SET_CHAT_MODE, { chatKey, mode }),
 
   // Routines
   listRoutines: () => ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_LIST),
@@ -6649,6 +6685,21 @@ export interface ElectronAPI {
   getRecentHubFiles: (limit?: number) => Promise<import("./file-hub/types").UnifiedFile[]>;
   trackHubFileAccess: (file: import("./file-hub/types").UnifiedFile) => Promise<void>;
   getHubSources: () => Promise<import("./file-hub/types").FileHubSource[]>;
+  getEventGateSettings: () => Promise<import("../shared/types").EventGateSettings>;
+  addEventGatePolicy: (text: string) => Promise<import("../shared/types").EventGateSettings>;
+  removeEventGatePolicy: (id: string) => Promise<import("../shared/types").EventGateSettings>;
+  toggleEventGatePolicy: (
+    id: string,
+    enabled?: boolean,
+  ) => Promise<import("../shared/types").EventGateSettings>;
+  setEventGateSourceMode: (
+    source: string,
+    mode: import("../shared/types").EventGateMode,
+  ) => Promise<import("../shared/types").EventGateSettings>;
+  setEventGateChatMode: (
+    chatKey: string,
+    mode: import("../shared/types").EventGateMode | null,
+  ) => Promise<import("../shared/types").EventGateSettings>;
   selectFolder: (defaultPath?: string) => Promise<string | null>;
   selectFiles: (defaultPath?: string) => Promise<
     Array<{
@@ -7417,6 +7468,14 @@ export interface ElectronAPI {
     sideChat?: boolean;
     initialMessage?: string;
   }) => Promise<Any>;
+  listTaskProposals: (taskId: string) => Promise<TaskProposal[]>;
+  startTaskProposal: (proposalId: string, options?: TaskProposalStartOptions) => Promise<Task>;
+  startAllTaskProposals: (
+    taskId: string,
+    proposalIds: string[],
+  ) => Promise<Array<{ proposalId: string; taskId?: string; error?: string }>>;
+  doTaskProposalHere: (proposalId: string) => Promise<void>;
+  dismissTaskProposal: (proposalId: string) => Promise<void>;
   sendStdin: (taskId: string, input: string) => Promise<boolean>;
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;
@@ -8648,6 +8707,10 @@ export interface ElectronAPI {
     taskTimeoutMinutes?: number;
   }) => Promise<{ success: boolean }>;
   clearQueue: () => Promise<{ success: boolean; clearedRunning: number; clearedQueued: number }>;
+  getWatchdogSettings: () => Promise<WatchdogSettings>;
+  saveWatchdogSettings: (
+    settings: Partial<WatchdogSettings>,
+  ) => Promise<{ success: boolean; settings: WatchdogSettings }>;
   onQueueUpdate: (
     callback: (status: {
       runningCount: number;
@@ -10319,6 +10382,11 @@ export interface ElectronAPI {
 
   // MCP Events
   getMcpEventsReceiverPort: () => Promise<number | null>;
+
+  // Speculative reproduce-and-fix runs (read-only)
+  listSpeculativeRuns: (
+    query?: import("../shared/types").SpeculativeRunListQuery,
+  ) => Promise<import("../shared/types").SpeculativeRun[]>;
 
   // Playwright QA APIs
   qaGetRuns: () => Promise<Any[]>;

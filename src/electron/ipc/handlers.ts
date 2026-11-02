@@ -400,6 +400,11 @@ import { ChannelGateway } from "../gateway";
 
 import { getUpdatePrompt, UpdatePreferencesStore, updateManager } from "../updater";
 import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
+import {
+  WatchdogSettingsManager,
+  WatchdogSettingsPatchSchema,
+} from "../agent/watchdog/watchdog-settings";
+import { getWatchdogService } from "../agent/watchdog/WatchdogService";
 import { toPublicChannel } from "./channel-config-sanitizer";
 import { buildSavedLLMSettings } from "./llm-settings-save";
 import { buildTaskExportJson } from "../reports/task-export";
@@ -408,6 +413,7 @@ import { ProfileManager } from "../profiles/ProfileManager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { resolveAccessProfileDefinitionWithStatus } from "../../shared/access-profiles";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
+import { TaskProposalService } from "../task-proposals/TaskProposalService";
 import { removeWorkspacePermissionManifestRule } from "../security/workspace-permission-manifest";
 import {
   validateInput,
@@ -474,6 +480,10 @@ import {
   SetImportedRecallIgnoredSchema,
   StepFeedbackSchema,
   ForkSessionSchema,
+  TaskProposalActionSchema,
+  TaskProposalListSchema,
+  TaskProposalStartAllSchema,
+  TaskProposalStartSchema,
   PersonalityImportSchema,
   PersonalityConfigV2Schema,
   parsePersonalitySaveOptions,
@@ -1230,6 +1240,11 @@ rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.BOT_CAPABILITIES_GET, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_LIST, RATE_LIMIT_CONFIGS.frequent);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_START, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_DISMISS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
@@ -1732,8 +1747,9 @@ export async function setupIpcHandlers(
       win.webContents.send(IPC_CHANNELS.COMPUTER_USE_EVENT, event);
     }
   });
-  // Which tasks each app window watches, so a closed or reloaded window stops its captures.
-  const computerViewWatches = new Map<number, Set<string>>();
+  // Which tasks each app window watches (and how many of its views do), so a closed or
+  // reloaded window stops its captures and one view closing leaves the others live.
+  const computerViewWatches = new Map<number, Map<string, number>>();
   const readComputerViewTaskId = (value: unknown): string =>
     validateInput(StringIdSchema, value, "task ID");
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_WATCH, (event, taskId: unknown) => {
@@ -1753,23 +1769,31 @@ export async function setupIpcHandlers(
     const senderId = event.sender.id;
     let watched = computerViewWatches.get(senderId);
     if (!watched) {
-      watched = new Set();
+      watched = new Map();
       computerViewWatches.set(senderId, watched);
       event.sender.once("destroyed", () => {
-        for (const watchedTaskId of computerViewWatches.get(senderId) ?? []) {
+        for (const watchedTaskId of computerViewWatches.get(senderId)?.keys() ?? []) {
           computerView.unwatch(watchedTaskId);
         }
         computerViewWatches.delete(senderId);
       });
     }
-    if (watched.has(id)) return computerView.getState(id);
-    watched.add(id);
-    return computerView.watch(id);
+    const views = watched.get(id) ?? 0;
+    watched.set(id, views + 1);
+    return views > 0 ? computerView.getState(id) : computerView.watch(id);
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, (event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH);
     const id = readComputerViewTaskId(taskId);
-    if (computerViewWatches.get(event.sender.id)?.delete(id)) computerView.unwatch(id);
+    const watched = computerViewWatches.get(event.sender.id);
+    const views = watched?.get(id) ?? 0;
+    if (!watched || views === 0) return;
+    if (views > 1) {
+      watched.set(id, views - 1);
+      return;
+    }
+    watched.delete(id);
+    computerView.unwatch(id);
   });
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER);
@@ -6333,6 +6357,87 @@ export async function setupIpcHandlers(
       undefined,
       authorization.actor.principalId,
     );
+  });
+
+  // Suggested tasks: the person's actions on proposals an agent made with propose_task.
+  // A started task is created like a composer task (default access profile, WorkContext),
+  // but without prompt provenance: its prompt is the agent's brief.
+  const taskProposalService = new TaskProposalService({
+    getTask: (taskId) => agentDaemon.getTask(taskId),
+    getWorkspaceById: (id) => agentDaemon.getWorkspaceById(id),
+    logEvent: (taskId, type, payload) => agentDaemon.logEvent(taskId, type, payload),
+    sendMessage: (...args) => agentDaemon.sendMessage(...args),
+    createTask: async (params) => {
+      const task = await agentDaemon.createTask({
+        ...params,
+        agentConfig: applyDefaultAccessProfile(
+          params.agentConfig,
+          PermissionSettingsManager.loadSettings(),
+        ),
+      });
+      try {
+        await workContextService.ensureForTask(task);
+      } catch (error) {
+        logger.warn("Failed to register suggested task WorkContext:", error);
+      }
+      return task;
+    },
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_LIST, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_LIST);
+    const validated = validateInput(TaskProposalListSchema, data, "suggested task list");
+    await authorizeTaskForEvent(event, validated.taskId, "view");
+    return taskProposalService.list(validated.taskId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_START, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_START);
+    const validated = validateInput(TaskProposalStartSchema, data, "suggested task start");
+    const originTaskId = await taskProposalService.originTaskId(validated.proposalId);
+    await authorizeTaskForEvent(event, originTaskId, "manage");
+    const options = validated.options ?? {};
+    // Effort is a provider setting, applied the way the thread model picker applies it.
+    if (options.providerType && options.reasoningEffort) {
+      LLMProviderFactory.saveSettings(
+        LLMProviderFactory.applyReasoningEffortSelection(
+          LLMProviderFactory.loadSettings(),
+          options.providerType,
+          options.reasoningEffort as LLMReasoningEffort,
+        ),
+      );
+    }
+    return taskProposalService.start(validated.proposalId, {
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.worktreeMode ? { worktreeMode: options.worktreeMode } : {}),
+      ...(options.providerType && options.modelKey
+        ? { providerType: options.providerType, modelKey: options.modelKey }
+        : {}),
+      ...(options.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_START_ALL);
+    const validated = validateInput(TaskProposalStartAllSchema, data, "suggested task start all");
+    await authorizeTaskForEvent(event, validated.taskId, "manage");
+    return taskProposalService.startAll(validated.taskId, validated.proposalIds);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_DO_HERE);
+    const validated = validateInput(TaskProposalActionSchema, data, "suggested task");
+    const originTaskId = await taskProposalService.originTaskId(validated.proposalId);
+    await authorizeTaskForEvent(event, originTaskId, "contribute");
+    await taskProposalService.doHere(validated.proposalId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PROPOSAL_DISMISS, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PROPOSAL_DISMISS);
+    const validated = validateInput(TaskProposalActionSchema, data, "suggested task");
+    const originTaskId = await taskProposalService.originTaskId(validated.proposalId);
+    await authorizeTaskForEvent(event, originTaskId, "manage");
+    await taskProposalService.dismiss(validated.proposalId);
   });
 
   ipcMain.handle(
@@ -11996,6 +12101,19 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.QUEUE_CLEAR);
     const result = await agentDaemon.clearStuckTasks();
     return { success: true, ...result };
+  });
+
+  // Watchdog control loop settings (Settings > Automations > Queue)
+  ipcMain.handle(IPC_CHANNELS.WATCHDOG_GET_SETTINGS, async () => {
+    return WatchdogSettingsManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS, async (_, settings: unknown) => {
+    checkRateLimit(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS);
+    const patch = validateInput(WatchdogSettingsPatchSchema, settings, "watchdog settings");
+    const saved = WatchdogSettingsManager.saveSettings(patch);
+    getWatchdogService()?.applySettings(WatchdogSettingsManager.loadEffectiveSettings());
+    return { success: true, settings: saved };
   });
 
   // MCP handlers

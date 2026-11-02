@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComputerViewService } from "../computer-view-service";
-import { COMPUTER_VIEW_POLL_MS } from "../../../shared/computer-view";
+import { COMPUTER_VIEW_LIVE_POLL_MS, COMPUTER_VIEW_POLL_MS } from "../../../shared/computer-view";
 
 const makeService = (overrides: Record<string, unknown> = {}) => {
   const deps = {
@@ -148,6 +148,88 @@ describe("ComputerViewService", () => {
     service.unwatch("t1");
     await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_POLL_MS * 2);
     expect(deps.captureBrowser).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures the controlled window every second only while someone watches it working", async () => {
+    const { service } = makeService();
+    const capture = vi.fn(async () => Buffer.from("window"));
+    service.noteWorking("t1", "this_computer");
+    service.setLiveWindow("t1", { label: "Calculator", capture });
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS * 3);
+    expect(capture).not.toHaveBeenCalled();
+
+    service.watch("t1");
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS);
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(service.getState("t1").frame?.label).toBe("Calculator");
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS * 2);
+    expect(capture).toHaveBeenCalledTimes(3);
+
+    service.unwatch("t1");
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS * 3);
+    expect(capture).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips a timed capture right after an action captured the window", async () => {
+    const { service } = makeService();
+    const capture = vi.fn(async () => Buffer.from("window"));
+    service.noteWorking("t1", "this_computer");
+    service.setLiveWindow("t1", { label: "Calculator", capture });
+    service.watch("t1");
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS - 100);
+    service.publishFrame("t1", "this_computer", Buffer.from("action"), "Calculator");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(capture).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS);
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops capturing the window when the person takes over or the session ends", async () => {
+    const { service } = makeService();
+    const capture = vi.fn(async () => Buffer.from("window"));
+    service.watch("t1");
+    service.publishFrame("t1", "this_computer", Buffer.from("action"), "Calculator");
+    service.setLiveWindow("t1", { label: "Calculator", capture });
+    service.takeOver("t1");
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS * 3);
+    expect(capture).not.toHaveBeenCalled();
+
+    service.handBack("t1");
+    service.noteWorking("t1", "this_computer");
+    service.noteReleased("t1", "this_computer");
+    service.noteWorking("t1", "this_computer");
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS * 3);
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("drops a window capture that finishes after the run ended", async () => {
+    const { service } = makeService();
+    let finish!: (png: Buffer) => void;
+    service.watch("t1");
+    service.noteWorking("t1", "this_computer");
+    service.setLiveWindow("t1", {
+      capture: () => new Promise<Buffer>((resolve) => (finish = resolve)),
+    });
+    const capture = service.captureNow("t1");
+    service.noteTaskEnded("t1");
+    finish(Buffer.from("late"));
+    await capture;
+    expect(service.getState("t1").status).toBe("idle");
+    expect(service.getState("t1").frame).toBeUndefined();
+  });
+
+  it("skips a window capture that fails", async () => {
+    const { service } = makeService();
+    service.watch("t1");
+    service.noteWorking("t1", "this_computer");
+    service.setLiveWindow("t1", {
+      capture: vi.fn(async () => {
+        throw new Error("window closed");
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(COMPUTER_VIEW_LIVE_POLL_MS);
+    expect(service.getState("t1")).toMatchObject({ status: "working" });
+    expect(service.getState("t1").frame).toBeUndefined();
   });
 
   it("shows waiting until the task gets the computer", () => {

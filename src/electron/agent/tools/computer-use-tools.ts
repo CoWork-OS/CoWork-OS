@@ -573,13 +573,24 @@ export class ComputerUseTools {
     assertPrivateCaptureAllowed();
     this.currentCapture = this.makeCaptureState(this.currentTarget, payload);
     this.persistState();
-    // The same screenshot becomes the bot panel's live view (downscaled, never stored).
-    ComputerViewService.getInstance().publishFrame(
-      this.taskId,
-      "this_computer",
-      payload.pngBase64,
-      [this.currentTarget.appName, this.currentTarget.windowTitle].filter(Boolean).join(" — "),
-    );
+    // The same screenshot becomes the live view (downscaled, never stored). Between actions,
+    // the view captures this window in the background while someone watches.
+    const label = [this.currentTarget.appName, this.currentTarget.windowTitle]
+      .filter(Boolean)
+      .join(" — ");
+    const view = ComputerViewService.getInstance();
+    view.publishFrame(this.taskId, "this_computer", payload.pngBase64, label);
+    const provider = this.helper();
+    const { windowId } = this.currentTarget;
+    view.setLiveWindow(this.taskId, {
+      label,
+      capture: async () => {
+        const assertAllowed = privateCaptureGuard();
+        const live = await provider.screenshot(windowId);
+        assertAllowed();
+        return live.pngBase64;
+      },
+    });
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: toolName,
       success: true,

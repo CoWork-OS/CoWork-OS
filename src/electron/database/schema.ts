@@ -10,6 +10,7 @@ import {
 import { SCHEDULER_LEASE_SCHEMA } from "../automation/scheduler-lease-store";
 import { ANSWER_SURFACE_STATE_SCHEMA } from "../answer-surfaces/answer-surface-state-sql";
 import { ANSWER_TOOL_DATA_SCHEMA } from "../answer-surfaces/tool-data-sql";
+import { TASK_PROPOSAL_SCHEMA } from "../task-proposals/task-proposal-sql";
 import { DISPATCH_BUDGET_SCHEMA } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
 import path from "path";
@@ -53,6 +54,7 @@ import { instrumentDatabase } from "./sqlite-instrumentation";
 import { TimelineProjectionOutboxRepository } from "./TimelineProjectionOutboxRepository";
 import { applyConnectionPragmas, HOST_BUSY_TIMEOUT_MS, resolveDatabasePath } from "./connection";
 import { initializeMailboxSearchIndex } from "./mailbox-search-index-schema";
+import { THREAD_SUBSCRIPTIONS_SCHEMA_SQL } from "./thread-subscriptions-schema";
 import { TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK } from "../../shared/task-event-mutation-journal-limits";
 
 const schemaLogger = createLogger("DatabaseManager");
@@ -891,6 +893,7 @@ export class DatabaseManager {
       ${SCHEDULER_LEASE_SCHEMA}
       ${ANSWER_SURFACE_STATE_SCHEMA}
       ${ANSWER_TOOL_DATA_SCHEMA}
+      ${TASK_PROPOSAL_SCHEMA}
       ${BOT_RESPONSIBILITY_SCHEMA}
       ${BOT_NOTIFICATION_SCHEMA}
       ${NOTIFICATION_INBOX_SCHEMA}
@@ -6249,6 +6252,9 @@ export class DatabaseManager {
         updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
       );
     `);
+
+    // Thread subscriptions: tasks that receive later events of an IM thread, PR or email chain.
+    this.db.exec(THREAD_SUBSCRIPTIONS_SCHEMA_SQL);
 
     // Migration: Add body_html column to mailbox_messages for rendering original HTML email content
     try {

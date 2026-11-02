@@ -12,6 +12,10 @@
  *   - Discord: markdown-rich, casual, code blocks welcome
  *   - Teams: professional, structured, moderate length
  *   - Telegram: concise, no heavy formatting
+ *   - GitHub: dense and structured (background, change, verification)
+ *
+ * Chat channels also get a hard reply cap (about 100 words, conclusions first, direct
+ * questions only); email and GitHub get the dense background/change/verification shape.
  *
  * The adapter layers a channel-specific directive ON TOP of the core persona —
  * it never replaces it. The result: same personality, adapted delivery.
@@ -24,9 +28,23 @@ import { GuardrailManager } from "../guardrails/guardrail-manager";
 
 // ─── Channel Communication Profiles ──────────────────────────────────
 
+/** Where a reply goes: a gateway channel, or GitHub (PR and issue comments). */
+export type PersonaSurface = ChannelType | "github";
+
+/** The hard per-reply word cap on chat channels. */
+export const CHAT_REPLY_WORD_LIMIT = 100;
+
+/**
+ * - chat: instant messaging; replies are capped and lead with the conclusion.
+ * - structured: email and GitHub; dense background / change / verification shape.
+ */
+type ReplyNorm = "chat" | "structured";
+
 interface ChannelProfile {
   /** Short description of channel communication norms. */
   directive: string;
+  /** Hard reply norm for the channel. */
+  replyNorm: ReplyNorm;
   /** Suggested response length adjustment. */
   lengthHint: "shorter" | "normal" | "longer";
   /** Whether to encourage emoji usage. */
@@ -37,7 +55,7 @@ interface ChannelProfile {
   formalFraming: boolean;
 }
 
-const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
+const CHANNEL_PROFILES: Partial<Record<PersonaSurface, ChannelProfile>> = {
   slack: {
     directive:
       "You are responding in a Slack workspace. Keep messages concise and scannable. " +
@@ -45,6 +63,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "Avoid long paragraphs — prefer short blocks. " +
       "If sharing code, use backtick code blocks. " +
       "Thread-style brevity is preferred over essay-length answers.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: false,
     structuredFormatting: true,
@@ -56,6 +75,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "brief greeting, clear body with paragraphs, and a courteous sign-off. " +
       "Be thorough but not verbose. Organize long responses with numbered points or sections. " +
       "Maintain a professional tone appropriate for business communication.",
+    replyNorm: "structured",
     lengthHint: "longer",
     emojiEncouraged: false,
     structuredFormatting: true,
@@ -67,6 +87,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "Use simple, direct language. Break long responses into multiple short paragraphs. " +
       "Avoid heavy formatting — WhatsApp supports only basic bold/italic. " +
       "Match the casual, quick-reply style typical of instant messaging.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: true,
     structuredFormatting: false,
@@ -77,6 +98,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "You are replying to a customer through a WhatsApp Business account. Keep messages short, " +
       "polite and professional, and use plain text with at most basic bold/italic. " +
       "Break long answers into short paragraphs.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: false,
     structuredFormatting: false,
@@ -86,6 +108,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     directive:
       "You are replying by SMS. Use plain text only — no Markdown, tables or code blocks. " +
       "Keep replies brief (ideally under 320 characters) because long messages are split and billed per segment.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: false,
     structuredFormatting: false,
@@ -96,6 +119,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "You are responding via iMessage. Keep messages concise and natural. " +
       "Use a conversational, friendly tone. Avoid long blocks of text. " +
       "Short replies feel more natural on this platform.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: true,
     structuredFormatting: false,
@@ -106,6 +130,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "You are responding via Signal. Keep messages focused and concise. " +
       "This is a security-conscious platform — avoid unnecessary verbosity. " +
       "Direct, clear communication is valued.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: false,
     structuredFormatting: false,
@@ -117,6 +142,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "headers, bold, code blocks, and bullets are well-supported. " +
       "Match the community-style tone. Keep responses moderately sized. " +
       "Use code blocks with syntax highlighting for technical content.",
+    replyNorm: "chat",
     lengthHint: "normal",
     emojiEncouraged: true,
     structuredFormatting: true,
@@ -128,6 +154,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "Teams supports rich formatting — use headings, bullets, and tables when helpful. " +
       "Keep responses structured and actionable. " +
       "Business context is the norm — maintain professionalism.",
+    replyNorm: "chat",
     lengthHint: "normal",
     emojiEncouraged: false,
     structuredFormatting: true,
@@ -138,6 +165,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "You are responding via Telegram. Keep messages concise. " +
       "Telegram supports markdown formatting but users prefer brevity. " +
       "Use bold for emphasis and code blocks for technical content.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: false,
     structuredFormatting: false,
@@ -148,6 +176,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
       "You are responding in Mattermost. Use professional, structured formatting. " +
       "Mattermost supports full markdown — use headers, bullets, and code blocks as appropriate. " +
       "Match the workplace communication style.",
+    replyNorm: "chat",
     lengthHint: "normal",
     emojiEncouraged: false,
     structuredFormatting: true,
@@ -157,6 +186,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     directive:
       "You are responding in Matrix/Element. Use clean markdown formatting. " +
       "Matrix is often used by technical communities — be direct and precise.",
+    replyNorm: "chat",
     lengthHint: "normal",
     emojiEncouraged: false,
     structuredFormatting: true,
@@ -166,6 +196,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     directive:
       "You are responding in Google Chat. Keep messages professional and concise. " +
       "Google Chat supports basic formatting. Prefer short, actionable messages.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: false,
     structuredFormatting: false,
@@ -175,6 +206,7 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     directive:
       "You are responding via LINE. Keep messages short and friendly. " +
       "LINE is a casual messaging platform — use a warm, conversational tone.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: true,
     structuredFormatting: false,
@@ -184,12 +216,35 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     directive:
       "You are responding via BlueBubbles (iMessage bridge). " +
       "Keep messages concise and conversational, matching iMessage norms.",
+    replyNorm: "chat",
     lengthHint: "shorter",
     emojiEncouraged: true,
     structuredFormatting: false,
     formalFraming: false,
   },
+  github: {
+    directive:
+      "You are writing on GitHub (pull request or issue comments, reviews, descriptions). " +
+      "Write for engineers reading a review queue: dense, factual and skimmable. " +
+      "Use Markdown headings or bold labels, short bullets and code spans for identifiers.",
+    replyNorm: "structured",
+    lengthHint: "normal",
+    emojiEncouraged: false,
+    structuredFormatting: true,
+    formalFraming: false,
+  },
 };
+
+const CHAT_REPLY_NORM = [
+  `- Hard limit: keep every reply under about ${CHAT_REPLY_WORD_LIMIT} words. Do not split a long answer into several messages to get around it.`,
+  "- Give the conclusion or answer first, not the process that led to it.",
+  "- Ask only direct questions, and only when you cannot continue without the answer.",
+];
+
+const STRUCTURED_REPLY_NORM = [
+  "- Write densely, in three parts when reporting work: Background (why), Change (what was done or is proposed), Verification (how it was checked, with results).",
+  "- No filler or pleasantries beyond what the medium requires; every sentence should carry information.",
+];
 
 // ─── Group context adjustments ───────────────────────────────────────
 
@@ -218,7 +273,7 @@ export class ChannelPersonaAdapter {
    * @param gatewayContext - Whether this is a private, group, or public conversation
    * @returns Channel-specific directive string (empty if disabled or desktop)
    */
-  static adaptForChannel(channelType?: ChannelType, gatewayContext?: GatewayContext): string {
+  static adaptForChannel(channelType?: PersonaSurface, gatewayContext?: GatewayContext): string {
     // Check guardrail
     const settings = GuardrailManager.loadSettings();
     if (!settings.channelPersonaEnabled) {
@@ -259,6 +314,9 @@ export class ChannelPersonaAdapter {
       lines.push("- Include an appropriate greeting and sign-off.");
     }
 
+    // Hard reply norms
+    lines.push(...(profile.replyNorm === "chat" ? CHAT_REPLY_NORM : STRUCTURED_REPLY_NORM));
+
     // Group/public context overlay
     if (gatewayContext === "group") {
       lines.push("");
@@ -275,14 +333,14 @@ export class ChannelPersonaAdapter {
    * Get the channel profile for a given channel type.
    * Useful for UI display or debugging.
    */
-  static getChannelProfile(channelType: ChannelType): ChannelProfile | undefined {
+  static getChannelProfile(channelType: PersonaSurface): ChannelProfile | undefined {
     return CHANNEL_PROFILES[channelType];
   }
 
   /**
    * List all channel types that have a defined profile.
    */
-  static getSupportedChannels(): ChannelType[] {
-    return Object.keys(CHANNEL_PROFILES) as ChannelType[];
+  static getSupportedChannels(): PersonaSurface[] {
+    return Object.keys(CHANNEL_PROFILES) as PersonaSurface[];
   }
 }

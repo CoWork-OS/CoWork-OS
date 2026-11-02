@@ -208,6 +208,9 @@ const MEMORY_LANE_TOOLS = new Set([
 ]);
 
 const ALWAYS_VISIBLE_TOOLS = new Set([
+  // Suggested tasks: noticing work worth proposing is never tied to the request's wording.
+  "propose_task",
+  "withdraw_task_proposal",
   "read_file",
   "read_files",
   "write_file",
@@ -232,8 +235,10 @@ const ALWAYS_VISIBLE_TOOLS = new Set([
   "revise_plan",
   "request_user_input",
   "task_history",
+  "task_get",
   "scratchpad_write",
   "scratchpad_read",
+  "tool_result_read",
   "memory_recall",
   "memory_remember",
   "memory_forget",
@@ -661,6 +666,9 @@ const ALWAYS_MUTATING = new Set([
   "schedule_task",
   // Parks the task and adds a temporary trigger: not for plan or analyze modes.
   "wait_for_event",
+  // Change which external thread events reach this task: not for plan or analyze modes.
+  "thread_subscribe",
+  "thread_unsubscribe",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",

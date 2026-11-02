@@ -6,8 +6,6 @@ import {
   ToolResultSpillStore,
 } from "../tool-result-spill-store";
 
-const FINISHED_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
-
 /**
  * SpillTools pages through tool results that were shortened to fit the context window
  * (Inline & Spill). The truncation code keeps the omitted text under a handle and its
@@ -34,8 +32,9 @@ export class SpillTools {
           'a result contains a marker like [... 51234 chars omitted; call tool_result_read(handle="sp…", ' +
           "offset=4000) to continue ...] and you need the omitted text: pass that handle and offset, " +
           "then call again with next_offset until it is null or you have what you need. Prefer this " +
-          "over re-running the command or fetch. Handles belong to this task and expire when it " +
-          "finishes or after 24 hours; if one has expired, run the original tool again.",
+          "over re-running the command or fetch. Handles belong to this task and stay readable in " +
+          "later turns; they expire when the task is cancelled or deleted, or after 24 hours. If one " +
+          "has expired, run the original tool again.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -74,11 +73,6 @@ export class SpillTools {
             note: `Call ${TOOL_RESULT_READ_TOOL}(handle="${page.handle}", offset=${page.next_offset}) for the next page.`,
           }),
     };
-  }
-
-  /** Spills live as long as the task runs: they go when it has finished. */
-  expireIfTaskFinished(status: string | undefined): void {
-    if (status && FINISHED_TASK_STATUSES.has(status)) this.store.expireTask(this.taskId);
   }
 
   private get store(): ToolResultSpillStore {

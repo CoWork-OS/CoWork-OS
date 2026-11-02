@@ -274,7 +274,7 @@ export class ToolResultSpillStore {
       expired: true,
       error:
         `The full text behind handle "${handle}" is no longer kept (a task's shortened results ` +
-        "expire when it finishes and after 24 hours). Run the original tool again if you still need it.",
+        "expire when it is cancelled or deleted, and after 24 hours). Run the original tool again if you still need it.",
     };
   }
 

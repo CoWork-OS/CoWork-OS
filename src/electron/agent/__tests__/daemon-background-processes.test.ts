@@ -9,6 +9,7 @@ import { BotWorkControlStore } from "../../automation/BotWorkControlStore";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
 import { getBackgroundProcessManager } from "../tools/background-processes";
+import { ToolResultSpillStore } from "../tool-result-spill-store";
 
 vi.mock("electron", () => ({ app: { getPath: vi.fn().mockReturnValue("/tmp") } }));
 
@@ -40,9 +41,15 @@ describe("daemon background process lifecycle", () => {
         activeTasks: new Map(),
       }) as Any;
 
+      const expireSpills = vi
+        .spyOn(ToolResultSpillStore.prototype, "expireTask")
+        .mockImplementation(() => undefined);
+
       await AgentDaemon.prototype.cancelTask.call(daemon, "task-1");
 
       expect(stopAllForTask).toHaveBeenCalledWith("task-1", "task_cancelled");
+      // Shortened tool results (tool_result_read handles) go with the task too.
+      expect(expireSpills).toHaveBeenCalledWith("task-1");
     },
   );
 

@@ -7007,12 +7007,8 @@ ${skillDescriptions}`;
       await computer.close();
     }
     await this._codeExecTools?.cleanup().catch(() => undefined);
-    // Shortened tool results are kept only while the task runs.
-    try {
-      this.spillTools.expireIfTaskFinished(this.daemon.getTask?.(this.taskId)?.status);
-    } catch {
-      // The 24-hour sweep removes them instead.
-    }
+    // Shortened tool results stay for follow-up turns; the daemon removes them when
+    // the task is cancelled or deleted (see cancelTask), else the 24-hour sweep does.
     this.codexConsentClosed = true;
     this.codexTaskConsents?.clear();
     await this.browserTools.cleanup();

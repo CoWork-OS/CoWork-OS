@@ -58,13 +58,16 @@ describe("SpillTools", () => {
     expect(tools.read({ handle: "../../etc/passwd" })).toMatchObject({ success: false });
   });
 
-  it("expires the task's spills only once the task has finished", () => {
+  it("keeps a handle readable across turns until the task's spills are expired", () => {
     store.write("task-1", new Map([["sp0123456789ab", "x"]]));
     const tools = new SpillTools("task-1", store);
-    tools.expireIfTaskFinished("executing");
-    tools.expireIfTaskFinished(undefined);
+    // A completed turn does not end the task: a follow-up may still page through it.
     expect(tools.read({ handle: "sp0123456789ab" }).success).toBe(true);
-    tools.expireIfTaskFinished("completed");
-    expect(tools.read({ handle: "sp0123456789ab" }).success).toBe(false);
+    store.expireTask("task-1");
+    expect(tools.read({ handle: "sp0123456789ab" })).toMatchObject({
+      success: false,
+      expired: true,
+    });
+    expect(SpillTools.getToolDefinitions()[0]?.description).toContain("cancelled or deleted");
   });
 });

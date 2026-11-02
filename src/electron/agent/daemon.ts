@@ -418,6 +418,7 @@ import {
 } from "../../shared/mailbox";
 import { extractCanonicalTaskImpactMetrics } from "./canonical-task-impact";
 import { getBackgroundProcessManager } from "./tools/background-processes";
+import { ToolResultSpillStore } from "./tool-result-spill-store";
 import { emitCorrectionLearningSignal } from "../agents/heartbeat-signal-bus";
 import { InFlightWork } from "../utils/in-flight-work";
 import {
@@ -7193,6 +7194,13 @@ export class AgentDaemon extends EventEmitter {
         if (options.strictCleanup) throw error;
         log.error(`[cancel] Stopping background processes failed for ${taskId}:`, error);
       });
+    // Shortened tool results (tool_result_read handles) likewise outlive a finished
+    // turn so a follow-up can still page through them; they go with the task.
+    try {
+      ToolResultSpillStore.getDefault().expireTask(taskId);
+    } catch (error) {
+      log.warn(`[cancel] Removing spilled tool results failed for ${taskId}:`, error);
+    }
     if (
       options.scopeWorkspaceId &&
       this.taskRepo.findById(taskId)?.workspaceId !== options.scopeWorkspaceId
@@ -20265,8 +20273,32 @@ export class AgentDaemon extends EventEmitter {
    * After execution completes, process any follow-up messages that were queued
    * but never picked up by the execution loop (e.g. arrived on the last iteration).
    */
+  private idleDrainWaits?: Set<string>;
+
+  /** Drain the executor's queue after its current turn fully releases the lifecycle mutex. */
+  private drainOrphanedFollowUpsWhenIdle(taskId: string, executor: TaskExecutor): void {
+    const waits = (this.idleDrainWaits ??= new Set());
+    if (waits.has(taskId) || typeof executor.waitForIdle !== "function") return;
+    waits.add(taskId);
+    void executor
+      .waitForIdle()
+      .catch(() => undefined)
+      .finally(() => {
+        waits.delete(taskId);
+        if (this.shutdownRequested || !executor.hasPendingFollowUps) return;
+        this.processOrphanedFollowUps(taskId, executor);
+      });
+  }
+
   private processOrphanedFollowUps(taskId: string, executor: TaskExecutor): void {
-    if (this.shutdownRequested || executor.isRunning || this.drainingFollowUps.has(taskId)) return;
+    if (this.shutdownRequested || this.drainingFollowUps.has(taskId)) return;
+    if (executor.isRunning) {
+      // A turn's promise resolves before its lifecycle mutex releases, so the drain
+      // from that turn's finally still sees the executor running. An item queued
+      // during the turn's last model call is then left behind: drain once idle.
+      this.drainOrphanedFollowUpsWhenIdle(taskId, executor);
+      return;
+    }
     this.drainingFollowUps.add(taskId);
     let queueExhausted = false;
     // Leave later messages in the runtime snapshot while processing each turn.

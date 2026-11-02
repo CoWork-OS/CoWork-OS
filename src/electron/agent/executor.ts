@@ -21020,6 +21020,13 @@ ${transcript}
       base.add("git_status");
       base.add("git_diff");
     }
+    // A step that may start a background command must also be able to read and stop
+    // it: run_command's own result says "read new output with process_output", and the
+    // completion push arms only after two quiet process_output polls.
+    if (base.has("run_command")) {
+      base.add("process_output");
+      base.add("stop_process");
+    }
     return base;
   }
 

@@ -28,12 +28,17 @@ export const TOOL_POLICY_UNAVAILABLE_REASON = "workspace tool policy unavailable
  * (TerminalTabTools.requestReadConsent, "Allow for this task") that names the tab, rather than
  * a prompt per read; a tab this task's code block run opened needs none, since the user ran it.
  * The tool also checks that consent itself, so a tools.monty that passes cannot skip it.
+ *
+ * speculative_runs passes: it is read-only and lists only this workspace's speculative
+ * reproduce-and-fix runs (state, outcome, summary, branch or pull request link). It cannot
+ * start, stop or deliver a run, and returns no diff or file contents.
  */
 const DEFAULT_TOOL_DECISIONS: ReadonlyMap<string, ToolPolicyDecision> = new Map<
   string,
   ToolPolicyDecision
 >([
   ["list_terminal_tabs", { decision: "pass" }],
+  ["speculative_runs", { decision: "pass" }],
   [
     "read_terminal",
     {

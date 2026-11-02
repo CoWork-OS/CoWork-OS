@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   looksLikeSecretReference,
   parseSecretReference,
+  secretFieldInputType,
   secretReferenceSourceLabel,
 } from "../secret-references";
 
@@ -78,5 +79,14 @@ describe("parseSecretReference", () => {
     expect(secretReferenceSourceLabel("op://a/b/c")).toBe("1Password");
     expect(secretReferenceSourceLabel("BW://item/password")).toBe("Bitwarden");
     expect(secretReferenceSourceLabel("sk-123")).toBeNull();
+  });
+});
+
+describe("secretFieldInputType", () => {
+  it("shows a vault reference and masks a pasted key", () => {
+    expect(secretFieldInputType("op://Private/OpenAI/credential")).toBe("text");
+    expect(secretFieldInputType(" bws://4f0c7d2e-0000-0000-0000-000000000000")).toBe("text");
+    expect(secretFieldInputType("sk-live-abc123")).toBe("password");
+    expect(secretFieldInputType("")).toBe("password");
   });
 });

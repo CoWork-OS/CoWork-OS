@@ -907,6 +907,7 @@ export class WebApplication {
       onboardingCompleted: data.onboardingCompleted,
       disclaimerAccepted: data.disclaimerAccepted,
       activeWorkspaceId: data.activeWorkspaceId,
+      ...(data.appearance ? { appearance: data.appearance } : {}),
       ...(data.desktopMethods ? { desktopMethods: data.desktopMethods } : {}),
       csrfToken: session.csrfToken,
     };

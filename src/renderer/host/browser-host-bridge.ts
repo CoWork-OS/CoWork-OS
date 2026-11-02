@@ -837,6 +837,8 @@ export function installBrowserHostBridge(
       uiDensity: "focused",
       timelineVerbosity: "summary",
       commandOutputStyle: "terminal",
+      // Match the desktop until this browser picks its own look.
+      ...sanitizeBrowserAppearance(session.appearance ?? {}),
       ...local,
       // The authenticated host flags are authoritative when already accepted.
       // Local completion is only a browser preference and is never written to

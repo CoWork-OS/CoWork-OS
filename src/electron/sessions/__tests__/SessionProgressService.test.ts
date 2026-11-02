@@ -128,6 +128,16 @@ describeWithSqlite("SessionProgressService", () => {
     expect(restored).toEqual(state);
   });
 
+  it("keeps diagnostic logs out of the headline", () => {
+    const task = createTask("Build a status page");
+    addEvent(task.id, "event-1", "step_started", {
+      step: { id: "build", description: "Build the page" },
+    });
+    addEvent(task.id, "event-2", "log", { message: "[skill-routing] plan.create.start" });
+
+    expect(service.rebuild(task.id)?.headline).toBe("Working on Build the page");
+  });
+
   it("restores pending structured input and searches only the requested workspace", () => {
     const task = createTask("Quarterly planning");
     new InputRequestStore(db).create({

@@ -101,6 +101,8 @@ function stepFromPayload(payload: Record<string, unknown>): SessionProgressStep 
 function extractEventHeadline(event: TaskEvent): string | undefined {
   const payload = payloadRecord(event);
   const type = eventType(event);
+  // Diagnostic logs ("[skill-routing] plan.create.start") and internal turns are not progress.
+  if (type === "log" || payload.internal === true) return undefined;
   const step = stepFromPayload(payload);
   if (type === "step_started" && step) return `Working on ${step.description}`;
   if (type === "step_completed" && step) return `Completed ${step.description}`;

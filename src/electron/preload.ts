@@ -4036,8 +4036,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getPiModels: (piProvider?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_MODELS, piProvider),
   getPiProviders: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_PROVIDERS),
-  getOpenAICompatibleModels: (baseUrl: string, apiKey?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS, baseUrl, apiKey),
+  getOpenAICompatibleModels: (
+    baseUrl: string,
+    apiKey?: string,
+    options?: { cacheModels?: boolean },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS, baseUrl, apiKey, options),
   // Local AI (MLX-LM + hf-agents + llama.cpp)
   checkHf: () => ipcRenderer.invoke(IPC_CHANNELS.LOCAL_AI_CHECK_HF),
   detectHardware: () => ipcRenderer.invoke(IPC_CHANNELS.LOCAL_AI_DETECT_HARDWARE),
@@ -7951,6 +7954,7 @@ export interface ElectronAPI {
   getOpenAICompatibleModels: (
     baseUrl: string,
     apiKey?: string,
+    options?: { cacheModels?: boolean },
   ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
   // Local AI (MLX-LM + hf-agents + llama.cpp)
   checkHf?: () => Promise<{

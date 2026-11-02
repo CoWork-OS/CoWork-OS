@@ -125,9 +125,26 @@ function ensureDefaultMarkdown(fileName: string): string {
   }
 }
 
+/**
+ * A model id reported by a local server (any process can answer on its port), as one bounded
+ * line: it is written into IDENTITY.md, which the agent reads.
+ */
+function localModelLabel(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/[\p{Cc}\s]+/gu, " ")
+    .trim()
+    .slice(0, 120);
+}
+
 function providerLabel(data: OnboardingProfileData): string {
-  if (data.selectedProvider === "ollama" && data.detectedOllamaModel) {
-    return `Ollama (${data.detectedOllamaModel})`;
+  const ollamaModel = localModelLabel(data.detectedOllamaModel);
+  if (data.selectedProvider === "ollama" && ollamaModel) {
+    return `Ollama (${ollamaModel})`;
+  }
+  const lmStudioModel = localModelLabel(data.detectedLmStudioModel);
+  if (data.selectedProvider === "openai-compatible" && lmStudioModel) {
+    return `LM Studio (${lmStudioModel})`;
   }
   if (!data.selectedProvider) {
     return "Not configured yet";

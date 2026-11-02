@@ -8730,14 +8730,21 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS,
-    async (_, baseUrl: string, apiKey?: string) => {
+    async (_, baseUrl: string, apiKey?: string, options?: unknown) => {
       checkRateLimit(IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS);
       const validatedBaseUrl = await validateOpenAICompatibleBaseUrl(baseUrl, {
         allowLoopback: true,
       });
+      // Only an explicit `cacheModels: false` (an onboarding probe) skips the model cache.
+      const cacheModels = !(
+        options &&
+        typeof options === "object" &&
+        (options as { cacheModels?: unknown }).cacheModels === false
+      );
       return LLMProviderFactory.getOpenAICompatibleModels(
         validatedBaseUrl,
         validateOptionalProviderApiKey(apiKey, "OpenAI-compatible provider"),
+        { cacheModels },
       );
     },
   );

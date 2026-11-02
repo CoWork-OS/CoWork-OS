@@ -3,8 +3,10 @@ import { BUILTIN_ACCESS_PROFILE_IDS } from "../../../shared/access-profiles";
 import { getInteractionModeSelection } from "../../../shared/interaction-mode";
 import { OPENROUTER_FREE_MODEL_ID } from "../../../shared/llm-provider-catalog";
 import {
+  LM_STUDIO_BASE_URL,
   ONBOARDING_FIRST_TASK_OPTIONS,
   ONBOARDING_FIRST_TASK_PROMPT,
+  pickLmStudioChatModel,
 } from "../../../shared/onboarding";
 import { getOnboardingDefaultModel, ONBOARDING_ACCOUNT_ROUTES } from "../useOnboardingFlow";
 
@@ -33,5 +35,14 @@ describe("onboarding defaults", () => {
       chatgpt: { label: "ChatGPT", provider: "openai" },
       grok: { label: "Grok", provider: "xai-oauth" },
     });
+  });
+
+  it("offers the first LM Studio chat model and skips embedding-only models", () => {
+    expect(LM_STUDIO_BASE_URL).toBe("http://127.0.0.1:1234/v1");
+    expect(
+      pickLmStudioChatModel([{ key: "text-embedding-nomic-embed-text-v1.5" }, { key: "qwen3-8b" }]),
+    ).toBe("qwen3-8b");
+    expect(pickLmStudioChatModel([{ key: "text-embedding-nomic-embed-text-v1.5" }])).toBeNull();
+    expect(pickLmStudioChatModel([])).toBeNull();
   });
 });

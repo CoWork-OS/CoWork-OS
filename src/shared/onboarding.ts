@@ -68,6 +68,17 @@ export interface OnboardingProfileData {
   memoryEnabled: boolean;
   selectedProvider: LLMProviderType | null;
   detectedOllamaModel: string | null;
+  detectedLmStudioModel?: string | null;
+}
+
+/** LM Studio's default local server; probed during onboarding, loopback only. */
+export const LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1";
+
+/** First chat model from an OpenAI-compatible model list, skipping embedding-only models. */
+export function pickLmStudioChatModel(
+  models: Array<{ key: string }> | null | undefined,
+): string | null {
+  return models?.find((m) => m.key && !/embed/i.test(m.key))?.key ?? null;
 }
 
 export interface ApplyOnboardingProfileRequest {

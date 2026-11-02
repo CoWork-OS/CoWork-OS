@@ -35,6 +35,7 @@ import {
   setAnnotationBaseRevision,
 } from "./annotation-results-sql";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
+import { type LibraryArtifact, listRecentArtifacts } from "./artifact-library-sql";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
 import { LIKE_ESCAPE_CLAUSE, likeContainsPattern, likeTermHitsSql } from "./fts-query";
@@ -4195,6 +4196,11 @@ export class ArtifactStore {
   findByTaskIdPage(taskId: string, limit: number, offset: number): Artifact[] {
     const rows = readArtifactRowsByTaskIdPage(this.db, taskId, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToArtifact(row));
+  }
+
+  /** See artifact-library-sql.ts. */
+  findRecent(limit: number): LibraryArtifact[] {
+    return listRecentArtifacts(this.db, limit);
   }
 
   findById(id: string): Artifact | undefined {

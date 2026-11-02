@@ -222,6 +222,7 @@ const ARTIFACT_METHODS = [
   "create",
   "findByTaskId",
   "findByTaskIdPage",
+  "findRecent",
   "findById",
   "findLatestByPath",
 ] as const;

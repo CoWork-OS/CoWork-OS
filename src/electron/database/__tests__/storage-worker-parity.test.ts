@@ -375,6 +375,7 @@ describe("storage layer leaf repositories on the host and in the database worker
         pendingAfter: pendingAfter.length,
         approval: await approvals.findById(approval.id),
         artifacts: await artifacts.findByTaskId(task.id),
+        recentArtifacts: await artifacts.findRecent(10),
         annotations: await annotations.list({ taskId: task.id }),
         rules: await rules.listByWorkspaceId(workspace.id),
         inputs: await inputs.findPendingByTaskId(task.id),

@@ -49,6 +49,7 @@ import {
 import { ChannelRepository, ChannelUserRepository } from "./database/repository-facades";
 import {
   AnnotationRepository,
+  ArtifactRepository,
   ChannelMessageRepository,
   TaskEventReplayRepository,
   TaskRepository,
@@ -4740,6 +4741,7 @@ if (isMacSafeStorageMigrationWorker) {
         }
 
         // File Hub
+        const fileHubArtifacts = new ArtifactRepository(db);
         const fileHubService = new FileHubService(
           {
             getWorkspacePath: (wsId) => {
@@ -4756,7 +4758,7 @@ if (isMacSafeStorageMigrationWorker) {
                 return "";
               }
             },
-            getArtifacts: () => [],
+            getArtifacts: ({ limit }) => fileHubArtifacts.findRecent(limit),
             getConnectedSources: () => [],
           },
           db,

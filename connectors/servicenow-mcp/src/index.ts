@@ -37,6 +37,8 @@ type MCPToolProperty = {
 type MCPTool = {
   name: string;
   description?: string;
+  /** `cowork.objectManifest: true` on the tool CoWork reads the object manifest from. */
+  _meta?: Record<string, any>;
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;
@@ -107,6 +109,7 @@ class ServiceNowClient {
     limit?: number,
     offset?: number,
     fields?: string[],
+    signal?: AbortSignal,
   ): Promise<RequestResult> {
     const params = new URLSearchParams();
     if (query) params.set("sysparm_query", query);
@@ -117,6 +120,8 @@ class ServiceNowClient {
     return this.requestJson(
       "GET",
       `table/${encodeURIComponent(table)}${queryString ? `?${queryString}` : ""}`,
+      undefined,
+      signal,
     );
   }
 
@@ -169,7 +174,12 @@ class ServiceNowClient {
     throw new Error("Missing ServiceNow credentials");
   }
 
-  private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
+  private async requestJson(
+    method: string,
+    path: string,
+    body?: any,
+    signal?: AbortSignal,
+  ): Promise<RequestResult> {
     const start = Date.now();
     const url = `${this.getBaseUrl()}/api/now/${path.replace(/^\//, "")}`;
 
@@ -181,6 +191,7 @@ class ServiceNowClient {
         "User-Agent": "CoWork-ServiceNow-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     const durationMs = Date.now() - start;
@@ -401,6 +412,8 @@ class StdioMCPServer {
 // ==================== Tool Definitions ====================
 
 const CONNECTOR_PREFIX = "servicenow";
+/** On `describe_objects`: CoWork reads the object manifest from it; the model never sees it. */
+const OBJECT_MANIFEST_TOOL_META = { "cowork.objectManifest": true };
 
 const config: ServiceNowConfig = {
   instanceUrl: process.env.SERVICENOW_INSTANCE_URL,
@@ -475,7 +488,505 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: `${CONNECTOR_PREFIX}.describe_objects`,
+    _meta: OBJECT_MANIFEST_TOOL_META,
+    description:
+      "Describe the business objects this connector holds, their fields and which tools read or write them. CoWork reads this itself.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
+
+// ==================== Object manifest ====================
+//
+// `servicenow.describe_objects` tells CoWork which tables this connector works with, their
+// fields, state values and relations, and which tools read or write them. CoWork calls it
+// itself; the model never sees it. The manifest starts from the tables declared below and,
+// when the instance is configured, adds each table's own dictionary columns (custom `u_`
+// columns included) and its active state choices. Columns a table inherits from `task` are
+// not in its own dictionary, so they always come from the declarations here. A lookup that
+// fails leaves its part as declared, a live read that takes longer than 12 seconds gives the
+// declared tables, and the tool never fails. It only reads.
+
+type ManifestFieldType =
+  | "id"
+  | "string"
+  | "text"
+  | "number"
+  | "currency"
+  | "percent"
+  | "boolean"
+  | "date"
+  | "datetime"
+  | "enum"
+  | "reference"
+  | "email"
+  | "phone"
+  | "url"
+  | "json";
+
+type ManifestField = {
+  name: string;
+  type: ManifestFieldType;
+  label?: string;
+  enum?: string[];
+  pii?: boolean;
+};
+
+type ManifestObject = {
+  type: string;
+  label: string;
+  entityType: string;
+  keyField: string;
+  titleField?: string;
+  urlTemplate?: string;
+  fields: ManifestField[];
+  statusField?: { name: string; values: string[]; closed?: string[] };
+  relations?: Array<{ field: string; targetType: string; edgeType: string }>;
+};
+
+type ManifestTool = {
+  name: string;
+  effect: "read" | "create" | "update" | "delete";
+  risk: "read" | "external_write" | "data_export";
+  objects?: string[];
+  objectArg?: string;
+  recordIdArg?: string;
+  resultPath?: string;
+  preview?: boolean;
+  receipt?: boolean;
+};
+
+type ObjectManifest = {
+  version: 1;
+  connector: string;
+  objects: ManifestObject[];
+  tools: ManifestTool[];
+};
+
+const MANIFEST_MAX_FIELDS = 120;
+const MANIFEST_MAX_ENUM_VALUES = 64;
+/** Kept under CoWork's 256 KB limit for one manifest. */
+const MANIFEST_MAX_BYTES = 240 * 1024;
+const MANIFEST_FIELD_NAME = /^[A-Za-z_$][A-Za-z0-9_.$:-]{0,119}$/;
+/** On a person table, a live column whose name looks personal is marked pii as well. */
+const PERSONAL_FIELD_NAME =
+  /name|e_?mail|phone|mobile|fax|street|address|city|zip|postal|birth|photo|avatar/i;
+/** Rows read from `sys_dictionary` per table. */
+const DICTIONARY_ROW_LIMIT = 200;
+/**
+ * The whole live read gets this long. CoWork runs one call at a time per connector, so a slow
+ * instance would hold up the model's own calls; past the deadline the declared manifest goes back.
+ */
+const LIVE_MANIFEST_DEADLINE_MS = 12_000;
+
+// State, priority, impact and urgency are choice lists whose API values are numeric codes.
+const INCIDENT_STATES = ["1", "2", "3", "6", "7", "8"];
+const PROBLEM_STATES = ["101", "102", "103", "104", "106", "107"];
+const CHANGE_STATES = ["-5", "-4", "-3", "-2", "-1", "0", "3", "4"];
+const PRIORITY_CODES = ["1", "2", "3", "4", "5"];
+const SEVERITY_CODES = ["1", "2", "3"];
+
+/** Columns incident, problem and change_request inherit from `task`. */
+const TASK_FIELDS: ManifestField[] = [
+  { name: "sys_id", type: "id", label: "Sys ID" },
+  { name: "number", type: "string", label: "Number" },
+  { name: "short_description", type: "string", label: "Short description" },
+  { name: "description", type: "text", label: "Description", pii: true },
+  { name: "priority", type: "enum", label: "Priority", enum: PRIORITY_CODES },
+  { name: "impact", type: "enum", label: "Impact", enum: SEVERITY_CODES },
+  { name: "urgency", type: "enum", label: "Urgency", enum: SEVERITY_CODES },
+  { name: "assigned_to", type: "reference", label: "Assigned to" },
+  { name: "assignment_group", type: "reference", label: "Assignment group" },
+  { name: "opened_by", type: "reference", label: "Opened by" },
+  { name: "opened_at", type: "datetime", label: "Opened" },
+  { name: "closed_at", type: "datetime", label: "Closed" },
+  { name: "active", type: "boolean", label: "Active" },
+  { name: "sys_created_on", type: "datetime", label: "Created" },
+  { name: "sys_updated_on", type: "datetime", label: "Updated" },
+];
+
+const SERVICENOW_OBJECTS: ManifestObject[] = [
+  {
+    type: "incident",
+    label: "Incident",
+    entityType: "incident",
+    keyField: "sys_id",
+    titleField: "number",
+    fields: [
+      ...TASK_FIELDS,
+      { name: "state", type: "enum", label: "State", enum: INCIDENT_STATES },
+      { name: "caller_id", type: "reference", label: "Caller" },
+      { name: "category", type: "string", label: "Category" },
+      { name: "subcategory", type: "string", label: "Subcategory" },
+      { name: "problem_id", type: "reference", label: "Problem" },
+      { name: "resolved_at", type: "datetime", label: "Resolved" },
+      { name: "close_code", type: "string", label: "Resolution code" },
+      { name: "close_notes", type: "text", label: "Resolution notes", pii: true },
+    ],
+    statusField: { name: "state", values: INCIDENT_STATES, closed: ["6", "7", "8"] },
+    relations: [
+      { field: "assigned_to", targetType: "sys_user", edgeType: "assigned_to" },
+      { field: "caller_id", targetType: "sys_user", edgeType: "reported_by" },
+      { field: "opened_by", targetType: "sys_user", edgeType: "related_to" },
+      { field: "problem_id", targetType: "problem", edgeType: "related_to" },
+    ],
+  },
+  {
+    type: "problem",
+    label: "Problem",
+    entityType: "problem",
+    keyField: "sys_id",
+    titleField: "number",
+    fields: [
+      ...TASK_FIELDS,
+      { name: "state", type: "enum", label: "State", enum: PROBLEM_STATES },
+      { name: "known_error", type: "boolean", label: "Known error" },
+      { name: "resolved_at", type: "datetime", label: "Resolved" },
+    ],
+    statusField: { name: "state", values: PROBLEM_STATES, closed: ["106", "107"] },
+    relations: [
+      { field: "assigned_to", targetType: "sys_user", edgeType: "assigned_to" },
+      { field: "opened_by", targetType: "sys_user", edgeType: "reported_by" },
+    ],
+  },
+  {
+    type: "change_request",
+    label: "Change Request",
+    entityType: "change",
+    keyField: "sys_id",
+    titleField: "number",
+    fields: [
+      ...TASK_FIELDS,
+      { name: "state", type: "enum", label: "State", enum: CHANGE_STATES },
+      { name: "type", type: "enum", label: "Type", enum: ["standard", "normal", "emergency"] },
+      { name: "category", type: "string", label: "Category" },
+      { name: "risk", type: "string", label: "Risk" },
+      { name: "requested_by", type: "reference", label: "Requested by" },
+      { name: "start_date", type: "datetime", label: "Planned start date" },
+      { name: "end_date", type: "datetime", label: "Planned end date" },
+    ],
+    statusField: { name: "state", values: CHANGE_STATES, closed: ["3", "4"] },
+    relations: [
+      { field: "assigned_to", targetType: "sys_user", edgeType: "assigned_to" },
+      { field: "requested_by", targetType: "sys_user", edgeType: "reported_by" },
+      { field: "opened_by", targetType: "sys_user", edgeType: "related_to" },
+    ],
+  },
+  {
+    type: "sys_user",
+    label: "User",
+    entityType: "person",
+    keyField: "sys_id",
+    titleField: "name",
+    fields: [
+      { name: "sys_id", type: "id", label: "Sys ID" },
+      { name: "user_name", type: "string", label: "User ID", pii: true },
+      { name: "name", type: "string", label: "Name", pii: true },
+      { name: "first_name", type: "string", label: "First name", pii: true },
+      { name: "last_name", type: "string", label: "Last name", pii: true },
+      { name: "email", type: "email", label: "Email", pii: true },
+      { name: "phone", type: "phone", label: "Business phone", pii: true },
+      { name: "mobile_phone", type: "phone", label: "Mobile phone", pii: true },
+      { name: "street", type: "text", label: "Street", pii: true },
+      { name: "city", type: "string", label: "City", pii: true },
+      { name: "state", type: "string", label: "State / Province", pii: true },
+      { name: "zip", type: "string", label: "Zip / Postal code", pii: true },
+      { name: "country", type: "string", label: "Country code", pii: true },
+      { name: "title", type: "string", label: "Title" },
+      { name: "department", type: "reference", label: "Department" },
+      { name: "company", type: "reference", label: "Company" },
+      { name: "manager", type: "reference", label: "Manager" },
+      { name: "location", type: "reference", label: "Location" },
+      { name: "active", type: "boolean", label: "Active" },
+      { name: "sys_created_on", type: "datetime", label: "Created" },
+      { name: "sys_updated_on", type: "datetime", label: "Updated" },
+    ],
+  },
+];
+
+const SERVICENOW_MANIFEST_TOOLS: ManifestTool[] = [
+  {
+    name: `${CONNECTOR_PREFIX}.list_records`,
+    effect: "read",
+    risk: "read",
+    objectArg: "table",
+    resultPath: "data.result",
+  },
+  {
+    name: `${CONNECTOR_PREFIX}.get_record`,
+    effect: "read",
+    risk: "read",
+    objectArg: "table",
+    recordIdArg: "sysId",
+    resultPath: "data.result",
+  },
+  {
+    name: `${CONNECTOR_PREFIX}.create_record`,
+    effect: "create",
+    risk: "external_write",
+    objectArg: "table",
+  },
+  {
+    name: `${CONNECTOR_PREFIX}.update_record`,
+    effect: "update",
+    risk: "external_write",
+    objectArg: "table",
+    recordIdArg: "sysId",
+  },
+];
+
+/** Dictionary internal types as manifest types; anything else reads as a string. */
+const SERVICENOW_FIELD_TYPES: Record<string, ManifestFieldType> = {
+  GUID: "id",
+  string: "string",
+  translated_text: "string",
+  translated_field: "string",
+  multi_two_lines: "text",
+  html: "text",
+  translated_html: "text",
+  journal: "text",
+  journal_input: "text",
+  journal_list: "text",
+  integer: "number",
+  longint: "number",
+  decimal: "number",
+  float: "number",
+  currency: "currency",
+  price: "currency",
+  percent_complete: "percent",
+  boolean: "boolean",
+  glide_date: "date",
+  glide_date_time: "datetime",
+  due_date: "datetime",
+  reference: "reference",
+  email: "email",
+  ph_number: "phone",
+  url: "url",
+  choice: "enum",
+  json: "json",
+};
+/**
+ * Internal types that hold personal data on any table: email and phone, and every free-text
+ * type (journals hold comment and work-note bodies; notes and HTML often quote people).
+ */
+const SERVICENOW_PII_TYPES = new Set([
+  "email",
+  "ph_number",
+  "multi_two_lines",
+  "html",
+  "translated_html",
+  "journal",
+  "journal_input",
+  "journal_list",
+]);
+
+function manifestLabel(value: unknown): string | undefined {
+  const label = typeof value === "string" ? value.trim().slice(0, 120).trim() : "";
+  return label || undefined;
+}
+
+/** Distinct values the manifest accepts, in order, at most 64. */
+function manifestEnum(values: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const value of values) {
+    if (out.size >= MANIFEST_MAX_ENUM_VALUES) break;
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed && trimmed.length <= 120) out.add(trimmed);
+  }
+  return [...out];
+}
+
+/** A Table API value: a plain string, or a reference's `value`. */
+function servicenowValue(value: any): string {
+  if (typeof value === "string") return value;
+  return typeof value?.value === "string" ? value.value : "";
+}
+
+/** The status field with the live values; closed values the instance no longer has drop out. */
+function liveStatusField(
+  object: ManifestObject,
+  fields: ManifestField[],
+): ManifestObject["statusField"] {
+  const status = object.statusField;
+  const values = status && fields.find((field) => field.name === status.name)?.enum;
+  if (!status || !values || values.length === 0) return status;
+  const closed = (status.closed ?? []).filter((value) => values.includes(value));
+  return { name: status.name, values, ...(closed.length > 0 ? { closed } : {}) };
+}
+
+/**
+ * A declared table updated from its own dictionary rows (labels, extra columns after the
+ * declared ones) and its state choices. Declared columns keep their declared types.
+ */
+function enrichServiceNowObject(
+  object: ManifestObject,
+  columns: any[] | undefined,
+  choices: any[] | undefined,
+): ManifestObject {
+  const declared = new Set(object.fields.map((field) => field.name));
+  const labels = new Map<string, string>();
+  const extra = new Map<string, ManifestField>();
+  for (const row of columns ?? []) {
+    const name = servicenowValue(row?.element);
+    if (!MANIFEST_FIELD_NAME.test(name)) continue;
+    const label = manifestLabel(servicenowValue(row?.column_label));
+    if (declared.has(name)) {
+      if (label) labels.set(name, label);
+      continue;
+    }
+    if (extra.has(name)) continue;
+    const internalType = servicenowValue(row?.internal_type);
+    const field: ManifestField = { name, type: SERVICENOW_FIELD_TYPES[internalType] ?? "string" };
+    if (label) field.label = label;
+    const personal = object.entityType === "person" && PERSONAL_FIELD_NAME.test(name);
+    if (personal || SERVICENOW_PII_TYPES.has(internalType)) field.pii = true;
+    extra.set(name, field);
+  }
+  const states = manifestEnum((choices ?? []).map((row) => servicenowValue(row?.value)));
+  const fields = [
+    ...object.fields.map((field) => {
+      const label = labels.get(field.name) ?? field.label;
+      const isState = states.length > 0 && field.name === object.statusField?.name;
+      return { ...field, ...(label ? { label } : {}), ...(isState ? { enum: states } : {}) };
+    }),
+    ...extra.values(),
+  ].slice(0, MANIFEST_MAX_FIELDS);
+  const statusField = liveStatusField(object, fields);
+  return { ...object, fields, ...(statusField ? { statusField } : {}) };
+}
+
+/** The instance's https origin for record links; none when the instance is not https. */
+function servicenowRecordPageBase(): string | undefined {
+  try {
+    const base =
+      config.instanceUrl || (config.instance ? `https://${config.instance}.service-now.com` : "");
+    const url = new URL(base);
+    return url.protocol === "https:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function servicenowManifest(objects: ManifestObject[]): ObjectManifest {
+  const base = servicenowRecordPageBase();
+  return {
+    version: 1,
+    connector: CONNECTOR_PREFIX,
+    objects: objects.map((object) =>
+      base
+        ? { ...object, urlTemplate: `${base}/nav_to.do?uri=${object.type}.do?sys_id={id}` }
+        : object,
+    ),
+    tools: SERVICENOW_MANIFEST_TOOLS,
+  };
+}
+
+function manifestBytes(manifest: ObjectManifest): number {
+  return Buffer.byteLength(JSON.stringify(manifest), "utf8");
+}
+
+/** Whether the instance can be asked at all: an instance plus a token or a user and password. */
+function servicenowConfigured(): boolean {
+  return Boolean(
+    (config.instanceUrl || config.instance) &&
+    (config.accessToken || (config.username && config.password)),
+  );
+}
+
+/** Rows from a Table API read, or undefined when the read failed. */
+async function readRows(
+  table: string,
+  query: string,
+  limit: number,
+  fields: string[],
+  signal: AbortSignal,
+): Promise<any[] | undefined> {
+  try {
+    const result = await client.listRecords(table, query, limit, undefined, fields, signal);
+    return Array.isArray(result.data?.result) ? result.data.result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `work`'s value, or `fallback` once `ms` pass first. Past the deadline `work`'s signal is
+ * aborted, so its requests stop rather than run on beside the model's calls; the timer never
+ * outlives the race.
+ */
+async function withDeadline<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(fallback);
+    }, ms);
+    (timer as { unref?: () => unknown }).unref?.();
+  });
+  try {
+    return await Promise.race([work(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The declared tables updated from their dictionaries and state choices. */
+async function liveServiceNowObjects(signal: AbortSignal): Promise<ManifestObject[]> {
+  return Promise.all(
+    SERVICENOW_OBJECTS.map(async (object) => {
+      const status = object.statusField?.name;
+      const [columns, choices] = await Promise.all([
+        readRows(
+          "sys_dictionary",
+          `name=${object.type}^elementISNOTEMPTY`,
+          DICTIONARY_ROW_LIMIT,
+          ["element", "column_label", "internal_type"],
+          signal,
+        ),
+        // English rows only: each translation is its own row and would eat the limit.
+        status
+          ? readRows(
+              "sys_choice",
+              `name=${object.type}^element=${status}^inactive=false^language=en^ORDERBYsequence`,
+              MANIFEST_MAX_ENUM_VALUES,
+              ["value", "label"],
+              signal,
+            )
+          : undefined,
+      ]);
+      try {
+        return enrichServiceNowObject(object, columns, choices);
+      } catch {
+        return object;
+      }
+    }),
+  );
+}
+
+async function describeServiceNowObjects(): Promise<ObjectManifest> {
+  try {
+    let objects = SERVICENOW_OBJECTS;
+    if (servicenowConfigured()) {
+      objects = await withDeadline(
+        liveServiceNowObjects,
+        LIVE_MANIFEST_DEADLINE_MS,
+        SERVICENOW_OBJECTS,
+      );
+    }
+    const manifest = servicenowManifest(objects);
+    if (manifestBytes(manifest) <= MANIFEST_MAX_BYTES) return manifest;
+  } catch {
+    // Fall back to the declared tables below.
+  }
+  return servicenowManifest(SERVICENOW_OBJECTS);
+}
 
 const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
   [`${CONNECTOR_PREFIX}.health`]: async () => buildEnvelope(await client.health()),
@@ -489,6 +1000,13 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
     buildEnvelope(await client.createRecord(args.table, args.fields || {})),
   [`${CONNECTOR_PREFIX}.update_record`]: async (args) =>
     buildEnvelope(await client.updateRecord(args.table, args.sysId, args.fields || {})),
+  [`${CONNECTOR_PREFIX}.describe_objects`]: async () => {
+    const manifest = await describeServiceNowObjects();
+    return {
+      content: [{ type: "text", text: JSON.stringify(manifest) }],
+      structuredContent: manifest,
+    };
+  },
 };
 
 const toolProvider: ToolProvider = {
@@ -511,8 +1029,23 @@ const serverInfo: MCPServerInfo = {
   },
 };
 
-const server = new StdioMCPServer(toolProvider, serverInfo);
-server.start();
+export function startServiceNowMcpServer(): void {
+  new StdioMCPServer(toolProvider, serverInfo).start();
+}
+
+/** Test hook: one `tools/call` request through the server. */
+export async function callServiceNowToolForTest(params: any): Promise<any> {
+  return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+/** Test hook: the tools `tools/list` returns. */
+export function listServiceNowToolsForTest(): MCPTool[] {
+  return toolProvider.getTools();
+}
+
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
+  startServiceNowMcpServer();
+}
 
 function buildEnvelope(result: RequestResult): any {
   return {

@@ -399,6 +399,8 @@ export const MCP_IDEMPOTENCY_META_KEY = "cowork.idempotencyKey";
 export const MCP_ATTEMPT_META_KEY = "cowork.attemptId";
 /** On a tool definition: the tool can describe a write. On a call: describe, do not act. */
 export const MCP_PREVIEW_META_KEY = "cowork.preview";
+/** On a tool definition: the tool returns the connector's object manifest (`object-manifest.ts`). */
+export const MCP_OBJECT_MANIFEST_META_KEY = "cowork.objectManifest";
 
 // MCP Protocol Methods
 export const MCP_METHODS = {

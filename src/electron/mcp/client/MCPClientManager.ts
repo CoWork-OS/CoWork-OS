@@ -21,6 +21,7 @@ import {
 } from "../types";
 import { MCPSettingsManager } from "../settings";
 import { MCPServerConnection } from "./MCPServerConnection";
+import type { ConnectorObjectManifest } from "../object-manifest";
 import { LEGACY_ONLY_SERVERS_FILE, legacyOnlyServers } from "./legacy-only-servers";
 import { IPC_CHANNELS } from "../../../shared/types";
 import { createLogger } from "../../utils/logger";
@@ -361,6 +362,21 @@ export class MCPClientManager extends EventEmitter {
       return [];
     }
     return connection.getTools();
+  }
+
+  /**
+   * The business objects a connected server declares (`object-manifest.ts`), or null when it
+   * declares none, is not connected or is blocked by policy, or its manifest is invalid.
+   */
+  async getObjectManifest(serverId: string): Promise<ConnectorObjectManifest | null> {
+    try {
+      this.assertServerNotBlocked(serverId);
+    } catch {
+      return null;
+    }
+    const connection = this.connections.get(serverId);
+    if (!connection) return null;
+    return connection.getObjectManifest({ beforeSend: this.policyCheckedBeforeSend(serverId) });
   }
 
   async listServerEvents(serverId: string): Promise<MCPEventDefinition[]> {

@@ -1680,6 +1680,17 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
               Local Ollama
             </button>
           )}
+          {onboarding.data.detectedLmStudioModel && (
+            <button
+              type="button"
+              className="onboarding-route-secondary"
+              onClick={() => onboarding.acceptLmStudioDetection()}
+              disabled={signingIn !== null}
+              title={`Use ${onboarding.data.detectedLmStudioModel} on this computer`}
+            >
+              Local LM Studio
+            </button>
+          )}
         </div>
 
         {onboarding.accountSignInError && (

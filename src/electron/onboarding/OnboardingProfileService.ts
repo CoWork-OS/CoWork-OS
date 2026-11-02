@@ -129,6 +129,9 @@ function providerLabel(data: OnboardingProfileData): string {
   if (data.selectedProvider === "ollama" && data.detectedOllamaModel) {
     return `Ollama (${data.detectedOllamaModel})`;
   }
+  if (data.selectedProvider === "openai-compatible" && data.detectedLmStudioModel) {
+    return `LM Studio (${data.detectedLmStudioModel})`;
+  }
   if (!data.selectedProvider) {
     return "Not configured yet";
   }

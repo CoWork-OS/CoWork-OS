@@ -185,6 +185,27 @@ export class NativeAppTools {
       (status) => status === "dispatching" || status === "outcome_unknown",
     );
   }
+  /** Shows the window this task controls in the live view, captured in the background. */
+  private showLive(result: Record<string, unknown>, pngBase64?: string): void {
+    const windowId = result.windowId;
+    if (typeof windowId !== "number" || !Number.isFinite(windowId)) return;
+    const label = [result.appName ?? result.bundleId, result.windowTitle]
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join(" — ");
+    const view = ComputerViewService.getInstance();
+    if (pngBase64) view.publishFrame(this.taskId, "this_computer", pngBase64, label);
+    const runtime = this.runtime;
+    view.setLiveWindow(this.taskId, {
+      label,
+      capture: async () => {
+        const assertAllowed = privateCaptureGuard();
+        const live = await runtime.screenshot(windowId);
+        assertAllowed();
+        return live.pngBase64;
+      },
+    });
+  }
+
   async run(raw: unknown): Promise<Record<string, unknown>> {
     const guard = privateCaptureGuard();
     let dispatched = false;
@@ -340,6 +361,7 @@ export class NativeAppTools {
       const capture = result.capture as
         | { pngBase64?: string; width?: number; height?: number; scaleFactor?: number }
         | undefined;
+      this.showLive(result, capture?.pngBase64);
       if (capture?.pngBase64) {
         delete result.capture;
         return {

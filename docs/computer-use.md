@@ -170,6 +170,17 @@ Computer use runs under a **single global session** on the machine:
 
 The session is torn down when the task finishes or the session ends cleanly after abort.
 
+## Watching it work
+
+Computer use runs in the background, so you can keep using your Mac. While a task uses an app on this computer, the task's right sidebar shows a live card under its other sections:
+
+- The window the task controls, refreshed by every action and, while the card is on screen, captured in the background about once a second. Only that window is captured, never the screen, and nothing is captured while the app window is hidden.
+- Windows it used earlier, stacked behind the live one.
+- **Make larger** opens the live window over the app; Esc closes it. **Minimize** folds the card to one row.
+- **Take over** stops the agent from using the computer until you click **Hand back**. When the agent asks you to step in (passwords, one-time codes, payments), its reason shows on the card.
+
+Bot conversations show the same view in the bot's rail.
+
 ## Built-in tools
 
 All of these are part of the **`computer_use` built-in tool family**. They are registered together and can be enabled or prioritized alongside other built-in categories in **Settings → Tools → Built-in tools**.

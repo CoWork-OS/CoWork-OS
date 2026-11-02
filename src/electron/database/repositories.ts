@@ -34,6 +34,7 @@ import {
   setAnnotationBaseRevision,
 } from "./annotation-results-sql";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
+import { type LibraryArtifact, listRecentArtifacts } from "./artifact-library-sql";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
 import { LIKE_ESCAPE_CLAUSE, likeContainsPattern, likeTermHitsSql } from "./fts-query";
@@ -4194,21 +4195,9 @@ export class ArtifactStore {
     return rows.map((row) => this.mapRowToArtifact(row));
   }
 
-  findRecent(limit: number): Array<Artifact & { workspacePath?: string }> {
-    const rows = this.db
-      .prepare(
-        `SELECT artifacts.*, workspaces.path AS workspace_path
-         FROM artifacts
-         JOIN tasks ON tasks.id = artifacts.task_id
-         JOIN workspaces ON workspaces.id = tasks.workspace_id
-         ORDER BY artifacts.created_at DESC, artifacts.id DESC
-         LIMIT ?`,
-      )
-      .all(limit) as Any[];
-    return rows.map((row) => ({
-      ...this.mapRowToArtifact(row),
-      workspacePath: row.workspace_path,
-    }));
+  /** See artifact-library-sql.ts. */
+  findRecent(limit: number): LibraryArtifact[] {
+    return listRecentArtifacts(this.db, limit);
   }
 
   findById(id: string): Artifact | undefined {

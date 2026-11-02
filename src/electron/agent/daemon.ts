@@ -312,6 +312,7 @@ import {
   getTaskBestKnownOutcome,
   hasSubstantiveOutcomeEvidence,
 } from "./outcome-policy";
+import type { WatchdogTaskRuntime } from "./watchdog/watchdog-types";
 import {
   approvalIdempotency,
   taskIdempotency as _taskIdempotency,
@@ -20725,6 +20726,126 @@ export class AgentDaemon extends EventEmitter {
     this.logEvent(taskId, "step_timeout", {
       message: "Task exceeded maximum execution time and was automatically cancelled",
     });
+  }
+
+  // ===== Watchdog host surface (src/electron/agent/watchdog) =====
+
+  /** What only this process knows about a task's runtime, for the watchdog's checks. */
+  getWatchdogTaskRuntime(taskId: string): WatchdogTaskRuntime {
+    const cached = this.activeTasks.get(taskId);
+    const active = cached?.status === "active";
+    const task = this.taskRepo.findById(taskId);
+    return {
+      hasExecutor: active,
+      executorRunning: active && cached.executor.isRunning === true,
+      queued: this.queueManager.isQueued(taskId),
+      retryPending: this.pendingRetries.has(taskId),
+      waitingForUser: this.hasPendingUserDecisionForTask(taskId),
+      autoResumable: task ? this.shouldResumeTaskOnStartup(task) : false,
+    };
+  }
+
+  /** Tasks in the given statuses, for the watchdog's scans. */
+  listTasksForWatchdog(statuses: TaskStatus[]): Task[] {
+    return this.taskRepo.findByStatus(statuses);
+  }
+
+  /** Tasks whose executor is running a turn in this process. */
+  listRunningTaskIdsForWatchdog(): string[] {
+    const ids: string[] = [];
+    this.activeTasks.forEach((cached, taskId) => {
+      if (cached.status === "active" && cached.executor.isRunning) ids.push(taskId);
+    });
+    return ids;
+  }
+
+  /**
+   * Watchdog recovery through the restart path: mark the task interrupted and resume it from its
+   * saved state (snapshot, plan, or a restart from scratch when nothing was saved), as an app
+   * restart would. Never touches a task whose executor is running a turn here; `allowFailed`
+   * lets a failure from a transient provider error be retried.
+   */
+  async recoverTaskForWatchdog(
+    taskId: string,
+    reason: string,
+    options: { allowFailed?: boolean } = {},
+  ): Promise<boolean> {
+    if (this.shutdownRequested || this.interruptedDiscards?.has(taskId)) return false;
+    const cached = this.activeTasks.get(taskId);
+    if (cached?.executor.isRunning) return false;
+    const task = this.taskRepo.findById(taskId);
+    if (!task || this.queueManager.isQueued(taskId) || this.pendingRetries.has(taskId))
+      return false;
+    const recoverable =
+      task.status === "executing" ||
+      task.status === "planning" ||
+      task.status === "interrupted" ||
+      (options.allowFailed === true && task.status === "failed");
+    if (!recoverable) return false;
+    if (task.status !== "interrupted" || task.terminalStatus !== "resume_available") {
+      // resume_available keeps the canonical status interrupted (a failed task's "failed"
+      // terminal status would otherwise still read as terminal), so resumeTask accepts it.
+      this.taskRepo.update(taskId, {
+        status: "interrupted",
+        terminalStatus: "resume_available",
+        error: reason,
+      });
+      this.logEvent(taskId, "task_interrupted", {
+        message: `Watchdog: ${reason}`,
+        reason: "watchdog",
+        terminalStatus: "resume_available",
+      });
+    }
+    // An idle or finished executor kept for follow-ups would make resumeTask reuse it instead
+    // of rebuilding from the saved state; queued follow-ups are journaled and recovered.
+    if (cached) this.activeTasks.delete(taskId);
+    return this.resumeTask(taskId);
+  }
+
+  /** Pause with a reason the person sees in the task. The watchdog never cancels this way. */
+  async pauseTaskForWatchdog(taskId: string, message: string): Promise<boolean> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || task.status === "paused") return false;
+    if (isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return false;
+    const cached = this.activeTasks.get(taskId);
+    if (cached?.status === "active") await cached.executor.pause();
+    this.taskRepo.update(taskId, { status: "paused" });
+    this.logEvent(taskId, "task_paused", { message, reason: "watchdog" });
+    return true;
+  }
+
+  /** Put a task stuck in transient retry (no timer armed) back in the queue. */
+  async requeueTaskForWatchdog(taskId: string, reason: string): Promise<boolean> {
+    if (this.shutdownRequested) return false;
+    if (this.pendingRetries.has(taskId) || this.queueManager.isQueued(taskId)) return false;
+    if (this.activeTasks.get(taskId)?.executor.isRunning) return false;
+    const task = this.taskRepo.findById(taskId);
+    if (!task || (task.status !== "queued" && task.status !== "executing")) return false;
+    if (task.status !== "queued") this.taskRepo.update(taskId, { status: "queued" });
+    this.logEvent(taskId, "task_queued", { reason: "watchdog_requeue", message: reason });
+    const refreshed = this.taskRepo.findById(taskId);
+    if (!refreshed || refreshed.status !== "queued") return false;
+    await this.startTask(refreshed);
+    return true;
+  }
+
+  /**
+   * After the host woke up: scan cached tasks again for finished background processes whose
+   * completion was not delivered (a delivery attempted around the suspend may have been lost).
+   */
+  rearmBackgroundProcessCompletions(): number {
+    let scanned = 0;
+    this.activeTasks.forEach((_cached, taskId) => {
+      this.backgroundCompletionsSettled?.delete(taskId);
+      void this.trackBackgroundWork(this.flushBackgroundProcessCompletions(taskId));
+      scanned += 1;
+    });
+    return scanned;
+  }
+
+  /** The host was suspended for `ms`: that time does not count toward the session timeout. */
+  creditSuspendedTimeToQueue(ms: number): void {
+    this.queueManager.creditSuspendedTime(ms);
   }
 
   /**

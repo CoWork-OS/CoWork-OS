@@ -184,6 +184,7 @@ const EXACT_CLASSES: Readonly<Record<string, ToolBoundaryClass>> = {
   wait: "app",
   wait_for_agent: "app",
   wait_for_event: "app",
+  watchdog_status: "app",
   withdraw_task_proposal: "app",
   // Files, through the workspace file boundary
   analyze_image: "workspace_files",

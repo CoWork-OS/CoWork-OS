@@ -7,6 +7,7 @@ import {
   canRetainBackgroundCompletion,
   continuesAfterTurn,
   isFreshAgentHandoff,
+  isRuntimeNotice,
   pendingBackgroundCompletionNotices,
   runningTurnUpdateText,
 } from "../background-process-notifications";
@@ -20,6 +21,16 @@ describe("background completion delivery eligibility", () => {
       isFreshAgentHandoff({ messageSource: "agent", notificationKind: "background_process" }),
     ).toBe(false);
     expect(isFreshAgentHandoff({ messageSource: "agent" })).toBe(true);
+  });
+  it("keeps a watchdog steering note in the existing conversation too", () => {
+    expect(isFreshAgentHandoff({ messageSource: "agent", notificationKind: "watchdog" })).toBe(
+      false,
+    );
+    expect(isRuntimeNotice("watchdog")).toBe(true);
+    expect(isRuntimeNotice("background_process")).toBe(true);
+    expect(isRuntimeNotice("agent_output")).toBe(true);
+    expect(isRuntimeNotice("handoff")).toBe(false);
+    expect(isRuntimeNotice(undefined)).toBe(false);
   });
   function harness(status: Task["status"] = "executing") {
     let current = { ...task, status };

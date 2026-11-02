@@ -7,9 +7,12 @@ import type {
 } from "../../shared/types";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 
-/** Work that finished outside the turn: a tracked background job or a spawned child agent. */
+/**
+ * Runtime notices (a finished background process or spawned child agent, a watchdog steering
+ * note) continue the current conversation; they are not a handoff from another agent.
+ */
 export function isRuntimeNotice(kind: unknown): kind is RuntimeNotificationKind {
-  return kind === "background_process" || kind === "agent_output";
+  return kind === "background_process" || kind === "agent_output" || kind === "watchdog";
 }
 
 export function isFreshAgentHandoff(

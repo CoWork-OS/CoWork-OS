@@ -400,6 +400,11 @@ import { ChannelGateway } from "../gateway";
 
 import { getUpdatePrompt, UpdatePreferencesStore, updateManager } from "../updater";
 import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
+import {
+  WatchdogSettingsManager,
+  WatchdogSettingsPatchSchema,
+} from "../agent/watchdog/watchdog-settings";
+import { getWatchdogService } from "../agent/watchdog/WatchdogService";
 import { toPublicChannel } from "./channel-config-sanitizer";
 import { buildSavedLLMSettings } from "./llm-settings-save";
 import { buildTaskExportJson } from "../reports/task-export";
@@ -12087,6 +12092,19 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.QUEUE_CLEAR);
     const result = await agentDaemon.clearStuckTasks();
     return { success: true, ...result };
+  });
+
+  // Watchdog control loop settings (Settings > Automations > Queue)
+  ipcMain.handle(IPC_CHANNELS.WATCHDOG_GET_SETTINGS, async () => {
+    return WatchdogSettingsManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS, async (_, settings: unknown) => {
+    checkRateLimit(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS);
+    const patch = validateInput(WatchdogSettingsPatchSchema, settings, "watchdog settings");
+    const saved = WatchdogSettingsManager.saveSettings(patch);
+    getWatchdogService()?.applySettings(WatchdogSettingsManager.loadEffectiveSettings());
+    return { success: true, settings: saved };
   });
 
   // MCP handlers

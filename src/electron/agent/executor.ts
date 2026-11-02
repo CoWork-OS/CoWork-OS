@@ -240,6 +240,15 @@ import {
   truncateToTokens,
   truncateToolResult,
 } from "./context-manager";
+import {
+  buildSpillHandleIndex,
+  extractSpillReferences,
+  stripSpillHandleIndex,
+  type SpillIndexEntry,
+  type ToolResultSpillSink,
+} from "./tool-result-spill";
+import { ToolResultSpillStore } from "./tool-result-spill-store";
+import { buildTaskIdentityLine } from "../../shared/task-origin-refs";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { loadPolicies } from "../admin/policies";
@@ -2432,6 +2441,7 @@ export class TaskExecutor {
         this.getToolFailureReason(toolResult, fallback),
       includeRunCommandTerminationContext: true,
       compactForLocalModel: this.shouldCompactToolResultsForLocalModel(),
+      spill: this.getToolResultSpillSink(),
     });
 
     this.emitToolLaneFinished(
@@ -2441,6 +2451,23 @@ export class TaskExecutor {
     );
 
     return this.keepToolResultAsAnswerData(params, normalizedToolResult.toolResult);
+  }
+
+  private toolResultSpillSink?: ToolResultSpillSink;
+
+  /**
+   * Inline & Spill: where this task's shortened tool results keep their full text, so the
+   * omission marker can point the model at tool_result_read. Undefined if unavailable.
+   */
+  private getToolResultSpillSink(): ToolResultSpillSink | undefined {
+    if (!this.toolResultSpillSink) {
+      try {
+        this.toolResultSpillSink = ToolResultSpillStore.getDefault().sinkForTask(this.task.id);
+      } catch {
+        return undefined;
+      }
+    }
+    return this.toolResultSpillSink;
   }
 
   /**
@@ -2748,7 +2775,9 @@ export class TaskExecutor {
       canonical === "browser_snapshot" ||
       canonical === "browser_evaluate" ||
       canonical === "task_events" ||
-      canonical === "task_history"
+      canonical === "task_history" ||
+      canonical === "task_get" ||
+      canonical === "tool_result_read"
     );
   }
 
@@ -6395,6 +6424,31 @@ export class TaskExecutor {
     return messages.length > 0 ? messages : fullMessages;
   }
 
+  /**
+   * Spill handles named in messages compaction removes (and in the summary it replaces),
+   * oldest first, with the tool that produced each result when known.
+   */
+  private collectSpillIndexEntries(
+    removedMessages: LLMMessage[],
+    previousSummary: string,
+  ): SpillIndexEntry[] {
+    const entries: SpillIndexEntry[] = extractSpillReferences(previousSummary);
+    const toolNames = new Map<string, string>();
+    for (const msg of removedMessages) {
+      if (!Array.isArray(msg.content)) continue;
+      for (const block of msg.content as Any[]) {
+        if (block?.type === "tool_use" && typeof block.id === "string") {
+          toolNames.set(block.id, String(block.name || ""));
+        } else if (block?.type === "tool_result" && typeof block.content === "string") {
+          for (const ref of extractSpillReferences(block.content)) {
+            entries.push({ ...ref, toolName: toolNames.get(String(block.tool_use_id)) });
+          }
+        }
+      }
+    }
+    return entries;
+  }
+
   private formatMessagesForCompactionSummary(
     removedMessages: LLMMessage[],
     maxChars: number,
@@ -6478,9 +6532,19 @@ export class TaskExecutor {
               `[${role}] TOOL_USE ${String(block.name || "").trim()} ${clamp(input, COMPACTION_TOOL_USE_CLAMP)}`,
             );
           } else if (block.type === "tool_result") {
-            lines.push(
-              `[${role}] TOOL_RESULT ${clamp(String(block.content || "").trim(), COMPACTION_TOOL_RESULT_CLAMP)}`,
+            const resultText = String(block.content || "").trim();
+            const clamped = clamp(resultText, COMPACTION_TOOL_RESULT_CLAMP);
+            // A clamp can cut the omission marker out: keep the handles it named.
+            const lostHandles = extractSpillReferences(resultText).filter(
+              (ref) => !clamped.includes(ref.handle),
             );
+            const handleNote =
+              lostHandles.length > 0
+                ? ` [full text: ${lostHandles
+                    .map((ref) => `tool_result_read(handle="${ref.handle}", offset=${ref.offset})`)
+                    .join(", ")}]`
+                : "";
+            lines.push(`[${role}] TOOL_RESULT ${clamped}${handleNote}`);
           } else if (block.type === "image") {
             const sizeMB = ((block.originalSizeBytes || 0) / (1024 * 1024)).toFixed(1);
             lines.push(`[${role}] IMAGE ${block.mimeType || "unknown"} ${sizeMB}MB`);
@@ -6563,12 +6627,20 @@ export class TaskExecutor {
       "Use this to build on the work that has already been done and avoid duplicating effort.\n\n";
 
     // The new block replaces the previous one, so its facts must be carried forward.
+    // Handles of shortened tool results are carried in a fixed index (Inline & Spill), so a
+    // summarizer that drops them cannot make that text unreachable.
+    const spillHandleIndex = buildSpillHandleIndex(
+      this.collectSpillIndexEntries(removed, String(opts.previousSummary || "")),
+    );
     const previousSummary = truncateToTokens(
-      String(opts.previousSummary || "")
+      stripSpillHandleIndex(String(opts.previousSummary || ""))
         .replace(SESSION_PREAMBLE.trim(), "")
         .trim(),
       COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS + 2000,
     );
+    const preamble = spillHandleIndex
+      ? `${SESSION_PREAMBLE}${spillHandleIndex}\n\n`
+      : SESSION_PREAMBLE;
     const previousSummarySection = previousSummary
       ? `Previous summary (from an earlier compaction; the dropped transcript below continues from it). Merge both into one summary: keep every fact that still applies, and let newer information replace outdated state, especially in Current State and Recommended Next Step:
 ${previousSummary}
@@ -6616,6 +6688,7 @@ ${previousSummary}
 - Be factual and specific. Include file paths, function names, error messages.
 - Preserve user messages as close to verbatim as possible.
 - Do NOT include secrets, API keys, tokens, or large raw data dumps.
+- Copy any tool_result_read(handle="...", offset=N) reference you rely on verbatim: it is how the agent reads the rest of a shortened tool result.
 - Output ONLY the structured summary, no preamble or meta-commentary.
 
 Context: ${contextLabel}
@@ -6662,7 +6735,7 @@ ${transcript}
       );
       return [
         TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
-        SESSION_PREAMBLE + earlierSummary + `Dropped context (raw, truncated):\n${fallback}`,
+        preamble + earlierSummary + `Dropped context (raw, truncated):\n${fallback}`,
         TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
       ].join("\n");
     };
@@ -6716,7 +6789,7 @@ ${transcript}
       const clamped = truncateToTokens(sanitized, outputBudget);
       return [
         TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
-        SESSION_PREAMBLE + clamped,
+        preamble + clamped,
         TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
       ].join("\n");
     } catch {
@@ -6752,10 +6825,13 @@ ${transcript}
     summaryBlock: string;
   }): Promise<void> {
     if (!opts.allowMemoryInjection || taskDisablesMemoryCapture(this.task)) return;
-    const content = this.extractPinnedBlockContent(
-      opts.summaryBlock,
-      TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
-      TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
+    // Spill handles expire with the task, so the memory copy leaves their index out.
+    const content = stripSpillHandleIndex(
+      this.extractPinnedBlockContent(
+        opts.summaryBlock,
+        TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+        TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
+      ),
     );
     if (!content) return;
 
@@ -12653,6 +12729,8 @@ ${transcript}
       canonical === "system_info" ||
       canonical === "task_events" ||
       canonical === "task_history" ||
+      canonical === "task_get" ||
+      canonical === "tool_result_read" ||
       canonical === "scratchpad_write"
     );
   }
@@ -19606,7 +19684,12 @@ ${transcript}
   }
 
   private buildExecutionWorkspaceContextPrompt(): string {
-    return [`Workspace: ${this.workspace.path}`, this.buildExecutionEnvironmentPrompt()]
+    return [
+      `Workspace: ${this.workspace.path}`,
+      this.buildExecutionEnvironmentPrompt(),
+      // This task's own ID and the IDs it links to (Chain of Recall); stable per task.
+      buildTaskIdentityLine(this.task),
+    ]
       .filter(Boolean)
       .join("\n");
   }
@@ -20707,7 +20790,10 @@ ${transcript}
       "screen_context_resolve",
       "scratchpad_write",
       "scratchpad_read",
+      // Omission markers and task references name these, in any step.
+      "tool_result_read",
       "task_history",
+      "task_get",
       // Work worth suggesting turns up in any step (suggested tasks); the registry offers
       // these only to the task the person talks to.
       "propose_task",
@@ -21319,6 +21405,7 @@ ${transcript}
         "list_directory",
         "scratchpad_write",
         "scratchpad_read",
+        "tool_result_read",
         "revise_plan",
         "request_user_input",
       ]);
@@ -21631,10 +21718,11 @@ ${transcript}
       fallbackTaskDomain,
     );
     const fallbackWebSearchModeContract = this.buildWebSearchModeContract();
+    const fallbackIdentityLine = buildTaskIdentityLine(this.task);
     this.systemPrompt = `You are an AI assistant helping with tasks. Use the available tools to complete the work.
 Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
-Workspace is temporary: ${this.workspace.isTemp ? "true" : "false"}
+Workspace is temporary: ${this.workspace.isTemp ? "true" : "false"}${fallbackIdentityLine ? `\n${fallbackIdentityLine}` : ""}
 ${fallbackModeDomainContract}
 ${fallbackWebSearchModeContract}
 Always ask for approval before deleting files or making destructive changes.
@@ -37097,6 +37185,7 @@ Return ONLY a JSON object:
                         suggestion: buildDuplicateCallSuggestionUtil(duplicateCheck),
                         sanitizeToolResult: (toolName, resultText) =>
                           OutputFilter.sanitizeToolResult(toolName, resultText),
+                        spill: this.getToolResultSpillSink(),
                       });
                       if (duplicateResult.hasDuplicateAttempt) {
                         hasDuplicateToolAttempt = true;
@@ -43856,6 +43945,7 @@ Return ONLY a JSON object:
                       suggestion: buildDuplicateCallSuggestionUtil(duplicateCheck),
                       sanitizeToolResult: (toolName, resultText) =>
                         OutputFilter.sanitizeToolResult(toolName, resultText),
+                      spill: this.getToolResultSpillSink(),
                     });
                     if (duplicateResult.hasDuplicateAttempt) {
                       hasDuplicateToolAttempt = true;

@@ -166,7 +166,10 @@ describe("EventTriggerService thread subscriptions", () => {
     await service.evaluateEvent(githubEvent("opened"));
 
     expect(deps.createTask).toHaveBeenCalledWith(
-      expect.objectContaining({ agentConfig: { replySurface: "github" } }),
+      expect.objectContaining({
+        // The task also carries its origin refs (Chain of Recall) next to the reply surface.
+        agentConfig: expect.objectContaining({ replySurface: "github" }),
+      }),
     );
     expect(subscribeThread).toHaveBeenCalledWith("github:acme/app:pr:42", "new-task");
     expect(service.getHistory(trigger.id)[0]).toMatchObject({

@@ -64,6 +64,7 @@ const RECALL_TOOL_NAMES = new Set([
   "memory_recall",
   "context_recall",
   "task_history",
+  "task_get",
   // Retired recall tools (audit §8.3, RETIRED_MEMORY_TOOL_NAMES): no longer registered,
   // but the one-time backfill reads recorded task events that still carry their output.
   "memory_topics_load",

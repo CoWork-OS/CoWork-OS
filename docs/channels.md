@@ -14,7 +14,7 @@ CoWork OS supports messaging and communication channels across chat, community, 
 - **Channel specialization**: Route a whole channel, one chat/group, or one topic/thread to a specific workspace, agent role, prompt guidance, tool restrictions, and optional shared-memory policy
 - **Access-profile enforcement**: New channel tasks use the target workspace's access profile, while channel/context restrictions can only narrow it. Command tools do not have a separate shell toggle, and invalid profiles fail closed.
 
-See [Gateway Message Lifecycle](gateway-message-lifecycle.md) for the shared routing, command, active-task, skill-slash, delivery, and scheduled-output behavior. For day-to-day usage examples, see [Using CoWork from WhatsApp and Other Channels](gateway-user-guide.md). For per-channel feature and best-practice guides, see [Channel User Guides](channel-user-guides.md) and the [dedicated channel guide index](channel-guides/).
+See [Gateway Message Lifecycle](gateway-message-lifecycle.md) for the shared routing, command, active-task, skill-slash, delivery, and scheduled-output behavior. For day-to-day usage examples, see [Using CoWork from WhatsApp and Other Channels](gateway-user-guide.md). For per-channel feature and best-practice guides, see [Channel User Guides](channel-user-guides.md) and the [dedicated channel guide index](channel-guides/index.md).
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-12.webp" alt="Messaging channel setup" width="700">

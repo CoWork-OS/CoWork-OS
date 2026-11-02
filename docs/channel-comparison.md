@@ -25,7 +25,7 @@ How CoWork OS channel integrations compare to alternative plugin-based implement
 
 - [Channel Integrations](channels.md) — Setup and features for all 17 channels
 - [Channel User Guides](channel-user-guides.md) — End-user features and best practices for each messaging channel
-- [Dedicated Channel Guides](channel-guides/) — Separate guide pages for each messaging channel
+- [Dedicated Channel Guides](channel-guides/index.md) — Separate guide pages for each messaging channel
 - [Gateway User Guide](gateway-user-guide.md) — End-user workflows and best practices for remote chat usage
 - [Gateway Message Lifecycle](gateway-message-lifecycle.md) — Remote command routing, active-task policy, delivery, and scheduled channel outputs
 - [Research Channels](research-channels.md) — Link-research channels for Telegram and WhatsApp

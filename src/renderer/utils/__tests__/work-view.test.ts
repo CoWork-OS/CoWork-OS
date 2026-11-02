@@ -49,6 +49,7 @@ describe("buildWorkModel", () => {
       task("running", { status: "executing" }),
       task("failed", { status: "failed" }),
       task("partial", { terminalStatus: "partial_success" }),
+      task("cancelled", { status: "cancelled" }),
       task("done"),
     ]);
     const rows = model.groups[0].rows.map((row) => [row.title, row.status, row.statusLabel]);
@@ -56,10 +57,30 @@ describe("buildWorkModel", () => {
       ["Session waiting", "needs", "Response needed"],
       ["Session running", "running", "Running"],
       ["Session failed", "failed", "Failed"],
-      ["Session partial", "done", "Partly done"],
+      ["Session partial", "partial", "Partly done"],
+      ["Session cancelled", "cancelled", "Cancelled"],
       ["Session done", "done", "Done"],
     ]);
-    expect(model.counts).toEqual({ all: 5, needs: 1, running: 1, done: 2, failed: 1 });
+    expect(model.counts).toEqual({
+      all: 6,
+      needs: 1,
+      running: 1,
+      done: 1,
+      partial: 1,
+      cancelled: 1,
+      failed: 1,
+    });
+  });
+
+  it("filters completed, partially completed, and cancelled work separately", () => {
+    const tasks = [
+      task("done"),
+      task("partial", { terminalStatus: "partial_success" }),
+      task("cancelled", { status: "cancelled" }),
+    ];
+    for (const status of ["done", "partial", "cancelled"] as const) {
+      expect(build(tasks, { status }).groups[0].rows.map((row) => row.task.id)).toEqual([status]);
+    }
   });
 
   it("collapses repeated runs of the same work and leads with the one that needs you", () => {

@@ -6,7 +6,7 @@ This document satisfies the product-planning deliverables: Phase 1 UX requiremen
 
 Inbox Agent has moved past the original saved-view slice into the email-client replacement foundation. The current working system includes:
 
-- Classic three-pane mode plus Today lanes for `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- Classic three-pane mode plus Today lanes for `Needs action`, `Dates & plans`, `Good to know`, and `More to browse`
 - richer classifier fields: `todayBucket` and `domainCategory`
 - domain chips for travel, packages, receipts, bills, newsletters, shopping, work, and all domains
 - Ask Inbox as a right-sidebar mailbox chat with live run steps, hybrid retrieval, final answers, and matched evidence

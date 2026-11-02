@@ -227,7 +227,7 @@ Unified AI gateway across 17 channels with security modes, rate limiting, ambien
 
 Local-first inbox workspace that turns email into an action queue while preserving normal email-client controls. It keeps cached mail visible on restart, syncs in the background, supports manual reply/reply-all/forward, and surfaces the right next step for each thread: triage, draft, cleanup, commitment tracking, and scheduling. [Learn more](inbox-agent.md)
 
-- **Classic + Today modes**: use the familiar three-pane inbox or the Today lanes for Needs action, Happening today, Good to know, and More to browse
+- **Classic + Today modes**: use the familiar three-pane inbox or the Today lanes for Needs action, Dates & plans, Good to know, and More to browse
 - **Action cards**: Unread, Needs reply, Suggested Actions, Open Commitments
 - **Mailbox views**: Inbox, Sent, All, plus Recent/Priority sorting, saved views, account filters, and practical domain filters
 - **Normal email actions**: manual Reply, Reply all, Forward, To/Cc/Bcc, editable subject/body, and provider-backed send

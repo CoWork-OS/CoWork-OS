@@ -686,7 +686,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
             let settled = false;
             const settle = (
               models: Array<{ name: string; size: number; modified: string }> | null,
-              lmStudioModel: string | null,
             ) => {
               if (settled) return;
               if (!isActiveAsyncMutation(mutationToken)) return;
@@ -699,25 +698,31 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
                 const recommended = sorted[0].name;
                 setData((d) => ({ ...d, detectedOllamaModel: recommended }));
               }
-              if (lmStudioModel) {
-                setData((d) => ({ ...d, detectedLmStudioModel: lmStudioModel }));
-              }
               // A detected local model is offered beside the other sign-ins, not as its own step.
               setState("llm_setup");
               setCurrentText(SCRIPT.llm_intro);
               setShowProviders(true);
             };
 
-            Promise.all([
-              window.electronAPI.getOllamaModels().catch(() => null),
-              window.electronAPI
-                .getOpenAICompatibleModels(LM_STUDIO_BASE_URL)
-                .then(pickLmStudioChatModel)
-                .catch(() => null),
-            ]).then(([m, lm]) => settle(m, lm));
+            window.electronAPI
+              .getOllamaModels()
+              .then((m) => settle(m))
+              .catch(() => settle(null));
+
+            // LM Studio is probed on its own, so a slow port 1234 never holds up Ollama. A probe
+            // must not replace the cached model list of a configured OpenAI-compatible endpoint.
+            window.electronAPI
+              .getOpenAICompatibleModels(LM_STUDIO_BASE_URL, undefined, { cacheModels: false })
+              .then(pickLmStudioChatModel)
+              .then((lmStudioModel) => {
+                if (lmStudioModel && isActiveAsyncMutation(mutationToken)) {
+                  setData((d) => ({ ...d, detectedLmStudioModel: lmStudioModel }));
+                }
+              })
+              .catch(() => undefined);
 
             // 3-second timeout fallback
-            setTimeout(() => settle(null, null), 3000);
+            setTimeout(() => settle(null), 3000);
           }, 1500);
         }
         break;
@@ -1758,11 +1763,12 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         providerType: "openai-compatible",
         modelKey: modelName,
       });
-      settings.openaiCompatible = {
-        ...existingSettings?.openaiCompatible,
-        baseUrl: LM_STUDIO_BASE_URL,
-        model: modelName,
-      };
+      const existingCompatible = existingSettings?.openaiCompatible;
+      settings.openaiCompatible =
+        existingCompatible?.baseUrl === LM_STUDIO_BASE_URL
+          ? { ...existingCompatible, model: modelName }
+          : // Another endpoint's key must not follow to LM Studio; "" clears the saved one.
+            { baseUrl: LM_STUDIO_BASE_URL, model: modelName, apiKey: "" };
       stageLlmSettings(settings);
       setState("llm_confirmed");
       setCurrentText(SCRIPT.llm_success);

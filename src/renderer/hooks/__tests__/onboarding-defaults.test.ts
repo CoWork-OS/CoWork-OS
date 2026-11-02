@@ -3,10 +3,11 @@ import { BUILTIN_ACCESS_PROFILE_IDS } from "../../../shared/access-profiles";
 import { getInteractionModeSelection } from "../../../shared/interaction-mode";
 import { OPENROUTER_FREE_MODEL_ID } from "../../../shared/llm-provider-catalog";
 import {
+  LM_STUDIO_BASE_URL,
   ONBOARDING_FIRST_TASK_OPTIONS,
   ONBOARDING_FIRST_TASK_PROMPT,
+  pickLmStudioChatModel,
 } from "../../../shared/onboarding";
-import { LM_STUDIO_BASE_URL, pickLmStudioChatModel } from "../../../shared/onboarding";
 import { getOnboardingDefaultModel, ONBOARDING_ACCOUNT_ROUTES } from "../useOnboardingFlow";
 
 describe("onboarding defaults", () => {

@@ -1413,28 +1413,42 @@ export function createBrowserSettingsDefinitions(
       async (args) => {
         const baseUrl = await validateBaseUrl(args[0], "OpenAI-compatible provider", true);
         if (!baseUrl) return invalid("A provider base URL is required.");
+        // An onboarding probe of another endpoint passes `cacheModels: false`.
+        const cache = (args[2] as { cacheModels?: boolean } | undefined)?.cacheModels !== false;
         const models = await LLMProviderFactory.getOpenAICompatibleModels(
           baseUrl,
           args[1] as string | undefined,
+          { cacheModels: cache },
         );
-        cacheModels(
-          "openai-compatible",
-          models,
-          (model) => ({
-            key: stringField(model, "key"),
-            displayName: stringField(model, "displayName"),
-            description: stringField(model, "description"),
-          }),
-          { apiKey: args[1] },
-        );
+        if (cache) {
+          cacheModels(
+            "openai-compatible",
+            models,
+            (model) => ({
+              key: stringField(model, "key"),
+              displayName: stringField(model, "displayName"),
+              description: stringField(model, "description"),
+            }),
+            { apiKey: args[1] },
+          );
+        }
         return scrubResult(models, { apiKey: args[1] });
       },
       {
         capability: "providers.read",
         mutation: true,
         minArgs: 1,
-        maxArgs: 2,
-        validate: (args) => parsePositional([NonEmptyString, OptionalString], args, 1),
+        maxArgs: 3,
+        validate: (args) =>
+          parsePositional(
+            [
+              NonEmptyString,
+              OptionalString,
+              z.object({ cacheModels: z.boolean().optional() }).strict().optional(),
+            ],
+            args,
+            2,
+          ),
       },
     ),
     refreshCustomProviderModels: define(

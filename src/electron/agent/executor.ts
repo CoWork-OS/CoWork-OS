@@ -22963,10 +22963,6 @@ You are continuing a previous conversation. The context from the previous conver
     );
   }
 
-  private isUserActionRequiredFailure(reason: string): boolean {
-    return isUserActionRequiredFailure(reason);
-  }
-
   /**
    * Approval denials are terminal for the current follow-up attempt. Feeding the
    * denial back to the model as an ordinary tool error lets it immediately retry
@@ -23030,7 +23026,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     // Reuse the broader blocker detection first (auth/approval/permissions/etc.).
-    if (this.isUserActionRequiredFailure(text)) {
+    if (isUserActionRequiredFailure(text)) {
       return true;
     }
 
@@ -23070,7 +23066,7 @@ You are continuing a previous conversation. The context from the previous conver
       return "user_blocker";
     }
 
-    if (this.isUserActionRequiredFailure(reason)) {
+    if (isUserActionRequiredFailure(reason)) {
       return "user_blocker";
     }
 
@@ -39815,7 +39811,7 @@ Return ONLY a JSON object:
       const shouldPauseForFailureDerivedUserInput =
         stepFailed &&
         !awaitingUserInput &&
-        this.isUserActionRequiredFailure(lastFailureReason || "") &&
+        isUserActionRequiredFailure(lastFailureReason || "") &&
         (this.shouldPauseForQuestions || this.shouldPauseForRequiredDecision);
       if (shouldPauseForFailureDerivedUserInput) {
         awaitingUserInput = true;

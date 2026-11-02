@@ -6,6 +6,7 @@ describe("isUserActionRequiredFailure", () => {
     const recoverable = [
       // "author" is not "auth"
       "Failed to parse the author field in package.json",
+      "Co-authored-by trailer is malformed",
       // a number that merely contains 429 is not an HTTP 429
       "SyntaxError at line 1429",
       "Processed 14290 rows before the crash",
@@ -34,6 +35,18 @@ describe("isUserActionRequiredFailure", () => {
       "Please provide the path to the config file",
       "Provide a value for the API_BASE input",
       "permission denied",
+      "Authorisation failed for the Slack workspace",
+      "Not authorised to access this resource",
+      "Please reauthenticate to continue",
+      "reauthorize the GitHub app",
+      "auth_token missing",
+      "Error: authToken is invalid",
+      "UNAUTHENTICATED",
+      "login_required",
+      "Provide values for the required inputs",
+      "Please provide the paths to both files",
+      "error_429",
+      "HTTP_429 rate-limited",
     ];
     for (const reason of blockers) {
       expect(isUserActionRequiredFailure(reason), reason).toBe(true);

@@ -16,7 +16,8 @@ export function isUserActionRequiredFailure(reason: string): boolean {
   if (!lower) return false;
 
   const rateLimitedExternalDependency =
-    /\b429\b/.test(lower) ||
+    // 429 not inside a longer number (line 1429), but also in error_429 or E429.
+    /(?<!\d)429(?!\d)/.test(lower) ||
     lower.includes("too many requests") ||
     lower.includes("rate limit") ||
     lower.includes("faucet has run dry") ||
@@ -47,16 +48,14 @@ export function isUserActionRequiredFailure(reason: string): boolean {
     /approve|approval|user denied|denied approval/.test(lower) ||
     integrationActionSignal ||
     missingUserSpecificDatesOrYears ||
-    // "auth" only as a word or as the start of authenticate/authorization/
-    // unauthorized (and standalone oauth): "author" must not match.
-    /\b(auth|authenticat\w*|authoriz\w*|unauthori[sz]ed|oauth|credential\w*|login)\b/.test(
-      lower,
-    ) ||
+    // "auth" at the start of a word (re-/un-/o- prefixes allowed, auth_token and
+    // authToken too), but not "author"/"authority": "authoris"/"authoriz" still match.
+    /(?<![a-z])(?:re-?|un|o)?auth(?!or(?!i[sz]))|credential|login/.test(lower) ||
     /permission/.test(lower) ||
     /api key|token required/.test(lower) ||
     rateLimitedExternalDependency ||
     // The verb "provide", not "provided"/"provides": an instruction to hand
     // something over, not prose about what something provided.
-    /\bprovide\b.*\b(path|value|input)\b/.test(lower)
+    /\bprovide\b.*\b(paths?|values?|inputs?)\b/.test(lower)
   );
 }

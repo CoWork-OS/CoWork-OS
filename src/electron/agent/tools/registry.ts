@@ -87,6 +87,7 @@ import { SystemTools } from "./system-tools";
 import { EventWaitTools } from "./event-wait-tools";
 import { TASK_PROPOSAL_TOOL_NAMES, TaskProposalTools } from "./task-proposal-tools";
 import { TaskProposalService } from "../../task-proposals/TaskProposalService";
+import { SpeculativeRunTools } from "./speculative-run-tools";
 import { WatchdogTools } from "./watchdog-tools";
 import { ThreadTools } from "./thread-tools";
 import { CronTools } from "./cron-tools";
@@ -764,6 +765,7 @@ export class ToolRegistry {
   private cronTools: CronTools;
   private eventWaitTools: EventWaitTools;
   private taskProposalTools: TaskProposalTools;
+  private speculativeRunTools: SpeculativeRunTools;
   private watchdogTools: WatchdogTools;
   private threadTools: ThreadTools;
   private canvasTools: CanvasTools;
@@ -861,6 +863,7 @@ export class ToolRegistry {
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.eventWaitTools = new EventWaitTools(daemon, taskId);
     this.taskProposalTools = new TaskProposalTools(new TaskProposalService(daemon), taskId);
+    this.speculativeRunTools = new SpeculativeRunTools(() => this.workspace);
     this.watchdogTools = new WatchdogTools(daemon, taskId);
     this.threadTools = new ThreadTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
@@ -1837,6 +1840,10 @@ export class ToolRegistry {
       typeof this.daemon.getTask === "function" ? this.daemon.getTask(this.taskId) : undefined;
     if (!proposingTask?.parentTaskId) {
       allTools.push(...TaskProposalTools.getToolDefinitions());
+    }
+    // Read-only history of speculate_fix runs; only where that runtime is running.
+    if (SpeculativeRunTools.isAvailable()) {
+      allTools.push(...SpeculativeRunTools.getToolDefinitions());
     }
     // Read-only explanation of the watchdog control loop's decisions for a task.
     allTools.push(...WatchdogTools.getToolDefinitions());
@@ -4018,6 +4025,11 @@ export class ToolRegistry {
       serialSchedulerSpec,
     );
     register(
+      "speculative_runs",
+      async ({ request }) => this.speculativeRunTools.listRuns(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
       "thread_subscribe",
       async ({ request }) => this.threadTools.subscribe(request.input),
       serialSchedulerSpec,
@@ -5980,6 +5992,7 @@ ${skillDescriptions}`;
     if (name === "withdraw_task_proposal") {
       return await this.taskProposalTools.withdrawTaskProposal(input);
     }
+    if (name === "speculative_runs") return await this.speculativeRunTools.listRuns(input);
     if (name === "thread_subscribe") return await this.threadTools.subscribe(input);
     if (name === "thread_unsubscribe") return await this.threadTools.unsubscribe(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);

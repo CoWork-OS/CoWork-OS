@@ -6085,6 +6085,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeTrigger: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, id),
   getTriggerHistory: (triggerId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_HISTORY, triggerId),
+  listSpeculativeRuns: (query?: { workspaceId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SPECULATIVE_RUNS_LIST, query ?? {}),
   // Semantic event gate (policies and per-source/per-chat modes)
   getEventGateSettings: () => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GATE_GET),
   addEventGatePolicy: (text: string) =>
@@ -10380,6 +10382,11 @@ export interface ElectronAPI {
 
   // MCP Events
   getMcpEventsReceiverPort: () => Promise<number | null>;
+
+  // Speculative reproduce-and-fix runs (read-only)
+  listSpeculativeRuns: (
+    query?: import("../shared/types").SpeculativeRunListQuery,
+  ) => Promise<import("../shared/types").SpeculativeRun[]>;
 
   // Playwright QA APIs
   qaGetRuns: () => Promise<Any[]>;

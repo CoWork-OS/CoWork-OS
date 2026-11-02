@@ -19,6 +19,7 @@ import { FILE_HUB_UNITS } from "../file-hub/file-hub-units";
 import { BRIEFING_UNITS } from "../briefing/briefing-units";
 import { YOUTUBE_UNITS } from "../youtube/youtube-units";
 import { ANSWER_SURFACE_UNITS } from "../answer-surfaces/answer-surface-units";
+import { TASK_PROPOSAL_UNITS } from "../task-proposals/task-proposal-units";
 import { USAGE_TELEMETRY_UNITS } from "../agent/llm/usage-telemetry-units";
 import { CHANNEL_HISTORY_UNITS } from "../agent/tools/channel-history-units";
 import { PULSE_REPORT_UNITS } from "../telemetry/pulse-report-units";
@@ -68,6 +69,7 @@ export const SERVICE_UNITS = {
   ...BRIEFING_UNITS,
   ...YOUTUBE_UNITS,
   ...ANSWER_SURFACE_UNITS,
+  ...TASK_PROPOSAL_UNITS,
   ...USAGE_TELEMETRY_UNITS,
   ...CHANNEL_HISTORY_UNITS,
   ...PULSE_REPORT_UNITS,

@@ -162,6 +162,9 @@ const SERVICE_TOOLS = new Set([
   "task_list_update",
   "task_list_list",
   "task_history",
+  "task_get",
+  // Pages of shortened results are kept on the host, whichever computer produced them.
+  "tool_result_read",
   "spawn_agent",
   "wait_for_agent",
   "orchestrate_agents",

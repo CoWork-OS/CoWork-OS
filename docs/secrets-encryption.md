@@ -253,6 +253,12 @@ profile from a previous release to this build:
 6. Rolling back leaves the secrets untouched.
 7. Upgrading again reads them.
 
+That is the upgrade from a release that seals secrets with the OS keychain (0.5.61 and
+earlier). From a release that already uses the data key (0.5.62 and later), the script
+expects this build to reuse the same key and move nothing, and the rollback to still read
+the secrets. It tells the two apart by whether the baseline left a data key, and prints the
+mode it detected. The expectations live in `scripts/qa/secrets-upgrade-smoke-checks.mjs`.
+
 ```bash
 node scripts/qa/secrets-upgrade-smoke.mjs --baseline <previous app or package dir> --current <this build>
 ```
@@ -266,6 +272,10 @@ it on pull requests that touch this code. It also runs on demand before a releas
 | Windows installer          | the previous release's NSIS installer | this build, packaged                          |
 | Linux npm, Secret Service  | the previous npm release              | this checkout, with GNOME Keyring             |
 | Linux npm, no keyring      | the previous npm release              | this checkout, no keyring (app-level key)     |
+
+"The previous release" is the latest published one. To exercise the OS-keychain upgrade
+now that releases ship the data key, dispatch it with an older baseline:
+`gh workflow run secrets-upgrade-smoke.yml --ref <branch> -f baseline_version=v0.5.61`.
 
 ## Code map
 

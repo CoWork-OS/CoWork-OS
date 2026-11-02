@@ -210,6 +210,7 @@ import {
 import { isSpawnSubagentsPrompt } from "../shared/spawn-intent-detection";
 import { findMultitaskCommand, parseMultitaskCommand } from "../shared/multitask-command";
 import { isSynthesisChildTask } from "../shared/synthesis-agent-detection";
+import { isSpeculativeTask } from "../shared/automated-task-detection";
 import { classifyShellPermissionDecision } from "../shared/shell-permission-intents";
 import { resolveTaskStatusUpdateFromEvent } from "../shared/task-status";
 import {
@@ -4856,6 +4857,8 @@ export function App() {
 
         void (async () => {
           try {
+            // A speculative fix worker never raises a notification; it is dismissed instead.
+            if (isSpeculativeTask(task)) return;
             if (
               task?.assignedAgentRoleId &&
               task.workspaceId &&
@@ -4935,7 +4938,8 @@ export function App() {
       if (event.type === "task_completed") {
         const isMainView = currentViewRef.current === "main";
         const isSelectedTask = selectedTaskIdRef.current === event.taskId;
-        if (shouldTrackUnseenCompletion({ isMainView, isSelectedTask })) {
+        const speculative = isSpeculativeTask(tasksRef.current.find((t) => t.id === event.taskId));
+        if (!speculative && shouldTrackUnseenCompletion({ isMainView, isSelectedTask })) {
           setUnseenCompletedTaskIds((prev) => addUniqueTaskId(prev, event.taskId));
         }
         const fallbackEventsForTask =

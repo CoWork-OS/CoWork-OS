@@ -15,6 +15,12 @@
  *      must leave them as they are.
  *   7. upgrade again: this build reads the API key.
  *
+ * That is the upgrade from a baseline that seals secrets with the OS keychain (0.5.61 and
+ * earlier). A baseline that already seals them with the data key (0.5.62 and later) is
+ * detected from step 1, and then this build must reuse that same key and move nothing, and
+ * the rollback must still read every secret. The report header names the mode; the
+ * expectations for each are in secrets-upgrade-smoke-checks.mjs.
+ *
  * A target is a packaged app (a macOS .app bundle or the app's executable) or an app
  * directory with its own node_modules/electron (a built checkout or an installed npm
  * package). The current target defaults to this checkout.
@@ -28,6 +34,7 @@
  * OpenAI-compatible provider listens on 127.0.0.1; nothing leaves the machine.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -36,6 +43,11 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import {
+  describeBaselineMode,
+  detectBaselineMode,
+  secretsUpgradeChecks,
+} from "./secrets-upgrade-smoke-checks.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const { values: options } = parseArgs({
@@ -56,7 +68,6 @@ if (!["keychain", "app"].includes(options.expect)) {
   console.error("--expect is keychain or app");
   process.exit(2);
 }
-const expectKeychain = options.expect === "keychain";
 const out = path.resolve(
   options.out ?? fs.mkdtempSync(path.join(os.tmpdir(), "cowork-secrets-upgrade-")),
 );
@@ -215,29 +226,56 @@ async function hangReport(label, pid) {
   ].join("\n");
 }
 
+/**
+ * The wrapper that copies the app's stdout and stderr to a file from process start. It is
+ * run as the executable: Playwright spawns it directly on POSIX (shebang) and through its
+ * .cmd shim on Windows, where Playwright runs the command through the shell.
+ */
+const launchWrapper = path.join(
+  root,
+  "scripts",
+  "qa",
+  process.platform === "win32"
+    ? "secrets-upgrade-smoke-launch.cmd"
+    : "secrets-upgrade-smoke-launch.mjs",
+);
+
 async function runApp(label, spec, fn) {
   console.log(`${label}: starting`);
+  // The app runs through the launch wrapper: Playwright reads the app's stdio itself from
+  // the moment it spawns the process, so a listener added here after launch would miss
+  // the startup lines. The wrapper appends everything to this file instead.
+  const logFile = path.join(out, `${label}.log`);
+  const pidFile = path.join(out, `${label}.pid`);
+  fs.rmSync(logFile, { force: true });
+  fs.rmSync(pidFile, { force: true });
+  const readLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "");
   let app;
   try {
     app = await _electron.launch({
-      executablePath: spec.executablePath,
+      executablePath: launchWrapper,
       args: [...options["electron-arg"], ...spec.appArgs],
       cwd: spec.appDir ?? path.dirname(spec.executablePath),
       timeout: 180_000,
-      env,
+      env: {
+        ...env,
+        COWORK_SMOKE_NODE: process.execPath,
+        COWORK_SMOKE_EXECUTABLE: spec.executablePath,
+        COWORK_SMOKE_LOG_FILE: logFile,
+        COWORK_SMOKE_PID_FILE: pidFile,
+      },
     });
   } catch (error) {
     const output = await plainLaunchOutput(spec);
-    fs.writeFileSync(path.join(out, `${label}.log`), output);
+    fs.writeFileSync(logFile, output);
     console.log(`${label}: could not launch; the app's own output:\n${output.slice(-4000)}`);
     results[label] = { error: String(error?.message || error), ...summarizeLog(output) };
     return;
   }
   console.log(`${label}: launched`);
-  const pid = app.process().pid;
-  let log = "";
-  app.process().stdout?.on("data", (d) => (log += d));
-  app.process().stderr?.on("data", (d) => (log += d));
+  // The app's own pid (the wrapper writes it at spawn); the wrapper's pid is the fallback.
+  const appPid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, "utf8")) : NaN;
+  const pid = Number.isInteger(appPid) && appPid > 0 ? appPid : app.process().pid;
   // Every call into the app has a deadline: a blocked main process otherwise hangs the run.
   const deadline = (promise, what) => withDeadline(promise, 180_000, `${label}: ${what}`);
   try {
@@ -272,7 +310,7 @@ async function runApp(label, spec, fn) {
     results[label] = { error: String(error?.stack || error) };
     const report = await hangReport(label, pid);
     if (report) results[label].hang = report;
-    const tail = log.split("\n").slice(-60).join("\n");
+    const tail = readLog().split("\n").slice(-60).join("\n");
     console.log(
       `${label}: ${error?.message || error}\n${report}\napp output (last 60 lines):\n${tail}`,
     );
@@ -282,9 +320,8 @@ async function runApp(label, spec, fn) {
         process.kill(pid, "SIGKILL");
       } catch {}
     });
-    fs.writeFileSync(path.join(out, `${label}.log`), log);
   }
-  Object.assign(results[label], summarizeLog(log));
+  Object.assign(results[label], summarizeLog(readLog()));
   console.log(`${label}: ${results[label].error ? "failed" : "done"}`);
 }
 
@@ -347,6 +384,10 @@ function inspectProfile() {
       llmSealedBy: sealedBy(rows.find((row) => row.category === "llm")?.encrypted_data ?? ""),
       canarySealedBy: canary ? sealedBy(canary.encrypted_data) : null,
       dataKeyInDatabase: keyRow?.encrypted_data.startsWith("key:") ?? false,
+      // Which sealed data key the database holds, to tell a reused key from a new one.
+      dataKeyHash: keyRow
+        ? createHash("sha256").update(keyRow.encrypted_data).digest("hex").slice(0, 16)
+        : null,
       dataKeyFile: fs.existsSync(keyFile),
       // Chromium keeps its own encryption key here (DPAPI-protected on Windows).
       localStateInProfile: fs.existsSync(path.join(profile, "Local State")),
@@ -440,72 +481,25 @@ Object.assign(results["7-upgrade-again"], inspectProfile());
 server.close();
 for (const step of Object.values(results)) delete step.fingerprint;
 
-// Every expectation, by step.
-const checks = [];
-const check = (step, name, ok) => checks.push({ step, name, ok: !!ok });
-const r = results;
-check("1-baseline", "saved and read the API key", r["1-baseline"].apiKeyRead);
-check(
-  "1-baseline",
-  expectKeychain ? "sealed it with the OS keychain" : "sealed it with the app key",
-  r["1-baseline"].llmSealedBy === (expectKeychain ? "keychain" : "app"),
-);
-for (const step of ["2-current", "3-current-again", "5-key-file-lost", "7-upgrade-again"]) {
-  check(step, "read the API key", r[step].apiKeyRead);
-  check(step, "log captured", r[step].logCaptured);
-  check(step, "no safeStorage deprecation warning", r[step].deprecationWarnings === 0);
-  check(step, "no secret read through the synchronous keychain call", r[step].legacyReads === 0);
-  if (expectKeychain) {
-    check(
-      step,
-      "every secret sealed with the data key",
-      r[step].sealing["data-key"] === r[step].secrets,
-    );
-    check(step, "keychain canary sealed with the data key", r[step].canarySealedBy === "data-key");
-    check(
-      step,
-      "data key in the database and the key file",
-      r[step].dataKeyInDatabase && r[step].dataKeyFile,
-    );
-  } else {
-    check(step, "no data key created", !r[step].dataKeyInDatabase && !r[step].dataKeyFile);
-    check(step, "secrets still sealed with the app key", r[step].sealing.app === r[step].secrets);
-  }
-}
-if (expectKeychain) {
-  check("2-current", "created the data key", r["2-current"].keyCreated);
-  check("2-current", "moved the secrets onto it", r["2-current"].movedToDataKey > 0);
-  check("3-current-again", "nothing left to move", r["3-current-again"].movedToDataKey === 0);
-  check(
-    "5-key-file-lost",
-    "key file restored from the database",
-    r["5-key-file-lost"].keyFileRestored,
-  );
-  check("6-rollback", "baseline cannot read the moved secret", !r["6-rollback"].apiKeyRead);
-}
-check("6-rollback", "secrets left as they were", r["6-rollback"].secretsUntouched);
-check("6-rollback", "nothing archived as unreadable", r["6-rollback"].unreadableBackups === 0);
-if (r["4-cli"]) {
-  check("4-cli", "sent the right key to the provider", r["4-cli"].sentRightKey);
-  check("4-cli", "no safeStorage deprecation warning", r["4-cli"].deprecationWarnings === 0);
-}
-for (const [step, result] of Object.entries(results)) {
-  if (result.error) check(step, `ran without error: ${result.error.split("\n")[0]}`, false);
-}
+// Every expectation, by step, for the kind of baseline this run started from.
+const mode = detectBaselineMode(results["1-baseline"], options.expect);
+const checks = secretsUpgradeChecks(results, mode);
 
 const summary = {
   platform: `${process.platform}-${process.arch}`,
   expect: options.expect,
+  baselineMode: mode,
   baseline: options.baseline,
   current: options.current,
   results,
   failed: checks.filter((c) => !c.ok),
 };
 fs.writeFileSync(path.join(out, "results.json"), JSON.stringify(summary, null, 2));
+console.log(`\nBaseline mode: ${mode} (${describeBaselineMode(mode)})`);
 for (const [step, result] of Object.entries(results))
   console.log(`${step} ${JSON.stringify(result)}`);
 for (const c of checks) console.log(`${c.ok ? "ok  " : "FAIL"} ${c.step}: ${c.name}`);
 console.log(
-  `\n${checks.length - summary.failed.length}/${checks.length} checks passed; evidence in ${out}`,
+  `\n${checks.length - summary.failed.length}/${checks.length} checks passed (baseline mode: ${mode}); evidence in ${out}`,
 );
 process.exit(summary.failed.length === 0 ? 0 : 1);

@@ -5,7 +5,12 @@
  * webhooks, and other events to auto-create tasks or send messages.
  */
 
-import type { AgentConfig } from "../../shared/types";
+import type {
+  AgentConfig,
+  EventGateDecision,
+  EventGateMode,
+  SpeculativeFixConfig,
+} from "../../shared/types";
 
 export type TriggerSource =
   | "channel_message"
@@ -38,7 +43,7 @@ export interface TriggerCondition {
   value: string;
 }
 
-export type TriggerActionType = "create_task" | "send_message" | "wake_agent";
+export type TriggerActionType = "create_task" | "send_message" | "wake_agent" | "speculate_fix";
 
 export interface TriggerAction {
   type: TriggerActionType;
@@ -68,6 +73,11 @@ export interface TriggerAction {
      * event. It fires once (the runtime disables it), and is removed when the wait ends.
      */
     eventWait?: { taskId: string; expiresAt: number; reason?: string };
+    /**
+     * For speculate_fix: reproduce the reported problem in an isolated worktree and deliver a
+     * fix only when it is confirmed and small. Off unless a trigger is set to this action.
+     */
+    speculateFix?: SpeculativeFixConfig;
     /** MCP Events subscription bound to this trigger. */
     mcpEvent?: {
       serverId: string;
@@ -118,6 +128,29 @@ export interface TriggerHistoryEntry {
   actionResult?: string;
   taskId?: string;
   sourceLabel?: string;
+  /** Semantic gate verdict, when the trigger's source is in candidate mode. */
+  gateDecision?: EventGateDecision;
+  /** The gate's one-line reason. */
+  gateReason?: string;
+  /** Thread the event belongs to, when a thread subscription received it. */
+  threadKey?: string;
+}
+
+export interface SpeculateFixRequest {
+  trigger: EventTrigger;
+  event: TriggerEvent;
+  /** Stable occurrence identity: one key never starts a second run. */
+  idempotencyKey?: string;
+  /** Present when a bot responsibility prepared this event; such a trigger may not speculate. */
+  agentConfig?: AgentConfig;
+}
+
+export interface SpeculateFixStartResult {
+  started: boolean;
+  runId?: string;
+  taskId?: string;
+  /** Why no run started (for the trigger history). */
+  reason?: string;
 }
 
 /**
@@ -157,6 +190,8 @@ export interface EventTriggerServiceDeps {
     idempotencyKey?: string;
   }) => Promise<{ messageId: string }>;
   wakeAgent?: (agentRoleId: string, prompt: string) => void | Promise<void>;
+  /** Starts a speculative reproduce-and-fix run; without it, speculate_fix triggers fail. */
+  speculateFix?: (params: SpeculateFixRequest) => Promise<SpeculateFixStartResult>;
   getDefaultWorkspaceId: () => string;
   getActiveTaskCount?: () => number;
   log?: (...args: unknown[]) => void;
@@ -174,4 +209,27 @@ export interface EventTriggerServiceDeps {
     triggerId: string;
     event: TriggerEvent;
   }) => Promise<void>;
+  /**
+   * The event gate mode of an event's source (or gateway chat). Absent: explicit_only for
+   * every event, today's behaviour.
+   */
+  resolveGateMode?: (event: TriggerEvent) => EventGateMode;
+  /**
+   * The semantic gate for a candidate event: one small model call over the event and the
+   * user's policies. Absent in a runtime: candidate events are ignored (fail closed).
+   */
+  runSemanticGate?: (params: {
+    trigger: EventTrigger;
+    event: TriggerEvent;
+  }) => Promise<{ decision: EventGateDecision; reason: string }>;
+  /** Tasks subscribed to a thread that can still take a follow-up. */
+  findActiveThreadSubscribers?: (threadKey: string) => Promise<string[]>;
+  /** Hand a thread event to a subscribed task as an untrusted external follow-up. */
+  deliverThreadEvent?: (params: {
+    taskId: string;
+    threadKey: string;
+    event: TriggerEvent;
+  }) => Promise<void>;
+  /** Subscribe a task the engine created for an event's thread. */
+  subscribeThread?: (threadKey: string, taskId: string) => Promise<void>;
 }

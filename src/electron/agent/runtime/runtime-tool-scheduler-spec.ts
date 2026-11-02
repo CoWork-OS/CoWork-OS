@@ -70,6 +70,7 @@ const READ_PARALLEL_TOOLS = new Set([
   "git_blame",
   "git_refs",
   "task_history",
+  "task_get",
   "task_list_list",
   // Memory reads.
   "memory_recall",
@@ -77,6 +78,8 @@ const READ_PARALLEL_TOOLS = new Set([
   "scratchpad_read",
   // Reads buffered output of this task's own background processes.
   "process_output",
+  // Reads pages of this task's own shortened tool results.
+  "tool_result_read",
 ]);
 
 const EXCLUSIVE_TOOLS = new Set([
@@ -128,6 +131,7 @@ const IDEMPOTENT_TOOLS = new Set([
   "context_recall",
   "scratchpad_read",
   "process_output",
+  "tool_result_read",
 ]);
 
 const FILE_SCOPE_KEYS = [

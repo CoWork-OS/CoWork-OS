@@ -80,6 +80,8 @@ const VERIFIER_DENY_LIST = [
   "git_merge_to_base",
   "schedule_task",
   "wait_for_event",
+  "thread_subscribe",
+  "thread_unsubscribe",
   "create_issue",
   "canvas_create",
   "canvas_push",

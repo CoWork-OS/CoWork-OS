@@ -42,11 +42,19 @@ export interface CamofoxConnectionResult {
   startCommand?: string;
 }
 
+/** User name Camofox sends to CoWork's policy proxy (PROXY_USERNAME). */
+export const CAMOFOX_PROXY_USERNAME = "cowork";
+
 /**
  * How to start Camofox so it listens on loopback only, requires the access key, and browses
- * through CoWork's proxy. The key itself stays out of the UI; the user fills it in.
+ * through CoWork's proxy. The access key stays out of the UI; the user fills it in. The proxy
+ * password is a placeholder unless the main process fills it in for "Copy start command".
  */
-export function camofoxStartCommand(serverUrl: string, proxyPort: number): string {
+export function camofoxStartCommand(
+  serverUrl: string,
+  proxyPort: number,
+  proxyPassword = "<proxy password>",
+): string {
   let host = "127.0.0.1";
   let port = "9377";
   try {
@@ -58,6 +66,7 @@ export function camofoxStartCommand(serverUrl: string, proxyPort: number): strin
   }
   return (
     `CAMOFOX_BIND_HOST=${host} CAMOFOX_PORT=${port} CAMOFOX_ACCESS_KEY=<your access key> ` +
-    `PROXY_HOST=127.0.0.1 PROXY_PORT=${proxyPort} npm start`
+    `PROXY_HOST=127.0.0.1 PROXY_PORT=${proxyPort} PROXY_USERNAME=${CAMOFOX_PROXY_USERNAME} ` +
+    `PROXY_PASSWORD=${proxyPassword} npm start`
   );
 }

@@ -8671,6 +8671,7 @@ export const IPC_CHANNELS = {
   CAMOFOX_SETTINGS_GET: "camofox:getSettings",
   CAMOFOX_SETTINGS_SAVE: "camofox:saveSettings",
   CAMOFOX_TEST_CONNECTION: "camofox:testConnection",
+  CAMOFOX_COPY_START_COMMAND: "camofox:copyStartCommand",
   BROWSER_SITE_PERMISSIONS_LIST: "browserSettings:sitePermissionsList",
   BROWSER_SITE_PERMISSIONS_RESET: "browserSettings:sitePermissionsReset",
   BROWSER_SITE_PERMISSIONS_SET: "browserSettings:sitePermissionsSet",

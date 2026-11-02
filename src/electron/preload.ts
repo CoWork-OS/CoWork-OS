@@ -2623,6 +2623,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) as Promise<CamofoxDisplaySettings>,
   testCamofoxConnection: () =>
     ipcRenderer.invoke(IPC_CHANNELS.CAMOFOX_TEST_CONNECTION) as Promise<CamofoxConnectionResult>,
+  copyCamofoxStartCommand: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND) as Promise<void>,
   resolveWorktreeBaseCommit: (data: { workspaceId: string; branch?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT, data) as Promise<{
       commit: string;
@@ -6922,6 +6924,8 @@ export interface ElectronAPI {
   getCamofoxSettings: () => Promise<CamofoxDisplaySettings>;
   saveCamofoxSettings: (update: CamofoxSettingsUpdate) => Promise<CamofoxDisplaySettings>;
   testCamofoxConnection: () => Promise<CamofoxConnectionResult>;
+  /** Copies the start command, proxy password filled in, without it reaching the renderer. */
+  copyCamofoxStartCommand: () => Promise<void>;
   /** Build Compare: the commit a branch points to now, so every variant starts from it. */
   resolveWorktreeBaseCommit: (data: {
     workspaceId: string;

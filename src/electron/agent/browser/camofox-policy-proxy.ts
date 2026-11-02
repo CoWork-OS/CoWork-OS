@@ -8,19 +8,27 @@
  * with PROXY_HOST/PROXY_PORT pointing at this proxy on a fixed loopback port, and CoWork
  * proves that before every new tab with a check page only this proxy can serve.
  *
+ * The proxy wants PROXY_USERNAME/PROXY_PASSWORD, a password CoWork never sends to the Camofox
+ * API: a process that takes over Camofox's port receives the access key but still cannot fetch
+ * the check page. The check page also loads scripts from 127.0.0.1 and localhost on this port.
+ * Through the proxy they are refused like any loopback target; a browser that skips the proxy
+ * for loopback reaches the port directly and gets a canary, and the tab is refused.
+ *
  * The proxy only runs while a task holds a lease. A request must pass the policy of every
  * task using Camofox at that moment; with no lease the port is closed, so Camofox cannot
  * reach anything on its own.
  */
 
-import { randomBytes } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
 import {
   createBrowserNetworkProxy,
   type BrowserNetworkProxy,
 } from "../../security/browser-network-proxy";
+import { CAMOFOX_PROXY_USERNAME } from "../../../shared/camofox";
 
 /** `.invalid` never resolves (RFC 6761), so only a browser using this proxy can load it. */
 export const CAMOFOX_CHECK_HOST_SUFFIX = ".cowork-camofox-check.invalid";
+const LOOPBACK_CHECK_PATH = "/cowork-loopback-check/";
 const CHECK_TTL_MS = 60_000;
 const MAX_PENDING_CHECKS = 32;
 
@@ -30,8 +38,28 @@ export interface CamofoxProxyLease {
 
 export interface CamofoxProxyCheck {
   url: string;
+  /** On the page when Camofox fetched it through this proxy. */
   token: string;
+  /** Written by the page's last script, so the loopback scripts before it had their turn. */
+  marker: string;
+  /** Written only when Camofox fetched a loopback script around this proxy. */
+  canary: string;
   done(): void;
+}
+
+interface PendingCheck {
+  token: string;
+  marker: string;
+  canary: string;
+  expiresAt: number;
+}
+
+const hex = (bytes: number) => randomBytes(bytes).toString("hex");
+
+/** document.write of `text` without `text` itself appearing in the page source. */
+function writeSplit(text: string): string {
+  const half = Math.floor(text.length / 2);
+  return `document.write("<p>" + "${text.slice(0, half)}" + "${text.slice(half)}" + "</p>");`;
 }
 
 type CreateProxy = typeof createBrowserNetworkProxy;
@@ -39,35 +67,40 @@ type CreateProxy = typeof createBrowserNetworkProxy;
 export class CamofoxPolicyProxy {
   private proxy: BrowserNetworkProxy | null = null;
   private port: number | null = null;
+  private password: string | null = null;
   private starting: Promise<void> | null = null;
   private readonly leases = new Map<string, (url: string) => void>();
-  private readonly checks = new Map<string, { token: string; expiresAt: number }>();
+  private readonly checks = new Map<string, PendingCheck>();
 
   constructor(
     private readonly createProxy: CreateProxy = createBrowserNetworkProxy,
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Starts the proxy on `port` if needed and adds this task's policy to it. */
+  /**
+   * Starts the proxy on `port` if needed and adds this task's policy to it. Camofox must send
+   * `password` (with CAMOFOX_PROXY_USERNAME) on every request.
+   */
   async acquire(
     port: number,
+    password: string,
     leaseId: string,
     assertAllowed: (url: string) => void,
   ): Promise<CamofoxProxyLease> {
     if (this.starting) await this.starting.catch(() => {});
-    if (this.proxy && this.port !== port) {
+    if (this.proxy && (this.port !== port || this.password !== password)) {
       const others = [...this.leases.keys()].filter((id) => id !== leaseId);
       if (others.length > 0) {
         throw new Error(
           `CoWork's Camofox policy proxy is running on port ${this.port} for another task. ` +
-            "Finish that task before changing the proxy port.",
+            "Finish that task before changing the proxy settings.",
         );
       }
       await this.stop();
     }
     this.leases.set(leaseId, assertAllowed);
     if (!this.proxy) {
-      this.starting = this.start(port);
+      this.starting = this.start(port, password);
       try {
         await this.starting;
       } catch (error) {
@@ -100,12 +133,12 @@ export class CamofoxPolicyProxy {
     while (this.checks.size >= MAX_PENDING_CHECKS) {
       this.checks.delete(this.checks.keys().next().value as string);
     }
-    const id = randomBytes(12).toString("hex");
-    const token = randomBytes(16).toString("hex");
-    this.checks.set(id, { token, expiresAt: this.now() + CHECK_TTL_MS });
+    const id = hex(12);
+    const check = { token: hex(16), marker: hex(16), canary: hex(16) };
+    this.checks.set(id, { ...check, expiresAt: this.now() + CHECK_TTL_MS });
     return {
       url: `http://${id}${CAMOFOX_CHECK_HOST_SUFFIX}/`,
-      token,
+      ...check,
       done: () => {
         this.checks.delete(id);
       },
@@ -120,21 +153,26 @@ export class CamofoxPolicyProxy {
     return this.leases.size;
   }
 
-  private async start(port: number): Promise<void> {
+  private async start(port: number, password: string): Promise<void> {
+    const expected = Buffer.from(`${CAMOFOX_PROXY_USERNAME}:${password}`);
     this.proxy = await this.createProxy((url) => this.assertAllowed(url), {
       port,
+      authorize: (header) => credentialsMatch(header, expected),
       answer: (target) => this.answer(target),
-      // Camofox's own unauthenticated-by-default API and this proxy live on loopback; a page,
-      // or a name that resolves to 127.0.0.1, must not reach them through here.
+      answerDirect: (path) => this.answerDirect(path),
+      // Camofox's own API and this proxy live on loopback; a page, or a name that resolves to
+      // 127.0.0.1, must not reach them through here.
       allowsLoopback: () => false,
     });
     this.port = port;
+    this.password = password;
   }
 
   private async stop(): Promise<void> {
     const proxy = this.proxy;
     this.proxy = null;
     this.port = null;
+    this.password = null;
     this.checks.clear();
     await proxy?.close();
   }
@@ -149,12 +187,32 @@ export class CamofoxPolicyProxy {
     const host = target.hostname.toLowerCase();
     if (!host.endsWith(CAMOFOX_CHECK_HOST_SUFFIX)) return null;
     const id = host.slice(0, -CAMOFOX_CHECK_HOST_SUFFIX.length);
-    const check = this.checks.get(id);
-    const token = check && check.expiresAt > this.now() ? check.token : "expired";
+    const check = this.liveCheck(id);
+    if (!check) {
+      return "<!doctype html><html><head><title>CoWork proxy check</title></head><body><h1>expired</h1></body></html>";
+    }
+    const script = (loopbackHost: string) =>
+      `<script src="http://${loopbackHost}:${this.port}${LOOPBACK_CHECK_PATH}${id}.js"></script>`;
     return (
       "<!doctype html><html><head><title>CoWork proxy check</title></head>" +
-      `<body><h1>${token}</h1></body></html>`
+      `<body><h1>${check.token}</h1>` +
+      script("127.0.0.1") +
+      script("localhost") +
+      `<script>${writeSplit(check.marker)}</script></body></html>`
     );
+  }
+
+  /** Reached only around the proxy: the browser loaded a loopback script directly. */
+  private answerDirect(path: string): { contentType: string; body: string } | null {
+    if (!path.startsWith(LOOPBACK_CHECK_PATH) || !path.endsWith(".js")) return null;
+    const check = this.liveCheck(path.slice(LOOPBACK_CHECK_PATH.length, -".js".length));
+    if (!check) return null;
+    return { contentType: "text/javascript; charset=utf-8", body: writeSplit(check.canary) };
+  }
+
+  private liveCheck(id: string): PendingCheck | null {
+    const check = this.checks.get(id);
+    return check && check.expiresAt > this.now() ? check : null;
   }
 
   private sweepChecks(): void {
@@ -163,6 +221,14 @@ export class CamofoxPolicyProxy {
       if (check.expiresAt <= now) this.checks.delete(id);
     }
   }
+}
+
+/** Basic credentials, compared in constant time. */
+function credentialsMatch(header: string | undefined, expected: Buffer): boolean {
+  const match = /^basic\s+([A-Za-z0-9+/=]+)\s*$/i.exec(header || "");
+  if (!match) return false;
+  const given = Buffer.from(match[1], "base64");
+  return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 let shared: CamofoxPolicyProxy | null = null;

@@ -8,12 +8,14 @@
  * signed-in sessions CoWork loads into it.
  */
 
+import { randomBytes } from "crypto";
 import { isIP } from "net";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 import { createLogger } from "../../utils/logger";
 import {
   CAMOFOX_DEFAULT_PROXY_PORT,
   CAMOFOX_DEFAULT_SERVER_URL,
+  camofoxStartCommand,
   type CamofoxDisplaySettings,
   type CamofoxSettingsUpdate,
 } from "../../../shared/camofox";
@@ -29,7 +31,19 @@ export interface CamofoxSettings {
   accessKey?: string;
   /** CAMOFOX_API_KEY: bearer token for cookie import. Encrypted at rest. */
   apiKey?: string;
+  /**
+   * PROXY_PASSWORD Camofox must send to CoWork's policy proxy. CoWork makes it and never sends
+   * it to the Camofox API, so a process that takes over Camofox's port cannot use the proxy
+   * and pass the check. Encrypted at rest.
+   */
+  proxyPassword?: string;
 }
+
+export type CamofoxEnabledSettings = CamofoxSettings & {
+  origin: string;
+  accessKey: string;
+  proxyPassword: string;
+};
 
 const DEFAULT_SETTINGS: CamofoxSettings = {
   enabled: false,
@@ -103,6 +117,7 @@ function normalize(value: unknown): CamofoxSettings {
   const raw = (value && typeof value === "object" ? value : {}) as Partial<CamofoxSettings>;
   const accessKey = readKey(raw.accessKey);
   const apiKey = readKey(raw.apiKey);
+  const proxyPassword = readKey(raw.proxyPassword);
   return {
     enabled: raw.enabled === true,
     serverUrl:
@@ -116,7 +131,12 @@ function normalize(value: unknown): CamofoxSettings {
     persistentIdentity: raw.persistentIdentity === true,
     ...(accessKey ? { accessKey } : {}),
     ...(apiKey ? { apiKey } : {}),
+    ...(proxyPassword ? { proxyPassword } : {}),
   };
+}
+
+function newProxyPassword(): string {
+  return randomBytes(24).toString("hex");
 }
 
 function originOf(url: string): string | null {
@@ -168,6 +188,8 @@ export class CamofoxSettingsManager {
         update.apiKey === null
           ? undefined
           : (update.apiKey ?? (sameOrigin ? current.apiKey : undefined)),
+      // Belongs to CoWork's proxy, not the server, so it survives a server change.
+      proxyPassword: current.proxyPassword ?? newProxyPassword(),
     });
     resolveCamofoxOrigin(next.serverUrl);
     validateCamofoxProxyPort(next.proxyPort, next.serverUrl);
@@ -182,17 +204,35 @@ export class CamofoxSettingsManager {
     this.cached = next;
   }
 
-  /** Enabled settings with a usable loopback origin and an access key, or null. */
-  static loadEnabled(): (CamofoxSettings & { origin: string; accessKey: string }) | null {
+  /** Enabled settings with a usable loopback origin, an access key and a proxy password. */
+  static loadEnabled(): CamofoxEnabledSettings | null {
     const settings = this.load();
-    if (!settings.enabled || !settings.accessKey) return null;
+    if (!settings.enabled || !settings.accessKey || !settings.proxyPassword) return null;
     try {
       const origin = resolveCamofoxOrigin(settings.serverUrl);
       validateCamofoxProxyPort(settings.proxyPort, settings.serverUrl);
-      return { ...settings, origin, accessKey: settings.accessKey };
+      return {
+        ...settings,
+        origin,
+        accessKey: settings.accessKey,
+        proxyPassword: settings.proxyPassword,
+      };
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Main process only: the start command with the real proxy password, for the clipboard.
+   * Makes and stores the password first if there is none yet.
+   */
+  static startCommandWithProxyPassword(): string {
+    let settings = this.load();
+    if (!settings.proxyPassword) {
+      this.save({});
+      settings = this.load();
+    }
+    return camofoxStartCommand(settings.serverUrl, settings.proxyPort, settings.proxyPassword);
   }
 
   static getDisplaySettings(): CamofoxDisplaySettings {

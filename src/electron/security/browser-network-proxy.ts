@@ -30,7 +30,19 @@ export interface BrowserNetworkProxyOptions {
    * CoWork prove a browser really sends its traffic here (a name only this proxy can serve).
    */
   answer?: (target: URL) => string | null;
+  /**
+   * When set, a request or CONNECT whose Proxy-Authorization this refuses gets a 407 Basic
+   * challenge, for a browser CoWork does not launch and so cannot hand a private port.
+   */
+  authorize?: (proxyAuthorization: string | undefined) => boolean;
+  /**
+   * Answers a request sent to this port as if it were the site (a path, not a proxy target),
+   * which only a browser that bypasses the proxy for loopback sends. Null refuses it.
+   */
+  answerDirect?: (path: string) => { contentType: string; body: string } | null;
 }
+
+const PROXY_AUTH_CHALLENGE = 'Basic realm="CoWork"';
 
 const IDLE_TIMEOUT_MS = 30_000;
 /**
@@ -62,6 +74,20 @@ export async function createBrowserNetworkProxy(
     const timer = setTimeout(() => controller.abort(), 30_000);
     res.on("close", () => controller.abort());
     try {
+      if ((req.url || "").startsWith("/")) {
+        const direct = options.answerDirect?.(req.url || "");
+        if (!direct) throw new Error("Not a proxy request");
+        res.writeHead(200, { "content-type": direct.contentType, "cache-control": "no-store" });
+        res.end(direct.body);
+        req.resume();
+        return;
+      }
+      if (options.authorize && !options.authorize(req.headers["proxy-authorization"])) {
+        res.writeHead(407, { "proxy-authenticate": PROXY_AUTH_CHALLENGE, "content-length": "0" });
+        res.end();
+        req.resume();
+        return;
+      }
       const target = new URL(req.url || "");
       if (target.protocol !== "http:" || target.username || target.password)
         throw new Error("Invalid proxy target");
@@ -163,6 +189,15 @@ export async function createBrowserNetworkProxy(
   server.on("connect", (req, client, head) => {
     void (async () => {
       try {
+        if (options.authorize && !options.authorize(req.headers["proxy-authorization"])) {
+          // The socket has left the HTTP parser, so the browser retries on a new connection.
+          client.end(
+            "HTTP/1.1 407 Proxy Authentication Required\r\n" +
+              `Proxy-Authenticate: ${PROXY_AUTH_CHALLENGE}\r\n` +
+              "Content-Length: 0\r\nConnection: close\r\n\r\n",
+          );
+          return;
+        }
         const target = new URL(`https://${req.url}`);
         if (
           target.username ||

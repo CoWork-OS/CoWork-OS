@@ -13,18 +13,25 @@ import {
   toCamofoxCookie,
   type CamofoxSessionContext,
 } from "../camofox-session";
-import type { CamofoxSettings } from "../camofox-settings";
+import type { CamofoxEnabledSettings } from "../camofox-settings";
 
 /**
  * A stand-in for the Camofox server, bound to 127.0.0.1. In "proxied" mode it loads pages
- * through the configured HTTP proxy the way Camofox does with PROXY_HOST/PROXY_PORT; in
- * "direct" mode it resolves and fetches pages itself, like a Camofox started without them.
+ * through the configured HTTP proxy the way Camofox does with PROXY_HOST/PROXY_PORT and
+ * PROXY_USERNAME/PROXY_PASSWORD; in "direct" mode it resolves and fetches pages itself, like
+ * a Camofox started without them. "unauthenticated" uses the proxy without the password (a
+ * process that took Camofox's port); "loopback-direct" uses it except for 127.0.0.1 and
+ * localhost, like a Firefox without network.proxy.allow_hijacking_localhost.
  */
 const ACCESS_KEY = "test-access-key";
+const PROXY_PASSWORD = "test-proxy-password";
+const PROXY_AUTH = `Basic ${Buffer.from(`cowork:${PROXY_PASSWORD}`).toString("base64")}`;
+
+type FakeMode = "proxied" | "direct" | "unauthenticated" | "loopback-direct";
 
 interface FakeCamofox {
   origin: string;
-  mode: "proxied" | "direct";
+  mode: FakeMode;
   /** CAMOFOX_ACCESS_KEY the fake was "started" with; "" accepts unauthenticated requests. */
   accessKey: string;
   openTabs: Set<string>;
@@ -62,6 +69,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 function loadThroughProxy(
   url: string,
   proxyPort: number,
+  auth?: string,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
@@ -71,7 +79,7 @@ function loadThroughProxy(
         port: proxyPort,
         method: "GET",
         path: url,
-        headers: { host: target.host },
+        headers: { host: target.host, ...(auth ? { "proxy-authorization": auth } : {}) },
       },
       (res) => {
         let body = "";
@@ -84,8 +92,32 @@ function loadThroughProxy(
   });
 }
 
+/** The text of the page's document.write calls (string literals joined with +). */
+function documentWrites(code: string): string {
+  return [...code.matchAll(/document\.write\(((?:"[^"]*"\s*\+?\s*)+)\)/g)]
+    .map((call) => [...call[1].matchAll(/"([^"]*)"/g)].map((part) => part[1]).join(""))
+    .join("");
+}
+
+/** Runs a page's scripts in order, as far as the check page needs: document.write only. */
+async function runScripts(
+  html: string,
+  fetchScript: (src: string) => Promise<string | null>,
+): Promise<string> {
+  const script = /<script(?: src="([^"]+)")?>([\s\S]*?)<\/script>/;
+  let out = "";
+  let rest = html;
+  for (let match = script.exec(rest); match; match = script.exec(rest)) {
+    out += rest.slice(0, match.index);
+    const code = match[1] ? await fetchScript(match[1]) : match[2];
+    if (code) out += documentWrites(code);
+    rest = rest.slice(match.index + match[0].length);
+  }
+  return out + rest;
+}
+
 async function startFakeCamofox(
-  mode: "proxied" | "direct",
+  mode: FakeMode,
   proxyPort: number,
   accessKey = ACCESS_KEY,
 ): Promise<FakeCamofox> {
@@ -100,10 +132,24 @@ async function startFakeCamofox(
     close: async () => {},
   };
   let next = 0;
+  const viaProxy = (url: string) =>
+    loadThroughProxy(url, proxyPort, fake.mode === "unauthenticated" ? undefined : PROXY_AUTH);
+  const fetchScript = async (src: string) => {
+    const loopback = ["127.0.0.1", "localhost"].includes(new URL(src).hostname);
+    if (loopback && fake.mode === "loopback-direct") {
+      const response = await fetch(src).catch(() => null);
+      return response?.ok ? await response.text() : null;
+    }
+    const response = await viaProxy(src).catch(() => null);
+    return response?.status === 200 ? response.body : null;
+  };
   const load = async (url: string) => {
-    if (fake.mode === "proxied") return await loadThroughProxy(url, proxyPort);
-    const response = await fetch(url);
-    return { status: response.status, body: await response.text() };
+    if (fake.mode === "direct") {
+      const response = await fetch(url);
+      return { status: response.status, body: await response.text() };
+    }
+    const page = await viaProxy(url);
+    return { status: page.status, body: await runScripts(page.body, fetchScript) };
   };
   const server = createServer(async (req, res) => {
     const send = (status: number, body: unknown) => {
@@ -195,7 +241,8 @@ function settingsFor(origin: string, proxyPort: number, persistentIdentity = fal
     proxyPort,
     persistentIdentity,
     accessKey: ACCESS_KEY,
-  } satisfies CamofoxSettings & { origin: string };
+    proxyPassword: PROXY_PASSWORD,
+  } satisfies CamofoxEnabledSettings;
 }
 
 function clientFor(origin: string): CamofoxClient {
@@ -227,9 +274,18 @@ function context(overrides: Partial<CamofoxSessionContext> = {}): CamofoxSession
 const noEffect = async () => {};
 
 beforeEach(async () => {
-  // The test sites live on 127.0.0.1; the real proxy refuses loopback (tested separately).
+  // The test sites resolve to 127.0.0.1, so the proxy may not refuse loopback addresses here.
+  // It still refuses loopback names, as the real one does for the check's loopback scripts.
   proxy = new CamofoxPolicyProxy((assert, options) =>
-    createBrowserNetworkProxy(assert, { ...options, allowsLoopback: undefined }),
+    createBrowserNetworkProxy(
+      (url) => {
+        if (["127.0.0.1", "localhost"].includes(new URL(url).hostname)) {
+          throw new Error("loopback target");
+        }
+        assert(url);
+      },
+      { ...options, allowsLoopback: undefined },
+    ),
   );
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "camofox-test-"));
 });
@@ -308,6 +364,46 @@ describe("CamofoxBrowserSession through the policy proxy", () => {
     expect(fake.openTabs.size).toBe(0);
     await session.close();
     expect(proxy.running).toBe(false);
+  }, 20_000);
+
+  it("refuses a process on Camofox's port that cannot log in to the proxy", async () => {
+    const proxyPort = await freePort();
+    const fake = await startFakeCamofox("unauthenticated", proxyPort);
+    const session = new CamofoxBrowserSession(
+      settingsFor(fake.origin, proxyPort),
+      clientFor(fake.origin),
+      proxy,
+      context(),
+    );
+    const result = await session.execute(
+      "browser_navigate",
+      { url: "https://example.com/" },
+      noEffect,
+    );
+    expect(result).toMatchObject({ success: false, setupRequired: true });
+    expect(String(result.error)).toMatch(/policy proxy/);
+    expect(fake.openTabs.size).toBe(0);
+    await session.close();
+  }, 20_000);
+
+  it("refuses a Camofox that loads loopback addresses around the proxy", async () => {
+    const proxyPort = await freePort();
+    const fake = await startFakeCamofox("loopback-direct", proxyPort);
+    const session = new CamofoxBrowserSession(
+      settingsFor(fake.origin, proxyPort),
+      clientFor(fake.origin),
+      proxy,
+      context(),
+    );
+    const result = await session.execute(
+      "browser_navigate",
+      { url: "https://example.com/" },
+      noEffect,
+    );
+    expect(result).toMatchObject({ success: false, setupRequired: true });
+    expect(String(result.error)).toMatch(/127\.0\.0\.1 and localhost/);
+    expect(fake.openTabs.size).toBe(0);
+    await session.close();
   }, 20_000);
 
   it("does not accept a check page that lacks the proxy's token", async () => {

@@ -77,6 +77,7 @@ describe("CamofoxSettingsManager", () => {
       persistentIdentity: false,
       accessKey: "access",
       apiKey: "api-key",
+      proxyPassword: expect.stringMatching(/^[0-9a-f]{48}$/),
     });
     const display = CamofoxSettingsManager.getDisplaySettings();
     expect(display).toEqual({
@@ -88,6 +89,7 @@ describe("CamofoxSettingsManager", () => {
       apiKeyConfigured: true,
     });
     expect(JSON.stringify(display)).not.toContain('access"');
+    expect(JSON.stringify(display)).not.toContain(CamofoxSettingsManager.load().proxyPassword);
     expect(CamofoxSettingsManager.loadEnabled()?.origin).toBe("http://127.0.0.1:9377");
   });
 
@@ -105,6 +107,23 @@ describe("CamofoxSettingsManager", () => {
     expect(CamofoxSettingsManager.load().accessKey).toBe("again");
     CamofoxSettingsManager.save({ accessKey: null });
     expect(CamofoxSettingsManager.load().accessKey).toBeUndefined();
+  });
+
+  it("keeps one proxy password across server changes and fills it in only on request", () => {
+    CamofoxSettingsManager.save({ enabled: true, accessKey: "access" });
+    const password = CamofoxSettingsManager.load().proxyPassword!;
+    CamofoxSettingsManager.save({ enabled: false, serverUrl: "http://127.0.0.1:9400" });
+    expect(CamofoxSettingsManager.load().proxyPassword).toBe(password);
+    expect(CamofoxSettingsManager.startCommandWithProxyPassword()).toContain(
+      `PROXY_USERNAME=cowork PROXY_PASSWORD=${password} `,
+    );
+    expect(camofoxStartCommand("http://127.0.0.1:9400", 9378)).not.toContain(password);
+  });
+
+  it("makes a proxy password when the start command is copied before any save", () => {
+    expect(CamofoxSettingsManager.startCommandWithProxyPassword()).toMatch(
+      /PROXY_PASSWORD=[0-9a-f]{48} /,
+    );
   });
 
   it("refuses to save a server off this Mac", () => {
@@ -125,7 +144,8 @@ describe("camofoxStartCommand", () => {
   it("binds Camofox to loopback, requires the access key and points it at the policy proxy", () => {
     expect(camofoxStartCommand("http://127.0.0.1:9400", 9411)).toBe(
       "CAMOFOX_BIND_HOST=127.0.0.1 CAMOFOX_PORT=9400 CAMOFOX_ACCESS_KEY=<your access key> " +
-        "PROXY_HOST=127.0.0.1 PROXY_PORT=9411 npm start",
+        "PROXY_HOST=127.0.0.1 PROXY_PORT=9411 PROXY_USERNAME=cowork " +
+        "PROXY_PASSWORD=<proxy password> npm start",
     );
   });
 });

@@ -34,7 +34,9 @@ export function CamofoxSettingsGroup() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [test, setTest] = useState<CamofoxConnectionResult>();
+  const [copied, setCopied] = useState(false);
   const available = hasHostMethods(...CAMOFOX_METHODS);
+  const canCopy = hasHostMethods("copyCamofoxStartCommand");
 
   const apply = useCallback((next: CamofoxDisplaySettings) => {
     setSettings(next);
@@ -69,6 +71,7 @@ export function CamofoxSettingsGroup() {
   const save = (update: CamofoxSettingsUpdate) =>
     run(async () => {
       setTest(undefined);
+      setCopied(false);
       const port = Number(proxyPort.trim());
       apply(
         await window.electronAPI.saveCamofoxSettings({
@@ -139,6 +142,33 @@ export function CamofoxSettingsGroup() {
           CoWork checks every request Camofox makes on this port. Start Camofox with:
         </p>
         {command ? <pre className="browser-settings-code">{command}</pre> : null}
+        <p className="settings-description">
+          The proxy password is made by CoWork and only Camofox should know it. Copy the command to
+          get it, then fill in your access key.
+        </p>
+        {canCopy ? (
+          <div className="computer-use-active-actions">
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={busy || !settings || dirty}
+              onClick={() =>
+                void run(async () => {
+                  setCopied(false);
+                  await window.electronAPI.copyCamofoxStartCommand();
+                  setCopied(true);
+                })
+              }
+            >
+              Copy start command
+            </button>
+            {copied ? (
+              <span className="settings-description" role="status">
+                Copied, with the proxy password.
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="settings-field">
         <label className="settings-label" htmlFor="camofox-access-key">

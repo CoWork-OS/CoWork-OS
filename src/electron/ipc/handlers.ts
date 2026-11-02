@@ -77,6 +77,7 @@ import {
   dialog,
   app as _app,
   nativeTheme,
+  clipboard,
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
@@ -1273,6 +1274,7 @@ rateLimiter.configure(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE, RATE_LIMIT_CONFI
 // Camofox settings carry keys, and the check drives the user's Camofox server.
 rateLimiter.configure(IPC_CHANNELS.CAMOFOX_SETTINGS_SAVE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.CAMOFOX_TEST_CONNECTION, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -13107,6 +13109,13 @@ function setupMCPHandlers(): void {
     ) as CamofoxSettingsUpdate;
     CamofoxSettingsManager.save(validated);
     return CamofoxSettingsManager.getDisplaySettings();
+  });
+
+  // The proxy password goes from the main process to the clipboard; the renderer never has it.
+  ipcMain.handle(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND, async (event) => {
+    if (!fromTopFrame(event)) throw new Error("Not allowed.");
+    checkRateLimit(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND);
+    clipboard.writeText(CamofoxSettingsManager.startCommandWithProxyPassword());
   });
 
   let camofoxTest: Promise<CamofoxConnectionResult> | null = null;

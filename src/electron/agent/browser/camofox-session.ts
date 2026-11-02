@@ -19,7 +19,7 @@ import {
 } from "./camofox-client";
 import { isPrivateOrLocalBrowserTarget } from "./browser-use-cloud-client";
 import type { CamofoxPolicyProxy, CamofoxProxyLease } from "./camofox-policy-proxy";
-import type { CamofoxSettings } from "./camofox-settings";
+import type { CamofoxEnabledSettings } from "./camofox-settings";
 import { camofoxStartCommand, type CamofoxConnectionResult } from "../../../shared/camofox";
 
 // oxlint-disable-next-line typescript-eslint/no-explicit-any
@@ -200,9 +200,22 @@ export async function openCheckedCamofoxTab(
     }
     tabId = opened.tabId;
     if (!tabId) throw failed();
-    const snapshot = await client.snapshot(userId, tabId);
-    if (opened.navigationOk === false || !String(snapshot.snapshot || "").includes(check.token)) {
+    const page = String((await client.snapshot(userId, tabId)).snapshot || "");
+    // The marker shows the page's scripts ran, so a missing canary means something.
+    if (
+      opened.navigationOk === false ||
+      !page.includes(check.token) ||
+      !page.includes(check.marker)
+    ) {
       throw failed();
+    }
+    if (page.includes(check.canary)) {
+      throw new CamofoxProxyCheckError(
+        "Camofox loads 127.0.0.1 and localhost around CoWork's network-policy proxy, so a page " +
+          "could reach services on this Mac. CoWork will not use it. Camofox's Firefox must " +
+          "send loopback addresses through the proxy (network.proxy.allow_hijacking_localhost).",
+        startCommand,
+      );
     }
     return tabId;
   } catch (error) {
@@ -218,7 +231,7 @@ export async function openCheckedCamofoxTab(
  * CoWork's policy proxy. Uses a throwaway identity that is deleted afterwards.
  */
 export async function checkCamofoxConnection(
-  settings: CamofoxSettings & { origin: string },
+  settings: CamofoxEnabledSettings,
   client: CamofoxClient,
   proxy: CamofoxPolicyProxy,
   assertRequestAllowed: (url: string) => void,
@@ -236,7 +249,12 @@ export async function checkCamofoxConnection(
   const userId = `cowork-check-${randomBytes(6).toString("hex")}`;
   let lease: CamofoxProxyLease | null = null;
   try {
-    lease = await proxy.acquire(settings.proxyPort, userId, assertRequestAllowed);
+    lease = await proxy.acquire(
+      settings.proxyPort,
+      settings.proxyPassword,
+      userId,
+      assertRequestAllowed,
+    );
     const tabId = await openCheckedCamofoxTab(client, proxy, userId, userId, startCommand);
     await client.closeTab(userId, tabId).catch(() => {});
     return { reachable: true, proxied: true };
@@ -265,7 +283,7 @@ export class CamofoxBrowserSession {
   private beforeEffect: () => Promise<void> = async () => {};
 
   constructor(
-    private readonly settings: CamofoxSettings & { origin: string },
+    private readonly settings: CamofoxEnabledSettings,
     private readonly client: CamofoxClient,
     private readonly proxy: CamofoxPolicyProxy,
     private readonly ctx: CamofoxSessionContext,
@@ -618,6 +636,7 @@ export class CamofoxBrowserSession {
     if (this.lease) return;
     this.lease = await this.proxy.acquire(
       this.settings.proxyPort,
+      this.settings.proxyPassword,
       `${this.ctx.taskId}:${this.userId}`,
       this.ctx.assertRequestAllowed,
     );

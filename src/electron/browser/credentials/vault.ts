@@ -100,7 +100,10 @@ export function secureSettingsVaultStore(): VaultStore {
       if (!SecureSettingsRepository.isInitialized()) {
         throw new VaultError("storage_failed", "Settings storage is not ready.");
       }
-      SecureSettingsRepository.getInstance().save(CATEGORY, value);
+      // A refused write (keychain mismatch) returns false; it must not read as saved.
+      if (!SecureSettingsRepository.getInstance().save(CATEGORY, value)) {
+        throw new VaultError("storage_failed", "Secure storage refused the write.");
+      }
     },
   };
 }

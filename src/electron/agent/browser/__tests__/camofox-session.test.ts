@@ -594,9 +594,9 @@ describe("hardening", () => {
   });
 
   it("keeps cookie values and keys away from a non-web URL in the client", async () => {
-    await expect(clientFor("http://127.0.0.1:1").createTab("u", "s", "file:///etc/hosts")).rejects.toThrow(
-      /http/,
-    );
+    await expect(
+      clientFor("http://127.0.0.1:1").createTab("u", "s", "file:///etc/hosts"),
+    ).rejects.toThrow(/http/);
     await expect(clientFor("http://127.0.0.1:1").navigate("u", "t", "about:blank")).rejects.toThrow(
       /http/,
     );

@@ -8,7 +8,7 @@
  * redirects, and keeps bearer tokens out of every error it raises.
  */
 
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 
 type FetchLike = typeof fetch;
 
@@ -19,6 +19,14 @@ function getDirectDispatcher(): Agent {
   if (!directDispatcher) directDispatcher = new Agent({ connect: { timeout: 10_000 } });
   return directDispatcher;
 }
+
+// The Agent must go to undici's own fetch: Node's global fetch bundles an older undici and
+// rejects it ("invalid onRequestStart method"), so every request would fail as unreachable.
+const directFetch: FetchLike = (input, init) =>
+  undiciFetch(input as string, {
+    ...(init as object),
+    dispatcher: getDirectDispatcher(),
+  }) as unknown as Promise<Response>;
 
 /** Camofox opens only web pages; refuse anything else before it reaches the server. */
 function assertWebUrl(url: string): void {
@@ -123,7 +131,7 @@ export class CamofoxClient {
   private readonly timeoutMs: number;
 
   constructor(private readonly options: CamofoxClientOptions) {
-    this.fetchImpl = options.fetchImpl || fetch;
+    this.fetchImpl = options.fetchImpl || directFetch;
     this.timeoutMs = options.timeoutMs ?? 45_000;
   }
 
@@ -259,12 +267,26 @@ export class CamofoxClient {
   async importCookies(userId: string, cookies: CamofoxCookie[]): Promise<number> {
     let imported = 0;
     for (const batch of batchCookies(cookies)) {
-      const result = await this.json<{ count?: number }>(
-        "POST",
-        `/sessions/${encodeURIComponent(userId)}/cookies`,
-        { cookies: batch },
-        this.options.apiKey,
-      );
+      let result: { count?: number };
+      try {
+        result = await this.json<{ count?: number }>(
+          "POST",
+          `/sessions/${encodeURIComponent(userId)}/cookies`,
+          { cookies: batch },
+          this.options.apiKey,
+        );
+      } catch (error) {
+        // Camofox may echo a rejected cookie in its error, and the message reaches the model.
+        if (error instanceof CamofoxApiError && error.status >= 400 && error.status !== 401) {
+          throw new CamofoxApiError(
+            `Camofox did not accept the saved cookies (HTTP ${error.status}).`,
+            error.status,
+            error.code,
+            error.retryable,
+          );
+        }
+        throw error;
+      }
       imported += typeof result.count === "number" ? result.count : batch.length;
     }
     return imported;
@@ -313,8 +335,7 @@ export class CamofoxClient {
         body: body === undefined ? undefined : JSON.stringify(body),
         redirect: "error",
         signal: AbortSignal.timeout(this.timeoutMs),
-        ...(this.options.fetchImpl ? {} : { dispatcher: getDirectDispatcher() }),
-      } as RequestInit);
+      });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new CamofoxApiError(
@@ -333,7 +354,8 @@ export class CamofoxClient {
       const text = new TextDecoder().decode(await readLimited(response, 64 * 1024));
       const parsed = JSON.parse(text) as { error?: unknown; code?: unknown; retryable?: unknown };
       if (typeof parsed.error === "string" && parsed.error.trim()) {
-        message = `Camofox: ${parsed.error.trim().slice(0, 400)}`;
+        // Redact first: a key cut in half by the slice would no longer match.
+        message = `Camofox: ${this.redact(parsed.error.trim()).slice(0, 400)}`;
       }
       if (typeof parsed.code === "string") code = parsed.code;
       retryable = parsed.retryable === true;

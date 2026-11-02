@@ -39,12 +39,13 @@ beforeEach(() => {
 
 describe("resolveCamofoxOrigin", () => {
   it("accepts loopback origins only", () => {
-    expect(resolveCamofoxOrigin("http://127.0.0.1:9377")).toBe("http://127.0.0.1:9377");
-    expect(resolveCamofoxOrigin("http://localhost:9377/")).toBe("http://localhost:9377");
+    expect(resolveCamofoxOrigin("http://127.0.0.1:9377/")).toBe("http://127.0.0.1:9377");
     expect(resolveCamofoxOrigin("http://[::1]:9377")).toBe("http://[::1]:9377");
   });
 
-  it("refuses network hosts, lookalikes, https, credentials and paths", () => {
+  it("refuses names, network hosts, lookalikes, https, credentials and paths", () => {
+    // A name is resolved, so even localhost could point elsewhere.
+    expect(() => resolveCamofoxOrigin("http://localhost:9377")).toThrow(/this Mac/);
     expect(() => resolveCamofoxOrigin("http://192.168.1.20:9377")).toThrow(/this Mac/);
     expect(() => resolveCamofoxOrigin("http://0.0.0.0:9377")).toThrow(/this Mac/);
     expect(() => resolveCamofoxOrigin("http://127.0.0.1.nip.io:9377")).toThrow(/this Mac/);
@@ -92,7 +93,11 @@ describe("CamofoxSettingsManager", () => {
 
   it("drops stored keys when the server origin changes and clears them on null", () => {
     CamofoxSettingsManager.save({ enabled: true, accessKey: "access", apiKey: "api" });
-    CamofoxSettingsManager.save({ serverUrl: "http://127.0.0.1:9400" });
+    // The key does not carry to the new origin, and an enabled Camofox needs one.
+    expect(() => CamofoxSettingsManager.save({ serverUrl: "http://127.0.0.1:9400" })).toThrow(
+      /access key/,
+    );
+    CamofoxSettingsManager.save({ enabled: false, serverUrl: "http://127.0.0.1:9400" });
     expect(CamofoxSettingsManager.load().accessKey).toBeUndefined();
     expect(CamofoxSettingsManager.load().apiKey).toBeUndefined();
     CamofoxSettingsManager.save({ accessKey: "again" });
@@ -117,9 +122,10 @@ describe("CamofoxSettingsManager", () => {
 });
 
 describe("camofoxStartCommand", () => {
-  it("binds Camofox to loopback and points it at the policy proxy", () => {
+  it("binds Camofox to loopback, requires the access key and points it at the policy proxy", () => {
     expect(camofoxStartCommand("http://127.0.0.1:9400", 9411)).toBe(
-      "CAMOFOX_BIND_HOST=127.0.0.1 CAMOFOX_PORT=9400 PROXY_HOST=127.0.0.1 PROXY_PORT=9411 npm start",
+      "CAMOFOX_BIND_HOST=127.0.0.1 CAMOFOX_PORT=9400 CAMOFOX_ACCESS_KEY=<your access key> " +
+        "PROXY_HOST=127.0.0.1 PROXY_PORT=9411 npm start",
     );
   });
 });

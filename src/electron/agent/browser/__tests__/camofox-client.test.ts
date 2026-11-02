@@ -88,6 +88,28 @@ describe("CamofoxClient", () => {
     expect(isCamofoxTabGone(error)).toBe(true);
   });
 
+  it("redacts a key that the 400-character cut would split", async () => {
+    const key = "k".repeat(40);
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: `${"x".repeat(380)}${key}` }, 500));
+    const error = await client(fetchImpl as unknown as typeof fetch, { accessKey: key })
+      .listTabs("u1")
+      .catch((e: unknown) => e);
+    expect((error as Error).message).not.toContain("k".repeat(20));
+  });
+
+  it("does not pass Camofox's cookie-import error text on", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ error: "Invalid cookie sid=super-secret-value" }, 400),
+    );
+    const error = await client(fetchImpl as unknown as typeof fetch, { apiKey: "api" })
+      .importCookies("u1", [
+        { name: "sid", value: "super-secret-value", domain: "a.test", path: "/" },
+      ])
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CamofoxApiError);
+    expect((error as Error).message).toBe("Camofox did not accept the saved cookies (HTTP 400).");
+  });
+
   it("explains a 401 and an unreachable server without leaking the token", async () => {
     const unauthorized = await client((async () =>
       jsonResponse({ error: "Unauthorized" }, 401)) as unknown as typeof fetch)

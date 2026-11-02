@@ -193,15 +193,21 @@ export function CamofoxSettingsGroup() {
         Keep one Camofox identity per workspace (cookies and sign-ins carry across tasks)
       </label>
       <p className="settings-description">
-        Camofox keeps each identity&apos;s cookies unencrypted in ~/.camofox/profiles unless you
-        set <code>&quot;persistence&quot;: {"{"} &quot;enabled&quot;: false {"}"}</code> in its
-        camofox.config.json. That includes saved cookies you let CoWork load into it.
+        Camofox keeps each identity&apos;s cookies unencrypted in ~/.camofox/profiles unless you set{" "}
+        <code>
+          &quot;persistence&quot;: {"{"} &quot;enabled&quot;: false {"}"}
+        </code>{" "}
+        in its camofox.config.json. That includes saved cookies you let CoWork load into it.
       </p>
       <label className="settings-description">
         <input
           type="checkbox"
           checked={settings?.enabled ?? false}
-          disabled={busy || !settings || (!settings.enabled && !settings.accessKeyConfigured && !accessKey.trim())}
+          disabled={
+            busy ||
+            !settings ||
+            (!settings.enabled && !settings.accessKeyConfigured && !accessKey.trim())
+          }
           onChange={(e) => void save({ enabled: e.target.checked })}
         />{" "}
         Let CoWork use Camofox when you ask for it

@@ -765,7 +765,8 @@ export class BrowserTools {
         getCamofoxPolicyProxy(),
         {
           taskId: this.taskId,
-          identityScope: botId === null ? `${this.workspace.id}` : `bot-${botId}-${this.workspace.id}`,
+          identityScope:
+            botId === null ? `${this.workspace.id}` : `bot-${botId}-${this.workspace.id}`,
           // A bot, or a task a bot started, never signs in as the user.
           mayUseSavedCookies: botId === null,
           assertRequestAllowed: (url) => this.assertCamofoxRequestAllowed(url),
@@ -1310,6 +1311,8 @@ export class BrowserTools {
   private getOwningBotId(): string | null {
     try {
       let task = this.daemon.getTask?.(this.taskId);
+      // A task that cannot be found is not known to be the user's.
+      if (!task) return "unknown";
       for (let depth = 0; task && depth < 16; depth += 1) {
         if (task.assignedAgentRoleId) return String(task.assignedAgentRoleId);
         task = task.parentTaskId ? this.daemon.getTask?.(task.parentTaskId) : undefined;

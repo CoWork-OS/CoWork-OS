@@ -161,6 +161,10 @@ describe("connector object manifests with live enrichment", () => {
       const result = await pending;
       expect(result.isError).toBeFalsy();
       expect(vi.getTimerCount()).toBe(0);
+      // The reads still in flight are cancelled, not left running beside the model's calls.
+      for (const [, init] of fetchMock.mock.calls) {
+        expect((init as RequestInit | undefined)?.signal?.aborted).toBe(true);
+      }
       const manifest = manifestFromToolResult(result) as Any;
       expect(validateObjectManifest(manifest, tools)).toMatchObject({ ok: true, warnings: [] });
       expect(withoutUrls(manifest)).toEqual(declared.objects);

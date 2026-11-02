@@ -109,6 +109,7 @@ class ServiceNowClient {
     limit?: number,
     offset?: number,
     fields?: string[],
+    signal?: AbortSignal,
   ): Promise<RequestResult> {
     const params = new URLSearchParams();
     if (query) params.set("sysparm_query", query);
@@ -119,6 +120,8 @@ class ServiceNowClient {
     return this.requestJson(
       "GET",
       `table/${encodeURIComponent(table)}${queryString ? `?${queryString}` : ""}`,
+      undefined,
+      signal,
     );
   }
 
@@ -171,7 +174,12 @@ class ServiceNowClient {
     throw new Error("Missing ServiceNow credentials");
   }
 
-  private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
+  private async requestJson(
+    method: string,
+    path: string,
+    body?: any,
+    signal?: AbortSignal,
+  ): Promise<RequestResult> {
     const start = Date.now();
     const url = `${this.getBaseUrl()}/api/now/${path.replace(/^\//, "")}`;
 
@@ -183,6 +191,7 @@ class ServiceNowClient {
         "User-Agent": "CoWork-ServiceNow-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     const durationMs = Date.now() - start;
@@ -892,31 +901,44 @@ async function readRows(
   query: string,
   limit: number,
   fields: string[],
+  signal: AbortSignal,
 ): Promise<any[] | undefined> {
   try {
-    const result = await client.listRecords(table, query, limit, undefined, fields);
+    const result = await client.listRecords(table, query, limit, undefined, fields, signal);
     return Array.isArray(result.data?.result) ? result.data.result : undefined;
   } catch {
     return undefined;
   }
 }
 
-/** `work`'s value, or `fallback` once `ms` pass first; the timer never outlives the race. */
-async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+/**
+ * `work`'s value, or `fallback` once `ms` pass first. Past the deadline `work`'s signal is
+ * aborted, so its requests stop rather than run on beside the model's calls; the timer never
+ * outlives the race.
+ */
+async function withDeadline<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(fallback);
+    }, ms);
     (timer as { unref?: () => unknown }).unref?.();
   });
   try {
-    return await Promise.race([work, deadline]);
+    return await Promise.race([work(controller.signal), deadline]);
   } finally {
     clearTimeout(timer);
   }
 }
 
 /** The declared tables updated from their dictionaries and state choices. */
-async function liveServiceNowObjects(): Promise<ManifestObject[]> {
+async function liveServiceNowObjects(signal: AbortSignal): Promise<ManifestObject[]> {
   return Promise.all(
     SERVICENOW_OBJECTS.map(async (object) => {
       const status = object.statusField?.name;
@@ -926,6 +948,7 @@ async function liveServiceNowObjects(): Promise<ManifestObject[]> {
           `name=${object.type}^elementISNOTEMPTY`,
           DICTIONARY_ROW_LIMIT,
           ["element", "column_label", "internal_type"],
+          signal,
         ),
         // English rows only: each translation is its own row and would eat the limit.
         status
@@ -934,6 +957,7 @@ async function liveServiceNowObjects(): Promise<ManifestObject[]> {
               `name=${object.type}^element=${status}^inactive=false^language=en^ORDERBYsequence`,
               MANIFEST_MAX_ENUM_VALUES,
               ["value", "label"],
+              signal,
             )
           : undefined,
       ]);
@@ -951,7 +975,7 @@ async function describeServiceNowObjects(): Promise<ObjectManifest> {
     let objects = SERVICENOW_OBJECTS;
     if (servicenowConfigured()) {
       objects = await withDeadline(
-        liveServiceNowObjects(),
+        liveServiceNowObjects,
         LIVE_MANIFEST_DEADLINE_MS,
         SERVICENOW_OBJECTS,
       );

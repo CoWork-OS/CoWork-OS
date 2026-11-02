@@ -122,8 +122,15 @@ class SalesforceClient {
     return this.requestJson("GET", "sobjects");
   }
 
-  async describeObject(objectName: string): Promise<RequestResult> {
-    return this.requestJson("GET", `sobjects/${encodeURIComponent(objectName)}/describe`);
+  async describeObject(objectName: string, signal?: AbortSignal): Promise<RequestResult> {
+    return this.requestJson(
+      "GET",
+      `sobjects/${encodeURIComponent(objectName)}/describe`,
+      undefined,
+      false,
+      0,
+      signal,
+    );
   }
 
   async getRecord(objectName: string, recordId: string, fields?: string[]): Promise<RequestResult> {
@@ -173,6 +180,7 @@ class SalesforceClient {
     body?: any,
     absolutePath = false,
     refreshAttempt = 0,
+    signal?: AbortSignal,
   ): Promise<RequestResult> {
     const start = Date.now();
 
@@ -189,11 +197,12 @@ class SalesforceClient {
         "User-Agent": "CoWork-Salesforce-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     if (res.status === 401 && this.canRefresh() && refreshAttempt < 1) {
       await this.refreshAccessToken();
-      return this.requestJson(method, path, body, absolutePath, refreshAttempt + 1);
+      return this.requestJson(method, path, body, absolutePath, refreshAttempt + 1, signal);
     }
 
     const durationMs = Date.now() - start;
@@ -1372,25 +1381,40 @@ function salesforceConfigured(): boolean {
   );
 }
 
-/** `work`'s value, or `fallback` once `ms` pass first; the timer never outlives the race. */
-async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+/**
+ * `work`'s value, or `fallback` once `ms` pass first. Past the deadline `work`'s signal is
+ * aborted, so its requests stop rather than run on beside the model's calls; the timer never
+ * outlives the race.
+ */
+async function withDeadline<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(fallback);
+    }, ms);
     (timer as { unref?: () => unknown }).unref?.();
   });
   try {
-    return await Promise.race([work, deadline]);
+    return await Promise.race([work(controller.signal), deadline]);
   } finally {
     clearTimeout(timer);
   }
 }
 
 /** The declared objects updated from their describes; a failed describe leaves one as is. */
-async function liveSalesforceObjects(): Promise<ManifestObject[]> {
+async function liveSalesforceObjects(signal: AbortSignal): Promise<ManifestObject[]> {
   const enrich = async (object: ManifestObject): Promise<ManifestObject> => {
     try {
-      return enrichSalesforceObject(object, (await client.describeObject(object.type)).data);
+      return enrichSalesforceObject(
+        object,
+        (await client.describeObject(object.type, signal)).data,
+      );
     } catch {
       return object;
     }
@@ -1405,7 +1429,7 @@ async function describeSalesforceObjects(): Promise<ObjectManifest> {
     let objects = SALESFORCE_OBJECTS;
     if (salesforceConfigured()) {
       objects = await withDeadline(
-        liveSalesforceObjects(),
+        liveSalesforceObjects,
         LIVE_MANIFEST_DEADLINE_MS,
         SALESFORCE_OBJECTS,
       );

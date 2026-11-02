@@ -100,11 +100,14 @@ type RequestResult = {
 
 /**
  * Zendesk's search also returns users, organizations and groups. `search_tickets` reads tickets
- * only, so a query that names no `type:` gets `type:ticket` in front.
+ * only, so any `type:` term the query has is dropped and `type:ticket` goes in front.
  */
 function ticketSearchQuery(query: string): string {
-  const text = String(query ?? "");
-  return /\btype:/i.test(text) ? text : `type:ticket ${text}`;
+  const text = String(query ?? "")
+    .split(/\s+/)
+    .filter((term) => term && !/^-?type:/i.test(term))
+    .join(" ");
+  return text ? `type:ticket ${text}` : "type:ticket";
 }
 
 class ZendeskClient {
@@ -618,7 +621,7 @@ const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.search_tickets`,
     description:
-      "Search Zendesk tickets only (not users, organizations or groups) with a query string. A query without a type: term is limited to type:ticket.",
+      "Search Zendesk tickets only (not users, organizations or groups) with a query string. Any type: term is replaced with type:ticket.",
     inputSchema: {
       type: "object",
       properties: {

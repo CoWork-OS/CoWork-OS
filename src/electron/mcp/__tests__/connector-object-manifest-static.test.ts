@@ -242,8 +242,10 @@ describe("static connector object manifests", () => {
     expect(await search("status:open printer")).toBe("type:ticket status:open printer");
     // `ticket_type:` is a ticket field, not a result type.
     expect(await search("ticket_type:incident")).toBe("type:ticket ticket_type:incident");
-    expect(await search("TYPE:ticket status:open")).toBe("TYPE:ticket status:open");
-    expect(await search("status:open type:user")).toBe("status:open type:user");
+    expect(await search("TYPE:ticket status:open")).toBe("type:ticket status:open");
+    // Another result type would put users under data.results, read as tickets.
+    expect(await search("status:open type:user")).toBe("type:ticket status:open");
+    expect(await search("-type:ticket acme")).toBe("type:ticket acme");
   });
 
   it("lists only the Linear fields its GraphQL queries select", async () => {

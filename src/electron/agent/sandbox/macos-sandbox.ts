@@ -36,6 +36,7 @@ import {
 import { applyNonInteractiveEnvDefaults } from "./non-interactive-env";
 import {
   macOSToolchainProfileRules,
+  resolveActiveDeveloperDir,
   resolveMacOSToolchainAccess,
   writeSanitizedNpmrc,
   type MacOSToolchainAccess,
@@ -509,6 +510,7 @@ export class MacOSSandbox implements ISandbox {
       env: process.env,
       workspacePath: this.workspace.path,
       allowWrites: permissions.write === true && permissions.accessSandboxMode !== "read-only",
+      developerDir: resolveActiveDeveloperDir(process.env),
     });
     if (!privateDocumentWorkspace) return access;
     return {
@@ -619,6 +621,7 @@ export class MacOSSandbox implements ISandbox {
   (subpath "/System")
   (subpath "/Library/Frameworks")
   (subpath "/Applications/Xcode.app")
+  (subpath "/Library/Developer/CommandLineTools")
   (subpath "/private/var/db")
   (subpath "/private/var/select")
 ${workspaceAncestorRules}

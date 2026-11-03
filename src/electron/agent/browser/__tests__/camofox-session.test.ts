@@ -41,6 +41,10 @@ interface FakeCamofox {
   /** Camofox userId each cookie import went to, in order. */
   cookieUsers: string[];
   deletedSessions: string[];
+  /** Camofox's persistence plugin is loaded (DELETE /sessions/{id}/storage_state exists). */
+  persistence: boolean;
+  /** Identities whose saved state was removed through the persistence plugin. */
+  resetSessions: string[];
   close(): Promise<void>;
 }
 
@@ -135,6 +139,8 @@ async function startFakeCamofox(
     cookieImports: [],
     cookieUsers: [],
     deletedSessions: [],
+    persistence: true,
+    resetSessions: [],
     close: async () => {},
   };
   let next = 0;
@@ -202,7 +208,12 @@ async function startFakeCamofox(
       return send(200, { ok: true, count: body.cookies.length });
     }
     if (req.method === "DELETE" && url.pathname.startsWith("/sessions/")) {
-      fake.deletedSessions.push(decodeURIComponent(url.pathname.split("/")[2]));
+      const [, , id, rest] = url.pathname.split("/");
+      if (rest === "storage_state") {
+        if (!fake.persistence) return send(404, { error: "Not found" });
+        fake.resetSessions.push(decodeURIComponent(id));
+      }
+      fake.deletedSessions.push(decodeURIComponent(id));
       fake.openTabs.clear();
       return send(200, { ok: true });
     }
@@ -572,6 +583,8 @@ describe("saved cookies", () => {
 
     await session.close();
     expect(fake.deletedSessions).toEqual([taskOnly]);
+    // Camofox's persistence plugin wrote the cookies to disk; closing removes that copy too.
+    expect(fake.resetSessions).toEqual([taskOnly]);
 
     // A later task in the workspace gets the shared identity, which never held the cookies.
     const later = newSession("task-2");
@@ -681,7 +694,19 @@ describe("checkCamofoxConnection", () => {
     );
     expect(proxiedResult).toEqual({ reachable: true, proxied: true });
     expect(proxied.deletedSessions).toHaveLength(1);
+    expect(proxied.resetSessions).toEqual(proxied.deletedSessions);
     expect(proxy.running).toBe(false);
+
+    // Without the persistence plugin there is no saved state, and the session is just closed.
+    proxied.persistence = false;
+    await checkCamofoxConnection(
+      settingsFor(proxied.origin, proxyPort),
+      clientFor(proxied.origin),
+      proxy,
+      () => {},
+    );
+    expect(proxied.deletedSessions).toHaveLength(2);
+    expect(proxied.resetSessions).toHaveLength(1);
   }, 20_000);
 });
 

@@ -231,7 +231,8 @@ export function CamofoxSettingsGroup() {
         <code>
           &quot;persistence&quot;: {"{"} &quot;enabled&quot;: false {"}"}
         </code>{" "}
-        in its camofox.config.json. That includes saved cookies you let CoWork load into it.
+        in its camofox.config.json. Saved cookies you let CoWork load are deleted from there when
+        their task ends.
       </p>
       <label className="settings-description">
         <input

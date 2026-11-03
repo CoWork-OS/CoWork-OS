@@ -836,8 +836,8 @@ export class BrowserTools {
       "protected_credential",
       `Load ${count} saved cookie${count === 1 ? "" : "s"} for ${host} into the Camofox browser? ` +
         `They can sign CoWork in to ${host} there for this task only; later tasks ask again. ` +
-        "Unless you turned Camofox's persistence off, Camofox also keeps them unencrypted in " +
-        "~/.camofox/profiles on this Mac.",
+        "Camofox may also keep them unencrypted in ~/.camofox/profiles on this Mac until the " +
+        "task ends.",
       { kind: "camofox_saved_cookies", host, count },
       { allowAutoApprove: false, noStandingApproval: true },
     );

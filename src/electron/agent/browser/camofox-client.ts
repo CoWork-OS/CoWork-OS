@@ -170,8 +170,19 @@ export class CamofoxClient {
     );
   }
 
+  /**
+   * Ends an identity and removes what Camofox saved of it. Camofox's persistence plugin writes
+   * an identity's cookies to disk on cookie import and again when the session closes, so the
+   * identity is reset through the plugin's route; without the plugin (404) nothing was saved.
+   */
   async deleteSession(userId: string): Promise<void> {
-    await this.json("DELETE", `/sessions/${encodeURIComponent(userId)}`);
+    const id = encodeURIComponent(userId);
+    try {
+      await this.json("DELETE", `/sessions/${id}/storage_state`);
+    } catch (error) {
+      if (!(error instanceof CamofoxApiError) || error.status !== 404) throw error;
+      await this.json("DELETE", `/sessions/${id}`);
+    }
   }
 
   async navigate(userId: string, tabId: string, url: string): Promise<CamofoxNavigation> {

@@ -6,6 +6,7 @@ import {
 } from "../shared/browser-toolbar-menu";
 import {
   BROWSER_VAULT_IPC,
+  type BrowserCookieJarListing,
   type BrowserVaultItem,
   type BrowserVaultAnswer,
   type BrowserVaultCommand,
@@ -33,6 +34,11 @@ import type {
   CuaSpaceDisplaySettings,
   CuaSpaceSettingsUpdate,
 } from "../shared/cua-space";
+import type {
+  CamofoxConnectionResult,
+  CamofoxDisplaySettings,
+  CamofoxSettingsUpdate,
+} from "../shared/camofox";
 import type {
   ApprovalDraftPreview,
   InlineApprovalDraftReview,
@@ -2511,6 +2517,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     token: string;
     cookies?: boolean;
     passwords?: boolean;
+    saveToVault?: boolean;
+    applyToBrowser?: boolean;
   }) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.BROWSER_IMPORT_COMMIT,
@@ -2576,6 +2584,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_FOR_PAGE, data) as Promise<BrowserLoginsResult>,
   removeBrowserLogin: (data: { workspaceId: string; id: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_REMOVE, data) as Promise<{ success: boolean }>,
+  removeBrowserCookieJar: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_REMOVE, {
+      workspaceId: data.workspaceId,
+      id: data.id,
+      kind: "cookie_jar",
+    }) as Promise<{ success: boolean }>,
   clearBrowserLogins: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_CLEAR, data) as Promise<{
       success: boolean;
@@ -2600,6 +2614,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
       success: boolean;
       settings?: BrowserSettingsState;
     }>,
+  getCamofoxSettings: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CAMOFOX_SETTINGS_GET) as Promise<CamofoxDisplaySettings>,
+  saveCamofoxSettings: (update: CamofoxSettingsUpdate) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.CAMOFOX_SETTINGS_SAVE,
+      update,
+    ) as Promise<CamofoxDisplaySettings>,
+  testCamofoxConnection: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CAMOFOX_TEST_CONNECTION) as Promise<CamofoxConnectionResult>,
+  copyCamofoxStartCommand: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND) as Promise<void>,
   resolveWorktreeBaseCommit: (data: { workspaceId: string; branch?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT, data) as Promise<{
       commit: string;
@@ -6446,6 +6471,7 @@ export interface BrowserImportDetectResult {
 }
 export type BrowserImportPrepareRequest =
   | { workspaceId: string; kind: "csv" }
+  | { workspaceId: string; kind: "cookies_txt" }
   | {
       workspaceId: string;
       kind: "browser";
@@ -6458,6 +6484,7 @@ export type BrowserImportPrepareResult =
   | {
       success: true;
       token: string;
+      kind: "browser" | "csv" | "cookies_txt";
       source: string;
       cookies: number;
       logins: number;
@@ -6470,6 +6497,8 @@ export type BrowserImportCommitResult =
       success: true;
       cookies: number;
       cookiesRejected: number;
+      /** Cookies saved as an encrypted jar for Camofox. */
+      cookiesSaved: number;
       logins: number;
       loginsUpdated: number;
       canDeleteFile: boolean;
@@ -6486,6 +6515,8 @@ export interface BrowserLoginsResult {
   items?: BrowserVaultItem[];
   success: boolean;
   logins: BrowserSavedLogin[];
+  /** Saved cookies.txt jars; metadata only. */
+  cookieJars?: BrowserCookieJarListing[];
   canStore?: boolean;
 }
 
@@ -6833,6 +6864,10 @@ export interface ElectronAPI {
     token: string;
     cookies?: boolean;
     passwords?: boolean;
+    /** cookies.txt imports: save an encrypted cookie jar for Camofox (default true). */
+    saveToVault?: boolean;
+    /** cookies.txt imports: also add the cookies to the in-app browser (default false). */
+    applyToBrowser?: boolean;
   }) => Promise<BrowserImportCommitResult>;
   browserImportCancel: (data: { token: string }) => Promise<{ success: boolean }>;
   browserImportDeleteFile: (data: {
@@ -6872,6 +6907,10 @@ export interface ElectronAPI {
     url: string;
   }) => Promise<BrowserLoginsResult>;
   removeBrowserLogin: (data: { workspaceId: string; id: string }) => Promise<{ success: boolean }>;
+  removeBrowserCookieJar: (data: {
+    workspaceId: string;
+    id: string;
+  }) => Promise<{ success: boolean }>;
   clearBrowserLogins: (data: {
     workspaceId: string;
   }) => Promise<{ success: boolean; removed: number }>;
@@ -6885,6 +6924,11 @@ export interface ElectronAPI {
   saveBrowserSettings: (
     settings: Partial<BrowserSettings>,
   ) => Promise<{ success: boolean; settings?: BrowserSettingsState }>;
+  getCamofoxSettings: () => Promise<CamofoxDisplaySettings>;
+  saveCamofoxSettings: (update: CamofoxSettingsUpdate) => Promise<CamofoxDisplaySettings>;
+  testCamofoxConnection: () => Promise<CamofoxConnectionResult>;
+  /** Copies the start command, proxy password filled in, without it reaching the renderer. */
+  copyCamofoxStartCommand: () => Promise<void>;
   /** Build Compare: the commit a branch points to now, so every variant starts from it. */
   resolveWorktreeBaseCommit: (data: {
     workspaceId: string;

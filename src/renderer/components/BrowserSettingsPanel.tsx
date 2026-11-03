@@ -10,6 +10,7 @@ import type {
 } from "../../shared/browser-settings";
 import { useBrowserSettings } from "../hooks/useBrowserSettings";
 import { BrowserImportPanel } from "./BrowserImportPanel";
+import { CamofoxSettingsGroup } from "./CamofoxSettings";
 import { DeclaredAgentSettingsGroup } from "./DeclaredAgentSettings";
 
 type HistoryEntry = {
@@ -287,6 +288,8 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
           </p>
         )}
       </div>
+
+      <CamofoxSettingsGroup />
 
       <div className="settings-group">
         <div className="settings-section-header">

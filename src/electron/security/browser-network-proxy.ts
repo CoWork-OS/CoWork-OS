@@ -23,7 +23,26 @@ export interface BrowserNetworkProxyOptions {
   idleTimeoutMs?: number;
   /** Idle limit for established tunnels, which carry WebSockets and HTTP/2 sessions. */
   tunnelIdleTimeoutMs?: number;
+  /** Fixed loopback port, for a browser CoWork does not launch (Camofox). Default: any free port. */
+  port?: number;
+  /**
+   * Answers a plain-http request locally instead of fetching it, when it returns a body. Lets
+   * CoWork prove a browser really sends its traffic here (a name only this proxy can serve).
+   */
+  answer?: (target: URL) => string | null;
+  /**
+   * When set, a request or CONNECT whose Proxy-Authorization this refuses gets a 407 Basic
+   * challenge, for a browser CoWork does not launch and so cannot hand a private port.
+   */
+  authorize?: (proxyAuthorization: string | undefined) => boolean;
+  /**
+   * Answers a request sent to this port as if it were the site (a path, not a proxy target),
+   * which only a browser that bypasses the proxy for loopback sends. Null refuses it.
+   */
+  answerDirect?: (path: string) => { contentType: string; body: string } | null;
 }
+
+const PROXY_AUTH_CHALLENGE = 'Basic realm="CoWork"';
 
 const IDLE_TIMEOUT_MS = 30_000;
 /**
@@ -55,9 +74,33 @@ export async function createBrowserNetworkProxy(
     const timer = setTimeout(() => controller.abort(), 30_000);
     res.on("close", () => controller.abort());
     try {
+      if ((req.url || "").startsWith("/")) {
+        const direct = options.answerDirect?.(req.url || "");
+        if (!direct) throw new Error("Not a proxy request");
+        res.writeHead(200, { "content-type": direct.contentType, "cache-control": "no-store" });
+        res.end(direct.body);
+        req.resume();
+        return;
+      }
+      if (options.authorize && !options.authorize(req.headers["proxy-authorization"])) {
+        res.writeHead(407, { "proxy-authenticate": PROXY_AUTH_CHALLENGE, "content-length": "0" });
+        res.end();
+        req.resume();
+        return;
+      }
       const target = new URL(req.url || "");
       if (target.protocol !== "http:" || target.username || target.password)
         throw new Error("Invalid proxy target");
+      const answered = options.answer?.(target);
+      if (typeof answered === "string") {
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        res.end(answered);
+        req.resume();
+        return;
+      }
       assertAllowed(target.href);
       const headers: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers)) {
@@ -146,6 +189,15 @@ export async function createBrowserNetworkProxy(
   server.on("connect", (req, client, head) => {
     void (async () => {
       try {
+        if (options.authorize && !options.authorize(req.headers["proxy-authorization"])) {
+          // The socket has left the HTTP parser, so the browser retries on a new connection.
+          client.end(
+            "HTTP/1.1 407 Proxy Authentication Required\r\n" +
+              `Proxy-Authenticate: ${PROXY_AUTH_CHALLENGE}\r\n` +
+              "Content-Length: 0\r\nConnection: close\r\n\r\n",
+          );
+          return;
+        }
         const target = new URL(`https://${req.url}`);
         if (
           target.username ||
@@ -204,7 +256,7 @@ export async function createBrowserNetworkProxy(
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(options.port ?? 0, "127.0.0.1", resolve);
   });
   const port = (server.address() as { port: number }).port;
   return {

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Camofox browser (opt-in)**: CoWork can drive a [Camofox](https://github.com/jo-inc/camofox-browser) server you run on your Mac when you ask for it (`browser_provider: "camofox"`). Set it up in **Settings > Browser > Camofox**. The server must be on loopback with an access key, and Camofox must browse through CoWork's network-policy proxy with a password only CoWork and Camofox know: every new tab first proves that with a one-time check page, including for 127.0.0.1 and localhost, or CoWork refuses it. Camofox needs a small CoWork plugin for that last part, shown in Settings. Identities are per task by default, or per workspace if you choose. See [Camofox Browser](browser-workbench.md#camofox-browser).
+- **cookies.txt import**: Settings > Browser > Import accepts Netscape `cookies.txt` files. Cookies are saved encrypted in the vault for Camofox (and can also sign in the in-app browser). With your approval each time, `use_saved_cookies` loads a site's saved cookies into a Camofox identity for that task only; values never reach the model.
+
 ### Fixed
 
 - **English README on npm**: the npm and GitHub Packages pages for 0.5.61 and 0.5.62 showed the Simplified Chinese README, because npm packs every README at the package root and picked that one. The Chinese README moved to `i18n/README.zh-CN.md`, and the release now stops if a package ships any README besides `README.md`.

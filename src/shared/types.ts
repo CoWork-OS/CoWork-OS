@@ -8667,6 +8667,11 @@ export const IPC_CHANNELS = {
   BROWSER_SETTINGS_SAVE: "browserSettings:save",
   AGENT_IDENTITY_DIRECTORY_GET: "agentIdentity:directoryGet",
   AGENT_IDENTITY_KEY_ROTATE: "agentIdentity:keyRotate",
+  // Opt-in Camofox browser provider (a loopback server the user runs).
+  CAMOFOX_SETTINGS_GET: "camofox:getSettings",
+  CAMOFOX_SETTINGS_SAVE: "camofox:saveSettings",
+  CAMOFOX_TEST_CONNECTION: "camofox:testConnection",
+  CAMOFOX_COPY_START_COMMAND: "camofox:copyStartCommand",
   BROWSER_SITE_PERMISSIONS_LIST: "browserSettings:sitePermissionsList",
   BROWSER_SITE_PERMISSIONS_RESET: "browserSettings:sitePermissionsReset",
   BROWSER_SITE_PERMISSIONS_SET: "browserSettings:sitePermissionsSet",

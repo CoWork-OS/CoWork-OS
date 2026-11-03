@@ -16,11 +16,15 @@ const MAX_STAGED = 4;
 
 export interface StagedImport {
   profileKey: string;
+  /** What the user imported from; a cookies.txt file can also be saved to the vault. */
+  kind?: "browser" | "csv" | "cookies_txt";
   cookies: CookieSetDetails[];
   logins: ImportedLogin[];
   source: string;
-  /** A password file the user picked; only the main process knows its path. */
+  /** A password or cookies file the user picked; only the main process knows its path. */
   sourceFile?: string;
+  /** The picked file's name, without its folder. */
+  label?: string;
 }
 
 interface Entry extends StagedImport {

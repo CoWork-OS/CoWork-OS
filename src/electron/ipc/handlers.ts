@@ -77,6 +77,7 @@ import {
   dialog,
   app as _app,
   nativeTheme,
+  clipboard,
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
@@ -444,6 +445,7 @@ import {
   SearchSettingsSchema,
   NotionSettingsSchema,
   CuaSpaceSettingsSchema,
+  CamofoxSettingsSchema,
   BoxSettingsSchema,
   OneDriveSettingsSchema,
   GoogleWorkspaceSettingsSchema,
@@ -578,6 +580,12 @@ import {
   resolveCuaSpaceEndpoint,
 } from "../computer-use/cua-space/settings";
 import type { CuaSpaceConnectionResult, CuaSpaceSettingsUpdate } from "../../shared/cua-space";
+import { CamofoxClient } from "../agent/browser/camofox-client";
+import { getCamofoxPolicyProxy } from "../agent/browser/camofox-policy-proxy";
+import { checkCamofoxConnection } from "../agent/browser/camofox-session";
+import { CamofoxSettingsManager } from "../agent/browser/camofox-settings";
+import type { CamofoxConnectionResult, CamofoxSettingsUpdate } from "../../shared/camofox";
+import { evaluateNetworkPolicy } from "../security/network-policy";
 import {
   MCPServerConfigSchema,
   MCPServerUpdateSchema,
@@ -1263,6 +1271,10 @@ rateLimiter.configure(
   RATE_LIMIT_CONFIGS.limited,
 );
 rateLimiter.configure(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE, RATE_LIMIT_CONFIGS.limited);
+// Camofox settings carry keys, and the check drives the user's Camofox server.
+rateLimiter.configure(IPC_CHANNELS.CAMOFOX_SETTINGS_SAVE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.CAMOFOX_TEST_CONNECTION, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -13084,6 +13096,66 @@ function setupMCPHandlers(): void {
       cuaSpaceTest = null;
     });
     return await cuaSpaceTest;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CAMOFOX_SETTINGS_GET, async () =>
+    CamofoxSettingsManager.getDisplaySettings(),
+  );
+
+  // Only the app's own top frame may change the Camofox switch, its server or its keys.
+  const fromTopFrame = (event: IpcMainInvokeEvent) =>
+    Boolean(event.senderFrame) && event.senderFrame?.parent === null;
+
+  ipcMain.handle(IPC_CHANNELS.CAMOFOX_SETTINGS_SAVE, async (event, update) => {
+    if (!fromTopFrame(event)) throw new Error("Not allowed.");
+    checkRateLimit(IPC_CHANNELS.CAMOFOX_SETTINGS_SAVE);
+    const validated = validateInput(
+      CamofoxSettingsSchema,
+      update,
+      "Camofox settings",
+    ) as CamofoxSettingsUpdate;
+    CamofoxSettingsManager.save(validated);
+    return CamofoxSettingsManager.getDisplaySettings();
+  });
+
+  // The proxy password goes from the main process to the clipboard; the renderer never has it.
+  ipcMain.handle(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND, async (event) => {
+    if (!fromTopFrame(event)) throw new Error("Not allowed.");
+    checkRateLimit(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND);
+    clipboard.writeText(CamofoxSettingsManager.startCommandWithProxyPassword());
+  });
+
+  let camofoxTest: Promise<CamofoxConnectionResult> | null = null;
+  ipcMain.handle(IPC_CHANNELS.CAMOFOX_TEST_CONNECTION, async (event) => {
+    if (!fromTopFrame(event)) throw new Error("Not allowed.");
+    // One check at a time; a repeat click joins the running one.
+    if (camofoxTest) return await camofoxTest;
+    checkRateLimit(IPC_CHANNELS.CAMOFOX_TEST_CONNECTION);
+    const settings = CamofoxSettingsManager.loadEnabled();
+    if (!settings) {
+      return {
+        reachable: false,
+        error: "Turn Camofox on with a loopback server URL and an access key first.",
+      };
+    }
+    camofoxTest = checkCamofoxConnection(
+      settings,
+      new CamofoxClient({
+        origin: settings.origin,
+        accessKey: settings.accessKey,
+        apiKey: settings.apiKey,
+      }),
+      getCamofoxPolicyProxy(),
+      // No workspace here: the admin network policy, plus the proxy's internal-address boundary.
+      (url) => {
+        const decision = evaluateNetworkPolicy({ url, toolName: "browser_request" });
+        if (decision.action !== "allow")
+          throw new Error(`Network access denied: ${decision.reason}`);
+      },
+    ).finally(() => {
+      camofoxTest = null;
+    });
+    return await camofoxTest;
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_END_SESSION, async () => {

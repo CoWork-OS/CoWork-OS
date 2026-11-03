@@ -371,19 +371,34 @@ Browser Use Cloud API errors, live URLs, and CDP URLs are redacted before enteri
 Setup:
 
 1. Install Camofox (`git clone https://github.com/jo-inc/camofox-browser && cd camofox-browser && npm install`).
-2. Open **Settings > Browser > Camofox**. Keep the default server URL (`http://127.0.0.1:9377`) and policy proxy port (`9378`) unless they clash with something, choose an access key and enter it, and turn on **Let CoWork use Camofox when you ask for it**.
-3. Press **Copy start command** and run it in the Camofox folder, with your access key filled in. It looks like this; the copied command carries the real proxy password:
+2. Add CoWork's loopback plugin to Camofox. Camoufox's Firefox connects to `127.0.0.1` and `localhost` directly even when a proxy is set, so pages could reach services on your Mac around CoWork's network policy, and CoWork refuses Camofox until this is fixed. Camofox has no setting for Firefox preferences, so a plugin turns the right one on. In the Camofox folder, save this as `plugins/cowork-loopback/index.js` (Settings shows the same code):
+
+   ```js
+   // CoWork: send 127.0.0.1 and localhost through the configured proxy like every other address.
+   export function register(app, ctx) {
+     ctx.events.on("browser:launching", ({ options }) => {
+       options.firefoxUserPrefs = {
+         ...options.firefoxUserPrefs,
+         "network.proxy.allow_hijacking_localhost": true,
+       };
+     });
+   }
+   ```
+
+   Then enable it in `camofox.config.json` by adding `"cowork-loopback": { "enabled": true }` to `"plugins"`. Camofox only loads plugins listed there.
+3. Open **Settings > Browser > Camofox**. Keep the default server URL (`http://127.0.0.1:9377`) and policy proxy port (`9378`) unless they clash with something, choose an access key and enter it, and turn on **Let CoWork use Camofox when you ask for it**.
+4. Press **Copy start command** and run it in the Camofox folder, with your access key filled in. It looks like this; the copied command carries the real proxy password:
 
    ```bash
    CAMOFOX_BIND_HOST=127.0.0.1 CAMOFOX_PORT=9377 CAMOFOX_ACCESS_KEY=<your access key> PROXY_HOST=127.0.0.1 PROXY_PORT=9378 PROXY_USERNAME=cowork PROXY_PASSWORD=<proxy password> npm start
    ```
 
-4. Press **Check connection**.
+5. Press **Check connection**.
 
 How it is kept within CoWork's boundaries:
 
 - **Loopback only, with an access key.** The server URL must be a literal `127.0.0.1` or `[::1]` address; a name, even `localhost`, is refused because it could resolve elsewhere. Camofox has no authentication unless `CAMOFOX_ACCESS_KEY` is set, so CoWork requires one and refuses a Camofox that answers without it. Bind it with `CAMOFOX_BIND_HOST=127.0.0.1` (Camofox listens on every interface by default). The access key and `CAMOFOX_API_KEY` are stored encrypted and never shown again.
-- **Every request goes through CoWork's network policy.** Like the in-app browser, Camofox must send its traffic through CoWork's policy proxy, which refuses cloud metadata and private network addresses, pins DNS, and applies the workspace's domain rules to every request, redirect and subresource. Camofox is started by you, so it reaches the proxy through `PROXY_HOST`/`PROXY_PORT`, and logs in to it with `PROXY_USERNAME`/`PROXY_PASSWORD`. CoWork makes that password and never sends it to the Camofox API, so another program that takes over Camofox's port cannot use the proxy. Before every new tab CoWork opens a check page under `.invalid` that only its proxy can serve, with a one-time token; if Camofox shows anything else, CoWork refuses to use it and shows the start command. The check page also loads scripts from `127.0.0.1` and `localhost`: if Camofox fetches those around the proxy, a page could reach services on your Mac, so CoWork refuses it. The proxy runs only while a task is using Camofox, so Camofox cannot reach anything on its own; when several tasks share it, a request must pass each one's policy.
+- **Every request goes through CoWork's network policy.** Like the in-app browser, Camofox must send its traffic through CoWork's policy proxy, which refuses cloud metadata and private network addresses, pins DNS, and applies the workspace's domain rules to every request, redirect and subresource. Camofox is started by you, so it reaches the proxy through `PROXY_HOST`/`PROXY_PORT`, and logs in to it with `PROXY_USERNAME`/`PROXY_PASSWORD`. CoWork makes that password and never sends it to the Camofox API, so another program that takes over Camofox's port cannot use the proxy. Before every new tab CoWork opens a check page under `.invalid` that only its proxy can serve, with a one-time token; if Camofox shows anything else, CoWork refuses to use it and shows the start command. The check page also loads scripts from `127.0.0.1` and `localhost`: if Camofox fetches those around the proxy, a page could reach services on your Mac, so CoWork refuses it. Stock Camofox does this; the loopback plugin from step 2 stops it. The proxy runs only while a task is using Camofox, so Camofox cannot reach anything on its own; when several tasks share it, a request must pass each one's policy.
 - **Identities.** By default each task gets a fresh Camofox identity whose session is closed on `browser_close`. **Keep one Camofox identity per workspace** keeps cookies and sign-ins across tasks. Bots get their own identities and never your saved cookies.
 - **Saved cookies.** `browser_navigate` with `use_saved_cookies: true` loads the vault cookies that apply to that site into Camofox. You are asked every time; cookie values go from the vault straight to Camofox and never reach the model. They always load into an identity for that task only, closed when the task ends, never into the shared workspace identity. Otherwise one approval would keep later tasks signed in without asking. A task that was using the shared identity switches to its own after you approve, and its earlier Camofox tabs close. Cookies scoped to a whole suffix such as `.co.uk` are never sent. Camofox needs `CAMOFOX_API_KEY` for cookie import unless it runs in development mode on loopback.
 - **Camofox's own storage is not encrypted.** Camofox saves each identity's cookies in plain files under `~/.camofox/profiles` by default. Saved cookies CoWork loaded are there only while their task runs: when it ends, CoWork deletes that identity together with what Camofox saved of it. If CoWork quits in the middle of a task, they can stay behind. Turn Camofox's saving off with `"persistence": { "enabled": false }` in `camofox.config.json` if you only want them in CoWork's vault.

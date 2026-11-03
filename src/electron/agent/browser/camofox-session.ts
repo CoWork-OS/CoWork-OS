@@ -20,7 +20,12 @@ import {
 import { isPrivateOrLocalBrowserTarget } from "./browser-use-cloud-client";
 import type { CamofoxPolicyProxy, CamofoxProxyLease } from "./camofox-policy-proxy";
 import type { CamofoxEnabledSettings } from "./camofox-settings";
-import { camofoxStartCommand, type CamofoxConnectionResult } from "../../../shared/camofox";
+import {
+  CAMOFOX_LOOPBACK_PLUGIN_CONFIG,
+  CAMOFOX_LOOPBACK_PLUGIN_PATH,
+  camofoxStartCommand,
+  type CamofoxConnectionResult,
+} from "../../../shared/camofox";
 
 // oxlint-disable-next-line typescript-eslint/no-explicit-any
 type Any = any;
@@ -212,8 +217,10 @@ export async function openCheckedCamofoxTab(
     if (page.includes(check.canary)) {
       throw new CamofoxProxyCheckError(
         "Camofox loads 127.0.0.1 and localhost around CoWork's network-policy proxy, so a page " +
-          "could reach services on this Mac. CoWork will not use it. Camofox's Firefox must " +
-          "send loopback addresses through the proxy (network.proxy.allow_hijacking_localhost).",
+          "could reach services on this Mac. CoWork will not use it until Camofox has CoWork's " +
+          `loopback plugin: save it as ${CAMOFOX_LOOPBACK_PLUGIN_PATH} in the Camofox folder, ` +
+          `add ${CAMOFOX_LOOPBACK_PLUGIN_CONFIG} to "plugins" in camofox.config.json and ` +
+          "restart Camofox. The plugin's code is in Settings > Browser > Camofox.",
         startCommand,
       );
     }

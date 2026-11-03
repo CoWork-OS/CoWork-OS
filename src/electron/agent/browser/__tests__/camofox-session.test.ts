@@ -421,6 +421,7 @@ describe("CamofoxBrowserSession through the policy proxy", () => {
     );
     expect(result).toMatchObject({ success: false, setupRequired: true });
     expect(String(result.error)).toMatch(/127\.0\.0\.1 and localhost/);
+    expect(String(result.error)).toContain("plugins/cowork-loopback/index.js");
     expect(fake.openTabs.size).toBe(0);
     await session.close();
   }, 20_000);

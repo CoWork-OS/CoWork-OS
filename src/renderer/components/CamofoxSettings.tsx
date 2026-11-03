@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  CAMOFOX_LOOPBACK_PLUGIN_CONFIG,
+  CAMOFOX_LOOPBACK_PLUGIN_PATH,
+  CAMOFOX_LOOPBACK_PLUGIN_SOURCE,
   camofoxStartCommand,
   type CamofoxConnectionResult,
   type CamofoxDisplaySettings,
@@ -169,6 +172,17 @@ export function CamofoxSettingsGroup() {
             ) : null}
           </div>
         ) : null}
+      </div>
+      <div className="settings-field">
+        <span className="settings-label">Loopback plugin</span>
+        <p className="settings-description">
+          Camofox&apos;s Firefox connects to 127.0.0.1 and localhost directly, around the proxy, so
+          CoWork refuses it until you add this plugin. Save it as{" "}
+          <code>{CAMOFOX_LOOPBACK_PLUGIN_PATH}</code> in the Camofox folder, add{" "}
+          <code>{CAMOFOX_LOOPBACK_PLUGIN_CONFIG}</code> to &quot;plugins&quot; in its
+          camofox.config.json, then restart Camofox.
+        </p>
+        <pre className="browser-settings-code">{CAMOFOX_LOOPBACK_PLUGIN_SOURCE}</pre>
       </div>
       <div className="settings-field">
         <label className="settings-label" htmlFor="camofox-access-key">

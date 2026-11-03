@@ -46,6 +46,26 @@ export interface CamofoxConnectionResult {
 export const CAMOFOX_PROXY_USERNAME = "cowork";
 
 /**
+ * Camoufox's Firefox connects to 127.0.0.1 and localhost directly even with a proxy set, so
+ * a page could reach services on this Mac around CoWork's policy proxy, and CoWork refuses
+ * it. Camofox has no setting for Firefox prefs; this plugin, saved in the Camofox folder and
+ * enabled in its camofox.config.json, turns the pref on at every browser launch.
+ */
+export const CAMOFOX_LOOPBACK_PLUGIN_NAME = "cowork-loopback";
+export const CAMOFOX_LOOPBACK_PLUGIN_PATH = `plugins/${CAMOFOX_LOOPBACK_PLUGIN_NAME}/index.js`;
+export const CAMOFOX_LOOPBACK_PLUGIN_CONFIG = `"${CAMOFOX_LOOPBACK_PLUGIN_NAME}": { "enabled": true }`;
+export const CAMOFOX_LOOPBACK_PLUGIN_SOURCE = `// CoWork: send 127.0.0.1 and localhost through the configured proxy like every other address.
+export function register(app, ctx) {
+  ctx.events.on("browser:launching", ({ options }) => {
+    options.firefoxUserPrefs = {
+      ...options.firefoxUserPrefs,
+      "network.proxy.allow_hijacking_localhost": true,
+    };
+  });
+}
+`;
+
+/**
  * How to start Camofox so it listens on loopback only, requires the access key, and browses
  * through CoWork's proxy. The access key stays out of the UI; the user fills it in. The proxy
  * password is a placeholder unless the main process fills it in for "Copy start command".

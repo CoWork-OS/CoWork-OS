@@ -29,7 +29,16 @@ import {
   resolveCamofoxOrigin,
   validateCamofoxProxyPort,
 } from "../camofox-settings";
-import { camofoxStartCommand } from "../../../../shared/camofox";
+import { EventEmitter } from "events";
+import * as fs from "fs/promises";
+import * as os from "os";
+import * as path from "path";
+import { pathToFileURL } from "url";
+import {
+  CAMOFOX_LOOPBACK_PLUGIN_PATH,
+  CAMOFOX_LOOPBACK_PLUGIN_SOURCE,
+  camofoxStartCommand,
+} from "../../../../shared/camofox";
 
 beforeEach(() => {
   mocks.stored = undefined;
@@ -147,5 +156,36 @@ describe("camofoxStartCommand", () => {
         "PROXY_HOST=127.0.0.1 PROXY_PORT=9411 PROXY_USERNAME=cowork " +
         "PROXY_PASSWORD=<proxy password> npm start",
     );
+  });
+});
+
+describe("Camofox loopback plugin", () => {
+  it("turns on proxying for loopback at every browser launch, keeping Camofox's own prefs", async () => {
+    // Loaded the way Camofox loads plugins: an ES module file with a register(app, ctx) export.
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "camofox-plugin-"));
+    try {
+      const file = path.join(dir, path.basename(CAMOFOX_LOOPBACK_PLUGIN_PATH, ".js") + ".mjs");
+      await fs.writeFile(file, CAMOFOX_LOOPBACK_PLUGIN_SOURCE);
+      const plugin = (await import(pathToFileURL(file).href)) as {
+        register(app: unknown, ctx: { events: EventEmitter }): void;
+      };
+      const events = new EventEmitter();
+      plugin.register({}, { events });
+
+      const options: { firefoxUserPrefs?: Record<string, unknown> } = {
+        firefoxUserPrefs: { "network.dns.disableIPv6": true },
+      };
+      events.emit("browser:launching", { options });
+      expect(options.firefoxUserPrefs).toEqual({
+        "network.dns.disableIPv6": true,
+        "network.proxy.allow_hijacking_localhost": true,
+      });
+
+      const bare: { firefoxUserPrefs?: Record<string, unknown> } = {};
+      events.emit("browser:launching", { options: bare });
+      expect(bare.firefoxUserPrefs).toEqual({ "network.proxy.allow_hijacking_localhost": true });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

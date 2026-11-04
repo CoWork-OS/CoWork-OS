@@ -2211,6 +2211,7 @@ export class TaskExecutor {
   }
 
   private finalizeFollowUpFailure(error: Any): void {
+    this.discardProvisionalBootstrapArtifacts("failed");
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
     const completedAt = Date.now();
     const message = error?.message || String(error);
@@ -11196,6 +11197,8 @@ ${transcript}
   private maybeFinalizeAsPartialSuccess(error: unknown): boolean {
     if (!this.shouldFinalizeAsPartialSuccess(error)) return false;
 
+    // An unchanged bootstrap stub is scaffolding, never part of what the task delivered.
+    this.discardProvisionalBootstrapArtifacts("partial_success");
     const partialText = this.getPartialSuccessSummary(error);
     const failureClass = this.classifyPartialSuccessFailureClass(error);
     this.terminalStatus = "partial_success";
@@ -23435,6 +23438,9 @@ You are continuing a previous conversation. The context from the previous conver
         if (!existedBefore || fs.statSync(checkedPath).size === 0) {
           const previousContent = existedBefore ? fs.readFileSync(checkedPath) : null;
           const expectedContent = textStubByExtension[ext];
+          // Record the file as it was before the stub, so the task's change summary compares
+          // the agent's real write with the original file and not with the scaffolding.
+          await this.daemon.captureTaskMutationBaseline?.(this.task.id, checkedPath);
           fs.writeFileSync(checkedPath, expectedContent, "utf8");
           // Keep bootstrap progress in diagnostics only. A provisional stub is
           // not a completed artifact and must not appear as "Output ready" in
@@ -28535,6 +28541,25 @@ You are continuing a previous conversation. The context from the previous conver
     };
   }
 
+  /**
+   * The bootstrap stub at this path, while it is still unchanged scaffolding. File tools use
+   * it to describe the agent's first real write as creating the file rather than editing it.
+   */
+  getUnchangedProvisionalBootstrapArtifact(
+    filePath: string,
+  ): { previousContent: Buffer | null } | null {
+    const entry = this.getProvisionalBootstrapArtifacts().get(
+      this.normalizeArtifactPathForComparison(filePath),
+    );
+    if (!entry) return null;
+    try {
+      if (fs.readFileSync(entry.path, "utf8") !== entry.expectedContent) return null;
+    } catch {
+      return null;
+    }
+    return { previousContent: entry.previousContent };
+  }
+
   private getProvisionalBootstrapArtifacts(): Map<string, ProvisionalBootstrapArtifact> {
     // A few focused tests construct a TaskExecutor-like object without running
     // the constructor. Keep the cleanup path safe for those harnesses too.
@@ -32464,6 +32489,8 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       logger.error(`Task execution failed:`, error);
+      // A failed task delivered nothing: remove any bootstrap stub it left unchanged.
+      this.discardProvisionalBootstrapArtifacts("failed");
       // Save conversation snapshot even on failure for potential recovery
       this.saveConversationSnapshot();
       void this.trackLearning(
@@ -40316,6 +40343,7 @@ Return ONLY a JSON object:
       if (this.maybeFinalizeAsNeedsUserAction(error)) return;
       if (this.maybeFinalizeAsPartialSuccess(error)) return;
       logger.error(`${this.logTag} Resumed task execution failed:`, error);
+      this.discardProvisionalBootstrapArtifacts("failed");
       this.saveConversationSnapshot();
       this.daemon.updateTask(this.task.id, {
         status: "failed",
@@ -40526,6 +40554,7 @@ Return ONLY a JSON object:
       }
 
       logger.error(`${this.logTag} Resumed task execution failed:`, error);
+      this.discardProvisionalBootstrapArtifacts("failed");
       this.saveConversationSnapshot();
       this.daemon.updateTask(this.task.id, {
         status: "failed",

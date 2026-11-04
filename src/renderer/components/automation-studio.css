@@ -821,9 +821,13 @@ html.visual-calm .studio-library-search > span {
 }
 
 .studio-flow-meta {
-  display: grid;
-  grid-template-columns: minmax(200px, 1fr) auto;
-  gap: 18px;
+  /* Wraps the actions under the name when the canvas column is too narrow for both;
+     a two-column grid squeezed the buttons until "Save draft" broke over two lines. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 18px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--studio-line);
   background: color-mix(in srgb, var(--studio-surface-solid) 94%, transparent);
@@ -831,6 +835,8 @@ html.visual-calm .studio-library-search > span {
 
 .studio-flow-meta > div:first-child {
   display: grid;
+  flex: 1 1 200px;
+  min-width: 0;
   gap: 3px;
 }
 
@@ -861,8 +867,13 @@ html.visual-calm .studio-library-search > span {
 
 .studio-builder-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
+}
+
+.studio-builder-actions > button {
+  white-space: nowrap;
 }
 
 .studio-danger-action {
@@ -1746,14 +1757,9 @@ html.visual-calm .studio-library-search > span {
     max-height: 280px;
   }
 
-  .studio-flow-meta,
   .studio-inspector,
   .studio-test-grid {
     grid-template-columns: 1fr;
-  }
-
-  .studio-builder-actions {
-    flex-wrap: wrap;
   }
 
   .studio-field-list,

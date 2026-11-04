@@ -294,6 +294,19 @@ describe("buildActionBlockSummary", () => {
 
     expect(summary.iconKind).toBe("write");
     expect(summary.summary).toBe("Created 1 file, edited 2 files");
+    expect(summary.activityPhrase).toBe("Created and edited files");
+  });
+
+  it("says a new file was created, not edited, in the activity phrase", () => {
+    expect(buildActionBlockSummary([toolEvent("create", "write_file", 1000)]).activityPhrase).toBe(
+      "Created a file",
+    );
+    expect(
+      buildActionBlockSummary([
+        toolEvent("create-1", "write_file", 1000),
+        toolEvent("create-2", "write_file", 1100),
+      ]).activityPhrase,
+    ).toBe("Created files");
   });
 
   it("uses approval icon before command activity", () => {

@@ -46,10 +46,12 @@ const GERUND_BY_VERB: Record<string, string> = {
   write: "writing",
 };
 
+// Emphasis underscores sit at word edges; underscores inside names (run_command) stay.
 function cleanDescription(value: unknown): string {
   return String(value || "")
     .replace(/^[\s#>*\-\d.)]+/, "")
-    .replace(/[`*_#]/g, "")
+    .replace(/[`*#]/g, "")
+    .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.!?:;]+$/, "")

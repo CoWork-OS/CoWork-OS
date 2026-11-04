@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { Task, TaskStatus } from "../../../shared/types";
 import type { TaskProposal, TaskProposalStartOptions } from "../../../shared/task-proposals";
 import type { TaskProposalAction } from "../../hooks/useTaskProposals";
+import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { SuggestedTasksContext } from "./suggested-tasks-context";
 import {
   SuggestedTaskOptionsPopover,
@@ -20,7 +21,32 @@ const STATUS_EVENT_TYPES = new Set([
   "task_resumed",
   "task_interrupted",
   "follow_up_completed",
+  // A failure arrives live as timeline_error, which keeps its own type.
+  "timeline_error",
 ]);
+
+type StartedTaskEvent = {
+  taskId?: string;
+  type?: string;
+  legacyType?: string;
+  status?: string;
+  payload?: unknown;
+};
+
+/**
+ * Whether a live event can change a started task's status. Live events arrive as timeline
+ * projections (timeline_step_finished and friends), so the raw type alone never matches.
+ */
+export function isStartedTaskStatusEvent(event: StartedTaskEvent | null | undefined): boolean {
+  if (!event?.type) return false;
+  const effectiveType = getEffectiveTaskEventType({
+    type: event.type,
+    legacyType: event.legacyType,
+    status: event.status,
+    payload: event.payload,
+  } as Parameters<typeof getEffectiveTaskEventType>[0]);
+  return STATUS_EVENT_TYPES.has(effectiveType) || STATUS_EVENT_TYPES.has(event.type);
+}
 
 /** Live status of the tasks started from this card, kept current from task events. */
 function useStartedTaskStatuses(taskIds: string[]): Record<string, TaskStatus | undefined> {
@@ -41,12 +67,8 @@ function useStartedTaskStatuses(taskIds: string[]): Record<string, TaskStatus | 
     ids.forEach(refresh);
     const unsubscribe =
       typeof window.electronAPI.onTaskEvent === "function"
-        ? window.electronAPI.onTaskEvent((event: { taskId?: string; type?: string }) => {
-            if (
-              event?.taskId &&
-              ids.includes(event.taskId) &&
-              STATUS_EVENT_TYPES.has(String(event.type))
-            ) {
+        ? window.electronAPI.onTaskEvent((event: StartedTaskEvent) => {
+            if (event?.taskId && ids.includes(event.taskId) && isStartedTaskStatusEvent(event)) {
               refresh(event.taskId);
             }
           })

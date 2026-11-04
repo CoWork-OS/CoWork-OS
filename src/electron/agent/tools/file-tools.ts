@@ -2113,6 +2113,14 @@ export class FileTools {
       } catch {
         // No previous file: this write creates it.
       }
+      // A bootstrap stub the task wrote as scaffolding is not the file's previous content.
+      const bootstrapStub =
+        existed &&
+        this.daemon.getUnchangedProvisionalBootstrapArtifact?.(this.taskId, mutationPath.path);
+      if (bootstrapStub) {
+        existed = bootstrapStub.previousContent !== null;
+        previousContent = bootstrapStub.previousContent?.toString("utf-8") ?? null;
+      }
 
       await beforeEffect(mutationPath.path);
       // Write file

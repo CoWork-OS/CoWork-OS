@@ -59,6 +59,23 @@ describe("FileTools write_file line stats", () => {
     });
   });
 
+  it("reports a write over the task's own bootstrap stub as creating the file", async () => {
+    const target = path.join(tmpDir, "notes.md");
+    fs.writeFileSync(target, "# Draft\n\nBootstrap artifact stub.\n");
+    (fileTools as Any).daemon.getUnchangedProvisionalBootstrapArtifact = vi.fn((taskId, file) =>
+      taskId === "task-1" && path.basename(file) === "notes.md" ? { previousContent: null } : null,
+    );
+
+    await fileTools.writeFile("notes.md", "one\ntwo\nthree\n");
+
+    expect(fileCreatedPayload()).toMatchObject({
+      path: "notes.md",
+      existed: false,
+      linesAdded: 3,
+      linesRemoved: 0,
+    });
+  });
+
   it("reports an overwrite with the lines it changed", async () => {
     fs.writeFileSync(path.join(tmpDir, "notes.md"), "one\ntwo\nthree\n");
 

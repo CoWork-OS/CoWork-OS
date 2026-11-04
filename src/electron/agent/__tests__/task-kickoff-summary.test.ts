@@ -71,6 +71,16 @@ describe("task kickoff summary", () => {
     expect(summary).not.toContain("verifying the rendered result");
   });
 
+  it("keeps underscores inside names while dropping markdown marks", () => {
+    const summary = buildTaskKickoffSummary({
+      currentStepDescription: "Run `du -sh .` with run_command and update **my_notes.md**",
+    });
+
+    expect(summary).toBe(
+      "I’ll start by running du -sh . with run_command and update my_notes.md, then continue through the remaining work and verify the result.",
+    );
+  });
+
   it("falls back to the first tool category when no plan is available", () => {
     expect(buildTaskKickoffSummary({ firstToolName: "web_search" })).toContain(
       "gathering the relevant evidence",

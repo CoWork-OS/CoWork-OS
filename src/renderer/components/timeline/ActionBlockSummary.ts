@@ -493,7 +493,11 @@ export function buildActionBlockSummary(
     .map(([tool]) => tool);
   const phraseParts: string[] = [];
   if (browserActions > 0) phraseParts.push("used the browser");
-  if (writes > 0) phraseParts.push(writes === 1 ? "edited a file" : "edited files");
+  // Same split as the summary line: write_file creates files, edit_file edits them.
+  if (createdFiles > 0 && editedFiles > 0) phraseParts.push("created and edited files");
+  else if (createdFiles > 0)
+    phraseParts.push(createdFiles === 1 ? "created a file" : "created files");
+  else if (editedFiles > 0) phraseParts.push(editedFiles === 1 ? "edited a file" : "edited files");
   if (readFiles > 0 || searches > 0) phraseParts.push("read files");
   if (commands > 0) phraseParts.push(commands === 1 ? "ran a command" : "ran commands");
   if (webSearches > 0) phraseParts.push("searched the web");

@@ -4631,6 +4631,82 @@ relationship_memory:
     }
   });
 
+  it("captures the change baseline before the stub and removes the unchanged stub on failure", async () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const tempDir = fs.mkdtempSync("/tmp/cowork-bootstrap-baseline-");
+    (executor as Any).workspace.path = tempDir;
+    const target = path.join(tempDir, "notes.md");
+    const existedAtBaseline: boolean[] = [];
+    (executor as Any).daemon.captureTaskMutationBaseline = vi.fn(async (_taskId, file) => {
+      existedAtBaseline.push(fs.existsSync(file));
+    });
+
+    const step: Any = { id: "bootstrap-md", description: "Write notes", status: "pending" };
+    const stepContract: Any = {
+      requiredTools: new Set(["write_file"]),
+      mode: "mutation_required",
+      requiresMutation: true,
+      requiresArtifactEvidence: true,
+      targetPaths: ["notes.md"],
+      requiredExtensions: [".md"],
+      enforcementLevel: "strict",
+      contractReason: "step_requires_artifact_mutation",
+      verificationMode: "none",
+      artifactKind: "file",
+    };
+
+    try {
+      const bootstrap = await (executor as Any).performDeterministicArtifactBootstrap(
+        step,
+        stepContract,
+      );
+      expect(bootstrap.succeeded).toBe(true);
+      expect(existedAtBaseline).toEqual([false]);
+      expect(fs.existsSync(target)).toBe(true);
+      expect(executor.getUnchangedProvisionalBootstrapArtifact(bootstrap.path)).toEqual({
+        previousContent: null,
+      });
+
+      (executor as Any).discardProvisionalBootstrapArtifacts("failed");
+      expect(fs.existsSync(target)).toBe(false);
+      expect(executor.getUnchangedProvisionalBootstrapArtifact(bootstrap.path)).toBeNull();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops treating the stub as scaffolding once the agent writes over it", async () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const tempDir = fs.mkdtempSync("/tmp/cowork-bootstrap-written-");
+    (executor as Any).workspace.path = tempDir;
+    const step: Any = { id: "bootstrap-md", description: "Write notes", status: "pending" };
+    const stepContract: Any = {
+      requiredTools: new Set(["write_file"]),
+      mode: "mutation_required",
+      requiresMutation: true,
+      requiresArtifactEvidence: true,
+      targetPaths: ["notes.md"],
+      requiredExtensions: [".md"],
+      enforcementLevel: "strict",
+      contractReason: "step_requires_artifact_mutation",
+      verificationMode: "none",
+      artifactKind: "file",
+    };
+
+    try {
+      const bootstrap = await (executor as Any).performDeterministicArtifactBootstrap(
+        step,
+        stepContract,
+      );
+      fs.writeFileSync(bootstrap.path, "# Real notes\n");
+      expect(executor.getUnchangedProvisionalBootstrapArtifact(bootstrap.path)).toBeNull();
+      (executor as Any).discardProvisionalBootstrapArtifacts("failed");
+      expect(fs.readFileSync(bootstrap.path, "utf8")).toBe("# Real notes\n");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("prefers synthesized directory+basename target for deterministic bootstrap", async () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
     const tempDir = fs.mkdtempSync("/tmp/cowork-bootstrap-synth-");

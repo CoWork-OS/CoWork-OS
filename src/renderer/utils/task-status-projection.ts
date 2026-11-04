@@ -219,6 +219,17 @@ export function deriveRevisionAwarePlanSteps(events: TaskEvent[]): PlanStep[] {
  * Plan step descriptions are model-authored and can carry markdown emphasis; headers render
  * plain text, so normalize them the same way activity labels are normalized.
  */
+/**
+ * A plan step as plain text: markdown emphasis and code marks go, while underscores inside
+ * names (run_command, my_file.py) stay.
+ */
+export function plainStepDescription(description: string): string {
+  return description
+    .replace(/[*`]/g, "")
+    .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
+    .trim();
+}
+
 function planStepLabel(description: string | undefined): string {
   const trimmed = (description || "").trim();
   if (!trimmed) return "";
@@ -655,7 +666,7 @@ export function deriveTaskStatusStrip(args: {
                   state === "working"
                     ? planStepLabel(activeStep.description)
                     : // "Running …" would read as still running next to "Paused".
-                      activeStep.description.replace(/[*_`]/g, "").trim(),
+                      plainStepDescription(activeStep.description),
               }
             : {}),
     compactMetricSlots: selectTaskStatusMetricSlots(args.outcomeMetrics, 2),

@@ -554,9 +554,30 @@ export function deriveModelRetryLabel(events: TaskEvent[]): string | undefined {
 const TASK_PROVIDER_RETRY_RE =
   /^Transient provider error\.\s*Retry\s+(\d+)\/(\d+)\s+in\s+(\d+)s\./i;
 
-function taskProviderRetryLabel(task: Task | null | undefined): string | undefined {
-  if (task?.status !== "queued" || typeof task.error !== "string") return undefined;
-  const match = TASK_PROVIDER_RETRY_RE.exec(task.error.trim());
+// The notice the daemon logs for the same wait. A live task only gets `task_queued`, not the
+// row's new `error`, and still holds the provider error that came just before it.
+const TASK_PROVIDER_RETRY_NOTICE_RE =
+  /Temporary provider error\.\s*Retrying\s+(\d+)\/(\d+)\s+in\s+(\d+)s\./i;
+
+function latestProviderRetryNotice(events: TaskEvent[]): RegExpExecArray | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const type = getEffectiveTaskEventType(events[index]);
+    if (type === "task_dequeued") return null;
+    if (type !== "task_queued") continue;
+    const message = asObject(events[index].payload).message;
+    return typeof message === "string" ? TASK_PROVIDER_RETRY_NOTICE_RE.exec(message) : null;
+  }
+  return null;
+}
+
+function taskProviderRetryLabel(
+  task: Task | null | undefined,
+  events: TaskEvent[],
+): string | undefined {
+  if (task?.status !== "queued") return undefined;
+  const match =
+    (typeof task.error === "string" ? TASK_PROVIDER_RETRY_RE.exec(task.error.trim()) : null) ??
+    latestProviderRetryNotice(events);
   if (!match) return undefined;
   return `Model provider error. Trying again in ${match[3]}s (retry ${match[1]} of ${match[2]})`;
 }
@@ -585,7 +606,7 @@ export function deriveTaskStatusStrip(args: {
   const blocking = deriveBlockingState(args.events);
   let state = stripState(args.task);
   // A task queued to rerun after a provider error is still the user's running work.
-  const taskRetryLabel = taskProviderRetryLabel(args.task);
+  const taskRetryLabel = taskProviderRetryLabel(args.task, args.retryEvents ?? args.events);
   if (taskRetryLabel) state = "working";
   if (blocking?.state === "approval") state = "waiting_for_approval";
   if (blocking?.state === "input") state = "waiting_for_input";

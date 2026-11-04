@@ -401,6 +401,24 @@ describe("model provider retries", () => {
     expect(model.state).toBe("working");
     expect(model.phaseLabel).toBe("Model provider error. Trying again in 30s (retry 2 of 2)");
   });
+
+  it("reads the queued notice when the live task still holds the provider error", () => {
+    const queued = event("queued", 2, "task_queued", {
+      reason: "transient_retry",
+      message: "⏳ Temporary provider error. Retrying 1/2 in 60s.",
+    });
+    const task = {
+      status: "queued",
+      error: "LLM API error: OpenAI-Compatible API error: 429 Too Many Requests",
+    };
+
+    const model = strip(task, [event("error", 1, "llm_error"), queued]);
+    expect(model.visible).toBe(true);
+    expect(model.state).toBe("working");
+    expect(model.phaseLabel).toBe("Model provider error. Trying again in 60s (retry 1 of 2)");
+
+    expect(strip(task, [queued, event("dequeued", 3, "task_dequeued")]).visible).toBe(false);
+  });
 });
 
 describe("status strip detail for stopped tasks", () => {

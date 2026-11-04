@@ -72,6 +72,16 @@ describe("classifyTaskActivity", () => {
     expect(classifyTaskActivity(task("f"))).toBeNull();
   });
 
+  it("does not call a fork that waits for its first message queued", () => {
+    expect(
+      classifyTaskActivity(task("fork", { status: "pending", branchFromTaskId: "parent" })),
+    ).toBeNull();
+    expect(classifyTaskActivity(task("p", { status: "pending" }))?.label).toBe("Queued");
+    expect(
+      classifyTaskActivity(task("q", { status: "queued", branchFromTaskId: "parent" }))?.label,
+    ).toBe("Queued");
+  });
+
   it("never counts a finished run as waiting, whatever outcome it ended with", () => {
     // A run whose approval timed out is finalized as completed with "needs user action";
     // its approval is closed, so there is nothing to reply to.

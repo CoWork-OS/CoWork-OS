@@ -371,16 +371,29 @@ export function sanitizeToolCallTextFromAssistant(raw: string): ToolCallTextSani
     };
   }
 
-  text = text
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n[ \t]+(?=[{[])/g, "\n")
-    .trim();
-
   return {
-    text,
+    text: removedSegments > 0 ? closeRemovalGaps(text) : text.trim(),
     hadToolCallText: removedSegments > 0,
     removedSegments,
   };
+}
+
+/**
+ * Removing markup leaves doubled spaces, trailing spaces and blank runs behind. Code fences
+ * and line indentation are the answer's own content, so they are kept.
+ */
+function closeRemovalGaps(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/g)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part
+            .replace(/(\S)[ \t]{2,}(?=\S)/g, "$1 ")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .replace(/\n[ \t]+(?=[{[])/g, "\n"),
+    )
+    .join("")
+    .trim();
 }

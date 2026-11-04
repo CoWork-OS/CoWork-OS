@@ -6,6 +6,7 @@ import {
   deriveModelRetryLabel,
   deriveRevisionAwarePlanSteps,
   deriveTaskStatusStrip,
+  plainStepDescription,
 } from "../task-status-projection";
 
 function event(
@@ -421,5 +422,30 @@ describe("status strip detail for stopped tasks", () => {
     });
     expect(model.primaryLabel).toBe("Paused");
     expect(model.phaseLabel).toBe("Run ls in the workspace");
+  });
+
+  it("keeps underscores inside names while dropping markdown marks", () => {
+    const model = deriveTaskStatusStrip({
+      task: { id: "task-1", status: "paused", updatedAt: 1_000 } as Any,
+      events: [],
+      planSteps: [
+        {
+          id: "one",
+          description: "Run `du -sh .` with run_command for **my_notes.md** and _quickly_",
+          status: "in_progress",
+        },
+      ],
+      activityGroups: [],
+      outcomeMetrics: [],
+      outputSummary: null,
+    });
+    expect(model.phaseLabel).toBe("Run du -sh . with run_command for my_notes.md and quickly");
+  });
+});
+
+describe("plainStepDescription", () => {
+  it("strips emphasis underscores at word edges only", () => {
+    expect(plainStepDescription("__Bold__ step_one")).toBe("Bold step_one");
+    expect(plainStepDescription("snake_case_name")).toBe("snake_case_name");
   });
 });

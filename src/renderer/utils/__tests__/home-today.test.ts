@@ -325,6 +325,14 @@ describe("cardForAttention", () => {
       secondary: { label: "Not now", action: { type: "snooze-suggestion", suggestionId: "x" } },
     });
   });
+
+  it("keeps underscores inside names in a suggestion title", () => {
+    const card = cardForAttention(
+      { ...suggestion("y", false), title: "Wire _up_ the run_command hook in my_tool.py" },
+      NOW,
+    );
+    expect(card?.title).toBe("Wire up the run_command hook in my_tool.py");
+  });
 });
 
 describe("calendar cards", () => {

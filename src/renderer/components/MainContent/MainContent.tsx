@@ -306,7 +306,7 @@ import {
 } from "../timeline/parallel-group-projection";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { BotEarlierConversations } from "./BotEarlierConversations";
-import { fitComposerMenuWidth } from "./composer-menu-fit";
+import { fitComposerMenuHeight, fitComposerMenuWidth } from "./composer-menu-fit";
 import { BrowserProfileNotice } from "./BrowserProfileNotice";
 import { InteractionModePicker } from "./InteractionModePicker";
 import { ModelDropdown } from "./ModelDropdown";
@@ -5787,6 +5787,8 @@ function MainContentComponent({
     const fit = () => {
       fitComposerMenuWidth(mentionDropdownRef.current);
       fitComposerMenuWidth(slashDropdownRef.current);
+      fitComposerMenuHeight(mentionDropdownRef.current);
+      fitComposerMenuHeight(slashDropdownRef.current);
     };
     fit();
     window.addEventListener("resize", fit);

@@ -23757,7 +23757,12 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   /* --composer-menu-max-width: room left in the chat column (composer-menu-fit.ts). */
   width: min(720px, var(--composer-menu-max-width, calc(100vw - 64px)));
   max-width: min(720px, var(--composer-menu-max-width, calc(100vw - 64px)));
-  max-height: min(calc((var(--mention-option-row-height) * 8) + 76px), calc(100vh - 180px));
+  /* --composer-menu-max-height: room above (or below) the composer (composer-menu-fit.ts). */
+  max-height: min(
+    calc((var(--mention-option-row-height) * 8) + 76px),
+    calc(100vh - 180px),
+    var(--composer-menu-max-height, 100vh)
+  );
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -23869,8 +23874,14 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
 
 /* Slash command autocomplete (reuses mention styles) */
 .slash-autocomplete-dropdown {
-  max-height: 300px;
+  max-height: min(300px, var(--composer-menu-max-height, 300px));
   overflow-y: auto;
+}
+
+/* Too little room above the composer: open the menu below it instead. */
+.mention-autocomplete-dropdown[data-placement="below"] {
+  top: calc(100% + 8px);
+  bottom: auto;
 }
 
 .slash-command-icon {

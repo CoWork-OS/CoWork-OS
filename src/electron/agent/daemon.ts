@@ -11121,6 +11121,25 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * The unchanged bootstrap stub a running task wrote at this path, if any. The stub is
+   * scaffolding, so the first real write over it creates the file rather than editing it.
+   */
+  getUnchangedProvisionalBootstrapArtifact(
+    taskId: string,
+    filePath: string,
+  ): { previousContent: Buffer | null } | null {
+    // Daemons restored for a single tool call may not track running executors at all.
+    const executor = this.activeTasks?.get(taskId)?.executor as
+      | {
+          getUnchangedProvisionalBootstrapArtifact?: (
+            filePath: string,
+          ) => { previousContent: Buffer | null } | null;
+        }
+      | undefined;
+    return executor?.getUnchangedProvisionalBootstrapArtifact?.(filePath) ?? null;
+  }
+
+  /**
    * The top task of a task's parent/child tree (bounded, so a cycle cannot hang it). Build
    * Compare variants are alternatives to each other, so a Compare group is one family.
    */

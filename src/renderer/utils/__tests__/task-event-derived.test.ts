@@ -211,8 +211,8 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
           step: { id: "collect", description: "Collect the details" },
         }),
         makeEvent("spoken", 110, "assistant_message", { message: "Here is what I found." }),
-        makeEvent("done", 120, "step_completed", {
-          step: { id: "collect", description: "Collect the details" },
+        makeEvent("next", 120, "step_started", {
+          step: { id: "write", description: "Write the summary" },
         }),
       ],
       task: { id: "task-1", status: "executing" } as Any,
@@ -225,6 +225,42 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
       "event",
       "action_block",
     ]);
+  });
+
+  it("does not open an empty block for a step that finishes after its answer", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("start", 100, "step_started", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+        makeEvent("spoken", 110, "assistant_message", { message: "Here is what I found." }),
+        makeEvent("done", 120, "step_completed", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+        makeEvent("stage", 125, "step_completed", { stage: "BUILD", groupId: "stage:build" }),
+        makeEvent("finished", 130, "task_completed", { message: "Task completed successfully" }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(shared.baseTimelineItems.map((item) => item.kind)).toEqual(["action_block", "event"]);
+  });
+
+  it("keeps a trailing block that still has work in it", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("spoken", 110, "assistant_message", { message: "Here is what I found." }),
+        makeEvent("check", 120, "tool_call", { tool: "read_file", input: { path: "a.md" } }),
+        makeEvent("finished", 130, "task_completed", { message: "Task completed successfully" }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(shared.baseTimelineItems.map((item) => item.kind)).toEqual(["event", "action_block"]);
   });
 
   // Guards the assumption behind the block-merge above: a directive-only turn still renders,

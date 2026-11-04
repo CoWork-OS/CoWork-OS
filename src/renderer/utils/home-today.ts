@@ -188,11 +188,15 @@ function clip(text: string, max: number): string {
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
 
-/** Plain text from a short markdown description: no emphasis marks, links or headings. */
+/**
+ * Plain text from a short markdown description: no emphasis marks, links or headings.
+ * Underscores inside names (run_command) stay; emphasis underscores sit at word edges.
+ */
 function plain(text: string): string {
   return text
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`#>]+/g, "")
+    .replace(/[*`#>]+/g, "")
+    .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }

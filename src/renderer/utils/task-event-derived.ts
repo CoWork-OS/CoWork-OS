@@ -965,6 +965,27 @@ function deriveToolCallPairing(
   return { completions, claimedResultIds };
 }
 
+const RUN_BOOKKEEPING_TYPES = new Set(["step_started", "step_completed", "task_completed"]);
+
+/**
+ * The steps and stages that close after a finished task's final answer. On their own they
+ * rendered as an empty "Worked" block under the answer, holding a lone "Done" row.
+ */
+function isFinishedRunBookkeeping(events: TaskEvent[]): boolean {
+  let sawCompletion = false;
+  for (const event of events) {
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (!RUN_BOOKKEEPING_TYPES.has(effectiveType)) return false;
+    const payload = asObject(event.payload);
+    const stepId = String(payload.stepId ?? asObject(payload.step).id ?? "");
+    if (stepId.startsWith("tool_lane:") || payload.error || asObject(payload.step).error) {
+      return false;
+    }
+    if (effectiveType === "task_completed") sawCompletion = true;
+  }
+  return sawCompletion;
+}
+
 function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[] {
   const eventItems: BaseTimelineItem[] = [];
   const duplicateCompletionEventIndexes = getDuplicateCompletionEventIndexes(filteredEvents);
@@ -1077,6 +1098,10 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
     currentBlockIndices.push(index);
   }
 
+  if (eventItems.length > 0 && isFinishedRunBookkeeping(currentBlock)) {
+    currentBlock = [];
+    currentBlockIndices = [];
+  }
   flushBlock();
   return eventItems;
 }

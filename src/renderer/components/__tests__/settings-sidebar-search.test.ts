@@ -39,6 +39,28 @@ describe("settings sidebar search entries", () => {
     );
   });
 
+  it("finds the newer settings sections by their own names", () => {
+    const find = (tab: keyof typeof sidebarSearchEntries, query: string) =>
+      findSettingsSidebarSearchEntry(sidebarSearchEntries[tab] ?? [], query)?.target;
+
+    expect(find("automations", "watchdog")).toEqual({
+      tab: "automations",
+      automationsSubTab: "queue",
+    });
+    expect(find("automations", "event gate")).toEqual({
+      tab: "automations",
+      automationsSubTab: "triggers",
+    });
+    expect(
+      findSettingsSidebarSearchEntry(sidebarSearchEntries.browser ?? [], "camofox"),
+    ).toBeTruthy();
+    expect(
+      findSettingsSidebarSearchEntry(sidebarSearchEntries.browser ?? [], "proxy"),
+    ).toBeTruthy();
+    expect(find("aimodels", "api key")).toEqual({ tab: "aimodels", aiModelsSubTab: "llm" });
+    expect(find("aimodels", "lm studio")).toEqual({ tab: "aimodels", aiModelsSubTab: "llm" });
+  });
+
   it("routes multiword searches to the matching model settings destination", () => {
     const entries = sidebarSearchEntries.aimodels ?? [];
     const context = ["AI & Models"];

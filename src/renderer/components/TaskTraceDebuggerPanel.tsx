@@ -27,6 +27,8 @@ import {
   filterTaskTraceRows,
   serializeTaskTraceRows,
   normalizeTaskTraceMarkdownDisplay,
+  resolveTaskTraceWorkspaceFilter,
+  TASK_TRACE_ALL_WORKSPACES,
 } from "../utils/task-trace-debugger";
 import { createRendererLogger } from "../utils/logger";
 import { formatCount } from "../utils/plural";
@@ -36,7 +38,7 @@ interface TaskTraceDebuggerPanelProps {
   onOpenTask?: (taskId: string) => void;
 }
 
-const ALL_WORKSPACES = "__all__";
+const ALL_WORKSPACES = TASK_TRACE_ALL_WORKSPACES;
 const STATUS_OPTIONS = [
   "all",
   "pending",
@@ -128,8 +130,8 @@ export function TaskTraceDebuggerPanel({
   onOpenTask,
 }: TaskTraceDebuggerPanelProps) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>(
-    initialWorkspaceId || ALL_WORKSPACES,
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>(() =>
+    resolveTaskTraceWorkspaceFilter(initialWorkspaceId, null),
   );
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_OPTIONS)[number]>("all");
   const [runSearch, setRunSearch] = useState("");
@@ -160,6 +162,7 @@ export function TaskTraceDebuggerPanel({
       const loaded = await window.electronAPI.listWorkspaces();
       startTransition(() => {
         setWorkspaces(loaded || []);
+        setSelectedWorkspaceId((current) => resolveTaskTraceWorkspaceFilter(current, loaded || []));
       });
     } catch (loadError) {
       logger.error("Failed to load workspaces for trace debugger:", loadError);

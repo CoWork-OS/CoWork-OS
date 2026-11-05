@@ -6128,9 +6128,6 @@ function MainContentComponent({
             </div>
           </div>
         )}
-        <div className="mention-autocomplete-section">
-          <div className="mention-autocomplete-section-label">Files</div>
-        </div>
       </div>
     );
   };

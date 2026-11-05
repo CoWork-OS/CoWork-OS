@@ -15479,6 +15479,21 @@ export class AgentDaemon extends EventEmitter {
     this.retryCounts.delete(taskId);
   }
 
+  /**
+   * A follow-up turn replaces a pending transient-provider retry: it runs the same
+   * conversation now. Left armed, the retry finds the follow-up's executor and skips, and the
+   * follow-up hands back the "queued" status it started from, so the task would wait for a
+   * retry that never runs.
+   */
+  private supersedeTransientRetry(taskId: string): void {
+    if (!this.pendingRetries?.has(taskId)) return;
+    this.clearRetryState(taskId);
+    const task = this.taskRepo.findById(taskId);
+    if (task?.status !== "queued") return;
+    this.taskRepo.update(taskId, { status: "executing", error: null });
+    this.logEvent(taskId, "task_dequeued", { message: "▶️ Continuing with your follow-up." });
+  }
+
   private runQuickQualityPass(params: {
     resultSummary?: string;
     outputSummary?: TaskOutputSummary;
@@ -18398,6 +18413,7 @@ export class AgentDaemon extends EventEmitter {
           }
         }
         effectiveOptions?.admissionGuard?.();
+        this.supersedeTransientRetry(taskId);
         await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
           agentConfigOverride: effectiveOptions?.agentConfigOverride,
           interactionMode:

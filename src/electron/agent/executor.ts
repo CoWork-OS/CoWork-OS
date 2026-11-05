@@ -828,6 +828,19 @@ const READ_ONLY_CONTRACT_MUTATION_TOOLS = new Set([
   "canvas_push",
 ]);
 
+/**
+ * The saved-settings digest for a provider route, or undefined when the factory cannot give
+ * one (as with a partial test double); an unknown key never triggers a rebuild.
+ */
+function readProviderConnectionKey(type: LLMProviderType, model: string): string | undefined {
+  try {
+    const key = LLMProviderFactory.providerConnectionKey?.(type, model);
+    return typeof key === "string" && key ? key : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function isFeatureEnabled(envName: string, defaultValue = true): boolean {
   const raw = process.env[envName];
   if (raw === undefined) return defaultValue;
@@ -1185,6 +1198,8 @@ const VIDEO_FRAME_SAMPLE_LIMIT = 10;
 export class TaskExecutor {
   private _runtime?: SessionRuntime;
   private provider!: LLMProvider;
+  /** The route and saved connection settings `provider` was built from. */
+  private providerConnection?: { type: LLMProviderType; model: string; key?: string };
   private toolRegistry: ToolRegistry;
   private toolScheduler!: ToolScheduler;
   private toolBatchSummaryGenerator = createToolBatchSummaryGenerator();
@@ -41793,6 +41808,11 @@ Return ONLY a JSON object:
       type: selection.providerType,
       model: selection.modelId,
     });
+    this.providerConnection = {
+      type: selection.providerType,
+      model: selection.modelId,
+      key: readProviderConnectionKey(selection.providerType, selection.modelId),
+    };
     this.modelId = selection.modelId;
     this.modelKey = selection.modelKey;
     this.llmProfileUsed = selection.llmProfileUsed;
@@ -42111,6 +42131,32 @@ Return ONLY a JSON object:
         fallbackOccurred: false,
         manualOverride: this.hasExplicitTaskRouteOverride(),
       });
+    }
+    this.refreshProviderConnectionIfChanged();
+  }
+
+  /**
+   * Same provider and model, but the user changed its saved key, endpoint or options: build a
+   * new client, so a fixed key or base URL also takes effect in a session that is already open.
+   */
+  private refreshProviderConnectionIfChanged(): void {
+    const connection = this.providerConnection;
+    if (!connection?.key) return;
+    const key = readProviderConnectionKey(connection.type, connection.model);
+    if (!key || key === connection.key) return;
+    try {
+      this.provider = LLMProviderFactory.createProvider({
+        type: connection.type,
+        model: connection.model,
+      });
+      this.providerConnection = { ...connection, key };
+      logger.info(
+        `${this.logTag} Provider settings changed; rebuilt the ${connection.type} client`,
+      );
+    } catch (err: Any) {
+      logger.warn(
+        `${this.logTag} Could not rebuild the ${connection.type} client after a settings change: ${err?.message}`,
+      );
     }
   }
 

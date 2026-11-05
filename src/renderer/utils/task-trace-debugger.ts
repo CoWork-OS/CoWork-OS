@@ -7,6 +7,7 @@ import type {
   TaskTraceRowActor,
   TaskTraceTab,
 } from "../../shared/types";
+import { isTempWorkspaceId } from "../../shared/types";
 import { normalizeMarkdownForCollab } from "./markdown-inline-lists";
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -459,4 +460,25 @@ export function serializeTaskTraceRows(rows: TaskTraceRow[], tab: TaskTraceTab):
       return pieces.join("\n");
     })
     .join("\n\n");
+}
+
+export const TASK_TRACE_ALL_WORKSPACES = "__all__";
+
+/**
+ * The workspace filter to show, given the one requested and the workspaces the picker lists.
+ * A workspace the picker does not offer (a session's temporary workspace, or one that was
+ * removed) would filter by a value it cannot display: it reads "All workspaces" while the list
+ * stays empty. Pass `listed` as null while the workspaces are still loading.
+ */
+export function resolveTaskTraceWorkspaceFilter(
+  requested: string | null | undefined,
+  listed: readonly { id: string }[] | null,
+): string {
+  if (!requested || requested === TASK_TRACE_ALL_WORKSPACES || isTempWorkspaceId(requested)) {
+    return TASK_TRACE_ALL_WORKSPACES;
+  }
+  if (listed && !listed.some((workspace) => workspace.id === requested)) {
+    return TASK_TRACE_ALL_WORKSPACES;
+  }
+  return requested;
 }

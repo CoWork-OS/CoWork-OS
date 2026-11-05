@@ -20,6 +20,25 @@ describe("TaskExecutor workspace preflight classification", () => {
   it("detects existing code work when prompt includes a code file path", () => {
     expect(classify("Fix a bug in src/app.ts")).toBe("needs_existing");
   });
+
+  it("reads only the typed words, not the attached files listed after them", () => {
+    const prompt = [
+      "Summarize the attached files",
+      "",
+      "Attached files (relative to workspace):",
+      "- sales_q3.csv (.cowork/uploads/1/sales_q3.csv)",
+      "",
+      "- config.json (.cowork/uploads/1/config.json)",
+      "  Extracted content:",
+      "  [[ATTACHMENT_EXTRACTED_CONTENT_START]]",
+      '    { "src/app.ts": "fix the bug in this repo" }',
+      "  [[ATTACHMENT_EXTRACTED_CONTENT_END]]",
+    ].join("\n");
+    expect(classify(prompt)).toBe("none");
+    expect(
+      classify(prompt.replace("Summarize the attached files", "Fix a bug in src/app.ts")),
+    ).toBe("needs_existing");
+  });
 });
 
 describe("TaskExecutor intent detection", () => {

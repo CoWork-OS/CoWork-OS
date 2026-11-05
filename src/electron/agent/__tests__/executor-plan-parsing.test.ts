@@ -417,6 +417,56 @@ describe("TaskExecutor plan parsing", () => {
     }
   });
 
+  it("keeps composer attachments out of the full-document pipeline unless one long file is under review", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-attached-doc-"));
+    try {
+      const uploads = path.join(directory, ".cowork", "uploads", "1");
+      fs.mkdirSync(uploads, { recursive: true });
+      fs.writeFileSync(path.join(uploads, "meeting notes.md"), "# Meeting\n\n- ship v2\n");
+      fs.writeFileSync(path.join(uploads, "long-notes.md"), "A line of notes.\n".repeat(3_000));
+      const attach = (typed: string, ...names: string[]) =>
+        [
+          typed,
+          "",
+          "Attached files (relative to workspace):",
+          names
+            .map((name) =>
+              [
+                `- ${name} (.cowork/uploads/1/${name})`,
+                "  Extracted content:",
+                "  [[ATTACHMENT_EXTRACTED_CONTENT_START]]",
+                "    Review every chapter for character continuity.",
+                "  [[ATTACHMENT_EXTRACTED_CONTENT_END]]",
+              ].join("\n"),
+            )
+            .join("\n\n"),
+        ].join("\n");
+      const executor = createPlanExecutor({ content: [] });
+      executor.workspace.path = directory;
+      const route = (title: string, prompt: string) => {
+        executor.task.title = title;
+        executor.task.rawPrompt = prompt;
+        executor.task.userPrompt = prompt;
+        executor.task.prompt = prompt;
+        return (executor as Any).isBoundedDocumentAnalysisTask();
+      };
+
+      // Several files, one of them markdown: the pipeline would read only one source.
+      expect(
+        route(
+          "Attachment check",
+          attach("Summarize the attached files", "sales_q3.csv", "config.json", "meeting notes.md"),
+        ),
+      ).toBe(false);
+      // One short note whose name has a space, and whose text talks about chapters.
+      expect(route("Attachment check", attach("Summarize this", "meeting notes.md"))).toBe(false);
+      // One long attached file still gets the full-document pipeline.
+      expect(route("Notes summary", attach("Summarize this", "long-notes.md"))).toBe(true);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps verifier workers out of the full-document pipeline", () => {
     const executor = createPlanExecutor({ content: [] });
     executor.task.title = "Verify: Review the release checklist...";

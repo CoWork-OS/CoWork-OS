@@ -478,6 +478,7 @@ import {
 } from "./tool-policy-engine";
 import { userTypedFollowUpText } from "./follow-up-provenance";
 import { userTypedWords } from "./user-typed-words";
+import { listAttachedFilePaths } from "./runtime/composer-draft-sent-check";
 import { isTaskPromptFromUser } from "./task-prompt-provenance";
 
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
@@ -2586,9 +2587,14 @@ export class TaskExecutor {
     // and swap the role's tool-backed plan for the internal extraction pipeline.
     if (resolveWorkerRoleKind(this.task?.workerRole)) return false;
     const taskTitle = String(this.task?.title || "");
-    const rawTaskPrompt = String(
+    const promptWithAttachments = String(
       this.task?.rawPrompt || this.task?.userPrompt || this.getContractPrompt() || "",
     );
+    // Attached files ride after the typed words (attachment-summary.ts). Their names are
+    // sources, but their text is not the request: a file that says "review" or "chapter"
+    // must not turn "Summarize the attached files" into a manuscript review.
+    const attachedPaths = listAttachedFilePaths(promptWithAttachments);
+    const rawTaskPrompt = [userTypedWords(promptWithAttachments), ...attachedPaths].join("\n");
     const normalized = normalizePromptForContractsUtil(`${taskTitle}\n${rawTaskPrompt}`)
       .trim()
       .toLowerCase();
@@ -2599,14 +2605,17 @@ export class TaskExecutor {
     // This pipeline extracts one source. Multi-file comparisons need the
     // regular tools so a complete review does not silently omit other inputs.
     const sourceReferences = new Set(normalized.match(/[\w./~-]+\.(?:docx|pdf|md|txt)\b/g) || []);
-    if (sourceReferences.size > 1) return false;
+    if (sourceReferences.size > 1 || attachedPaths.length > 1) return false;
     // An explicit manuscript review ("character continuity", "kitap") keeps the pipeline
     // whatever the length; anything else about a short text file reads it directly.
     const hasManuscriptReviewCue =
       /(?:book|manuscript|novel|chapter|character|continuity|kitap|bölüm|karakter|devamlılık)/.test(
         normalized,
       );
-    if (!hasManuscriptReviewCue && this.namesShortTextSource(`${taskTitle}\n${rawTaskPrompt}`)) {
+    if (
+      !hasManuscriptReviewCue &&
+      this.namesShortTextSource(`${taskTitle}\n${rawTaskPrompt}`, attachedPaths)
+    ) {
       return false;
     }
     const hasDocumentScope =
@@ -2660,8 +2669,11 @@ export class TaskExecutor {
    * routing "Summarize README.md" through it ran a manuscript review ("gaps,
    * contradictions, character continuity") on a few lines.
    */
-  private namesShortTextSource(request: string): boolean {
-    const [source] = request.match(/[\w./~-]+\.(?:md|txt)\b/i) || [];
+  private namesShortTextSource(request: string, attachedPaths: string[] = []): boolean {
+    // An attached file's name may hold spaces ("meeting notes.md"), which the pattern cannot see.
+    const source =
+      attachedPaths.find((attachedPath) => /\.(?:md|txt)$/i.test(attachedPath)) ??
+      (request.match(/[\w./~-]+\.(?:md|txt)\b/i) || [])[0];
     if (!source || !this.workspace?.path) return false;
     try {
       const absolute = path.resolve(this.workspace.path, source);
@@ -24117,6 +24129,9 @@ You are continuing a previous conversation. The context from the previous conver
     if (additionalIdx > 0) raw = raw.slice(0, additionalIdx);
     const userUpdateIdx = raw.indexOf("\nUSER UPDATE:\n");
     if (userUpdateIdx > 0) raw = raw.slice(0, userUpdateIdx);
+    // Attached file names and their text are not a request for a project: "config.json" in the
+    // attachment list matched the file pattern and paused a new session to ask for a folder.
+    raw = userTypedWords(raw);
 
     const text = raw.toLowerCase().trim();
 

@@ -4949,8 +4949,13 @@ export class LLMProviderFactory {
       defaultModel: "",
     });
 
-    const models = await provider.getAvailableModels();
-    const cachedModels = models.map((m) => ({
+    // A failed request is an error, not an empty list: returning [] showed nothing in Settings
+    // and replaced the saved model list with an empty one.
+    const result = await provider.getAvailableModelsDetailed();
+    if (result.status !== "success" && result.status !== "valid_empty") {
+      throw new Error(result.error || "Couldn't load models from the OpenAI-compatible endpoint.");
+    }
+    const cachedModels = result.models.map((m) => ({
       key: m.id,
       displayName: m.name || m.id,
       description: "OpenAI-compatible model",

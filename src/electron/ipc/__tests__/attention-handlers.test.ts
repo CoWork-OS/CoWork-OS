@@ -60,6 +60,8 @@ describe("attention IPC", () => {
     });
     expect(handle).toHaveBeenCalledWith(IPC_CHANNELS.ATTENTION_LIST, expect.any(Function));
     expect([...listeners.keys()]).toEqual([...ATTENTION_DAEMON_EVENTS]);
+    // A reply to a paused session restarts it with only this event.
+    expect(listeners.has("executing")).toBe(true);
     listeners.get("approval_requested")!();
     listeners.get("task_status")!();
     vi.advanceTimersByTime(1000);

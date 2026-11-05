@@ -290,6 +290,7 @@ import {
 import { CalmHomeToday } from "../calm/CalmHomeToday";
 import { CalmModeToggle } from "../calm/CalmModeToggle";
 import { CalmAccessMenu, type CalmAccessMenuProps } from "../calm/CalmTopBar";
+import { useDismissable } from "../calm/useDismissable";
 import { deriveBuildChanges, normalizeBuildPath } from "../calm/build-changes";
 import { isBuildTask } from "../calm/build-task";
 import { buildMarkdownComponents } from "../markdown-components";
@@ -3566,21 +3567,14 @@ function MainContentComponent({
     setSelectedTaskAccessProfileOverride(normalized ? (normalized as AccessProfileId) : null);
   }, [task?.id]);
 
-  // Close skills menu on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (skillsMenuRef.current && !skillsMenuRef.current.contains(e.target as Node)) {
-        setShowSkillsMenu(false);
-        setSkillsSearchQuery("");
-      }
-    };
-    if (showSkillsMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showSkillsMenu]);
+  // The composer's menus close on a click outside them or on Escape.
+  const closeSkillsMenu = useCallback(() => {
+    setShowSkillsMenu(false);
+    setSkillsSearchQuery("");
+  }, []);
+  useDismissable(skillsMenuRef, showSkillsMenu, closeSkillsMenu);
 
-  // Close workspace dropdown on click outside
+  // Close workspace dropdown on click outside or Escape
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       // The folder menu renders in a portal on <body>, outside the container.
@@ -3593,53 +3587,25 @@ function MainContentComponent({
         setShowWorkspaceDropdown(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowWorkspaceDropdown(false);
+    };
     if (showWorkspaceDropdown) {
       document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
     }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [showWorkspaceDropdown]);
 
-  // Close permission dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        permissionDropdownRef.current &&
-        !permissionDropdownRef.current.contains(e.target as Node)
-      ) {
-        setShowPermissionDropdown(false);
-      }
-    };
-    if (showPermissionDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showPermissionDropdown]);
-
-  // Close mode dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
-        setShowModeDropdown(false);
-      }
-    };
-    if (showModeDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showModeDropdown]);
-
-  // Close domain dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (domainDropdownRef.current && !domainDropdownRef.current.contains(e.target as Node)) {
-        setShowDomainDropdown(false);
-      }
-    };
-    if (showDomainDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showDomainDropdown]);
+  const closePermissionDropdown = useCallback(() => setShowPermissionDropdown(false), []);
+  useDismissable(permissionDropdownRef, showPermissionDropdown, closePermissionDropdown);
+  const closeModeDropdown = useCallback(() => setShowModeDropdown(false), []);
+  useDismissable(modeDropdownRef, showModeDropdown, closeModeDropdown);
+  const closeDomainDropdown = useCallback(() => setShowDomainDropdown(false), []);
+  useDismissable(domainDropdownRef, showDomainDropdown, closeDomainDropdown);
 
   // Close overflow menu on click outside (welcome view)
   useEffect(() => {

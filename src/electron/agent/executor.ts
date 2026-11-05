@@ -563,6 +563,7 @@ import {
   nextToolUseStreak as nextToolUseStreakUtil,
   recordPackagingFailureFingerprint as recordPackagingFailureFingerprintUtil,
   shouldRetryEmptyFollowUpEndTurn as shouldRetryEmptyFollowUpEndTurnUtil,
+  shouldNudgeForFullerFollowUpAnswer,
   shouldAllowBotMessagingDuringFollowUpToolLock as shouldAllowBotMessagingDuringFollowUpToolLockUtil,
   shouldForceStopAfterSkippedToolOnlyTurns as shouldForceStopAfterSkippedToolOnlyTurnsUtil,
   shouldLockFollowUpToolCalls as shouldLockFollowUpToolCallsUtil,
@@ -43004,6 +43005,7 @@ Return ONLY a JSON object:
     const toolLoopProgress = new ToolLoopProgressTracker();
     let followUpTurnLimitWarningInjected = false;
     let unexecutedActionNudgeCount = 0;
+    let completionNudgeCount = 0;
     let intentOnlyNudgeInjected = false;
     let followUpToolCallsLocked = false;
     let followUpToolLockReason:
@@ -45037,7 +45039,13 @@ Return ONLY a JSON object:
               taskIntent: `${this.task.title || ""}\n${this.task.prompt || ""}\n${message}`,
               stepDescription: message,
             });
-            if (domainCompletion.failed) {
+            if (
+              shouldNudgeForFullerFollowUpAnswer({
+                completionFailed: domainCompletion.failed,
+                nudgesSoFar: completionNudgeCount,
+              })
+            ) {
+              completionNudgeCount += 1;
               messages.push({
                 role: "user",
                 content: [

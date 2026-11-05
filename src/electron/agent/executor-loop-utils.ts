@@ -259,6 +259,20 @@ export function appendAssistantResponseToConversation(
   return emptyResponseCount + 1;
 }
 
+/**
+ * How many times one follow-up asks the model for a fuller answer after a completion check
+ * fails. A model that keeps answering briefly is not helped by more of the same request, and
+ * each one is a paid model call; after the cap its answer stands.
+ */
+export const MAX_FOLLOW_UP_COMPLETION_NUDGES = 2;
+
+export function shouldNudgeForFullerFollowUpAnswer(opts: {
+  completionFailed: boolean;
+  nudgesSoFar: number;
+}): boolean {
+  return opts.completionFailed && opts.nudgesSoFar < MAX_FOLLOW_UP_COMPLETION_NUDGES;
+}
+
 export function shouldRetryEmptyFollowUpEndTurn(opts: {
   wantsToEnd: boolean;
   hasTextInThisResponse: boolean;

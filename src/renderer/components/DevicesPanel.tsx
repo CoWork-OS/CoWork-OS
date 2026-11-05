@@ -62,6 +62,7 @@ import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
 import { hasHostMethod } from "../host/browser-capabilities";
 import { scrollBehavior } from "../utils/motion";
 import { deviceMetricLabel } from "../utils/device-metrics";
+import { remoteGatewayUrlProblem } from "../utils/remote-gateway-url";
 
 type DeviceChannel = Pick<ChannelData, "id" | "name" | "type" | "enabled" | "status">;
 interface DeviceAccount {
@@ -2070,7 +2071,8 @@ function DeviceConnectionOverlay({
           ]),
         ) as Record<string, RemoteGatewayStatus>,
       );
-      if (!selectedDeviceId && remotes[0]) {
+      // Show the first saved device by default, but not over a new device the user started.
+      if (!selectedDeviceId && !isCreatingNewDevice && remotes[0]) {
         populateForm(remotes[0]);
       }
     } catch (error) {
@@ -2078,7 +2080,7 @@ function DeviceConnectionOverlay({
     } finally {
       setLoadingConfig(false);
     }
-  }, [populateForm, selectedDeviceId]);
+  }, [isCreatingNewDevice, populateForm, selectedDeviceId]);
 
   useEffect(() => {
     void loadRemoteDevices();
@@ -2123,6 +2125,11 @@ function DeviceConnectionOverlay({
 
   const saveDevice = useCallback(
     async (connectAfterSave: boolean) => {
+      const urlProblem = remoteGatewayUrlProblem(remoteUrl);
+      if (urlProblem) {
+        setTestResult({ success: false, message: urlProblem });
+        return;
+      }
       setSaving(true);
       setTestResult(null);
       try {
@@ -2145,6 +2152,10 @@ function DeviceConnectionOverlay({
           activeRemoteDeviceId: nextId,
           remote: nextDevice.config,
         });
+        // The device is saved now: if connecting fails, a retry updates it instead of adding
+        // another copy. Selecting it also reloads the saved list.
+        setSelectedDeviceId(nextId);
+        setIsCreatingNewDevice(false);
 
         if (connectAfterSave) {
           const result = await window.electronAPI?.connectDevice?.(nextId);
@@ -2170,7 +2181,7 @@ function DeviceConnectionOverlay({
         setSaving(false);
       }
     },
-    [buildManagedDevice, loadRemoteDevices, onClose, onRefresh, selectedDeviceId],
+    [buildManagedDevice, loadRemoteDevices, onClose, onRefresh, remoteUrl, selectedDeviceId],
   );
 
   const handleTestConnection = async () => {

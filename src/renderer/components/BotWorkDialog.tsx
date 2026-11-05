@@ -336,7 +336,15 @@ export function BotWorkDialog({
       ref={dialogRef}
       className="bot-work-dialog"
       aria-labelledby="bot-work-title"
-      onCancel={onClose}
+      onCancel={(event) => {
+        // Escape closes the innermost layer: an open actions menu first, then the dialog.
+        if (menuOpen) {
+          event.preventDefault();
+          setMenuOpen(false);
+          return;
+        }
+        onClose();
+      }}
     >
       <header className="bot-work-header">
         <div className="bot-work-identity">

@@ -77,6 +77,7 @@ import {
   measureEmailContentWidth,
 } from "../utils/email-html-layout";
 import { normalizeEmailExternalWebUrl, sanitizeEmailHtml } from "../utils/email-html-sanitize";
+import { ipcErrorMessage } from "../utils/ipc-error-message";
 import "./inbox-agent.css";
 
 type QueueMode = "cleanup" | "follow_up" | null;
@@ -3839,7 +3840,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           {error && (
             <div className="ibx-notice ibx-notice--danger" role="alert">
               <AlertCircle size={14} />
-              <div className="ibx-notice-body">{error}</div>
+              <div className="ibx-notice-body">{ipcErrorMessage(error)}</div>
               <IconBtn onClick={() => setError(null)} icon={<X size={13} />} title="Dismiss" />
             </div>
           )}

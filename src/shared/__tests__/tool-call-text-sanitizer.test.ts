@@ -57,6 +57,48 @@ describe("sanitizeToolCallTextFromAssistant", () => {
     expect(result.hadToolCallText).toBe(true);
   });
 
+  it("keeps code indentation, nested lists and aligned spaces in a plain answer", () => {
+    const answer = [
+      "1. Second item",
+      "   - nested bullet",
+      "Line with a hard break  ",
+      "next line",
+      "",
+      "```python",
+      "def my_func(a_b):",
+      "    return a_b * 2",
+      "",
+      "",
+      "",
+      "print(my_func(2))",
+      "```",
+      "Inner    gap",
+    ].join("\n");
+
+    const result = sanitizeToolCallTextFromAssistant(answer);
+
+    expect(result.text).toBe(answer);
+    expect(result.hadToolCallText).toBe(false);
+  });
+
+  it("closes the gaps left by removed markup without touching code or indentation", () => {
+    const result = sanitizeToolCallTextFromAssistant(
+      [
+        'Checking  <tool_call><tool_name>run_command</tool_name><parameters>{"command":"pwd"}</parameters></tool_call>  the folder.',
+        "   - nested bullet",
+        "```",
+        "if x:",
+        "    y = 1",
+        "```",
+      ].join("\n"),
+    );
+
+    expect(result.text).toBe(
+      ["Checking the folder.", "   - nested bullet", "```", "if x:", "    y = 1", "```"].join("\n"),
+    );
+    expect(result.hadToolCallText).toBe(true);
+  });
+
   it("keeps normal prose that merely mentions commands", () => {
     const result = sanitizeToolCallTextFromAssistant(
       "I ran git status locally and the working tree is clean.",

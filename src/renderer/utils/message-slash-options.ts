@@ -8,6 +8,11 @@ import { ONBOARDING_COMMAND_OPTIONS } from "../../shared/onboarding";
 
 export const MESSAGE_SHORTCUTS_UPDATED_EVENT = "cowork:message-shortcuts-updated";
 
+/** Tells open composers to reload their "/" commands after skills or packs change. */
+export function announceMessageShortcutsChanged(): void {
+  window.dispatchEvent(new Event(MESSAGE_SHORTCUTS_UPDATED_EVENT));
+}
+
 export type PluginSlashCommandAlias = {
   name: string;
   description?: string;

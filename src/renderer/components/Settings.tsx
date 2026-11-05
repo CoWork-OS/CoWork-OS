@@ -948,6 +948,20 @@ const sidebarItems: SidebarItem[] = [
   },
 ];
 
+/**
+ * The sidebar prints each group's header once, so every item has to sit with the rest of
+ * its group. Groups keep the order they first appear in; items keep their order inside one.
+ */
+export function groupSettingsSidebarItems<T extends { group: string }>(items: readonly T[]): T[] {
+  const groupOrder = new Map<string, number>();
+  for (const item of items) {
+    if (!groupOrder.has(item.group)) groupOrder.set(item.group, groupOrder.size);
+  }
+  return [...items].sort((a, b) => (groupOrder.get(a.group) ?? 0) - (groupOrder.get(b.group) ?? 0));
+}
+
+export const settingsSidebarItems: readonly SidebarItem[] = groupSettingsSidebarItems(sidebarItems);
+
 // Secondary channel configuration for "More Channels" tab
 const S = { size: 16, strokeWidth: 1.5 } as const;
 
@@ -1326,7 +1340,7 @@ const SettingsSidebar = memo(function SettingsSidebar({
   const hasSidebarSearch = sidebarSearch.trim().length > 0;
 
   const filteredSidebarItems = useMemo(() => {
-    return sidebarItems
+    return settingsSidebarItems
       .filter((item) => !item.macOnly || isMacPlatform)
       .map((item) => {
         const entries: SidebarSearchEntry[] = [

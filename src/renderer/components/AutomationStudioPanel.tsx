@@ -547,8 +547,8 @@ export default function AutomationStudioPanel({
     return Array.from(scopes).sort();
   }, [capabilities, workflow.nodes]);
   const availableVariables = useMemo(
-    () => buildVariableOptions(workflow, capabilities),
-    [workflow, capabilities],
+    () => buildVariableOptions(workflow, capabilities, selectedNodeId),
+    [workflow, capabilities, selectedNodeId],
   );
 
   // Unsaved changes: the flow differs from how it was last loaded or saved. Leaving
@@ -1906,11 +1906,11 @@ export default function AutomationStudioPanel({
                   <div>
                     {availableVariables.map((variable) => (
                       <button
-                        key={variable}
+                        key={variable.path}
                         disabled={!inspectorField}
-                        onClick={() => insertVariable(variable)}
+                        onClick={() => insertVariable(variable.path)}
                       >
-                        {variable}
+                        {variable.label}
                       </button>
                     ))}
                   </div>
@@ -2555,20 +2555,51 @@ function flattenNodes(nodes: RoutineWorkflowNode[]): RoutineWorkflowNode[] {
   return nodes.flatMap((node) => [node, ...flattenNodes(node.children || [])]);
 }
 
-function buildVariableOptions(
+export type WorkflowVariableOption = { path: string; label: string };
+
+/**
+ * The values a step can read: the starter's fields and the outputs of the steps that run
+ * before it. A step's own outputs and those of later or parallel steps do not exist yet
+ * when it runs. Paths reference steps by id, so labels use the step's name instead.
+ */
+export function buildVariableOptions(
   workflow: RoutineWorkflowDefinition,
   capabilities: WorkflowCapabilities | null,
-): string[] {
-  const values = new Set<string>();
+  selectedNodeId: string | null,
+): WorkflowVariableOption[] {
+  const options = new Map<string, WorkflowVariableOption>();
   const starter = workflow.nodes.find((node) => node.id === workflow.starterNodeId);
   for (const field of STARTER_OUTPUT_HINTS[starter?.operation || "starter.manual"] || [])
-    values.add(`trigger.${field}`);
+    options.set(`trigger.${field}`, { path: `trigger.${field}`, label: `trigger.${field}` });
+  const upstream = upstreamNodeIds(workflow, selectedNodeId);
   for (const node of orderWorkflowNodes(workflow)) {
-    if (node.id === workflow.starterNodeId) continue;
+    if (node.id === workflow.starterNodeId || !upstream.has(node.id)) continue;
     const operation = capabilities?.operations.find((candidate) => candidate.id === node.operation);
-    operation?.outputFields.forEach((field) => values.add(`${node.id}.${field}`));
+    const name = node.name.trim() || operation?.name || node.id;
+    operation?.outputFields.forEach((field) =>
+      options.set(`${node.id}.${field}`, {
+        path: `${node.id}.${field}`,
+        label: `${name}.${field}`,
+      }),
+    );
   }
-  return Array.from(values);
+  return Array.from(options.values());
+}
+
+/** Ids of the steps with a path to the given step. */
+function upstreamNodeIds(workflow: RoutineWorkflowDefinition, nodeId: string | null): Set<string> {
+  const upstream = new Set<string>();
+  const queue = nodeId ? [nodeId] : [];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const edge of workflow.edges) {
+      if (edge.targetNodeId !== id || upstream.has(edge.sourceNodeId)) continue;
+      upstream.add(edge.sourceNodeId);
+      queue.push(edge.sourceNodeId);
+    }
+  }
+  upstream.delete(nodeId ?? "");
+  return upstream;
 }
 
 function parseFieldValue(

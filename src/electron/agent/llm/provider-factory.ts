@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { normalizeResponseToolMetadata } from "./response-tool-metadata";
@@ -2342,6 +2343,22 @@ export class LLMProviderFactory {
    * Environment variables are no longer used for security reasons.
    */
   static createProvider(overrideConfig?: Partial<LLMProviderConfig>): LLMProvider {
+    return this.createProviderFromConfig(this.resolveProviderConfig(overrideConfig));
+  }
+
+  /**
+   * A digest of the saved settings a provider for this type and model is built from: keys,
+   * endpoints and options. It changes when the user edits that provider's connection, so a
+   * running session can tell its provider is out of date.
+   */
+  static providerConnectionKey(type: LLMProviderType, model: string): string {
+    const config = this.resolveProviderConfig({ type, model });
+    return createHash("sha256").update(JSON.stringify(config)).digest("hex");
+  }
+
+  private static resolveProviderConfig(
+    overrideConfig?: Partial<LLMProviderConfig>,
+  ): LLMProviderConfig {
     const settings = this.loadSettings();
     const providerType = overrideConfig?.type || settings.providerType;
     const customConfig = getCustomProviderConfig(settings.customProviders, providerType);
@@ -2497,7 +2514,7 @@ export class LLMProviderFactory {
       providerBaseUrl: overrideConfig?.providerBaseUrl || customConfig?.baseUrl,
     };
 
-    return this.createProviderFromConfig(config);
+    return config;
   }
 
   /**

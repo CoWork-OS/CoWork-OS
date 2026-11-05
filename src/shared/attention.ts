@@ -178,6 +178,8 @@ export function classifyTaskActivity(task: Task): TaskActivity | null {
   }
   if (status === "planning") return { category: "running", label: "Planning" };
   if (status === "executing") return { category: "running", label: "Running" };
+  // A fork stays pending until its first message: it waits on the user, not in a queue.
+  if (status === "pending" && task.branchFromTaskId) return null;
   if (status === "pending" || status === "queued") return { category: null, label: "Queued" };
   return null;
 }

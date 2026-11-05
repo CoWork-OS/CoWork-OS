@@ -959,8 +959,11 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       onCursorChange(getSelectionIndex(root, mentionsById));
     };
 
-    const handleKeyUp = () => {
+    const handleKeyUp = (event: ReactKeyboardEvent<HTMLDivElement>) => {
       pendingKeyboardEchoRef.current = null;
+      // Escape closes the "/" or "@" menu without moving the caret. Reporting its release as a
+      // caret move would reopen the menu it just closed.
+      if (event.key === "Escape") return;
       handleCursorChange();
     };
 

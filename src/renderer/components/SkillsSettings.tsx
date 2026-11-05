@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { FolderOpen, RefreshCw, Plus } from "lucide-react";
 import { CustomSkill, SkillParameter } from "../../shared/types";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { announceMessageShortcutsChanged } from "../utils/message-slash-options";
 
 interface SkillsSettingsProps {
   onSkillSelect?: (skill: CustomSkill) => void;
@@ -43,6 +44,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
     try {
       const reloadedSkills = await window.electronAPI.reloadCustomSkills();
       setSkills(reloadedSkills);
+      announceMessageShortcutsChanged();
       setError(null);
     } catch {
       setError("Failed to reload skills");
@@ -96,6 +98,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
     try {
       await window.electronAPI.deleteCustomSkill(id);
       setSkills((prev) => prev.filter((s) => s.id !== id));
+      announceMessageShortcutsChanged();
     } catch {
       setError("Failed to delete skill");
     }
@@ -131,6 +134,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
         const updated = await window.electronAPI.updateCustomSkill(editingSkill.id, editingSkill);
         setSkills((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
       }
+      announceMessageShortcutsChanged();
       setEditingSkill(null);
       setIsCreating(false);
       setError(null);
@@ -298,6 +302,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                                   setSkills((prev) =>
                                     prev.map((s) => (s.id === updated.id ? updated : s)),
                                   );
+                                  announceMessageShortcutsChanged();
                                 } catch (err) {
                                   console.error("Failed to toggle skill:", err);
                                 }

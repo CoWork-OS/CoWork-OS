@@ -1264,9 +1264,11 @@ export class CustomSkillLoader {
       fs.mkdirSync(this.workspaceSkillsDir, { recursive: true });
     }
 
-    const filePath = path.join(this.workspaceSkillsDir, `${skill.id}.json`);
+    const id = this.resolveNewSkillId(skill, this.workspaceSkillsDir);
+    const filePath = path.join(this.workspaceSkillsDir, `${id}.json`);
     const fullSkill: CustomSkill = {
       ...skill,
+      id,
       source: "workspace",
       filePath,
     };
@@ -1277,6 +1279,27 @@ export class CustomSkillLoader {
     await this.reloadSkills();
 
     return fullSkill;
+  }
+
+  /**
+   * The id a new skill is saved under, which is also its file name. The Settings form sends no
+   * id, so one comes from the name without reusing an existing skill's id. A given id must be
+   * a plain file name: it cannot reach outside the skills folder.
+   */
+  private resolveNewSkillId(skill: { id?: string; name?: string }, dir: string): string {
+    const requested = typeof skill.id === "string" ? skill.id.trim() : "";
+    if (requested) {
+      if (!SAFE_SKILL_ID.test(requested) || requested.includes("..")) {
+        throw new Error("A skill id may use only letters, numbers, dots, dashes and underscores.");
+      }
+      return requested;
+    }
+    const base = skillIdFromName(String(skill.name || ""));
+    let id = base;
+    for (let n = 2; this.getSkill(id) || fs.existsSync(path.join(dir, `${id}.json`)); n += 1) {
+      id = `${base}-${n}`;
+    }
+    return id;
   }
 
   /**
@@ -1381,9 +1404,11 @@ export class CustomSkillLoader {
   async createSkill(skill: Omit<CustomSkill, "filePath" | "source">): Promise<CustomSkill> {
     // For backward compatibility, if no workspace is set, create in managed dir
     if (!this.workspaceSkillsDir) {
-      const filePath = path.join(this.managedSkillsDir, `${skill.id}.json`);
+      const id = this.resolveNewSkillId(skill, this.managedSkillsDir);
+      const filePath = path.join(this.managedSkillsDir, `${id}.json`);
       const fullSkill: CustomSkill = {
         ...skill,
+        id,
         source: "managed",
         filePath,
       };
@@ -1410,6 +1435,22 @@ export class CustomSkillLoader {
     }
     return false;
   }
+}
+
+/** A skill id that works as a file name in a skills folder. */
+const SAFE_SKILL_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/i;
+
+/** The lowercase, dashed form of a skill name, used as the id of a new skill that has none. */
+export function skillIdFromName(name: string): string {
+  const slug = String(name || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+  return slug || "skill";
 }
 
 // Singleton instance

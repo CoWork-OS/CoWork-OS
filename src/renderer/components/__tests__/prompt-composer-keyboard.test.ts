@@ -25,7 +25,10 @@ vi.mock("react", async (importOriginal) => ({
 }));
 
 type ComposerProps = ComponentProps<typeof PromptComposerInput>;
-type EditorElement = ReactElement<{ onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void }>;
+type EditorElement = ReactElement<{
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  onKeyUp: (event: KeyboardEvent<HTMLDivElement>) => void;
+}>;
 
 function renderKeyboardHandler(value: string, cursor = value.length) {
   hooks.refIndex = 0;
@@ -49,6 +52,7 @@ function renderKeyboardHandler(value: string, cursor = value.length) {
     if (event.key === "Enter") send();
   });
   const onChange = vi.fn();
+  const onCursorChange = vi.fn();
   const props: ComposerProps = {
     value,
     mentions: [],
@@ -57,13 +61,20 @@ function renderKeyboardHandler(value: string, cursor = value.length) {
     onChange,
     onKeyDown,
     onPaste: vi.fn(),
-    onCursorChange: vi.fn(),
+    onCursorChange,
   };
   const component = PromptComposerInput as unknown as {
     render: (props: ComposerProps, ref: null) => EditorElement;
   };
   const element = component.render(props, null);
-  return { handleKeyDown: element.props.onKeyDown, onKeyDown, onChange, send };
+  return {
+    handleKeyDown: element.props.onKeyDown,
+    handleKeyUp: element.props.onKeyUp,
+    onKeyDown,
+    onChange,
+    onCursorChange,
+    send,
+  };
 }
 
 function keyEvent(
@@ -95,6 +106,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("composer keyboard callbacks", () => {
+  it("does not report a caret move when Escape is released, so a closed menu stays closed", () => {
+    const composer = renderKeyboardHandler("/cost");
+
+    composer.handleKeyUp(keyEvent("Escape"));
+    expect(composer.onCursorChange).not.toHaveBeenCalled();
+
+    composer.handleKeyUp(keyEvent("ArrowLeft"));
+    expect(composer.onCursorChange).toHaveBeenCalledWith(5);
+  });
+
   it.each(["Enter", "Tab"])("keeps composing %s away from parent shortcuts", (key) => {
     const composer = renderKeyboardHandler("正在输入");
     const event = keyEvent(key, {

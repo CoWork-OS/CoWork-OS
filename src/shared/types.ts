@@ -4382,6 +4382,7 @@ export interface SessionProgressState {
   taskId: string;
   status: TaskStatus;
   phase:
+    | "ready"
     | "queued"
     | "planning"
     | "executing"

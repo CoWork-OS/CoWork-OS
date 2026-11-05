@@ -169,6 +169,28 @@ describeWithSqlite("SessionProgressService", () => {
     expect(results[0].progress.pendingInputRequests[0]?.id).toBe(state.pendingInputRequests[0]?.id);
   });
 
+  it("shows a fork waiting for its first message as ready, not queued", () => {
+    const source = createTask("Plan the launch");
+    taskRepo.update(source.id, { status: "completed" });
+    const fork = createTask("Plan the launch (fork)");
+    taskRepo.update(fork.id, { status: "pending" });
+    // Copied history ends mid-run in the source session.
+    addEvent(fork.id, "event-4", "step_started", {
+      step: { id: "deliver", description: "DELIVER" },
+    });
+
+    // Stored before the task became a fork: a plain pending task is queued.
+    expect(service.get(fork.id)?.phase).toBe("queued");
+
+    taskRepo.update(fork.id, { branchFromTaskId: source.id });
+    const state = service.get(fork.id)!;
+    expect(state.phase).toBe("ready");
+    expect(state.headline).toBe("Ready for your next message");
+
+    taskRepo.update(fork.id, { status: "executing" });
+    expect(service.get(fork.id)?.phase).toBe("executing");
+  });
+
   it("marks interrupted sessions stale and exposes a safe resume checkpoint", () => {
     const task = createTask("Recover interrupted work");
     addEvent(task.id, "event-3", "conversation_snapshot", { summary: "checkpoint" });

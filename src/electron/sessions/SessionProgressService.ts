@@ -11,7 +11,7 @@ import {
   Task,
   TaskEvent,
 } from "../../shared/types";
-import { isTerminalTaskStatus } from "../../shared/task-status";
+import { isIdleFork, isTerminalTaskStatus } from "../../shared/task-status";
 import {
   ApprovalStore,
   ArtifactStore,
@@ -22,6 +22,7 @@ import {
 
 const MAX_HEADLINE_LENGTH = 240;
 const MAX_WAITING_REASON_LENGTH = 300;
+const IDLE_FORK_HEADLINE = "Ready for your next message";
 const STRUCTURAL_EVENT_TYPES = new Set([
   "task_created",
   "task_completed",
@@ -205,7 +206,14 @@ export class SessionProgressService {
     if (row?.state_json) {
       try {
         const state = JSON.parse(row.state_json) as SessionProgressState;
-        if (state?.schemaVersion === 1 && state.taskId === taskId && state.status === task.status) {
+        // Forks saved before the "ready" phase existed were stored as "queued"; rebuild those.
+        const staleIdleFork = isIdleFork(task) && state?.phase !== "ready";
+        if (
+          state?.schemaVersion === 1 &&
+          state.taskId === taskId &&
+          state.status === task.status &&
+          !staleIdleFork
+        ) {
           return state;
         }
       } catch {
@@ -333,8 +341,14 @@ export class SessionProgressService {
     const latestSnapshot = this.eventRepo.findLatestConversationSnapshot(task.id);
     const lastEventId = latestEvent?.eventId || latestEvent?.id;
 
-    const statusPhase: SessionProgressState["phase"] =
-      task.status === "interrupted" ? "stale" : task.status === "pending" ? "queued" : task.status;
+    const idleFork = isIdleFork(task);
+    const statusPhase: SessionProgressState["phase"] = idleFork
+      ? "ready"
+      : task.status === "interrupted"
+        ? "stale"
+        : task.status === "pending"
+          ? "queued"
+          : task.status;
     const phase = waiting
       ? waiting.kind === "reconnect"
         ? "stale"
@@ -350,7 +364,10 @@ export class SessionProgressService {
       taskId: task.id,
       status: task.status,
       phase,
-      headline: boundedText(waiting?.reason || headline) || defaultHeadline(task),
+      // A new fork's copied events can end mid-run in the source session ("Starting DELIVER").
+      headline:
+        boundedText(waiting?.reason || (idleFork ? IDLE_FORK_HEADLINE : headline)) ||
+        defaultHeadline(task),
       ...(currentStep ? { currentStep } : {}),
       completedSteps,
       totalSteps: steps.length,

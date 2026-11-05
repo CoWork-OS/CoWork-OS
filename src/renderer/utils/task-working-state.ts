@@ -1,3 +1,4 @@
+import { isIdleFork } from "../../shared/task-status";
 import type { EventType, Task, TaskEvent } from "../../shared/types";
 import { getEffectiveTaskEventType } from "./task-event-compat";
 
@@ -112,7 +113,7 @@ export function isTaskActivelyWorking(
 ): boolean {
   if (!task) return false;
 
-  if (task.status === "pending" && task.branchFromTaskId) {
+  if (isIdleFork(task)) {
     return false;
   }
 

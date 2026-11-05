@@ -11,6 +11,14 @@ export function isTerminalTaskStatus(status: TaskStatus | undefined): boolean {
   return typeof status === "string" && TERMINAL_TASK_STATUSES.has(status);
 }
 
+/**
+ * A fork is created pending, and a follow-up without tool calls hands that status back when it
+ * finishes. A pending fork waits on the user, not in a queue.
+ */
+export function isIdleFork(task: Pick<Task, "status" | "branchFromTaskId">): boolean {
+  return task.status === "pending" && Boolean(task.branchFromTaskId);
+}
+
 export function deriveCanonicalTaskStatus(
   task: Pick<Task, "status" | "completedAt" | "terminalStatus">,
 ): TaskStatus {

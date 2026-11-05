@@ -19,6 +19,7 @@ function statusLabel(progress: SessionProgressState): string {
   if (progress.phase === "stale") return "Stale session";
   if (progress.phase === "paused") return "Paused";
   if (progress.phase === "blocked") return "Blocked";
+  if (progress.phase === "ready") return "Ready";
   return progress.phase === "queued" ? "Queued" : "In progress";
 }
 

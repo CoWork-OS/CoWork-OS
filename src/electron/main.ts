@@ -2792,6 +2792,7 @@ if (isMacSafeStorageMigrationWorker) {
             memoryRepoWorkspaces ? ((await memoryRepoWorkspaces.findById(id))?.name ?? null) : null,
           findTasksCreatedBetween: async (params) =>
             hostTaskRepository ? hostTaskRepository.findByCreatedAtRange(params) : [],
+          findTaskById: async (taskId) => hostTaskRepository?.findById(taskId) ?? null,
           findTaskEvents: async (taskId, types, maxEvents) =>
             hostTaskEventReplayRepository
               ? hostTaskEventReplayRepository.findByTaskIdAndTypes(taskId, types, maxEvents)

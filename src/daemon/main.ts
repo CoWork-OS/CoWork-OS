@@ -415,6 +415,7 @@ async function main(): Promise<void> {
       listWorkspacePaths: async () => (await memoryRepoWorkspaces.findAll()).map((w) => w.path),
       workspaceName: async (id) => (await memoryRepoWorkspaces.findById(id))?.name ?? null,
       findTasksCreatedBetween: (params) => memoryRepoTasks.findByCreatedAtRange(params),
+      findTaskById: async (taskId) => memoryRepoTasks.findById(taskId),
       findTaskEvents: (taskId, types, maxEvents) =>
         memoryRepoTaskEvents.findByTaskIdAndTypes(taskId, types, maxEvents),
     });

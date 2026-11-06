@@ -382,6 +382,16 @@ describe("AgentDaemon.completeTask", () => {
 
     const completion = AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done", {
       outputSummary,
+      verificationEvidenceBundle: {
+        entries: [
+          {
+            kind: "shell_command",
+            ok: true,
+            detail: "Verification passed: npm test",
+            capturedAt: 1_800_000_000_000,
+          },
+        ],
+      },
     });
     for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
     await Promise.resolve();
@@ -423,7 +433,19 @@ describe("AgentDaemon.completeTask", () => {
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "task-1",
       "task_completed",
-      expect.objectContaining({ verificationVerdict: "PASS" }),
+      expect.objectContaining({
+        verificationVerdict: "PASS",
+        memoryExecutionReceipt: {
+          version: 1,
+          checks: [
+            {
+              kind: "shell_command",
+              detail: "Verification passed: npm test",
+              capturedAt: 1_800_000_000_000,
+            },
+          ],
+        },
+      }),
     );
     (PersonalityManager.recordTaskCompleted as Any).mockClear();
   });
@@ -466,6 +488,16 @@ describe("AgentDaemon.completeTask", () => {
 
     await AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Deployed and checked.", {
       outputSummary: { created: ["a", "b", "c", "d", "e", "f"], outputCount: 6 },
+      verificationEvidenceBundle: {
+        entries: [
+          {
+            kind: "shell_command",
+            ok: true,
+            detail: "Verification passed: npm test",
+            capturedAt: 1_800_000_000_000,
+          },
+        ],
+      },
     });
 
     expect(daemonLike.runReadOnlyChildTaskAndWait).toHaveBeenCalledOnce();
@@ -479,6 +511,11 @@ describe("AgentDaemon.completeTask", () => {
         verificationReport: expect.stringContaining("timed out"),
       }),
     );
+    const completionPayload = daemonLike.logEvent.mock.calls.find(
+      (call: unknown[]) => call[1] === "task_completed",
+    )?.[2];
+    expect(completionPayload).toBeDefined();
+    expect(completionPayload).not.toHaveProperty("memoryExecutionReceipt");
     (PersonalityManager.recordTaskCompleted as Any).mockClear();
   });
 
@@ -1378,6 +1415,50 @@ describe("AgentDaemon.completeTask", () => {
       verificationEvidenceBundle,
       expect.any(Array),
     );
+  });
+
+  it("records a bounded runtime receipt after completion, without learning from summary claims", async () => {
+    const daemonLike = createDaemonLike();
+    const capturedAt = Date.now();
+    await AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "Everything was deployed and verified.",
+      {
+        terminalStatus: "ok",
+        verificationEvidenceBundle: {
+          entries: [
+            {
+              kind: "http_head",
+              ok: true,
+              detail: "HTTP 200 for https://example.test/health",
+              capturedAt,
+            },
+          ],
+        },
+      },
+    );
+    const payload = daemonLike.logEvent.mock.calls.find(
+      (call: unknown[]) => call[1] === "task_completed",
+    )?.[2];
+    expect(payload?.memoryExecutionReceipt).toEqual({
+      version: 1,
+      checks: [
+        { kind: "http_head", detail: "HTTP 200 for https://example.test/health", capturedAt },
+      ],
+    });
+
+    const unsupported = createDaemonLike();
+    await AgentDaemon.prototype.completeTask.call(
+      unsupported,
+      "task-1",
+      "Everything was deployed and verified.",
+    );
+    const unsupportedPayload = unsupported.logEvent.mock.calls.find(
+      (call: unknown[]) => call[1] === "task_completed",
+    )?.[2];
+    expect(unsupportedPayload).toBeDefined();
+    expect(unsupportedPayload).not.toHaveProperty("memoryExecutionReceipt");
   });
 
   it("emits final downgraded terminal status after strict quality gate failure", () => {

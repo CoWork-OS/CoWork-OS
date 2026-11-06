@@ -21997,15 +21997,16 @@ You are continuing a previous conversation. The context from the previous conver
           })) as { success: boolean; exitCode: number | null; stdout: string; stderr: string };
         }
 
-        const ok = result.exitCode === 0;
-        const msg =
-          result.exitCode === 0
-            ? `Verification passed: ${verification.command}`
-            : `Verification failed (exit ${result.exitCode}): ${(result.stderr || result.stdout || "").slice(0, 500)}`;
+        const ok = result.success === true && result.exitCode === 0;
+        const msg = ok
+          ? `Verification passed: ${verification.command}`
+          : `Verification failed (exit ${result.exitCode}): ${(result.stderr || result.stdout || "").slice(0, 500)}`;
         this.pushVerificationEvidence({
           kind: "shell_command",
           ok,
-          detail: msg.slice(0, 1200),
+          // Preserve the complete checked command. Bounded consumers can omit an
+          // overlong observation, but must never mistake its prefix for the target.
+          detail: msg,
           capturedAt: now,
         });
         return { success: ok, message: msg };
@@ -22021,14 +22022,16 @@ You are continuing a previous conversation. The context from the previous conver
       }
     }
 
-    if (verification.type === "file_exists" && verification.filePaths) {
+    if (verification.type === "file_exists" && verification.filePaths?.length) {
       const missing = verification.filePaths.filter((p) => {
         const fullPath = path.resolve(this.workspace.path, p);
         return !this.canReadWorkspacePath(fullPath) || !fs.existsSync(fullPath);
       });
       const ok = missing.length === 0;
       const msg =
-        missing.length === 0 ? "All required files exist" : `Missing files: ${missing.join(", ")}`;
+        missing.length === 0
+          ? `All required files exist (existence only): ${verification.filePaths.map((file) => JSON.stringify(file)).join(", ")}`
+          : `Missing files: ${missing.join(", ")}`;
       this.pushVerificationEvidence({
         kind: "file_exists",
         ok,
@@ -22092,10 +22095,13 @@ You are continuing a previous conversation. The context from the previous conver
           command: `curl -sS -o /dev/null -w "%{http_code}" ${JSON.stringify(raw)}`,
         })) as { success: boolean; exitCode: number | null; stdout: string; stderr: string };
         const code = parseInt(String(result.stdout || "").trim(), 10);
-        const ok = Number.isFinite(code) && code === expected;
+        const executionSucceeded = result.success === true && result.exitCode === 0;
+        const ok = executionSucceeded && Number.isFinite(code) && code === expected;
         const msg = ok
-          ? `HTTP ${code} for ${raw.slice(0, 200)}`
-          : `Expected HTTP ${expected}, got ${Number.isFinite(code) ? code : "invalid"} for ${raw.slice(0, 200)}`;
+          ? `HTTP ${code} for ${raw}`
+          : !executionSucceeded
+            ? `HTTP verification command failed (exit ${result.exitCode ?? "unknown"}) for ${raw.slice(0, 200)}`
+            : `Expected HTTP ${expected}, got ${Number.isFinite(code) ? code : "invalid"} for ${raw.slice(0, 200)}`;
         this.pushVerificationEvidence({
           kind: "http_head",
           ok,
@@ -39314,8 +39320,8 @@ Return ONLY a JSON object:
           // The command text stays out of the reason: failure classifiers scan
           // it for words like "login" or "auth" and would treat it as a user
           // blocker. The commands go to the event log instead.
-          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map((kind) =>
-            kind === "test" ? "test" : "build/check",
+          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map(
+            (kind) => (kind === "test" ? "test" : "build/check"),
           );
           lastFailureReason =
             `run_command failed: the last ${failedKinds.join(" and ")} run did not pass, ` +

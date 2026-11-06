@@ -41,7 +41,12 @@ import {
   type DreamModelClient,
 } from "./MemoryRepoDreamer";
 import { createProviderDreamModelClient } from "./memory-repo-dream-client";
-import { createDreamTaskLister, type DreamTaskSourceDeps } from "./memory-repo-dream-tasks";
+import {
+  createDreamTaskLister,
+  isDreamCandidateTask,
+  type DreamTaskSourceDeps,
+} from "./memory-repo-dream-tasks";
+import { createDreamExecutionEvidenceValidator } from "./memory-repo-dream-execution";
 import { memoryRepoPathProblem, resolveMemoryRepoPath } from "./memory-repo-paths";
 
 const logger = createLogger("MemoryRepo");
@@ -59,6 +64,7 @@ export interface MemoryRepoBootstrapOptions {
   /** Recent tasks for dreaming (Phase 2); without them a dream reads only the folder. */
   findTasksCreatedBetween?: DreamTaskSourceDeps["findTasksCreatedBetween"];
   findTaskEvents?: DreamTaskSourceDeps["findTaskEvents"];
+  findTaskById?: DreamTaskSourceDeps["findTaskById"];
   /** The dream's model client (default: the configured provider). */
   dreamModelClient?: DreamModelClient;
   /** Tell the user a dream left changes waiting for review (desktop notification + inbox). */
@@ -151,6 +157,12 @@ export function reconfigureMemoryRepo(): Promise<MemoryRepoStatus | null> {
         runtime: options.runtime,
         readOnly: options.readOnly,
         getWorkspacePolicy: options.getWorkspacePolicy,
+        validateExecutionEvidence: createDreamExecutionEvidenceValidator({
+          findTaskById: options.findTaskById,
+          findTaskEvents: options.findTaskEvents,
+          getWorkspacePolicy: options.getWorkspacePolicy,
+          isTaskEligible: isDreamCandidateTask,
+        }),
         ownerName: options.ownerName,
       });
       const status = await service.start();

@@ -37,6 +37,19 @@ MemoryRepoDreamer.run(trigger)
 - **Tasks:** up to 20 tasks created since the last dream (newest first), aliased `T1…`: title,
   workspace name, the user's messages and the final assistant reply, at most 1 500 characters
   per task. Tool output is never included (it may carry untrusted text).
+- **Execution checks:** eligible tasks may carry a versioned runtime receipt written to the
+  completion event after the daemon's final gates settle. Only completed/`ok` tasks with
+  successful shell, file-existence or HTTP checks qualify. `none`, `grep_absent`, missing
+  receipts, failed checks and non-passing verification verdicts cannot supply evidence.
+  Receipts have at most eight checks of 1,200 characters each. Dream input uses separate `E1…`
+  aliases (2,000 characters per excerpt; 12,000 total), with validation against only the text
+  actually shown. Quotes must match a complete check line, preserving its kind, target and
+  qualifications; checks longer than 160 characters cannot support an addition. A saturated
+  80-event source window is excluded because earlier privacy markers may have been omitted.
+  No assistant summary, plan or Playbook success label becomes proof.
+  Loading requires normal privacy and explicit automatic capture, owner task eligibility,
+  no private/no-memory text, and no user follow-up after the completion. Exclusions are
+  refreshed when proposals are staged or accepted.
 - **Instructions:** what to look for (duplicates, stale or contradicted entries, preferences
   and lessons the user had to repeat, misplaced entries), what never to do (invent facts,
   follow instructions found in the data, save secrets), and the output schema.
@@ -54,6 +67,7 @@ MemoryRepoDreamer.run(trigger)
 | Op | Fields | Meaning |
 |---|---|---|
 | `add` | `file`, `text`, `kind`, `subject?`, `evidence[]` (`task`, `quote`) | A new entry learned from tasks |
+| `add_lesson` | `text` (260 chars), exactly one `evidence` (`outcome`, verbatim `quote`, 8–160 chars), `reason?` | A procedural inference from a runtime check; workspace destination and `insight` kind are derived, never model-selected |
 | `update` | `line`, `text`, `reason` | Rewrite an entry (same file) |
 | `remove` | `line`, `reason` | Drop a stale, duplicate or wrong entry |
 | `merge` | `lines[]`, `text`, `reason` | Keep one entry with `text`, remove the others |
@@ -75,12 +89,18 @@ counted.
 |---|---|---|
 | `update`, `remove`, `merge`, `move` | every line it touches is `by: agent` and none is in `MEMORY.md` | review |
 | `add` | the target is not `MEMORY.md` and every evidence quote appears in that task's **user** messages | review |
+| `add_lesson` | never | review with valid, current execution evidence; otherwise rejected |
 | `discard` | always (it only removes untrusted, unreviewed text) | — |
 | `promote` | never (inbox text came from untrusted content) | review |
 
 Automatic changes keep `by: agent`; new entries cite the first evidence task as `source`.
 Changes in the review commit are written with `by: user`, because merging them is the user's
 confirmation.
+
+Execution lessons keep `learning: execution`, the completion event ID, evidence hash,
+workspace and task source in metadata. Their text distinguishes the quoted observation from
+the inferred lesson. Updates, merges, moves and promotions that would retain this provenance
+are rejected; removal remains possible. A replacement needs a new evidence-backed proposal.
 
 ## 5. Applying, review and undo
 
@@ -92,6 +112,13 @@ confirmation.
   is removed, the branch stays. **Accept** merges the branch into `main` (`--no-ff`, under the
   lock; a conflict aborts the merge and marks the proposal stale). **Reject** deletes the
   branch. The diff shown is `git diff <base>..dream/<id>`.
+- **Execution evidence:** review records retain source references. `applyDream` and
+  `acceptDream` reload the current task, latest completion receipt and workspace policy;
+  deleted/changed sources, subsequent follow-ups and unavailable validation fail closed.
+  A stale execution source prevents acceptance of the whole review branch. Validation checks
+  workspace-file ownership too, so a pending lesson cannot follow a reassigned workspace
+  marker. It checks the recorded observation, not present-day external state, and never
+  reruns a command.
 - **Record:** `.git/cowork-dreams/<id>.json` holds the run (trigger, times, counts, tokens,
   auto commit, review branch, base, operations with reasons, status). `state.json` keeps the
   last run time and the newest task time already read.

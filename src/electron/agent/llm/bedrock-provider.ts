@@ -7,6 +7,7 @@ import type {
   ToolInputSchema,
   StopReason,
 } from "@aws-sdk/client-bedrock-runtime";
+import type { LLMReasoningItem } from "./types";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -24,6 +25,15 @@ import {
   resolvePromptCacheProviderFamily,
 } from "./prompt-cache";
 import { lazyClient, loadAwsIniCredentialProvider, loadBedrockRuntimeSdk } from "./sdk-loaders";
+import {
+  ANTHROPIC_REASONING_FORMAT,
+  planAnthropicThinking,
+  anthropicThinkingPrefixSeed,
+  applyAnthropicThinkingReplay,
+  anthropicContentHash,
+  type AnthropicReasoningData,
+  type AnthropicThinkingPlan,
+} from "./anthropic-thinking";
 
 type BedrockRuntimeSdk = Awaited<ReturnType<typeof loadBedrockRuntimeSdk>>;
 
@@ -31,6 +41,42 @@ type BedrockRuntimeSdk = Awaited<ReturnType<typeof loadBedrockRuntimeSdk>>;
  * AWS Bedrock provider implementation
  * Uses the Converse API for AI models
  */
+/**
+ * Map a Converse output block carrying reasoning to the Anthropic thinking
+ * block form the replay logic works with: `reasoningContent.reasoningText`
+ * with a signature, or `redactedContent`. Anything else returns null.
+ */
+function bedrockThinkingBlock(
+  block: Any,
+): { type: "thinking"; thinking: string; signature: string } | { type: "redacted_thinking"; data: string } | null {
+  const reasoningText = block?.reasoningContent?.reasoningText;
+  if (typeof reasoningText === "string") {
+    return {
+      type: "thinking",
+      thinking: reasoningText,
+      signature: typeof block.reasoningContent.signature === "string" ? block.reasoningContent.signature : "",
+    };
+  }
+  const redacted = block?.reasoningContent?.redactedContent;
+  if (typeof redacted === "string" && redacted.length > 0) {
+    return { type: "redacted_thinking", data: redacted };
+  }
+  return null;
+}
+
+/**
+ * The Claude family segment of a Bedrock model id, in the form the shared
+ * capability table keys on: "anthropic.claude-sonnet-4-6-..." →
+ * "claude-sonnet-4-6". Thinking replay and capability lookups compare against
+ * this spelling, matching what the Anthropic provider records.
+ */
+function bedrockClaudeModelFamily(modelId: string): string {
+  const segment = modelId.split("/").pop() || modelId;
+  const m = /((?:claude|anthropic\.claude)-[a-z0-9.-]+)/i.exec(segment);
+  if (!m) return segment;
+  return m[1].replace(/^anthropic\./i, "");
+}
+
 export class BedrockProvider implements LLMProvider {
   readonly type = "bedrock" as const;
   /** The SDK and client, loaded on the first request (see sdk-loaders). */
@@ -43,6 +89,10 @@ export class BedrockProvider implements LLMProvider {
   private region: string;
   private resolvedModelCache = new Map<string, string>();
   private readonly promptCacheRejectedModels = new Set<string>();
+  /** Models whose endpoint rejected thinking/effort fields (sticky per instance). */
+  private readonly thinkingConfigRejectedModels = new Set<string>();
+  /** Saved reasoning effort, from the same setting the Anthropic provider reads. */
+  private readonly reasoningEffort?: string;
   private inferenceProfileCache?: { fetchedAt: number; profiles: InferenceProfileCandidate[] };
   private static readonly CONTINUE_PLACEHOLDER_TEXT = "I understand. Let me continue.";
 
@@ -54,6 +104,7 @@ export class BedrockProvider implements LLMProvider {
 
     // Store the model for use in testConnection
     this.model = config.model || "anthropic.claude-sonnet-4-6";
+    this.reasoningEffort = config.anthropicReasoningEffort;
 
     // Use explicit credentials if provided
     const explicitCredentials =
@@ -100,15 +151,71 @@ export class BedrockProvider implements LLMProvider {
         : undefined;
 
     const resolvedModelId = await this.resolveModelId(request.model);
-    const clampedMaxTokens = this.clampToKnownOutputLimit(resolvedModelId, request.maxTokens);
+
+    // Extended thinking for Claude models on Bedrock: same option logic as the
+    // Anthropic provider, carried through Converse's
+    // additionalModelRequestFields instead of a top-level thinking parameter.
+    const isClaude = /claude/i.test(resolvedModelId);
+    const sendThinking = isClaude && !this.thinkingConfigRejectedModels.has(resolvedModelId);
+    const effort = request.reasoningEffort || this.reasoningEffort;
+    const thinkingPlan = sendThinking
+      ? planAnthropicThinking({
+          model: resolvedModelId,
+          maxTokens: request.maxTokens,
+          effort,
+        })
+      : { maxTokens: request.maxTokens };
+    // Replay works only against the resolved model's capability map, so strip
+    // the bedrock prefix the same way the capability lookup does.
+    const replayModel = bedrockClaudeModelFamily(resolvedModelId);
+    const seed = anthropicThinkingPrefixSeed(
+      request.system ? [request.system] : [],
+      request.tools,
+    );
+    // eslint-disable-next-line no-console
+    const replay = applyAnthropicThinkingReplay({
+      messages: preparedMessages,
+      converted: messages as unknown as { role: string; content: Any }[],
+      model: replayModel,
+      provider: this.type,
+      seed,
+      replay: true,
+    });
+    // The replay inserts blocks in the Anthropic Messages shape; Converse
+    // carries them as reasoningContent. Convert in place, dropping none.
+    const replayedConverse = replay.messages as unknown as Message[];
+    for (const msg of replayedConverse) {
+      if (!Array.isArray(msg.content)) continue;
+      msg.content = msg.content.map((block: Any) => {
+        if (block?.type === "thinking") {
+          return {
+            reasoningContent: {
+              reasoningText: block.thinking,
+              ...(block.signature ? { signature: block.signature } : {}),
+            },
+          };
+        }
+        if (block?.type === "redacted_thinking") {
+          return { reasoningContent: { redactedContent: block.data } };
+        }
+        return block;
+      });
+    }
+
+    const additionalModelRequestFields = this.thinkingFields(thinkingPlan);
+    const clampedMaxTokens = this.clampToKnownOutputLimit(
+      resolvedModelId,
+      thinkingPlan.maxTokens,
+    );
     const { sdk, client } = await this.getRuntime();
     const command = new sdk.ConverseCommand({
       modelId: resolvedModelId,
-      messages,
+      messages: replayedConverse,
       system,
       inferenceConfig: {
         maxTokens: clampedMaxTokens,
       },
+      ...(additionalModelRequestFields && { additionalModelRequestFields }),
       ...(toolConfig && { toolConfig }),
     });
 
@@ -124,7 +231,7 @@ export class BedrockProvider implements LLMProvider {
         // Pass abort signal to allow cancellation
         request.signal ? { abortSignal: request.signal } : undefined,
       );
-      return this.convertResponse(response, toolNameMap);
+      return this.convertResponse(response, toolNameMap, { prefixHash: replay.prefixHash, model: resolvedModelId });
     } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
@@ -134,6 +241,32 @@ export class BedrockProvider implements LLMProvider {
 
       const rawMessage = String(error?.message || "");
       const lower = rawMessage.toLowerCase();
+
+      // The endpoint may reject the thinking/effort fields (cross-region
+      // profiles, older snapshots). Retry once without them and remember the
+      // model, exactly as the Anthropic provider does (#610).
+      if (
+        additionalModelRequestFields &&
+        (lower.includes("thinking") ||
+          lower.includes("output_config") ||
+          lower.includes("additionalmodelrequestfields") ||
+          lower.includes("unexpected field") ||
+          lower.includes("validation exception"))
+      ) {
+        console.log(`${logTag} Thinking fields rejected; retrying without them`);
+        this.thinkingConfigRejectedModels.add(resolvedModelId);
+        const retryResponse = await client.send(
+          new sdk.ConverseCommand({
+            modelId: resolvedModelId,
+            messages,
+            system,
+            inferenceConfig: { maxTokens: this.clampToKnownOutputLimit(resolvedModelId, request.maxTokens) },
+            ...(toolConfig && { toolConfig }),
+          }),
+          request.signal ? { abortSignal: request.signal } : undefined,
+        );
+        return this.convertResponse(retryResponse, toolNameMap);
+      }
 
       // If Bedrock rejects the requested model for on-demand invocation, automatically
       // retry with an inference profile that the user has access to (when available).
@@ -154,7 +287,7 @@ export class BedrockProvider implements LLMProvider {
           );
           // Cache for subsequent calls in this process.
           this.resolvedModelCache.set(request.model, fallback);
-          return this.convertResponse(retryResponse, toolNameMap);
+          return this.convertResponse(retryResponse, toolNameMap, { prefixHash: replay.prefixHash, model: fallback });
         }
 
         throw new Error(
@@ -567,9 +700,15 @@ export class BedrockProvider implements LLMProvider {
 
     return {
       mergedTurns,
-      messages: merged.map((msg) => ({
+      messages: merged.map((msg, index) => ({
         role: msg.role,
         content: this.blocksToMessageContent(msg.blocks),
+        // Preserve reasoning state through the merge: assistant thinking
+        // blocks replay only when they ride the message they were produced on
+        // (#610). User messages never carry reasoning.
+        ...(("reasoning" in (messages[index] ?? {})
+          ? { reasoning: (messages[index] as LLMMessage).reasoning }
+          : {}) as Pick<LLMMessage, "reasoning">),
       })),
     };
   }
@@ -730,6 +869,26 @@ export class BedrockProvider implements LLMProvider {
     return ids;
   }
 
+  /**
+   * Converse spelling of the Anthropic thinking plan: budget mode sends
+   * { thinking: { type: "enabled", budget_tokens } } through
+   * additionalModelRequestFields; adaptive mode sends { thinking: { type:
+   * "adaptive" } } plus an effort hint. Undefined when the plan has neither,
+   * so the field is omitted entirely (non-Claude and rejected models).
+   */
+  private thinkingFields(plan: AnthropicThinkingPlan): Any | undefined {
+    const fields: Record<string, unknown> = {};
+    if (plan.thinking?.type === "enabled") {
+      fields.thinking = { type: "enabled", budget_tokens: plan.thinking.budget_tokens };
+    } else if (plan.thinking?.type === "adaptive") {
+      fields.thinking = { type: "adaptive" };
+    }
+    if (plan.outputConfig?.effort) {
+      fields.output_config = { effort: plan.outputConfig.effort };
+    }
+    return Object.keys(fields).length > 0 ? fields : undefined;
+  }
+
   private convertMessages(
     messages: LLMMessage[],
     toolNameMap?: ToolNameMap,
@@ -824,11 +983,56 @@ export class BedrockProvider implements LLMProvider {
     };
   }
 
-  private convertResponse(response: Any, toolNameMap?: ToolNameMap): LLMResponse {
+  private convertResponse(
+    response: Any,
+    toolNameMap?: ToolNameMap,
+    replayInfo?: { prefixHash: string; model: string },
+  ): LLMResponse {
     const content: LLMContent[] = [];
-
+    const reasoning: LLMReasoningItem[] = [];
+    const prefixHash = replayInfo?.prefixHash ?? "";
+    const resolvedModelId = replayInfo?.model;
     if (response.output?.message?.content) {
-      for (const block of response.output.message.content) {
+      // First pass: the visible content, hashed as a whole — the same
+      // semantics the Anthropic provider's response side uses — so a replayed
+      // block's contentHash matches what the next request hashes.
+      const rawBlocks = response.output.message.content;
+      const visibleForHash = rawBlocks
+        .filter((block: Any) => !bedrockThinkingBlock(block))
+        .map((block: Any) =>
+          block.text !== undefined
+            ? { text: block.text }
+            : block.toolUse
+              ? {
+                  toolUse: {
+                    toolUseId: block.toolUse.toolUseId,
+                    name: block.toolUse.name,
+                    input: block.toolUse.input,
+                  },
+                }
+              : {},
+        );
+      const contentHash = anthropicContentHash(visibleForHash);
+
+      for (const [blockIndex, block] of rawBlocks.entries()) {
+        // Converse surfaces Claude thinking as reasoningContent { reasoningText,
+        // signature } or redactedContent; map to the same reasoning items the
+        // Anthropic provider produces so replay and the UI treat them alike.
+        const reasoningBlock = bedrockThinkingBlock(block);
+        if (reasoningBlock) {
+          reasoning.push({
+            format: ANTHROPIC_REASONING_FORMAT,
+            model: bedrockClaudeModelFamily(resolvedModelId ?? ""),
+            data: {
+              provider: "bedrock",
+              block: reasoningBlock,
+              position: blockIndex,
+              prefixHash,
+              contentHash,
+            } satisfies AnthropicReasoningData,
+          });
+          continue;
+        }
         if (block.text) {
           content.push({
             type: "text",
@@ -857,6 +1061,7 @@ export class BedrockProvider implements LLMProvider {
     const cacheReadTokens = Number(response.usage?.cacheReadInputTokens || 0);
     return {
       content,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason: this.mapStopReason(response.stopReason),
       usage: response.usage
         ? {

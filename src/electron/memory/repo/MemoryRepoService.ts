@@ -90,9 +90,11 @@ import {
   redactRemoteUrl,
   type MemoryRepoSyncState,
 } from "./memory-repo-sync";
+import type { DreamExecutionEvidenceRef } from "./memory-repo-dream-execution";
 import {
   applyDreamOperations,
   describeDreamOperation,
+  isDreamExecutionTargetAvailable,
   type ClassifiedDreamOperation,
 } from "./memory-repo-dream-plan";
 
@@ -272,6 +274,8 @@ export interface MemoryRepoServiceDeps {
   lockTimeoutMs?: number;
   /** Tests only: accept a local path as the sync remote. */
   allowLocalRemotesForTests?: boolean;
+  /** Reload task outcomes and privacy policy before staging or accepting execution lessons. */
+  validateExecutionEvidence?: (refs: DreamExecutionEvidenceRef[]) => Promise<boolean>;
 }
 
 type ChangeListener = (change: MemoryRepoChange) => void;
@@ -1581,8 +1585,22 @@ export class MemoryRepoService {
         await this.commitHandEdits();
         const now = this.now();
         const files = await this.readAllFiles();
-        const autoOps = params.operations.filter((op) => op.decision === "auto");
-        const reviewOps = params.operations.filter((op) => op.decision === "review");
+        const operations: ClassifiedDreamOperation[] = [];
+        for (const op of params.operations) {
+          if (
+            op.op.op === "add_lesson" &&
+            op.decision !== "rejected" &&
+            !(await this.executionEvidenceIsCurrent(op.executionEvidence))
+          ) {
+            operations.push({
+              ...op,
+              decision: "rejected",
+              why: "execution evidence is unavailable or changed",
+            });
+          } else operations.push(op);
+        }
+        const autoOps = operations.filter((op) => op.decision === "auto");
+        const reviewOps = operations.filter((op) => op.decision === "review");
         const auto = applyDreamOperations({ files, operations: autoOps, by: "agent", now });
         let autoCommit: string | null = null;
         if (auto.files.size > 0) {
@@ -1640,13 +1658,12 @@ export class MemoryRepoService {
           reviewBase,
           reviewCount: review.applied.length,
           reviewStatus: reviewBranch ? "pending" : null,
-          rejected:
-            params.rejected + params.operations.filter((op) => op.decision === "rejected").length,
+          rejected: params.rejected + operations.filter((op) => op.decision === "rejected").length,
           skipped: auto.skipped.length + review.skipped.length,
           operations: [
             ...auto.applied.map((op) => describe(op, "auto")),
             ...review.applied.map((op) => describe(op, "review", op.why)),
-            ...params.operations
+            ...operations
               .filter((op) => op.decision === "rejected")
               .map((op) => describe(op, "rejected", op.why)),
             ...[...auto.skipped, ...review.skipped].map((entry) =>
@@ -1655,6 +1672,22 @@ export class MemoryRepoService {
           ],
           taskIds: params.taskIds,
           lastTaskCreatedAt: params.lastTaskCreatedAt,
+          ...(review.applied.some((op) => op.executionEvidence?.length)
+            ? {
+                executionEvidence: review.applied.flatMap((op) => op.executionEvidence ?? []),
+                executionTargets: review.applied.flatMap((op) =>
+                  op.op.op === "add_lesson" && op.targetFile && op.executionEvidence?.[0]
+                    ? [
+                        {
+                          file: op.targetFile,
+                          workspaceId: op.executionEvidence[0].workspaceId,
+                          created: !merged.has(op.targetFile),
+                        },
+                      ]
+                    : [],
+                ),
+              }
+            : {}),
         };
         await this.writeDreamRecord(record);
         return record;
@@ -1666,6 +1699,35 @@ export class MemoryRepoService {
   async recordDream(record: MemoryRepoDreamRecord): Promise<void> {
     if (!this.ready) return;
     await this.writeDreamRecord(record);
+  }
+
+  private async executionEvidenceIsCurrent(refs?: DreamExecutionEvidenceRef[]): Promise<boolean> {
+    if (!refs?.length || !this.deps.validateExecutionEvidence) return false;
+    try {
+      return (await this.deps.validateExecutionEvidence(refs)) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async executionTargetsAreCurrent(record: MemoryRepoDreamRecord): Promise<boolean> {
+    if (
+      !record.executionTargets?.length ||
+      record.executionTargets.length !== record.executionEvidence?.length
+    )
+      return false;
+    const files = await this.readAllFiles();
+    return record.executionTargets.every((target, index) => {
+      return (
+        target.workspaceId === record.executionEvidence?.[index]?.workspaceId &&
+        isDreamExecutionTargetAvailable(
+          files,
+          target.file,
+          target.workspaceId,
+          target.created === true,
+        )
+      );
+    });
   }
 
   /** Dream records, newest first. */
@@ -1742,6 +1804,19 @@ export class MemoryRepoService {
       return await this.serialized(() =>
         this.locked(async () => {
           await this.commitHandEdits();
+          if (
+            record.executionEvidence?.length &&
+            (!(await this.executionEvidenceIsCurrent(record.executionEvidence)) ||
+              !(await this.executionTargetsAreCurrent(record)))
+          ) {
+            await this.writeDreamRecord({ ...record, reviewStatus: "stale" });
+            await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+            return {
+              accepted: false,
+              error:
+                "Execution evidence or its workspace changed or is unavailable; run a new dream before accepting this lesson.",
+            };
+          }
           // A review was made against older lines: a change underneath it must conflict (stale),
           // not be unioned in as sync merges are. `.git/info/attributes` wins over .gitattributes.
           const infoAttributes = path.join(this.root, ".git", "info", "attributes");
@@ -2329,6 +2404,9 @@ export interface MemoryRepoDreamRecord {
   taskIds: string[];
   lastTaskCreatedAt: number | null;
   historyNote?: string;
+  /** Source snapshots for reviewed execution lessons; refreshed again at acceptance. */
+  executionEvidence?: DreamExecutionEvidenceRef[];
+  executionTargets?: Array<{ file: string; workspaceId: string; created: boolean }>;
 }
 
 /** Put a workspace line right under the file's first heading (or at the top). */

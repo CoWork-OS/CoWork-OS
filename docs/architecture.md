@@ -237,6 +237,15 @@ Dreaming is the background memory-curation phase inside Workflow Intelligence.
 
 It works on the memory folder (`MemoryRepoDreamer`). About once a day (Heartbeat's idle pulses offer a run; it starts when the last dream is more than 20 hours old and something new happened) or on **Dream now**, one model pass reads the folder and recent task conversations, applies safe edits to agent-written notes as one undoable commit, and leaves anything that touches the user's notes, `MEMORY.md` or the inbox on a review branch shown in **Settings > Memory > Review**. It uses the configured provider within a daily token budget (50,000 by default). The earlier rule-based curator of `memory_items` is retired. See [Dreaming](dreaming.md).
 
+Dreaming also reads bounded runtime verification receipts from eligible completed tasks.
+The daemon records these only after completion gates settle successfully; shell, file-existence
+and HTTP observations are distinct from assistant success claims and Playbook summaries.
+The `add_lesson` operation proposes a workspace-scoped procedural inference for review,
+preserving the observation and source snapshot. Task eligibility, privacy and receipt identity
+are refreshed before staging and accepting it. Existing user-fact additions still require
+user-message evidence; execution-derived lessons cannot be silently rewritten or generalized
+by later dreams.
+
 ## Memory Engine
 
 Facts about the user, workspaces and lessons live in the **memory folder** (`~/CoWork Memory`, a local git repo of markdown notes in the Agent Memory Repo format); commitments and notes about other people stay in `memory_items`. Both are written only through `MemoryWriter` (salience, redaction, policy, dedupe, supersession by subject, hot-memory invalidation). The `memories` archive keeps episodic outcomes. The legacy lanes (curated entries, user profile, relationship memory, awareness beliefs, adaptive style) were copied in once by a migration that runs at startup before anything reads memory; there are no dual writes, the old services are views of `memory_items`, a later migration copied global and workspace facts into the memory folder, and a one-time data retirement exports the old stores to an encrypted backup and drops them. Every producer (agent tools, Memory Hub, core memory candidates, imports, Chronicle) goes through the same hygiene. Recall (`MemoryRecall`) fuses facts, the archive, conversations and knowledge; four agent tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) cover it. See [Memory Engine](memory-engine.md).

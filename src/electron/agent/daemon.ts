@@ -339,6 +339,7 @@ import { permissionScopeFingerprint } from "../security/permission-utils";
 import { buildPermissionSecurityContext } from "./security/export-permission-context";
 import { evaluateNetworkPolicy } from "../security/network-policy";
 import { PlaybookService } from "../memory/PlaybookService";
+import { buildMemoryExecutionReceipt } from "../memory/repo/memory-repo-execution-receipt";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
 import { MemoryWorkspacePurgeService } from "../memory/MemoryWorkspacePurgeService";
@@ -17406,12 +17407,19 @@ export class AgentDaemon extends EventEmitter {
           : resolvedOutcome.status === "interrupted"
             ? "Task interrupted - resume available"
             : "Task is waiting for approval or further input";
+    const memoryExecutionReceipt = buildMemoryExecutionReceipt({
+      status: resolvedOutcome.status,
+      terminalStatus,
+      verificationVerdict: effectiveVerificationVerdict,
+      evidenceBundle: metadata?.verificationEvidenceBundle,
+    });
     this.logEvent(taskId, isCompletedOutcome ? "task_completed" : "task_status", {
       message: terminalStatusMessage,
       lastRunDurationMs,
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
       ...(resolvedOutcome.status !== "completed" ? { status: resolvedOutcome.status } : {}),
       terminalStatus,
+      ...(memoryExecutionReceipt ? { memoryExecutionReceipt } : {}),
       ...(failureClass ? { failureClass } : {}),
       ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
       ...(metadata?.budgetUsage ? { budgetUsage: metadata.budgetUsage } : {}),

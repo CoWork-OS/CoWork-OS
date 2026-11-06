@@ -386,7 +386,9 @@ export const EventTriggersPanel: React.FC<{
           try {
             new RegExp(condition.value, "i");
           } catch {
-            throw new Error(`"${condition.value}" is not a valid regular expression.`);
+            throw new Error(
+              `"${String(condition.value).slice(0, 80)}" is not a valid regular expression.`,
+            );
           }
         }
       }
@@ -807,6 +809,8 @@ export const EventTriggersPanel: React.FC<{
                   {conditions.length > 1 && (
                     <button
                       onClick={() => removeCondition(i)}
+                      aria-label="Remove condition"
+                      title="Remove condition"
                       style={{
                         background: "none",
                         border: "none",
@@ -1014,6 +1018,10 @@ export const EventTriggersPanel: React.FC<{
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
             <button
               onClick={() => toggleTrigger(t.id, !t.enabled)}
+              role="switch"
+              aria-checked={t.enabled}
+              aria-label={`${t.name} trigger`}
+              title={t.enabled ? "Turn off" : "Turn on"}
               style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
             >
               {t.enabled ? (
@@ -1058,6 +1066,9 @@ export const EventTriggersPanel: React.FC<{
             </div>
             <button
               onClick={() => loadHistory(t.id)}
+              aria-expanded={expandedHistory === t.id}
+              aria-label={`History for ${t.name}`}
+              title="History"
               style={{
                 background: "none",
                 border: "none",
@@ -1070,6 +1081,8 @@ export const EventTriggersPanel: React.FC<{
             </button>
             <button
               onClick={() => deleteTrigger(t.id)}
+              aria-label={`Delete ${t.name}`}
+              title="Delete"
               style={{
                 background: "none",
                 border: "none",

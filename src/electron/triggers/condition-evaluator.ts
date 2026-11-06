@@ -16,7 +16,9 @@ export function assertValidConditionPatterns(conditions: readonly TriggerConditi
     try {
       new RegExp(String(condition.value ?? ""), "i");
     } catch {
-      throw new Error(`"${condition.value}" is not a valid regular expression.`);
+      throw new Error(
+        `"${String(condition.value ?? "").slice(0, 80)}" is not a valid regular expression.`,
+      );
     }
   }
 }

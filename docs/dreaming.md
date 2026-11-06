@@ -12,13 +12,20 @@ source changes ([memory-engine.md §5c](memory-engine.md#5c-source-tied-memories
 handles up to 10 flagged entries, most recently changed first:
 
 - a pending flag counts as something new, so the daily dream runs even with no new tasks;
-- the files holding flagged entries go first, so the folder size cap never leaves them out;
+- the files holding flagged entries go first; any sources omitted by the size caps stay flagged;
 - each flagged line is marked "(source changed)", and a `<source_changes>` section gives its
   source, the day it changed and the current text (the first 1,500 characters of a file; a
   connector record has no copy, only the note that it changed; 12,000 characters in all). The
-  model updates the entry, removes it, or leaves it when the source still supports it;
-- after the dream, the entries it was shown are marked reviewed against the source's current
-  content. A link whose entry no longer exists is dropped.
+  model proposes an update/removal or leaves the entry unchanged, and gives each source a
+  `confirmed`, `contradicted`, or `insufficient_evidence` verdict;
+- a warning clears only for an unchanged entry explicitly confirmed with supporting words
+  quoted from the supplied source excerpt. The file must still match the snapshot the dream
+  read, with no newer source-change notification. Merely seeing the entry is not confirmation;
+- unavailable sources, missing verdicts, and proposed corrections (including pending or
+  rejected edits) keep the warning. Connector content is not fetched during dreaming, so
+  those warnings remain until the memory is explicitly saved again from its source;
+- when a memory has several changed sources, confirming one does not clear the others.
+  A link whose entry no longer exists is dropped on the next dream.
 
 ## What it replaced
 

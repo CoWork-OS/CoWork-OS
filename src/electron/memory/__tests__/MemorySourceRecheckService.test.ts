@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -170,11 +171,15 @@ describeWithSqlite("MemorySourceRecheckService", () => {
       file: "workspaces/acme.md",
       entryHash: "abc123",
       source: "docs/pricing.md",
+      evidenceAvailable: true,
+      observedContentHash: createHash("sha256")
+        .update(`Pro is $25 ${"x".repeat(3_000)}`)
+        .digest("hex"),
     });
     expect(pending[0].excerpt.startsWith("Pro is $25")).toBe(true);
     expect(pending[0].excerpt.length).toBeLessThanOrEqual(1_501);
 
-    await recheck.markReviewed(pending.map((entry) => entry.row));
+    await recheck.markReviewed(pending);
     expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toBeUndefined();
     expect(await recheck.pendingForDream(10)).toEqual([]);
     // Reviewed against the new content: an unrelated touch does not flag it again.
@@ -186,6 +191,154 @@ describeWithSqlite("MemorySourceRecheckService", () => {
       }),
     ).toBe(1); // the item, still saved from the old content
     expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toBeUndefined();
+  });
+
+  async function changedFile(
+    recheck: MemorySourceRecheckService,
+    file = "docs/a.md",
+    memoryRef = repoEntrySourceRef("workspaces/acme.md", "abc123"),
+  ) {
+    const absolutePath = path.join(workspace, file);
+    await fs.writeFile(absolutePath, "original");
+    await recheck.trackFile({ workspaceId: "ws-1", workspaceRoot: workspace, file, memoryRef });
+    await fs.writeFile(absolutePath, "changed");
+    const event = { workspaceId: "ws-1", relPath: file, absolutePath };
+    await recheck.onFileChanged(event);
+    return event;
+  }
+
+  it("keeps a flag when the file changes after the dream snapshot even before a notification", async () => {
+    const recheck = service();
+    const event = await changedFile(recheck);
+    const pending = await recheck.pendingForDream();
+    await fs.writeFile(event.absolutePath, "changed again while dreaming");
+
+    await recheck.markReviewed(pending);
+
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toBeDefined();
+    const remaining = await recheck.pendingForDream();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].excerpt).toBe("changed again while dreaming");
+    expect(remaining[0].row.contentHash).toBe(pending[0].row.contentHash);
+  });
+
+  it("does not clear a newer source notification from the same clock tick", async () => {
+    const recheck = service();
+    const event = await changedFile(recheck);
+    const pending = await recheck.pendingForDream();
+    // The bytes still match the evidence, but a later notification is a newer revision.
+    await recheck.onFileChanged(event);
+    const latest = await recheck.pendingForDream();
+    expect(latest[0].row.changedAt).toBeGreaterThan(pending[0].row.changedAt!);
+
+    await recheck.markReviewed(pending);
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toBeDefined();
+    expect(await recheck.pendingForDream()).toHaveLength(1);
+
+    await recheck.markReviewed(latest);
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toBeUndefined();
+    expect(await recheck.pendingForDream()).toEqual([]);
+  });
+
+  it("keeps unavailable connector and deleted-file evidence unresolved", async () => {
+    const recheck = service();
+    const event = await changedFile(recheck);
+    await fs.rm(event.absolutePath);
+    await recheck.onFileChanged(event);
+    await recheck.trackConnector({
+      resourceUri: "jira://issue/OPS-1",
+      memoryRef: repoEntrySourceRef("workspaces/acme.md", "connector"),
+    });
+    await recheck.onConnectorRecordChanged("jira://issue/OPS-1");
+    const pending = await recheck.pendingForDream();
+    expect(pending).toHaveLength(2);
+    for (const entry of pending) {
+      expect(entry.evidenceAvailable).toBe(false);
+      expect(entry.observedContentHash).toBeNull();
+    }
+
+    await recheck.markReviewed(pending);
+
+    expect(await recheck.pendingForDream()).toHaveLength(2);
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toBeDefined();
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "connector")).toBeDefined();
+  });
+
+  it("requires evidence availability and a matching snapshot hash to confirm a recheck", async () => {
+    const recheck = service();
+    await changedFile(recheck);
+    const [pending] = await recheck.pendingForDream();
+    await recheck.markReviewed([{ ...pending, evidenceAvailable: false }]);
+    await recheck.markReviewed([{ ...pending, observedContentHash: null }]);
+    await recheck.markReviewed([{ ...pending, observedContentHash: "different" }]);
+    expect(await recheck.pendingForDream()).toHaveLength(1);
+    await recheck.markReviewed([pending]);
+    expect(await recheck.pendingForDream()).toEqual([]);
+  });
+
+  it("redacts source evidence while hashing all original bytes of the same snapshot", async () => {
+    const recheck = service();
+    const event = await changedFile(recheck);
+    const source = `Plan remains Pro.\napi_key=sk-proj-abcdefghijklmnopqrstuvwxyz123456\n${"tail".repeat(2_000)}`;
+    await fs.writeFile(event.absolutePath, source);
+    await recheck.onFileChanged(event);
+
+    const [pending] = await recheck.pendingForDream();
+
+    expect(pending.evidenceAvailable).toBe(true);
+    expect(pending.excerpt).toContain("Plan remains Pro.");
+    expect(pending.excerpt).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz123456");
+    expect(pending.observedContentHash).toBe(createHash("sha256").update(source).digest("hex"));
+    expect(pending.observedContentHash).not.toBe(
+      createHash("sha256").update(pending.excerpt).digest("hex"),
+    );
+  });
+
+  it("keeps another source's flag when one source is reviewed, restored, re-saved or removed", async () => {
+    const recheck = service();
+    const ref = repoEntrySourceRef("workspaces/acme.md", "abc123");
+    await changedFile(recheck);
+    await recheck.trackConnector({ resourceUri: "jira://issue/OPS-1", memoryRef: ref });
+    await recheck.onConnectorRecordChanged("jira://issue/OPS-1");
+    const fileEvidence = (await recheck.pendingForDream()).filter(
+      (entry) => entry.row.sourceKind === "file",
+    );
+    await recheck.markReviewed(fileEvidence);
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toMatchObject({
+      sourceKind: "connector",
+    });
+
+    const event = await changedFile(recheck);
+    await fs.writeFile(event.absolutePath, "original");
+    await recheck.onFileChanged(event);
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toMatchObject({
+      sourceKind: "connector",
+    });
+
+    await changedFile(recheck);
+    await recheck.trackFile({
+      workspaceId: "ws-1",
+      workspaceRoot: workspace,
+      file: "docs/a.md",
+      memoryRef: ref,
+    });
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toMatchObject({
+      sourceKind: "connector",
+    });
+
+    await changedFile(recheck);
+    const latest = await recheck.pendingForDream();
+    await recheck.forget(
+      latest.filter((entry) => entry.row.sourceKind === "file").map((entry) => entry.row),
+    );
+    expect(recheck.flagForRepoEntry("workspaces/acme.md", "abc123")).toMatchObject({
+      sourceKind: "connector",
+    });
+    const loaded = service();
+    await loaded.load();
+    expect(loaded.flagForRepoEntry("workspaces/acme.md", "abc123")).toMatchObject({
+      sourceKind: "connector",
+    });
   });
 
   it("re-saving a memory from its source clears the flag", async () => {

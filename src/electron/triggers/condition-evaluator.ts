@@ -5,6 +5,30 @@
  */
 
 import { TriggerCondition, TriggerEvent } from "./types";
+import { findUnsafePattern, testTriggerPattern } from "./trigger-regex";
+
+/**
+ * Throws for a "matches" condition whose pattern does not compile, or that could backtrack
+ * catastrophically on crafted event text. The evaluator reads a pattern that does not compile as
+ * "no match", so saving it made a trigger that could never fire.
+ */
+export function assertValidConditionPatterns(conditions: readonly TriggerCondition[] = []): void {
+  for (const condition of conditions) {
+    if (condition?.operator !== "matches") continue;
+    const source = String(condition.value ?? "");
+    const shown = source.slice(0, 80);
+    try {
+      new RegExp(source, "i");
+    } catch {
+      throw new Error(`"${shown}" is not a valid regular expression.`);
+    }
+    if (findUnsafePattern(source)) {
+      throw new Error(
+        `"${shown}" can take too long on some messages. Simplify it, for example avoid repeats inside repeats like (a+)+.`,
+      );
+    }
+  }
+}
 
 /**
  * Evaluate all conditions against an event.
@@ -52,11 +76,7 @@ function evaluateOne(event: TriggerEvent, cond: TriggerCondition): boolean {
       return fieldVal.toLowerCase().endsWith(condVal.toLowerCase());
 
     case "matches":
-      try {
-        return new RegExp(condVal, "i").test(fieldVal);
-      } catch {
-        return false;
-      }
+      return testTriggerPattern(condVal, fieldVal);
 
     case "gt":
       return Number(fieldVal) > Number(condVal);

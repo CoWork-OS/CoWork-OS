@@ -21,7 +21,11 @@ import {
   EventTriggerServiceDeps,
   type EventTriggerRegistry,
 } from "./types";
-import { evaluateConditions, substituteEventVariables } from "./condition-evaluator";
+import {
+  assertValidConditionPatterns,
+  evaluateConditions,
+  substituteEventVariables,
+} from "./condition-evaluator";
 import { ensureResponsibilitySnapshotColumn, ensureTriggerHistoryGateColumns } from "./trigger-sql";
 import { buildTriggerOriginRefs, withOriginRefs } from "../../shared/task-origin-refs";
 import {
@@ -183,6 +187,7 @@ export class EventTriggerService implements EventTriggerRegistry {
   async addTrigger(
     input: Omit<EventTrigger, "id" | "fireCount" | "createdAt" | "updatedAt">,
   ): Promise<EventTrigger> {
+    assertValidConditionPatterns(input.conditions);
     const now = Date.now();
     const trigger: EventTrigger = {
       ...input,
@@ -199,6 +204,7 @@ export class EventTriggerService implements EventTriggerRegistry {
   async updateTrigger(id: string, updates: Partial<EventTrigger>): Promise<EventTrigger | null> {
     const existing = this.triggers.get(id);
     if (!existing) return null;
+    if (updates.conditions) assertValidConditionPatterns(updates.conditions);
     const updated: EventTrigger = {
       ...existing,
       ...updates,

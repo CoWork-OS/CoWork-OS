@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { evaluateConditions, substituteEventVariables } from "../condition-evaluator";
+import {
+  assertValidConditionPatterns,
+  evaluateConditions,
+  substituteEventVariables,
+} from "../condition-evaluator";
+import { findUnsafePattern, MATCH_TIME_LIMIT_MS, MAX_MATCH_FIELD_CHARS } from "../trigger-regex";
 import { TriggerCondition, TriggerEvent } from "../types";
 
 function makeEvent(fields: Record<string, string | number | boolean>): TriggerEvent {
@@ -76,6 +81,59 @@ describe("evaluateConditions", () => {
     ).toBe(false);
   });
 
+  it("matches is case-insensitive and reads lookbehind and named groups", () => {
+    const event = makeEvent({ text: "URGENT: ticket #4521 needs review" });
+    const matches = (value: string) =>
+      evaluateConditions(event, [{ field: "text", operator: "matches", value }]);
+    expect(matches("urgent|asap")).toBe(true);
+    expect(matches("(?<=#)\\d{4}\\b")).toBe(true);
+    expect(matches("ticket #(?<id>\\d+)")).toBe(true);
+    expect(matches("(?<!#)4521")).toBe(false);
+  });
+
+  it("a nested-quantifier pattern on crafted text finishes fast as no match", () => {
+    const crafted = makeEvent({ text: `${"a".repeat(40)}!` });
+    const started = performance.now();
+    expect(
+      evaluateConditions(crafted, [{ field: "text", operator: "matches", value: "(a+)+$" }]),
+    ).toBe(false);
+    // Unguarded, this backtracks about 2^40 times.
+    expect(performance.now() - started).toBeLessThan(MATCH_TIME_LIMIT_MS + 950);
+
+    // A timed-out check leaves nothing behind for the next one.
+    expect(
+      evaluateConditions(makeEvent({ text: "aaa" }), [
+        { field: "text", operator: "matches", value: "(a+)+$" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("stops slow patterns the save-time checker lets through", () => {
+    // Both pass safe-regex2: \d+\d+x is cubic, (a|a)*$ is exponential.
+    const cases: Array<[string, string]> = [
+      ["\\d+\\d+x", "1".repeat(5_000)],
+      ["(a|a)*$", `${"a".repeat(40)}!`],
+    ];
+    for (const [value, text] of cases) {
+      expect(findUnsafePattern(value)).toBe(false);
+      const started = performance.now();
+      expect(
+        evaluateConditions(makeEvent({ text }), [{ field: "text", operator: "matches", value }]),
+      ).toBe(false);
+      expect(performance.now() - started).toBeLessThan(MATCH_TIME_LIMIT_MS + 950);
+    }
+  });
+
+  it("matches reads only the first MAX_MATCH_FIELD_CHARS of a field", () => {
+    const filler = "x".repeat(MAX_MATCH_FIELD_CHARS - 10);
+    const matches = (text: string) =>
+      evaluateConditions(makeEvent({ text }), [
+        { field: "text", operator: "matches", value: "deploy" },
+      ]);
+    expect(matches(`${filler}deploy`)).toBe(true);
+    expect(matches(`${filler}${"y".repeat(20)}deploy`)).toBe(false);
+  });
+
   it("gt (numeric)", () => {
     const event = makeEvent({ priority: 8 });
     expect(evaluateConditions(event, [{ field: "priority", operator: "gt", value: "5" }])).toBe(
@@ -149,6 +207,51 @@ describe("evaluateConditions", () => {
     expect(
       evaluateConditions(event, [{ field: "active", operator: "equals", value: "true" }]),
     ).toBe(true);
+  });
+});
+
+describe("assertValidConditionPatterns", () => {
+  const matches = (value: string): TriggerCondition[] => [
+    { field: "text", operator: "matches", value },
+  ];
+
+  it("accepts ordinary patterns, including lookbehind and modifier groups", () => {
+    for (const value of [
+      "urgent|asap",
+      "^\\[(bug|feat)\\]",
+      "E\\d{5}",
+      "[^\\s@]+@example\\.com$",
+      "(?<=#)\\d+",
+      "(?<!re: )invoice",
+      "(?<id>[A-Z]+-\\d+)",
+      "(?i:prod)",
+    ]) {
+      expect(() => assertValidConditionPatterns(matches(value)), value).not.toThrow();
+    }
+  });
+
+  it("refuses a pattern that does not compile", () => {
+    expect(() => assertValidConditionPatterns(matches("urgent("))).toThrow(
+      '"urgent(" is not a valid regular expression.',
+    );
+  });
+
+  it("refuses patterns with repeats inside repeats", () => {
+    for (const value of ["(a+)+$", "(\\w+\\s?)+$", "(.*a){12}", "(?<=x)(a*)*b"]) {
+      expect(() => assertValidConditionPatterns(matches(value)), value).toThrow(
+        "can take too long on some messages",
+      );
+    }
+  });
+
+  it("only checks matches conditions", () => {
+    expect(() =>
+      assertValidConditionPatterns([
+        { field: "text", operator: "contains", value: "(a+)+" },
+        { field: "text", operator: "equals", value: "[" },
+      ]),
+    ).not.toThrow();
+    expect(() => assertValidConditionPatterns(undefined)).not.toThrow();
   });
 });
 

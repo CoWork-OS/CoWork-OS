@@ -964,6 +964,68 @@ describe("EventTriggerService", () => {
     expect(deps.createTask).toHaveBeenCalled();
   });
 
+  // ── Regex conditions ───────────────────────────────────────────
+
+  it("refuses a regex condition that does not compile or could hang", async () => {
+    const input = {
+      name: "Regex",
+      enabled: true,
+      source: "channel_message" as const,
+      conditions: [{ field: "text", operator: "matches" as const, value: "(a+)+$" }],
+      action: { type: "create_task" as const, config: { prompt: "x" } },
+      workspaceId: "ws-1",
+    };
+    await expect(service.addTrigger(input)).rejects.toThrow(
+      '"(a+)+$" can take too long on some messages',
+    );
+    await expect(
+      service.addTrigger({
+        ...input,
+        conditions: [{ field: "text", operator: "matches", value: "urgent(" }],
+      }),
+    ).rejects.toThrow('"urgent(" is not a valid regular expression.');
+    expect(service.listTriggers()).toHaveLength(0);
+
+    const saved = await service.addTrigger({
+      ...input,
+      conditions: [{ field: "text", operator: "matches", value: "urgent|asap" }],
+    });
+    await expect(
+      service.updateTrigger(saved.id, {
+        conditions: [{ field: "text", operator: "matches", value: "(\\w+\\s?)+$" }],
+      }),
+    ).rejects.toThrow("can take too long on some messages");
+    expect(service.listTriggers()[0].conditions[0].value).toBe("urgent|asap");
+  });
+
+  it("a crafted message cannot stall event handling on a slow regex", async () => {
+    // (a|a)*$ backtracks exponentially but passes the save-time checker, like a trigger saved
+    // before that check existed.
+    await service.addTrigger({
+      name: "Slow pattern",
+      enabled: true,
+      source: "channel_message",
+      conditions: [{ field: "text", operator: "matches", value: "(a|a)*$" }],
+      action: { type: "create_task", config: { prompt: "slow" } },
+      workspaceId: "ws-1",
+    });
+    await service.addTrigger({
+      name: "Keyword",
+      enabled: true,
+      source: "channel_message",
+      conditions: [{ field: "text", operator: "matches", value: "^a+!$" }],
+      action: { type: "create_task", config: { prompt: "keyword" } },
+      workspaceId: "ws-1",
+    });
+
+    const started = performance.now();
+    await service.evaluateEvent(makeMessageEvent(`${"a".repeat(40)}!`));
+    expect(performance.now() - started).toBeLessThan(2_000);
+
+    expect(deps.createTask).toHaveBeenCalledTimes(1);
+    expect(deps.createTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: "keyword" }));
+  });
+
   // ── Fire count ─────────────────────────────────────────────────
 
   it("increments fire count on each trigger firing", async () => {

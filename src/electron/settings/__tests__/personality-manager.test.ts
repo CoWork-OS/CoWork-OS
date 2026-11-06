@@ -430,6 +430,18 @@ describe("PersonalityManager - agent name", () => {
     });
   });
 
+  describe("saveConfigV2 agent name", () => {
+    it("saves the name the Settings form sends without surrounding spaces", () => {
+      PersonalityManager.saveConfigV2({ ...MINIMAL_V2, agentName: "  Nova  " } as never);
+      expect(mockStoredSettings?.agentName).toBe("Nova");
+      PersonalityManager.clearCache();
+      expect(PersonalityManager.getAgentName()).toBe("Nova");
+
+      PersonalityManager.saveConfigV2({ ...MINIMAL_V2, agentName: "   " } as never);
+      expect(mockStoredSettings?.agentName).toBe("CoWork");
+    });
+  });
+
   describe("setAgentName", () => {
     it("should set the agent name", () => {
       mockStoredSettings = { ...MINIMAL_V2 };

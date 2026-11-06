@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   macOSToolchainProfileRules,
+  resolveActiveDeveloperDir,
   resolveMacOSToolchainAccess,
   sanitizeNpmrc,
   stripUrlCredentials,
@@ -247,5 +248,88 @@ describe("macOS toolchain access", () => {
     expect(stripUrlCredentials("http://h:1")).toBe("http://h:1");
     expect(stripUrlCredentials("a:b@h:1")).toBeUndefined();
     expect(stripUrlCredentials("h:1")).toBe("h:1");
+  });
+});
+
+describe("developer directory access (#611)", () => {
+  let base: string;
+  let home: string;
+  let workspace: string;
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cowork-clt-")));
+    home = path.join(base, "home");
+    workspace = path.join(base, "workspace");
+    fs.mkdirSync(home, { recursive: true });
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.mkdirSync(path.join(home, "Library/Developer/Xcode/DerivedData"), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const resolve = (overrides: {
+    developerDir?: string;
+    allowWrites?: boolean;
+    env?: NodeJS.ProcessEnv;
+  }) =>
+    resolveMacOSToolchainAccess({
+      homeDir: home,
+      env: overrides.env ?? {},
+      workspacePath: workspace,
+      allowWrites: overrides.allowWrites ?? true,
+      developerDir: overrides.developerDir,
+    });
+
+  it("grants the resolved developer directory and the CLT root, never /Library as a whole", () => {
+    const clt = path.join(base, "CommandLineTools");
+    fs.mkdirSync(path.join(clt, "usr/lib"), { recursive: true });
+    const access = resolve({ developerDir: clt });
+    expect(access.readDirs).toContain(clt);
+    // The CLT default is granted only when the directory exists on this
+    // machine; never the enclosing roots.
+    if (fs.existsSync("/Library/Developer/CommandLineTools")) {
+      expect(access.readDirs).toContain("/Library/Developer/CommandLineTools");
+    }
+    for (const dir of access.readDirs) {
+      expect(dir === "/Library/Developer/CommandLineTools" || dir.startsWith(clt) || !dir.startsWith("/Library")).toBe(true);
+      expect(dir).not.toBe("/Library");
+      expect(dir).not.toBe("/Applications");
+    }
+    const rules = macOSToolchainProfileRules(access);
+    expect(rules).not.toMatch(/subpath "\/Library"/);
+    expect(rules).not.toMatch(/subpath "\/Applications"/);
+  });
+
+  it("grants Xcode build caches only when writes are allowed", () => {
+    const writable = resolve({ allowWrites: true, developerDir: undefined });
+    expect(writable.writeDirs.some((dir) => dir.endsWith("Library/Developer/Xcode/DerivedData"))).toBe(
+      fs.existsSync("/Library/Developer") || true,
+    );
+    expect(
+      writable.writeDirs.some((dir) => dir.includes("DerivedData")),
+    ).toBe(true);
+
+    const readonly = resolve({ allowWrites: false, developerDir: undefined });
+    expect(readonly.writeDirs.some((dir) => dir.includes("DerivedData"))).toBe(false);
+  });
+
+  it("resolveActiveDeveloperDir prefers DEVELOPER_DIR when it exists", () => {
+    const fake = path.join(base, "FakeXcode.app");
+    fs.mkdirSync(fake, { recursive: true });
+    expect(resolveActiveDeveloperDir({ DEVELOPER_DIR: fake } as NodeJS.ProcessEnv)).toBe(
+      path.resolve(fake),
+    );
+    // A non-directory value is ignored rather than trusted: the fallback
+    // chain continues (xcode-select -p, then the CLT default when installed).
+    const fallback = resolveActiveDeveloperDir({
+      DEVELOPER_DIR: path.join(base, "missing"),
+    } as NodeJS.ProcessEnv);
+    if (fs.existsSync("/Library/Developer/CommandLineTools")) {
+      expect(fallback).toBe("/Library/Developer/CommandLineTools");
+    } else {
+      expect(fallback).toBeUndefined();
+    }
   });
 });

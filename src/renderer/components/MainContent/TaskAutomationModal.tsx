@@ -98,6 +98,20 @@ export function TaskAutomationModal({
     [onClose, saving],
   );
 
+  // Escape steps back one level: an open menu, then the template list, then the dialog. The
+  // dialog is modal, so without this its backdrop kept the whole app blocked.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (openMenu) setOpenMenu(null);
+      else if (showTemplates) setShowTemplates(false);
+      else if (!saving) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, openMenu, saving, showTemplates]);
+
   const handleTemplateSelect = useCallback((template: TaskAutomationTemplate) => {
     setName(template.name);
     setPrompt(template.prompt);

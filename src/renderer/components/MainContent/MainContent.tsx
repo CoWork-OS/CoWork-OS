@@ -6530,6 +6530,20 @@ function MainContentComponent({
     }
   }, [task?.status]);
 
+  // A new session (sidebar New, File > New Task, the tray) opens with the cursor in the
+  // composer, so typing goes into the first message. A text field or dialog keeps its focus.
+  useEffect(() => {
+    if (task?.id) return;
+    const frame = window.requestAnimationFrame(() => {
+      const active = document.activeElement as HTMLElement | null;
+      const editing =
+        active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+      if (editing || active?.closest("[role='dialog'], dialog")) return;
+      promptInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [task?.id]);
+
   const formatTime = useCallback((timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString(undefined, {
       hour: "2-digit",

@@ -4,19 +4,23 @@ import {
   applyDreamOperations,
   buildDreamInput,
   classifyDreamOperations,
+  confirmedDreamRechecks,
   parseDreamOutput,
   type DreamOperation,
+  type DreamSourceRecheck,
 } from "../memory-repo-dream-plan";
 
 const NOW = Date.UTC(2026, 9, 5);
 
 describe("buildDreamInput source rechecks", () => {
-  const berlin = {
+  const berlin: DreamSourceRecheck = {
     file: "me.md",
     entryHash: hashMemoryItemContent("Lives in Berlin"),
     source: "docs/profile.md",
     changedAt: NOW,
     excerpt: "Moved to Lisbon.",
+    evidenceAvailable: true,
+    observedContentHash: "current-profile-hash",
   };
 
   it("marks the entry and shows its current source", () => {
@@ -27,6 +31,7 @@ describe("buildDreamInput source rechecks", () => {
       "docs/profile.md changed on 2026-10-05. Current source:\nMoved to Lisbon.",
     );
     expect(input.rechecked).toEqual([berlin]);
+    expect([...input.recheckSources!.entries()]).toEqual([["R1", berlin]]);
     expect(input.system).toContain("(source changed)");
   });
 
@@ -36,6 +41,66 @@ describe("buildDreamInput source rechecks", () => {
     const input = buildDreamInput({ files: big, tasks: [], now: NOW, rechecks: [berlin] });
     expect(input.user).not.toContain("<source_changes>");
     expect(input.rechecked).toBeUndefined();
+    expect(input.recheckSources?.size ?? 0).toBe(0);
+  });
+
+  it("assigns separate aliases to multiple sources supporting the same memory", () => {
+    const second = { ...berlin, source: "docs/contacts.md", excerpt: "Lives in Berlin." };
+    const input = buildDreamInput({
+      files: files(),
+      tasks: [],
+      now: NOW,
+      rechecks: [berlin, second],
+    });
+
+    expect(input.user).toContain("docs/profile.md");
+    expect(input.user).toContain("docs/contacts.md");
+    expect(input.rechecked).toEqual([berlin, second]);
+    expect([...input.recheckSources!.entries()]).toEqual([
+      ["R1", berlin],
+      ["R2", second],
+    ]);
+  });
+
+  it("does not alias sources omitted by the source excerpt budget", () => {
+    const rechecks = Array.from({ length: 10 }, (_, index) => ({
+      ...berlin,
+      source: `docs/source-${index}.md`,
+      excerpt: `Source ${index}: ${"evidence ".repeat(300)}`,
+    }));
+    const input = buildDreamInput({ files: files(), tasks: [], now: NOW, rechecks });
+
+    const shown = [...input.recheckSources!.values()];
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.length).toBeLessThan(rechecks.length);
+    expect(input.rechecked).toEqual(shown);
+    expect(input.user).not.toContain("docs/source-9.md");
+  });
+
+  it("does not confirm using a quote beyond the excerpt shown to the model", () => {
+    const source = { ...berlin, excerpt: `${"x".repeat(2_000)} Lives in Berlin` };
+    const input = buildDreamInput({ files: files(), tasks: [], rechecks: [source] });
+    const parsed = parseDreamOutput(
+      JSON.stringify({
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Berlin" }],
+      }),
+    );
+
+    expect(confirmedDreamRechecks(parsed, input)).toEqual([]);
+  });
+
+  it("does not confirm when an invalid operation may be an unapplied correction", () => {
+    const source = { ...berlin, excerpt: "Lives in Berlin" };
+    const input = buildDreamInput({ files: files(), tasks: [], rechecks: [source] });
+    const parsed = parseDreamOutput(
+      JSON.stringify({
+        operations: [{ op: "update", line: aliasFor(input, "Lives in Berlin"), text: "" }],
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Berlin" }],
+      }),
+    );
+
+    expect(parsed.invalid).toBe(1);
+    expect(confirmedDreamRechecks(parsed, input)).toEqual([]);
   });
 });
 
@@ -93,6 +158,24 @@ describe("dream output", () => {
     expect(parsed).toMatchObject({ summary: "tidy", invalid: 1, malformed: false });
     expect(parsed.operations).toHaveLength(1);
     expect(parseDreamOutput("no json").malformed).toBe(true);
+  });
+
+  it("keeps legacy output valid without inventing source confirmations", () => {
+    expect(parseDreamOutput('{"summary":"No changes","operations":[]}')).toMatchObject({
+      malformed: false,
+      rechecks: [],
+    });
+  });
+
+  it("parses explicit source verdicts without confusing source and memory aliases", () => {
+    const rechecks = [
+      { source: "R1", verdict: "confirmed", quote: "Lives in Berlin" },
+      { source: "R2", verdict: "contradicted", quote: "Moved to Lisbon" },
+      { source: "R3", verdict: "insufficient_evidence" },
+    ];
+    const parsed = parseDreamOutput(JSON.stringify({ operations: [], rechecks }));
+
+    expect(parsed).toMatchObject({ malformed: false, rechecks });
   });
 });
 

@@ -40,6 +40,14 @@ MemoryRepoDreamer.run(trigger)
 - **Instructions:** what to look for (duplicates, stale or contradicted entries, preferences
   and lessons the user had to repeat, misplaced entries), what never to do (invent facts,
   follow instructions found in the data, save secrets), and the output schema.
+- **Changed sources:** bounded source excerpts use separate aliases (`R1…`), including when
+  multiple sources support the same entry. Each source receives a `confirmed`, `contradicted`,
+  or `insufficient_evidence` verdict in the optional `rechecks` output array. A confirmation
+  must quote supporting words from the excerpt. Missing verdicts never clear a warning.
+  Only unchanged entries with no proposed edit can be confirmed; pending/rejected edits
+  remain flagged. The source service verifies the exact excerpt's file hash and the tracked
+  source revision before clearing. Unavailable content cannot confirm a memory, and absence
+  from a bounded excerpt cannot establish that a fact is false.
 
 ## 3. Operations
 

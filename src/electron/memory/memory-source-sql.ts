@@ -46,6 +46,12 @@ export interface TrackMemorySourceInput {
   now: number;
 }
 
+/** Revision of the source link that a recheck read, before inspecting its evidence. */
+export type MemorySourceRevision = Pick<
+  MemorySourceRow,
+  "observedAt" | "changedAt" | "contentHash"
+>;
+
 export function ensureMemorySourcesSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS memory_sources (
@@ -101,7 +107,8 @@ export class MemorySourceStore {
            workspace_id = excluded.workspace_id,
            source_path = excluded.source_path,
            content_hash = excluded.content_hash,
-           observed_at = excluded.observed_at,
+           observed_at = MAX(excluded.observed_at, memory_sources.observed_at + 1,
+             COALESCE(memory_sources.changed_at, 0) + 1),
            needs_recheck = 0,
            changed_at = NULL`,
       )
@@ -152,21 +159,30 @@ export class MemorySourceStore {
     const placeholders = ids.map(() => "?").join(", ");
     return this.db
       .prepare(
-        `UPDATE memory_sources SET needs_recheck = 1, changed_at = ?
+        `UPDATE memory_sources SET needs_recheck = 1,
+           changed_at = MAX(?, COALESCE(changed_at, observed_at) + 1)
          WHERE id IN (${placeholders})`,
       )
       .run(now, ...ids).changes;
   }
 
-  /** Reviewed against the current source: the flag clears and the current hash is kept. */
-  markReviewed(id: string, contentHash: string | null, now: number): number {
+  /** Clear only the source revision whose evidence was reviewed; newer updates stay flagged. */
+  markReviewed(
+    id: string,
+    contentHash: string | null,
+    now: number,
+    expected: MemorySourceRevision,
+  ): number {
     return this.db
       .prepare(
         `UPDATE memory_sources
-         SET needs_recheck = 0, changed_at = NULL, content_hash = ?, observed_at = ?
-         WHERE id = ?`,
+         SET needs_recheck = 0, changed_at = NULL, content_hash = ?,
+             observed_at = MAX(?, observed_at + 1, COALESCE(changed_at, 0) + 1)
+         WHERE id = ? AND needs_recheck = 1
+           AND observed_at = ? AND changed_at IS ? AND content_hash IS ?`,
       )
-      .run(contentHash, now, id).changes;
+      .run(contentHash, now, id, expected.observedAt, expected.changedAt, expected.contentHash)
+      .changes;
   }
 
   listFlagged(limit: number): MemorySourceRow[] {
@@ -223,9 +239,22 @@ export const MEMORY_SOURCE_UNITS = {
     new MemorySourceStore(db).markChanged(rowIds, now),
   ),
   memorySources_markReviewed: defineUnit(
-    tuple(id, (value: unknown, path: string) => nullableStr(value, path, 128), time),
-    (db: Database.Database, [rowId, hash, now]) =>
-      new MemorySourceStore(db).markReviewed(rowId, hash, now),
+    tuple(
+      id,
+      (value: unknown, path: string) => nullableStr(value, path, 128),
+      time,
+      (value: unknown, path: string): MemorySourceRevision => {
+        const expected = (value ?? {}) as Record<string, unknown>;
+        return {
+          observedAt: time(expected.observedAt, `${path}.observedAt`),
+          changedAt:
+            expected.changedAt === null ? null : time(expected.changedAt, `${path}.changedAt`),
+          contentHash: nullableStr(expected.contentHash, `${path}.contentHash`, 128),
+        };
+      },
+    ),
+    (db: Database.Database, [rowId, hash, now, expected]) =>
+      new MemorySourceStore(db).markReviewed(rowId, hash, now, expected),
   ),
   memorySources_listFlagged: defineReadUnit(
     tuple((value: unknown, path: string) => int(value, path, 1, 1_000)),

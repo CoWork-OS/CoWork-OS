@@ -21,6 +21,7 @@ import {
   DREAM_MAX_TASKS,
   buildDreamInput,
   classifyDreamOperations,
+  confirmedDreamRechecks,
   parseDreamOutput,
   type DreamTaskInput,
 } from "./memory-repo-dream-plan";
@@ -58,10 +59,10 @@ export interface MemoryRepoDreamerDeps {
   now?: () => number;
   /** Called after a dream that left changes waiting for review (the user is notified). */
   onReviewPending?: (record: MemoryRepoDreamRecord) => void;
-  /** Memories whose source changed (WP15): rechecked first, then marked reviewed. */
+  /** Memories whose source changed: only evidence-backed confirmations clear their flags. */
   sourceRechecks?: {
     pending: (limit: number) => Promise<MemorySourceRecheck[]>;
-    reviewed: (rows: MemorySourceRow[]) => Promise<void>;
+    reviewed: (rechecks: MemorySourceRecheck[]) => Promise<void>;
     forget: (rows: MemorySourceRow[]) => Promise<void>;
   };
 }
@@ -304,16 +305,21 @@ export class MemoryRepoDreamer {
     logger.info(
       `Dream ${id}: ${record.autoCount} applied, ${record.reviewCount} for review, ${record.rejected} rejected`,
     );
-    // The dream saw these entries next to their current source: they are rechecked.
-    const shown = new Set(
-      (input.rechecked ?? []).map((recheck) => `${recheck.file}#${recheck.entryHash}`),
-    );
-    const reviewed = rechecks.filter((recheck) =>
-      shown.has(`${recheck.file}#${recheck.entryHash}`),
+    const confirmed = new Set(confirmedDreamRechecks(parsed, input));
+    // Memory may have changed while the model ran. Confirmation applies only to the
+    // unchanged entry. Any proposed edit (including one awaiting review) stays flagged.
+    const currentFiles =
+      confirmed.size > 0 ? await service.readAllFiles() : new Map<string, string>();
+    const reviewed = rechecks.filter(
+      (recheck) =>
+        confirmed.has(recheck) &&
+        parseMemoryRepoEntries(currentFiles.get(recheck.file) ?? "").some(
+          (entry) => entry.hash === recheck.entryHash,
+        ),
     );
     if (reviewed.length > 0) {
       await this.deps.sourceRechecks
-        ?.reviewed(reviewed.map((recheck) => recheck.row))
+        ?.reviewed(reviewed)
         .catch((error) => logger.warn("Could not mark rechecked memories:", error));
     }
     if (record.reviewCount > 0 && record.reviewStatus === "pending") {

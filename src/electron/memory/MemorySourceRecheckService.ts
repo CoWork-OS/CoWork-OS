@@ -51,7 +51,15 @@ export interface MemorySourceRecheck {
   changedAt: number;
   /** The current source text (bounded), or a note when there is none. */
   excerpt: string;
+  /** True only when the excerpt and hash were read from the same stable file snapshot. */
+  evidenceAvailable: boolean;
+  observedContentHash: string | null;
 }
+
+type SourceEvidence = Pick<
+  MemorySourceRecheck,
+  "excerpt" | "evidenceAvailable" | "observedContentHash"
+>;
 
 export type MemorySourceUnitRunner = (name: string, args: unknown[]) => Promise<unknown>;
 
@@ -70,6 +78,44 @@ async function hashFile(filePath: string): Promise<string | null> {
     return hash.digest("hex");
   } catch {
     return null;
+  }
+}
+
+/** Hash the full file while retaining a bounded excerpt from that same read. */
+async function readFileEvidence(filePath: string): Promise<SourceEvidence | null> {
+  const handle = await fs.open(filePath, "r");
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile()) return null;
+    const hash = crypto.createHash("sha256");
+    const prefix: Buffer[] = [];
+    let remaining = DREAM_EXCERPT_CHARS * 4;
+    for await (const data of handle.createReadStream({ autoClose: false })) {
+      const chunk = data as Buffer;
+      hash.update(chunk);
+      if (remaining > 0) {
+        const part = chunk.subarray(0, remaining);
+        prefix.push(part);
+        remaining -= part.length;
+      }
+    }
+    const after = await handle.stat({ bigint: true });
+    if (
+      before.size !== after.size ||
+      before.mtimeNs !== after.mtimeNs ||
+      before.ctimeNs !== after.ctimeNs
+    )
+      return null;
+    const text = Buffer.concat(prefix).toString("utf8");
+    const clipped =
+      text.length > DREAM_EXCERPT_CHARS ? `${text.slice(0, DREAM_EXCERPT_CHARS)}…` : text;
+    return {
+      excerpt: redactSensitiveMarkdownContent(clipped),
+      evidenceAvailable: true,
+      observedContentHash: hash.digest("hex"),
+    };
+  } finally {
+    await handle.close();
   }
 }
 
@@ -95,7 +141,7 @@ async function resolveInWorkspace(
 
 export class MemorySourceRecheckService {
   private static instance: MemorySourceRecheckService | null = null;
-  private readonly flags = new Map<string, MemorySourceFlag>();
+  private readonly flags = new Map<string, Map<string, MemorySourceFlag>>();
   private stamp = 0;
 
   constructor(private readonly deps: MemorySourceRecheckDeps) {}
@@ -134,19 +180,27 @@ export class MemorySourceRecheckService {
   }
 
   private setFlag(row: MemorySourceRow): void {
-    this.flags.set(row.memoryRef, {
+    const sources = this.flags.get(row.memoryRef) ?? new Map<string, MemorySourceFlag>();
+    sources.set(row.id, {
       sourceKind: row.sourceKind,
       sourceKey: row.sourceKey,
       changedAt: row.changedAt ?? this.now(),
     });
+    this.flags.set(row.memoryRef, sources);
+  }
+
+  private flagForMemory(memoryRef: string): MemorySourceFlag | undefined {
+    const sources = this.flags.get(memoryRef);
+    if (!sources) return undefined;
+    return [...sources.values()].sort((a, b) => b.changedAt - a.changedAt)[0];
   }
 
   flagForRepoEntry(file: string, entryHash: string): MemorySourceFlag | undefined {
-    return this.flags.get(repoEntrySourceRef(file, entryHash));
+    return this.flagForMemory(repoEntrySourceRef(file, entryHash));
   }
 
   flagForItem(itemId: string): MemorySourceFlag | undefined {
-    return this.flags.get(itemSourceRef(itemId));
+    return this.flagForMemory(itemSourceRef(itemId));
   }
 
   /**
@@ -174,7 +228,7 @@ export class MemorySourceRecheckService {
         now: this.now(),
       },
     ])) as MemorySourceRow;
-    this.clearFlag(row.memoryRef);
+    this.clearFlag(row.memoryRef, row.id);
     return { sourceKey: resolved.key };
   }
 
@@ -191,11 +245,17 @@ export class MemorySourceRecheckService {
         now: this.now(),
       },
     ])) as MemorySourceRow;
-    this.clearFlag(row.memoryRef);
+    this.clearFlag(row.memoryRef, row.id);
   }
 
-  private clearFlag(memoryRef: string): void {
-    if (this.flags.delete(memoryRef)) this.stamp += 1;
+  private clearFlag(memoryRef: string, sourceId: string, expectedChangedAt?: number | null): void {
+    const sources = this.flags.get(memoryRef);
+    if (!sources) return;
+    const flag = sources.get(sourceId);
+    if (!flag || (expectedChangedAt !== undefined && flag.changedAt !== expectedChangedAt)) return;
+    sources.delete(sourceId);
+    if (sources.size === 0) this.flags.delete(memoryRef);
+    this.stamp += 1;
   }
 
   /**
@@ -219,11 +279,21 @@ export class MemorySourceRecheckService {
     const now = this.now();
     if (changed.length > 0) {
       await this.deps.run("memorySources_markChanged", [changed.map((row) => row.id), now]);
-      for (const row of changed) this.setFlag({ ...row, changedAt: now });
+      const latest = (await this.deps.run("memorySources_listForSource", [
+        "file",
+        toPosix(input.relPath),
+        input.workspaceId,
+      ])) as MemorySourceRow[];
+      for (const row of latest) if (row.needsRecheck) this.setFlag(row);
     }
     for (const row of restored) {
-      await this.deps.run("memorySources_markReviewed", [row.id, row.contentHash, now]);
-      this.flags.delete(row.memoryRef);
+      const cleared = await this.deps.run("memorySources_markReviewed", [
+        row.id,
+        row.contentHash,
+        now,
+        row,
+      ]);
+      if (cleared) this.clearFlag(row.memoryRef, row.id, row.changedAt);
     }
     if (changed.length > 0 || restored.length > 0) this.stamp += 1;
     return changed.length;
@@ -239,7 +309,12 @@ export class MemorySourceRecheckService {
     if (rows.length === 0) return 0;
     const now = this.now();
     await this.deps.run("memorySources_markChanged", [rows.map((row) => row.id), now]);
-    for (const row of rows) this.setFlag({ ...row, changedAt: now });
+    const latest = (await this.deps.run("memorySources_listForSource", [
+      "connector",
+      resourceUri,
+      null,
+    ])) as MemorySourceRow[];
+    for (const row of latest) if (row.needsRecheck) this.setFlag(row);
     this.stamp += 1;
     return rows.length;
   }
@@ -259,52 +334,62 @@ export class MemorySourceRecheckService {
         entryHash: entry.entryHash,
         source: row.sourceKey,
         changedAt: row.changedAt ?? row.observedAt,
-        excerpt: await this.excerptOf(row),
+        ...(await this.evidenceOf(row)),
       });
       if (out.length >= limit) break;
     }
     return out;
   }
 
-  private async excerptOf(row: MemorySourceRow): Promise<string> {
+  private async evidenceOf(row: MemorySourceRow): Promise<SourceEvidence> {
+    const unavailable = (excerpt: string): SourceEvidence => ({
+      excerpt,
+      evidenceAvailable: false,
+      observedContentHash: null,
+    });
     if (row.sourceKind === "connector") {
-      return "(the connector reported that this record was updated; its current content is not available here)";
+      return unavailable(
+        "(the connector reported that this record was updated; its current content is not available here)",
+      );
     }
-    if (!row.sourcePath) return "(the file's current content is not available)";
+    if (!row.sourcePath) return unavailable("(the file's current content is not available)");
     try {
-      const handle = await fs.open(row.sourcePath, "r");
-      try {
-        const buffer = Buffer.alloc(DREAM_EXCERPT_CHARS * 4);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        const text = buffer.subarray(0, bytesRead).toString("utf8");
-        const clipped =
-          text.length > DREAM_EXCERPT_CHARS ? `${text.slice(0, DREAM_EXCERPT_CHARS)}…` : text;
-        return redactSensitiveMarkdownContent(clipped);
-      } finally {
-        await handle.close();
-      }
+      return (
+        (await readFileEvidence(row.sourcePath)) ??
+        unavailable("(the file changed while its evidence was being read)")
+      );
     } catch {
-      return "(the file was deleted or cannot be read)";
+      return unavailable("(the file was deleted or cannot be read)");
     }
   }
 
-  /** Rechecked against the current source: the flags clear and the current hash is kept. */
-  async markReviewed(rows: MemorySourceRow[]): Promise<void> {
+  /** Clear confirmed rechecks only while both the evidence and source revision still match. */
+  async markReviewed(rechecks: MemorySourceRecheck[]): Promise<void> {
     const now = this.now();
-    for (const row of rows) {
-      const hash =
-        row.sourceKind === "file" && row.sourcePath ? await hashFile(row.sourcePath) : null;
-      await this.deps.run("memorySources_markReviewed", [row.id, hash, now]);
-      this.flags.delete(row.memoryRef);
+    for (const recheck of rechecks) {
+      const { row, evidenceAvailable, observedContentHash } = recheck;
+      if (
+        !evidenceAvailable ||
+        !observedContentHash ||
+        row.sourceKind !== "file" ||
+        !row.sourcePath
+      )
+        continue;
+      if ((await hashFile(row.sourcePath)) !== observedContentHash) continue;
+      const cleared = await this.deps.run("memorySources_markReviewed", [
+        row.id,
+        observedContentHash,
+        now,
+        row,
+      ]);
+      if (cleared) this.clearFlag(row.memoryRef, row.id, row.changedAt);
     }
-    if (rows.length > 0) this.stamp += 1;
   }
 
   /** Links whose memory no longer exists. */
   async forget(rows: MemorySourceRow[]): Promise<void> {
     if (rows.length === 0) return;
     await this.deps.run("memorySources_delete", [rows.map((row) => row.id)]);
-    for (const row of rows) this.flags.delete(row.memoryRef);
-    this.stamp += 1;
+    for (const row of rows) this.clearFlag(row.memoryRef, row.id);
   }
 }

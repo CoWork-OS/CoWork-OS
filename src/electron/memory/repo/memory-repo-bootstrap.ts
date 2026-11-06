@@ -307,7 +307,7 @@ function startDreamer(service: MemoryRepoService, bootOptions: MemoryRepoBootstr
       onReviewPending: bootOptions.notifyDreamReview,
       sourceRechecks: {
         pending: (limit) => MemorySourceRecheckService.getDefault().pendingForDream(limit),
-        reviewed: (rows) => MemorySourceRecheckService.getDefault().markReviewed(rows),
+        reviewed: (rechecks) => MemorySourceRecheckService.getDefault().markReviewed(rechecks),
         forget: (rows) => MemorySourceRecheckService.getDefault().forget(rows),
       },
       settings: () => {

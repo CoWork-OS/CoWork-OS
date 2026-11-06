@@ -663,9 +663,14 @@ can be linked; a source that cannot be linked never fails the save.
   the `memory_items` lines tag it "(source may have changed)", and the folder block's header
   says to check that source before relying on it.
 - **Clearing it:** saving the memory again from the same source, the source returning to its
-  saved content, or a dream that saw the entry next to its current source
-  ([Dreaming](dreaming.md#source-changes)). A link whose folder entry was rewritten or removed
-  is dropped at the next dream. Flags on `memory_items` rows are not rechecked by dreams.
+  saved content, or an explicit dream confirmation supported by a quote from the supplied
+  source excerpt ([Dreaming](dreaming.md#source-changes)). A confirmation clears only an
+  unchanged entry with no proposed edit, against the exact file snapshot shown to the dream;
+  the file hash and source-row revision must still match when the confirmation is recorded.
+  Contradicted or insufficient-evidence verdicts, unavailable connector/file content, and
+  pending or rejected corrections keep the warning. Confirming one source never clears
+  another source's warning for the same memory. A link whose folder entry was rewritten or
+  removed is dropped at the next dream. Flags on `memory_items` rows are not rechecked by dreams.
 
 ## 6. The archive (`memories`) and its future
 

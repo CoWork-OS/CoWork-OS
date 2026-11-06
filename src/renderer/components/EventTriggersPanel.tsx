@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Trash2, ToggleLeft, ToggleRight, History, ChevronDown } from "lucide-react";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { EventGateSettings } from "./EventGate/EventGateSettings";
+import { formatCount } from "../utils/plural";
 
 interface TriggerCondition {
   field: string;
@@ -377,6 +378,18 @@ export const EventTriggersPanel: React.FC<{
     if (!name.trim()) return;
     setFormError("");
     try {
+      // The evaluator treats a pattern it cannot compile as "no match", so a typo saved a
+      // trigger that could never fire.
+      if (source !== "mcp_event") {
+        for (const condition of conditions) {
+          if (condition.operator !== "matches") continue;
+          try {
+            new RegExp(condition.value, "i");
+          } catch {
+            throw new Error(`"${condition.value}" is not a valid regular expression.`);
+          }
+        }
+      }
       let mcpEvent: Record<string, Any> | undefined;
       if (source === "mcp_event") {
         const selected = mcpEvents.find((event) => event.name === mcpEventName);
@@ -1022,7 +1035,7 @@ export const EventTriggersPanel: React.FC<{
               <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
                 {t.source === "mcp_event"
                   ? `MCP event: ${t.action.config.mcpEvent?.name || "unknown"}`
-                  : `${t.source.replace("_", " ")} · ${t.conditions.length} conditions`}
+                  : `${t.source.replace("_", " ")} · ${formatCount(t.conditions.length, "condition")}`}
                 {` · fired ${t.fireCount}x`}
               </div>
               {t.source === "mcp_event" &&

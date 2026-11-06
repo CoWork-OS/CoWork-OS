@@ -9,6 +9,10 @@ import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/comput
 import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
 import { BotDesktopTools } from "./tools/bot-desktop-tools";
 import { isUserActionRequiredFailure } from "./user-action-failure";
+import {
+  classifyStepFailure,
+  isUserActionReason,
+} from "./failure-reason";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
@@ -23078,37 +23082,35 @@ You are continuing a previous conversation. The context from the previous conver
   private classifyRecoveryFailure(
     reason: string,
   ): "user_blocker" | "local_runtime" | "provider_quota" | "external_unknown" {
-    const lower = String(reason || "").toLowerCase();
-    if (!lower) return "external_unknown";
-
     if (this.getAccessBoundaryPauseReason(reason)) {
       return "user_blocker";
     }
 
-    // Access-profile denials are deterministic policy decisions, not local
-    // runtime failures. Do not spend recovery steps retrying a capability that
-    // the selected profile intentionally disabled.
-    if (/blocked by policy|capability is disabled|disabled by policy|access profile/.test(lower)) {
-      return "user_blocker";
+    // Machine-readable codes decide first: they are locale-independent, so
+    // localized error text that no keyword fallback could match still lands in
+    // the right category, and a quota mention can no longer be mistaken for a
+    // user blocker by check ordering (#613).
+    const coded = classifyStepFailure(reason);
+    if (coded !== "untyped") {
+      if (isUserActionReason(coded)) {
+        // Access-profile denials are deterministic policy decisions, not
+        // local runtime failures; every other user-action reason needs the
+        // user too.
+        return "user_blocker";
+      }
+      if (coded === "rate_limited" || coded === "quota_exhausted") {
+        return "provider_quota";
+      }
+      return "local_runtime";
     }
 
+    // Untyped reasons fall back to the legacy text heuristics.
     if (isUserActionRequiredFailure(reason)) {
       return "user_blocker";
     }
 
-    const providerQuotaSignal =
-      /quota|usage.*limit|rate.*limit|upgrade your plan|billing|payment required|resource.*exhausted/.test(
-        lower,
-      ) || /\b429\b|\b432\b/.test(lower);
-    if (providerQuotaSignal) {
-      return "provider_quota";
-    }
-
-    const localRuntimeSignal =
-      /enoent|eacces|eperm|enotdir|eisdir|no such file|does not exist|syntax error|invalid path|workspace|stat\b|run_command failed|read_file failed/.test(
-        lower,
-      );
-    if (localRuntimeSignal) {
+    const lower = String(reason || "").toLowerCase();
+    if (/workspace|stat\b|run_command failed|read_file failed/.test(lower)) {
       return "local_runtime";
     }
 

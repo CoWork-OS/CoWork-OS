@@ -6,7 +6,11 @@ export default defineConfig({
     "Rent the model. Own everything else. CoWork OS is a free, open-source AI app powered by a multi-provider agent harness for desktop, CLI, and headless work.",
   base: "/CoWork-OS/",
 
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: [
+      // Anchors to tabs created at runtime; qa:docs-links allowlists the same
+      // shapes for the repo-wide check.
+      /^#terminal\//,
+    ],
 
   head: [
     ["meta", { name: "theme-color", content: "#646cff" }],

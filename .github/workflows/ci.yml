@@ -38,6 +38,8 @@ jobs:
         with:
           node-version: "24"
       - run: node --test scripts/qa/validate-doc-versions.test.mjs
+      - run: node scripts/qa/validate-doc-links.mjs
+      - run: node --test scripts/qa/validate-doc-links.test.mjs
       - run: npm run test:release-surfaces
       - run: npm run qa:docs-versions
       - run: npm run qa:positioning-copy

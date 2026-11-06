@@ -150,6 +150,7 @@
     "qa:routing-export-risk:smoke": "npm run build:electron && node scripts/qa/routing-export-risk-smoke.mjs",
     "qa:bundle-sizes": "node scripts/qa/check-renderer-bundles.mjs",
     "qa:docs-versions": "node scripts/qa/validate-doc-versions.mjs && npm run docs:surfaces:check",
+    "qa:docs-links": "node scripts/qa/validate-doc-links.mjs",
     "docs:surfaces:generate": "node scripts/generate-release-surface-reference.mjs",
     "docs:surfaces:check": "node scripts/generate-release-surface-reference.mjs --check",
     "test:release-surfaces": "node --test scripts/qa/release-surface-reference.test.mjs",

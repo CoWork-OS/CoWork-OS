@@ -404,7 +404,7 @@ See [Architecture](architecture.md) for the full technical deep-dive.
 - **Encrypted storage**: OS keychain + AES-256 fallback
 - **17,018 Vitest cases** (**16,998 passing, 18 skipped, 2 todo**) across **1,515 test files**, including **160** security cases under `tests/security/` and **455** control-plane/WebSocket-related cases
 
-See [Security Guide](security-guide.md) and [Security Architecture](security/) for details.
+See [Security Guide](security-guide.md) and [Security Architecture](security/README.md) for details.
 
 ## Deployment
 

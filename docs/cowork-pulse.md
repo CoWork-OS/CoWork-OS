@@ -85,7 +85,7 @@ Prompts, responses, file names or contents, commands, URLs, workspace/task/sessi
 names, model/provider routes, account data, hostnames, raw errors, or precise activity timestamps.
 
 The collector source, closed validation schema, D1 migration, retention job, and deployment guide
-live in [`services/pulse-worker`](../services/pulse-worker). Daily installation rows are retained for
+live in [`services/pulse-worker`](../services/pulse-worker/README.md). Daily installation rows are retained for
 24 months. `/v1/admin/summary` returns aggregate reached-value and mature 7/30-day return cohorts
 and is protected by a server-side admin token.
 

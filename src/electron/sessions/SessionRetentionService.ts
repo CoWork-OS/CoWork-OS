@@ -113,6 +113,18 @@ export class SessionRetentionService {
     };
   }
 
+  /** Brings an archived session back to the sidebar; its tasks were never touched. */
+  unarchiveSession(sessionId: string): { metadata: TaskSessionMetadata; taskCount: number } {
+    const rows = this.tasksForSession(sessionId);
+    if (rows.length === 0) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    return {
+      metadata: this.metadataRepo.unarchive(sessionId),
+      taskCount: rows.length,
+    };
+  }
+
   /**
    * Archives every unarchived session in a workspace. The sidebar only holds a
    * page of a project's sessions, so archiving from its loaded rows would leave

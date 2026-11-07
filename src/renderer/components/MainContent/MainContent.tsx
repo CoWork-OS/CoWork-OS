@@ -175,6 +175,7 @@ import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-comp
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { buildTaskTranscriptMarkdown } from "./task-transcript-markdown";
 import { announceSessionArchived } from "../../utils/session-archive-events";
+import { promptForText } from "../TextPromptDialog";
 import { isActiveTaskStatus, isIdleFork } from "../../../shared/task-status";
 import { ipcErrorMessage } from "../../utils/ipc-error-message";
 import {
@@ -6849,7 +6850,13 @@ function MainContentComponent({
     )
       return;
     closeTaskHeaderMenu();
-    const nextTitle = window.prompt(actionLabels.rename, task.title)?.trim();
+    const nextTitle = (
+      await promptForText({
+        title: actionLabels.rename,
+        defaultValue: task.title,
+        confirmLabel: "Rename",
+      })
+    )?.trim();
     if (!nextTitle || nextTitle === task.title) return;
     try {
       await window.electronAPI.renameTask(task.id, nextTitle);

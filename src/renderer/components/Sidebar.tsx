@@ -54,6 +54,7 @@ import { Task, Workspace, UiDensity, isTempWorkspaceId } from "../../shared/type
 import { isActiveTaskStatus, isIdleFork } from "../../shared/task-status";
 import { formatCount } from "../utils/plural";
 import { ipcErrorMessage } from "../utils/ipc-error-message";
+import { promptForText } from "./TextPromptDialog";
 import { isAutomatedTaskLike, isSpeculativeTask } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
@@ -1273,18 +1274,21 @@ function SidebarComponent({
   );
 
   const handleEditWorkspace = useCallback(
-    (candidate: Workspace) => {
+    async (candidate: Workspace) => {
+      setWorkspaceMenuOpenId(null);
       const currentLabel = getWorkspaceLabel(candidate);
-      const nextLabel = window.prompt("Rename project", currentLabel)?.trim();
-      if (!nextLabel || nextLabel === currentLabel) {
-        setWorkspaceMenuOpenId(null);
-        return;
-      }
+      const nextLabel = (
+        await promptForText({
+          title: "Rename project",
+          defaultValue: currentLabel,
+          confirmLabel: "Rename",
+        })
+      )?.trim();
+      if (!nextLabel || nextLabel === currentLabel) return;
       updateWorkspaceNavSettings((current) => ({
         ...current,
         labels: { ...current.labels, [candidate.id]: nextLabel },
       }));
-      setWorkspaceMenuOpenId(null);
     },
     [getWorkspaceLabel, updateWorkspaceNavSettings],
   );
@@ -2864,7 +2868,7 @@ function SidebarComponent({
           className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="edit"
-          onClick={() => handleEditWorkspace(candidate)}
+          onClick={() => void handleEditWorkspace(candidate)}
         >
           <Pencil size={16} />
           <span>Edit</span>

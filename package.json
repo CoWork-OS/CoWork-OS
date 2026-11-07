@@ -267,6 +267,7 @@
     "recharts": "^3.10.1",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "safe-regex2": "5.1.2",
     "three": "^0.186.1",
     "undici": "8.12.3",
     "uuid": "^14.0.2",

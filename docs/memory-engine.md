@@ -294,6 +294,14 @@ gives the current user request precedence. Missing or withheld context does not 
 that no prior agreement exists. If policy resolution fails, framing is skipped and normal
 execution continues.
 
+Framing requests allow 4,096 output tokens so hidden reasoning does not consume a tiny
+answer allowance. The prompt still asks for at most 180 words. A `max_tokens` response gets
+at most one fresh retry with 8,192 tokens, under the existing task/context ceilings and
+budget/cancellation checks. Each call has a bounded 60-second timeout for the larger reasoning allowance. Usage from both calls
+is counted; streaming is suppressed and truncated drafts are never published as complete
+framing. If the retry has no additional headroom, remains truncated, or fails, normal
+execution continues with a diagnostic log instead of partial framing.
+
 **Attribution.** Each surface emits a `memory_used` task event once per turn (pre-flight, chat turn, plan,
 step, follow-up; `resetMemoryUsedAttribution`) and again when its set of injected refs changes
 within the turn: `{ surface, refs, source }` with `memory:<id>`, `archive:<id>` and

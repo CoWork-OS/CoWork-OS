@@ -1,0 +1,17 @@
+{
+  "id": "preflight-output-cap-2026-11-07",
+  "title": "Reasoning output cannot silently consume the pre-flight framing allowance",
+  "source": {
+    "audit": "free-openrouter-preflight-validation-2026-11-07"
+  },
+  "prompt": "Frame an Atlas verification task using its saved correction and human-review requirement. Simulate empty or partial max_tokens responses, then a complete response, and repeat under explicit task/context ceilings.",
+  "assertions": {
+    "requiredBehavior": "Allow reasoning headroom while prompting for concise framing. Retry a token-limited response at most once with a larger effective allowance, using the same policy-filtered context and a bounded 60-second per-call timeout. Honor task/context ceilings and budget/cancellation checks. Track usage for both calls. Suppress streaming and never emit a truncated draft as complete framing.",
+    "failureBehavior": "After exhaustion, an empty non-truncated reply, or a provider error, log the outcome and continue normal execution without an unbounded retry."
+  },
+  "executableTests": [
+    "src/electron/agent/__tests__/executor-preflight-memory.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/__tests__/executor-preflight-memory.test.ts",
+  "notes": "Traceability specification, not an automatically graded live-model success score. Live acceptance must inspect a non-truncated provider response and the actual emitted framing message, not merely request-token settings or downstream task completion."
+}

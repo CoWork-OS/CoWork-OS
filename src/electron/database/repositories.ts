@@ -1398,6 +1398,11 @@ export class TaskStore {
       excludeBotConversations?: boolean;
       excludeSources?: Array<NonNullable<Task["source"]>>;
       workspaceId?: string;
+      /**
+       * Only the top-level tasks of archived sessions, most recently archived
+       * first, for the sidebar's Archived view. Pin and cursor ordering do not apply.
+       */
+      archivedSessionsOnly?: boolean;
       cursor?: {
         id?: string;
         pinned?: boolean;
@@ -1407,8 +1412,11 @@ export class TaskStore {
       };
     },
   ): Task[] {
-    const orderBy = options?.prioritizeSidebar
-      ? `
+    const archivedSessionsOnly = options?.archivedSessionsOnly === true;
+    const orderBy = archivedSessionsOnly
+      ? "ORDER BY session_archived_at DESC, COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC"
+      : options?.prioritizeSidebar
+        ? `
       ORDER BY
         CASE WHEN COALESCE(is_pinned, 0) = 1 THEN 0 ELSE 1 END,
         CASE WHEN status IN ('executing', 'planning', 'interrupted', 'paused', 'blocked') THEN 0 ELSE 1 END,
@@ -1416,16 +1424,17 @@ export class TaskStore {
         created_at DESC,
         id DESC
       `
-      : "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC";
+        : "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC";
     const excludedSources = Array.isArray(options?.excludeSources)
       ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> =>
           Boolean(source),
         )
       : [];
     const includeArchivedSessions = options?.includeArchivedSessions !== false;
-    const cursor = options?.prioritizeSidebar
-      ? TaskStore.buildSidebarCursorPredicate(options.cursor)
-      : { sql: "", args: [] };
+    const cursor =
+      options?.prioritizeSidebar && !archivedSessionsOnly
+        ? TaskStore.buildSidebarCursorPredicate(options.cursor)
+        : { sql: "", args: [] };
     const whereClauses = [
       ...(options?.workspaceId ? ["workspace_id = ?"] : []),
       ...(options?.excludeBotConversations
@@ -1436,15 +1445,24 @@ export class TaskStore {
       ...(excludedSources.length > 0
         ? [`COALESCE(source, 'manual') NOT IN (${excludedSources.map(() => "?").join(", ")})`]
         : []),
-      ...(!includeArchivedSessions
+      ...(archivedSessionsOnly
         ? [
-            `NOT EXISTS (
+            "COALESCE(parent_task_id, '') = ''",
+            `EXISTS (
               SELECT 1 FROM task_session_metadata
               WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
                 AND task_session_metadata.archived_at IS NOT NULL
             )`,
           ]
-        : []),
+        : !includeArchivedSessions
+          ? [
+              `NOT EXISTS (
+              SELECT 1 FROM task_session_metadata
+              WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+                AND task_session_metadata.archived_at IS NOT NULL
+            )`,
+            ]
+          : []),
       ...(cursor.sql ? [cursor.sql] : []),
     ];
     const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -1549,7 +1567,16 @@ export class TaskStore {
           WHEN agent_config IS NOT NULL AND json_valid(agent_config)
           THEN json_extract(agent_config, '$.interactionMode')
           ELSE NULL
-        END AS agent_config_interaction_mode
+        END AS agent_config_interaction_mode${
+          archivedSessionsOnly
+            ? `,
+        1 AS session_archived,
+        (
+          SELECT archived_at FROM task_session_metadata
+          WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+        ) AS session_archived_at`
+            : ""
+        }
       FROM tasks
       ${where}
       ${orderBy}
@@ -2211,6 +2238,11 @@ export class TaskStore {
       priority: row.priority ?? undefined,
       worktreePath: row.worktree_path || undefined,
       sessionId: row.session_id || undefined,
+      sessionArchived: Number(row.session_archived) === 1 ? true : undefined,
+      sessionArchivedAt:
+        typeof row.session_archived_at === "number" && Number.isFinite(row.session_archived_at)
+          ? row.session_archived_at
+          : undefined,
       branchFromTaskId: row.branch_from_task_id || undefined,
       branchFromEventId: row.branch_from_event_id || undefined,
       branchLabel: row.branch_label || undefined,

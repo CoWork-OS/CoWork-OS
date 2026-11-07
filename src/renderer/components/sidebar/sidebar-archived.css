@@ -1,0 +1,246 @@
+/* Archived sessions: the sidebar list swapped for the sessions a user archived,
+   each with an Unarchive action. Rows follow the panel grid in
+   sidebar-panel.css (8px inset, 13px titles, 12px secondary text). */
+
+.sidebar-archived {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-archived-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 4px 0 0;
+}
+
+.sidebar-archived-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.sidebar-archived-back:hover {
+  background: var(--sidebar-panel-row-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-archived-back:focus-visible,
+.sidebar-archived-row-action:focus-visible,
+.sidebar-archived-status button:focus-visible {
+  outline: 2px solid var(--sidebar-accent);
+  outline-offset: 1px;
+}
+
+.sidebar-archived-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sidebar-archived-count {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-archived-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--sidebar-panel-row-hover);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sidebar-archived-status span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sidebar-archived-status button {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sidebar-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar-archived-status-error {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 10%, transparent);
+  color: var(--color-error, #ef4444);
+}
+
+.sidebar-archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar-archived-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 8px;
+}
+
+.sidebar-archived-row:hover,
+.sidebar-archived-row:focus-within {
+  background: var(--sidebar-panel-row-hover);
+}
+
+.sidebar-archived-row-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sidebar-archived-row-title,
+.sidebar-archived-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-archived-row-title {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.sidebar-archived-row-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* Icon-only, so the title keeps the row's width; the label is its tooltip and
+   accessible name. */
+.sidebar-archived-row-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.sidebar-archived-row:hover .sidebar-archived-row-action,
+.sidebar-archived-row-action:focus-visible {
+  color: var(--color-text-secondary);
+}
+
+.sidebar-archived-row-action:hover:not(:disabled) {
+  background: var(--sidebar-panel-chip-bg);
+  box-shadow:
+    0 0 0 1px var(--sidebar-panel-border),
+    var(--sidebar-panel-chip-shadow);
+  color: var(--color-text-primary);
+}
+
+.sidebar-archived-row-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-archived-more {
+  padding: 8px;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+}
+
+/* The Undo line shown right after a session is archived. */
+.sidebar-archive-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--sidebar-panel-row-hover);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.sidebar-archive-undo span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-archive-undo button {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sidebar-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar-archive-undo button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-archive-undo button:focus-visible {
+  outline: 2px solid var(--sidebar-accent);
+  outline-offset: 1px;
+}
+
+/* The session list hides (rather than unmounts) while the archived view is
+   open, and the status chips do not apply to it. */
+.task-list[hidden],
+.sidebar-session-state-filters[hidden] {
+  display: none;
+}
+
+/* With "Archived" beside "Show stopped sessions", the chip row wraps instead
+   of squeezing both labels onto two lines. */
+.sidebar-session-filter-panel:has(> .sidebar-session-filter-archived) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.sidebar-session-filter-panel > .sidebar-session-filter-archived,
+.sidebar-session-filter-panel:has(> .sidebar-session-filter-archived)
+  > .sidebar-session-filter-option {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

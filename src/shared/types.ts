@@ -2878,6 +2878,8 @@ export interface Task {
   sessionId?: string; // Stable lineage/session identifier shared across continued tasks
   /** True when the task's shared session metadata is archived. */
   sessionArchived?: boolean;
+  /** When the session was archived; set only on the sidebar's archived list. */
+  sessionArchivedAt?: number;
   branchFromTaskId?: string; // Parent task used as the branch origin
   branchFromEventId?: string; // Specific event to branch from when forking a session
   branchLabel?: string; // Human label for the branch shown in UI/debug surfaces
@@ -8570,6 +8572,7 @@ export const IPC_CHANNELS = {
   TASK_PROPOSAL_DISMISS: "taskProposal:dismiss",
   TASK_RENAME: "task:rename",
   TASK_ARCHIVE: "task:archive",
+  TASK_UNARCHIVE: "task:unarchive",
   TASK_ARCHIVE_WORKSPACE_SESSIONS: "task:archiveWorkspaceSessions",
   TASK_DELETE: "task:delete",
   DIALOG_SELECT_FOLDER: "dialog:selectFolder",

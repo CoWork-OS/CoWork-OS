@@ -128,6 +128,72 @@ describeWithSqlite("SessionRetentionService", () => {
     expect(taskRepo.findById(tasks[0].id)).toBeDefined();
   });
 
+  it("unarchives a session so the sidebar lists it again", () => {
+    const task = createTask("completed", "Restored task");
+    service.archiveSession(task.id);
+
+    const result = service.unarchiveSession(task.id);
+
+    expect(result.taskCount).toBe(1);
+    expect(result.metadata.archivedAt).toBeUndefined();
+    expect(
+      taskRepo.findSidebarSummaries(10, 0, { includeArchivedSessions: false }).map((row) => row.id),
+    ).toEqual([task.id]);
+    expect(taskRepo.findSidebarSummaries(10, 0, { archivedSessionsOnly: true })).toEqual([]);
+  });
+
+  it("unarchives every task of a continued session and keeps its name", () => {
+    const first = createTask("completed", "First turn");
+    taskRepo.update(first.id, { sessionId: "session-continued" });
+    const second = createTask("completed", "Second turn");
+    taskRepo.update(second.id, { sessionId: "session-continued" });
+    service.renameSession("session-continued", "Kept name");
+    service.archiveSession("session-continued");
+
+    const result = service.unarchiveSession("session-continued");
+
+    expect(result.taskCount).toBe(2);
+    expect(result.metadata).toMatchObject({ sessionId: "session-continued", name: "Kept name" });
+    expect(
+      taskRepo
+        .findSidebarSummaries(10, 0, { includeArchivedSessions: false })
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual([first.id, second.id].sort());
+  });
+
+  it("refuses to unarchive a session that does not exist", () => {
+    expect(() => service.unarchiveSession("missing-session")).toThrow(
+      "Session not found: missing-session",
+    );
+  });
+
+  it("lists only top-level tasks of archived sessions, most recently archived first", () => {
+    const older = createTask("completed", "Archived first");
+    const newer = createTask("completed", "Archived second");
+    const visible = createTask("completed", "Still visible");
+    const child = taskRepo.create({
+      title: "Child",
+      prompt: "Child",
+      status: "completed",
+      workspaceId,
+      parentTaskId: newer.id,
+    });
+    metadataRepo.archive(older.id, 1_000);
+    metadataRepo.archive(newer.id, 2_000);
+
+    const archived = taskRepo.findSidebarSummaries(10, 0, {
+      archivedSessionsOnly: true,
+      prioritizeSidebar: true,
+    });
+
+    expect(archived.map((row) => row.id)).toEqual([newer.id, older.id]);
+    expect(archived.map((row) => row.sessionArchivedAt)).toEqual([2_000, 1_000]);
+    expect(archived.every((row) => row.sessionArchived === true)).toBe(true);
+    expect(archived.map((row) => row.id)).not.toContain(visible.id);
+    expect(archived.map((row) => row.id)).not.toContain(child.id);
+  });
+
   it("archives nothing for a workspace without unarchived sessions", () => {
     const task = createTask("completed", "Already archived");
     service.archiveSession(task.id);

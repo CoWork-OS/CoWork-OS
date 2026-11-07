@@ -6,6 +6,10 @@ import {
 import { SidebarNotices } from "./sidebar/SidebarNotices";
 import { SidebarArchivedSessions } from "./sidebar/SidebarArchivedSessions";
 import {
+  SESSION_ARCHIVED_EVENT,
+  type SessionArchivedDetail,
+} from "../utils/session-archive-events";
+import {
   useState,
   useRef,
   useEffect,
@@ -2177,6 +2181,31 @@ function SidebarComponent({
     }
   };
 
+  const showArchiveUndo = useCallback(
+    (taskId: string, wasSelected: boolean) => {
+      if (!canShowArchivedSessions) return;
+      setArchiveUndo({ taskId, wasSelected });
+      if (archiveUndoTimeoutRef.current !== null) {
+        window.clearTimeout(archiveUndoTimeoutRef.current);
+      }
+      archiveUndoTimeoutRef.current = window.setTimeout(() => {
+        archiveUndoTimeoutRef.current = null;
+        setArchiveUndo(null);
+      }, ARCHIVE_UNDO_MS);
+    },
+    [canShowArchivedSessions],
+  );
+
+  // Archiving from the task header's actions menu gets the same notice and Undo.
+  useEffect(() => {
+    const onArchived = (event: Event) => {
+      const detail = (event as CustomEvent<SessionArchivedDetail>).detail;
+      if (detail?.taskId) showArchiveUndo(detail.taskId, detail.wasSelected === true);
+    };
+    window.addEventListener(SESSION_ARCHIVED_EVENT, onArchived);
+    return () => window.removeEventListener(SESSION_ARCHIVED_EVENT, onArchived);
+  }, [showArchiveUndo]);
+
   const handleArchiveClick = async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
     e.preventDefault();
@@ -2189,16 +2218,7 @@ function SidebarComponent({
         onSelectTask(null);
       }
       onTasksChanged();
-      if (canShowArchivedSessions) {
-        setArchiveUndo({ taskId, wasSelected });
-        if (archiveUndoTimeoutRef.current !== null) {
-          window.clearTimeout(archiveUndoTimeoutRef.current);
-        }
-        archiveUndoTimeoutRef.current = window.setTimeout(() => {
-          archiveUndoTimeoutRef.current = null;
-          setArchiveUndo(null);
-        }, ARCHIVE_UNDO_MS);
-      }
+      showArchiveUndo(taskId, wasSelected);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to archive session. Please try again.";

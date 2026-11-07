@@ -173,6 +173,8 @@ import {
 } from "../../utils/renderer-perf";
 import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-completion-ux";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
+import { buildTaskTranscriptMarkdown } from "./task-transcript-markdown";
+import { announceSessionArchived } from "../../utils/session-archive-events";
 import {
   deriveSharedTaskEventUiState,
   reconcileBotConversationSharedTaskEventUi,
@@ -6666,13 +6668,21 @@ function MainContentComponent({
       `- Link: ${botDeeplink}`,
       task.semanticSummary ? `- Summary: ${task.semanticSummary}` : null,
       "",
-      "## Prompt",
+      "## Conversation",
       "",
-      promptText.trim() || "_No prompt available._",
+      buildTaskTranscriptMarkdown(events, promptText, agentContext.agentName || "CoWork") ||
+        "_No messages yet._",
     ]
       .filter((line): line is string => line !== null)
       .join("\n");
-  }, [botDeeplink, cleanedDisplayPrompt, task, taskWorkingDirectory]);
+  }, [
+    agentContext.agentName,
+    botDeeplink,
+    cleanedDisplayPrompt,
+    events,
+    task,
+    taskWorkingDirectory,
+  ]);
   const botMascotForSender = useMemo(() => buildBotMascotLookup(agentRoles), [agentRoles]);
   const botConversationFirstMessageAt = useMemo(() => {
     if (!isBotConversation) return null;
@@ -6868,6 +6878,7 @@ function MainContentComponent({
       await window.electronAPI.archiveTask(task.id);
       onSelectTask?.(null);
       await onTasksChanged?.();
+      announceSessionArchived({ taskId: task.id, wasSelected: true });
     } catch (error) {
       console.error("Failed to archive task from header:", error);
       setHeaderActionError("Could not archive. Please try again.");

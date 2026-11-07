@@ -3,6 +3,7 @@ import { Zap, Plus, Trash2, ToggleLeft, ToggleRight, History, ChevronDown } from
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { EventGateSettings } from "./EventGate/EventGateSettings";
 import { formatCount } from "../utils/plural";
+import { ipcErrorMessage } from "../utils/ipc-error-message";
 
 interface TriggerCondition {
   field: string;
@@ -297,7 +298,7 @@ export const EventTriggersPanel: React.FC<{
       .catch((error: Error) => {
         if (!current) return;
         setMcpEvents([]);
-        setFormError(error.message);
+        setFormError(ipcErrorMessage(error));
       });
     return () => {
       current = false;
@@ -453,7 +454,7 @@ export const EventTriggersPanel: React.FC<{
       setTargetTaskId("");
       loadTriggers();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Could not create trigger.");
+      setFormError(err instanceof Error ? ipcErrorMessage(err) : "Could not create trigger.");
     }
   };
 

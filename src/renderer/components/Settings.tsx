@@ -104,6 +104,7 @@ import {
 import { getLlmModelReasoningEfforts } from "../../shared/llm-model-selection";
 import { secretFieldInputType } from "../../shared/secret-references";
 import { getLLMProviderIcon } from "./llm-provider-icons";
+import { ipcErrorMessage } from "../utils/ipc-error-message";
 import { providerBaseUrlProblem } from "../utils/provider-base-url";
 import {
   buildClaudeCredentialInput,
@@ -3513,11 +3514,16 @@ export function Settings({
     }
   };
 
-  const loadOpenAICompatibleModels = async (baseUrl?: string, apiKey?: string) => {
+  const loadOpenAICompatibleModels = async (
+    baseUrl?: string,
+    apiKey?: string,
+    options: { reportErrors?: boolean } = {},
+  ) => {
     try {
       setLoadingOpenAICompatModels(true);
       const resolvedBaseUrl = baseUrl || openaiCompatBaseUrl;
       if (!resolvedBaseUrl) return;
+      if (options.reportErrors) setTestResult(null);
       const models = await window.electronAPI.getOpenAICompatibleModels(
         resolvedBaseUrl,
         apiKey || openaiCompatApiKey || undefined,
@@ -3529,7 +3535,9 @@ export function Settings({
       onSettingsChanged?.();
     } catch (error) {
       console.error("Failed to load OpenAI-compatible models:", error);
-      setOpenaiCompatModels([]);
+      // Keep the list already shown: the request failed, the endpoint did not report no models.
+      // "Fetch Models" says why; the quiet load when the provider opens does not.
+      if (options.reportErrors) setTestResult({ success: false, error: ipcErrorMessage(error) });
     } finally {
       setLoadingOpenAICompatModels(false);
     }
@@ -7593,7 +7601,9 @@ export function Settings({
                 />
                 <button
                   className="button-small button-secondary"
-                  onClick={() => loadOpenAICompatibleModels()}
+                  onClick={() =>
+                    void loadOpenAICompatibleModels(undefined, undefined, { reportErrors: true })
+                  }
                   disabled={loadingOpenAICompatModels || !openaiCompatBaseUrl}
                 >
                   {loadingOpenAICompatModels ? "Loading..." : "Fetch Models"}

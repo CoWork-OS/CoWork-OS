@@ -36,7 +36,9 @@ export function PersonalityIdentityTab({
             type="text"
             className="settings-input"
             placeholder="CoWork"
-            value={config.agentName || "CoWork"}
+            // Empty shows the placeholder: a "CoWork" fallback here refilled the field as the
+            // last letter was deleted, so the next keystroke made "CoWorkN".
+            value={config.agentName ?? ""}
             onChange={(e) => onUpdate({ agentName: e.target.value })}
             maxLength={50}
           />

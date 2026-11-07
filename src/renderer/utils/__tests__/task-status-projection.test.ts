@@ -442,6 +442,25 @@ describe("status strip detail for stopped tasks", () => {
     expect(model.phaseLabel).toBe("Run ls in the workspace");
   });
 
+  it("does not pair Completed with the last step's in-progress label", () => {
+    const strip = (latestActivityLabel: string) =>
+      deriveTaskStatusStrip({
+        task: { id: "task-1", status: "completed", updatedAt: 1_000 } as Any,
+        events: [],
+        planSteps: [
+          { id: "one", description: "Gather the numbers.", status: "completed" },
+          { id: "two", description: "Write a short summary of the trend.", status: "completed" },
+        ],
+        activityGroups: [
+          { id: "g", status: "completed", summary: "Done", latestActivityLabel } as Any,
+        ],
+        outcomeMetrics: [],
+        outputSummary: null,
+      });
+    expect(strip("Writing a short summary of the trend.").phaseLabel).toBeUndefined();
+    expect(strip("Response ready").phaseLabel).toBe("Response ready");
+  });
+
   it("keeps underscores inside names while dropping markdown marks", () => {
     const model = deriveTaskStatusStrip({
       task: { id: "task-1", status: "paused", updatedAt: 1_000 } as Any,

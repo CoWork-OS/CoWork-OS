@@ -11,6 +11,7 @@ import {
   Task,
   TaskEvent,
 } from "../../shared/types";
+import { sessionWaitReason } from "../../shared/attention";
 import { isIdleFork, isTerminalTaskStatus } from "../../shared/task-status";
 import {
   ApprovalStore,
@@ -23,6 +24,15 @@ import {
 const MAX_HEADLINE_LENGTH = 240;
 const MAX_WAITING_REASON_LENGTH = 300;
 const IDLE_FORK_HEADLINE = "Ready for your next message";
+
+/** A paused task that asked the user something and waits for the reply (pauseForUserInput). */
+function pausedForUserReply(task: Task): boolean {
+  return (
+    task.status === "paused" &&
+    Boolean(task.awaitingUserInputReasonCode || task.stopReasons?.includes("awaiting_user_input"))
+  );
+}
+
 const STRUCTURAL_EVENT_TYPES = new Set([
   "task_created",
   "task_completed",
@@ -206,13 +216,16 @@ export class SessionProgressService {
     if (row?.state_json) {
       try {
         const state = JSON.parse(row.state_json) as SessionProgressState;
-        // Forks saved before the "ready" phase existed were stored as "queued"; rebuild those.
+        // Forks saved before the "ready" phase existed were stored as "queued", and pauses that
+        // asked the user something as resumable; rebuild those.
         const staleIdleFork = isIdleFork(task) && state?.phase !== "ready";
+        const staleReplyPause = pausedForUserReply(task) && state?.waiting?.kind === "paused";
         if (
           state?.schemaVersion === 1 &&
           state.taskId === taskId &&
           state.status === task.status &&
-          !staleIdleFork
+          !staleIdleFork &&
+          !staleReplyPause
         ) {
           return state;
         }
@@ -416,6 +429,14 @@ export class SessionProgressService {
       };
     }
     if (task.status === "paused") {
+      // A pause that asked the user something (pauseForUserInput) waits for a reply in the
+      // composer. Calling it resumable offered "Resume", which goes on without the answer.
+      if (pausedForUserReply(task)) {
+        return {
+          kind: "input",
+          reason: sessionWaitReason(task) || "It's waiting for your answer before it can go on.",
+        };
+      }
       return { kind: "paused", reason: "The session is paused and can be resumed." };
     }
     if (task.status === "blocked") {

@@ -24,6 +24,10 @@
   border: 1px solid var(--notif-border);
   border-radius: 16px;
   background: var(--notif-surface);
+  /* The elevated surface is slightly see-through; without a blur the chat behind showed
+     through the panel. Same treatment as the title bar's More menu. */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   box-shadow:
     0 18px 48px rgba(15, 23, 42, 0.16),
     0 2px 8px rgba(15, 23, 42, 0.06);

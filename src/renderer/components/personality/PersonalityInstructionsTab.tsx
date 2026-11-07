@@ -21,9 +21,17 @@ export function PersonalityInstructionsTab({
   const [newExpertiseDomain, setNewExpertiseDomain] = useState("");
   const [newExpertiseLevel, setNewExpertiseLevel] = useState<ExpertiseArea["level"]>("proficient");
 
+  // A rule or area already in the list is not added again: each copy went into the
+  // system prompt ("- ALWAYS: Use metric units" twice).
+  const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
   const addRule = () => {
     if (!newRuleText.trim()) return;
     const rules = [...(config.rules ?? [])];
+    if (rules.some((r) => r.type === newRuleType && sameText(r.rule, newRuleText))) {
+      setNewRuleText("");
+      return;
+    }
     rules.push({
       id: `rule-${Date.now()}`,
       type: newRuleType,
@@ -52,6 +60,10 @@ export function PersonalityInstructionsTab({
   const addExpertise = () => {
     if (!newExpertiseDomain.trim()) return;
     const expertise = [...(config.expertise ?? [])];
+    if (expertise.some((e) => sameText(e.domain, newExpertiseDomain))) {
+      setNewExpertiseDomain("");
+      return;
+    }
     expertise.push({
       id: `ex-${Date.now()}`,
       domain: newExpertiseDomain.trim(),

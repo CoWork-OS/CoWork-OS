@@ -514,6 +514,15 @@ const IN_PROGRESS_STAGE_LABELS = new Set([
   "Preparing final response",
 ]);
 
+/**
+ * Activity labels are written for a running task: stage names and step starts turned into
+ * "-ing" verbs ("Writing a short summary"). Next to Completed or Paused they read as still
+ * running.
+ */
+function readsAsInProgress(label: string): boolean {
+  return IN_PROGRESS_STAGE_LABELS.has(label) || /^[A-Za-z]+ing\b/.test(label);
+}
+
 // Anything after a retry that shows the model answered or the run moved on.
 const MODEL_PROGRESS_EVENT_TYPES = new Set([
   "llm_usage",
@@ -679,7 +688,7 @@ export function deriveTaskStatusStrip(args: {
         ? { phaseLabel: retryLabel }
         : currentGroup?.latestActivityLabel &&
             !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel) &&
-            (state === "working" || !IN_PROGRESS_STAGE_LABELS.has(currentGroup.latestActivityLabel))
+            (state === "working" || !readsAsInProgress(currentGroup.latestActivityLabel))
           ? { phaseLabel: currentGroup.latestActivityLabel }
           : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
             ? {

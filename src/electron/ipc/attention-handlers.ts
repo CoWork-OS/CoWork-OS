@@ -20,6 +20,9 @@ export const ATTENTION_DAEMON_EVENTS = [
   "task_status",
   "task_paused",
   "task_resumed",
+  // A reply to a paused session restarts it with "executing" alone (no task_resumed); without
+  // it the queue kept that running session as "Response needed".
+  "executing",
   "task_completed",
   "task_cancelled",
 ] as const;

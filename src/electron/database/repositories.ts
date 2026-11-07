@@ -1086,6 +1086,11 @@ export class TaskStore {
       if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "lastRunDurationMs")) {
         normalizedUpdates.lastRunDurationMs = undefined;
       }
+      // A running task waits on no one. A reply to a paused task restarts it with only a status
+      // change, which left the pause reason behind: the finished task still "waited" for it.
+      if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "awaitingUserInputReasonCode")) {
+        normalizedUpdates.awaitingUserInputReasonCode = undefined;
+      }
     }
 
     const fields: string[] = [];

@@ -2899,6 +2899,9 @@ a,
 .replay-controls-row {
   display: flex;
   align-items: center;
+  /* A narrow column (side chat or browser open) moves the speed group to a second line
+     instead of wrapping the step counter and clipping the close button. */
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
 }
@@ -2968,6 +2971,7 @@ a,
 }
 
 .replay-step-counter {
+  white-space: nowrap;
   font-size: 12px;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;

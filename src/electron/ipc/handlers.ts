@@ -11491,7 +11491,22 @@ export async function setupIpcHandlers(
                 workspaceName: labelForWorkspace(id),
               })),
           );
-          const tasks = perWorkspace.flat();
+          // A session started without a folder runs in its own temporary workspace. "All
+          // workspaces" counts those too, as Usage Insights does: without them the summary
+          // was empty for anyone who never picked a folder.
+          const temporarySessions = allMode
+            ? (
+                (await taskRepo.findByCreatedAtRange({
+                  startMs: sinceMs,
+                  endMs: Date.now(),
+                  limit: 200,
+                })) || []
+              )
+                .filter((task) => isTempWorkspaceId(task.workspaceId))
+                .slice(0, 100)
+                .map((task) => ({ ...task, workspaceName: "Temporary workspace" }))
+            : [];
+          const tasks = [...perWorkspace.flat(), ...temporarySessions];
           return tasks.sort((a: Any, b: Any) => (b.createdAt || 0) - (a.createdAt || 0));
         },
         searchMemory: async (_currentWorkspaceId, query, limit) => {

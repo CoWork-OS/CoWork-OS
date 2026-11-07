@@ -6,6 +6,7 @@ import type {
   AgentSecurityInventoryItem,
   AgentSecurityRuntimeStatus,
 } from "../../shared/agent-security";
+import { ipcErrorMessage } from "../utils/ipc-error-message";
 import "./agent-security.css";
 
 function formatTime(value?: number | string): string {
@@ -40,7 +41,9 @@ export function AgentSecurityPanel() {
       setDiagnostics(recentDiagnostics);
     } catch (loadError) {
       setError(
-        loadError instanceof Error ? loadError.message : "Failed to load agent security status",
+        loadError instanceof Error
+          ? ipcErrorMessage(loadError)
+          : "Failed to load agent security status",
       );
     }
   }, []);
@@ -57,7 +60,9 @@ export function AgentSecurityPanel() {
       setMessage(await action());
       await load(true);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Security action failed");
+      setError(
+        actionError instanceof Error ? ipcErrorMessage(actionError) : "Security action failed",
+      );
     } finally {
       setBusy(null);
     }
@@ -74,7 +79,9 @@ export function AgentSecurityPanel() {
         );
       }
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Failed to update finding");
+      setError(
+        updateError instanceof Error ? ipcErrorMessage(updateError) : "Failed to update finding",
+      );
     } finally {
       setBusy(null);
     }

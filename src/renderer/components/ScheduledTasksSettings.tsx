@@ -1995,6 +1995,17 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
   );
 
   const [saving, setSaving] = useState(false);
+
+  // The dialog covers the page; Escape closes it like a click on the backdrop.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || saving) return;
+      event.preventDefault();
+      onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, saving]);
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
@@ -2257,7 +2268,12 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div style={modalStyles.content}>
+      <div
+        style={modalStyles.content}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEditing ? "Edit Scheduled Task" : "New Scheduled Task"}
+      >
         <div style={modalStyles.title}>
           {Icons.clock}
           {isEditing ? "Edit Scheduled Task" : "New Scheduled Task"}

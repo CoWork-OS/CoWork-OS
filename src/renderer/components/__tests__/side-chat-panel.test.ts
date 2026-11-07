@@ -72,6 +72,26 @@ describe("SideChatPanel", () => {
     expect(markup).not.toContain("Speed test completed.");
   });
 
+  it("shows a side chat waiting for the next question as ready, not queued", () => {
+    const render = (sideTask: Task) =>
+      renderToStaticMarkup(
+        React.createElement(SideChatPanel, {
+          parentTask: { ...baseTask, id: "parent-task", title: "Parent" },
+          sideTask,
+          events: [],
+          onSendMessage: () => undefined,
+          onClose: () => undefined,
+        }),
+      );
+    const idle = render({ ...baseTask, status: "pending", branchFromTaskId: "parent-task" });
+    expect(idle).toContain("side-chat-status-ready");
+    expect(idle).toContain(">Ready<");
+    expect(idle).not.toContain(">Queued<");
+
+    const queued = render({ ...baseTask, status: "queued" });
+    expect(queued).toContain(">Queued<");
+  });
+
   it("renders sidechat message markdown instead of literal markdown syntax", () => {
     const markup = renderToStaticMarkup(
       React.createElement(SideChatPanel, {

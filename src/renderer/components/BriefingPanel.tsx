@@ -268,6 +268,11 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
               Generated {new Date(briefing.generatedAt).toLocaleString()}
             </div>
 
+            {/* Sections with nothing in them are left out of a briefing, so it can be empty. */}
+            {!briefing.sections.some((section) => section.enabled !== false) && (
+              <div className="briefing-empty">Nothing to report from the last 24 hours.</div>
+            )}
+
             {briefing.sections
               .filter((s) => s.enabled !== false)
               .map((section) => (

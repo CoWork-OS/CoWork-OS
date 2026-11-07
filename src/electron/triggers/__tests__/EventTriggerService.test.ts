@@ -58,6 +58,32 @@ describe("EventTriggerService", () => {
     expect(trigger.name).toBe("Test Trigger");
   });
 
+  it("refuses a regex condition that can never match", async () => {
+    const input = {
+      name: "Typo",
+      enabled: true,
+      source: "channel_message" as const,
+      conditions: [{ field: "text", operator: "matches" as const, value: "urgent(" }],
+      action: { type: "create_task" as const, config: { prompt: "x" } },
+      workspaceId: "ws-1",
+    };
+    await expect(service.addTrigger(input)).rejects.toThrow(
+      '"urgent(" is not a valid regular expression.',
+    );
+    expect(service.listTriggers()).toHaveLength(0);
+
+    const saved = await service.addTrigger({
+      ...input,
+      conditions: [{ field: "text", operator: "matches", value: "urgent|asap" }],
+    });
+    await expect(
+      service.updateTrigger(saved.id, {
+        conditions: [{ field: "text", operator: "matches", value: "[unclosed" }],
+      }),
+    ).rejects.toThrow("is not a valid regular expression");
+    expect(service.listTriggers()[0].conditions[0].value).toBe("urgent|asap");
+  });
+
   it("listTriggers returns all triggers", async () => {
     await service.addTrigger({
       name: "T1",

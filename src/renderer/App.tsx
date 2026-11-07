@@ -212,7 +212,7 @@ import { findMultitaskCommand, parseMultitaskCommand } from "../shared/multitask
 import { isSynthesisChildTask } from "../shared/synthesis-agent-detection";
 import { isSpeculativeTask } from "../shared/automated-task-detection";
 import { classifyShellPermissionDecision } from "../shared/shell-permission-intents";
-import { resolveTaskStatusUpdateFromEvent } from "../shared/task-status";
+import { isActiveTaskStatus, resolveTaskStatusUpdateFromEvent } from "../shared/task-status";
 import {
   getFirstRunReadiness,
   getFirstRunReadinessActionLabel,
@@ -4657,9 +4657,18 @@ export function App() {
             updates.completedAt = undefined;
             updates.lastRunDurationMs = undefined;
           }
-          if (shouldClearTerminalStatus) {
+          // A reply to a paused task restarts it with a plain "executing" event, not
+          // task_resumed. The main process drops the waiting state when the status turns
+          // active (TaskStore.update); without the same here the running task kept saying
+          // "Response needed".
+          const startedFromWait =
+            isActiveTaskStatus(resolvedStatus) &&
+            !isActiveTaskStatus(t.status) &&
+            !isTerminalTaskStatus(t.status);
+          if (shouldClearTerminalStatus || (startedFromWait && eventTerminalStatus === undefined)) {
             updates.terminalStatus = undefined;
             updates.failureClass = undefined;
+            updates.awaitingUserInputReasonCode = undefined;
           } else if (eventTerminalStatus !== undefined) {
             updates.terminalStatus = eventTerminalStatus;
           }

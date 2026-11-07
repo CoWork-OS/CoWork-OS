@@ -160,21 +160,147 @@ describe("pre-flight memory context", () => {
         } as Any);
       },
     ],
-  ])("withholds memory for %s without claiming that no memory exists", async (_, configure) => {
+  ])(
+    "uses unknown-context framing for %s without retrieving memory or asking the model",
+    async (_, configure) => {
+      const executor = createExecutor();
+      configure(executor);
+
+      await executor.emitPreflightFraming();
+
+      expect(executor.createMessageWithTimeout).not.toHaveBeenCalled();
+      const text = executor.emitEvent.mock.calls.find(
+        ([type]: [string]) => type === "assistant_message",
+      )?.[1].message;
+      expect(text).toContain("unknown status and contents for this turn");
+      expect(text).toContain("Details supplied by the current request remain authoritative");
+      expect(text).not.toContain(COMMAND);
+      expect(text).not.toContain("Atlas requires human review");
+      expect(MemoryRepoContext.prototype.build).not.toHaveBeenCalled();
+      expect(MemoryContextBuilderService.prototype.buildLayers).not.toHaveBeenCalled();
+      expect(executor.emitEvent.mock.calls.some(([type]: [string]) => type === "memory_used")).toBe(
+        false,
+      );
+    },
+  );
+
+  it("does not let the recorded unsupported model assumption reach a memory-disabled framing", async () => {
     const executor = createExecutor();
-    configure(executor);
+    executor.task.agentConfig.retainMemory = false;
+    const unsupported = "No prior agreed command or human review requirement exists in memory.";
+    executor.createMessageWithTimeout.mockResolvedValue({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: unsupported }],
+    });
 
     await executor.emitPreflightFraming();
 
-    const request = executor.createMessageWithTimeout.mock.calls[0][0];
-    expect(request.system).not.toContain(COMMAND);
-    expect(request.system).not.toContain("Atlas requires human review");
-    expect(request.system).toContain("Do not infer that no prior agreement or memory exists");
-    expect(MemoryRepoContext.prototype.build).not.toHaveBeenCalled();
-    expect(MemoryContextBuilderService.prototype.buildLayers).not.toHaveBeenCalled();
-    expect(executor.emitEvent.mock.calls.some(([type]: [string]) => type === "memory_used")).toBe(
-      false,
+    expect(executor.createMessageWithTimeout).not.toHaveBeenCalled();
+    const messages = executor.emitEvent.mock.calls.filter(
+      ([type]: [string]) => type === "assistant_message",
     );
+    expect(messages).toHaveLength(1);
+    expect(messages[0][1].message).not.toContain(unsupported);
+    expect(messages[0][1].message).toContain("unknown status and contents");
+    expect(executor.updateTracking).not.toHaveBeenCalled();
+  });
+
+  it.each(["empty", "guidance-only", "database-guidance-only"])(
+    "does not treat %s memory output as evidence of a prior agreement's absence",
+    async (kind) => {
+      vi.mocked(MemoryRepoContext.prototype.build).mockResolvedValue(
+        kind === "guidance-only"
+          ? {
+              text: "<cowork_memory_repo>Read MEMORY.md when needed.</cowork_memory_repo>",
+              refs: [],
+              hashes: [],
+              version: "empty",
+              tokens: 10,
+            }
+          : null,
+      );
+      vi.mocked(MemoryContextBuilderService.prototype.buildLayers).mockResolvedValue({
+        l0:
+          kind === "database-guidance-only"
+            ? {
+                layer: "l0",
+                text: "MEMORY: No facts were retrieved.",
+                refs: [],
+                tokens: 8,
+                truncated: false,
+              }
+            : null,
+        l1: null,
+        source: "none",
+      });
+      const executor = createExecutor();
+
+      await executor.emitPreflightFraming();
+
+      expect(executor.createMessageWithTimeout).not.toHaveBeenCalled();
+      expect(executor.emitEvent).toHaveBeenCalledWith("assistant_message", {
+        message: expect.stringContaining("unknown status and contents"),
+      });
+    },
+  );
+
+  it("uses unknown-context framing when both memory sources are unavailable", async () => {
+    vi.mocked(MemoryRepoContext.prototype.build).mockRejectedValue(new Error("repo unavailable"));
+    vi.mocked(MemoryContextBuilderService.prototype.buildLayers).mockRejectedValue(
+      new Error("database unavailable"),
+    );
+    const executor = createExecutor();
+
+    await executor.emitPreflightFraming();
+
+    expect(executor.createMessageWithTimeout).not.toHaveBeenCalled();
+    expect(executor.emitEvent).toHaveBeenCalledWith("assistant_message", {
+      message: expect.stringContaining("unknown status and contents"),
+    });
+  });
+
+  it("keeps model-based framing when only database-backed evidence is available", async () => {
+    vi.mocked(MemoryRepoContext.prototype.build).mockResolvedValue(null);
+    const executor = createExecutor();
+
+    await executor.emitPreflightFraming();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.createMessageWithTimeout.mock.calls[0][0].system).toContain(
+      "Atlas requires human review",
+    );
+  });
+
+  it("preserves current-request authority when memory is off and the request states an agreement", async () => {
+    const executor = createExecutor();
+    executor.task.agentConfig.retainMemory = false;
+    executor.task.prompt = "We agreed to use npm run verify:current. Prepare that verification.";
+
+    await executor.emitPreflightFraming();
+
+    const text = executor.emitEvent.mock.calls.find(
+      ([type]: [string]) => type === "assistant_message",
+    )?.[1].message;
+    expect(text).toContain("Details supplied by the current request remain authoritative");
+    expect(text).toContain("Any earlier agreement not established there");
+    expect(executor.task.prompt).toContain("We agreed to use npm run verify:current");
+    expect(executor.createMessageWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("does not emit unavailable-memory framing after cancellation during retrieval", async () => {
+    vi.mocked(MemoryRepoContext.prototype.build).mockResolvedValue(null);
+    const executor = createExecutor();
+    vi.mocked(MemoryContextBuilderService.prototype.buildLayers).mockImplementation(async () => {
+      executor.cancelled = true;
+      return { l0: null, l1: null, source: "none" };
+    });
+
+    await executor.emitPreflightFraming();
+
+    expect(executor.createMessageWithTimeout).not.toHaveBeenCalled();
+    expect(
+      executor.emitEvent.mock.calls.some(([type]: [string]) => type === "assistant_message"),
+    ).toBe(false);
   });
 
   it("uses the undecorated task query and preserves source-change and review warnings", async () => {

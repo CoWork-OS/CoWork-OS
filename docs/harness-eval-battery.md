@@ -45,7 +45,7 @@ A fresh application profile is not an operating-system sandbox. Run untrusted ca
 
 ## Memory evals
 
-`npm run qa:memory-evals` runs four deterministic, offline suites over the memory engine. `npm run qa:harness` runs them as its last step, so CI runs them too.
+`npm run qa:memory-evals` runs the deterministic, offline suites over the memory engine. `npm run qa:harness` runs them as its last step, so CI runs them too.
 
 Each suite creates a fresh profile database with the real schema in a temporary directory. It runs the real services over that database: `MemoryService` archive capture and search, the conversation index, the knowledge graph, `MemoryWriter`, `MemoryRecall` with its production lanes, `MemoryInjectionPolicy`, `MemoryContextBuilder`, the `memory_recall` tool and the briefing search. Nothing uses the network or a model, and the desktop app is not needed.
 
@@ -61,6 +61,16 @@ The fixtures are JSON files in `src/electron/memory/__tests__/evals/fixtures/`. 
 `COWORK_MEMORY_EVAL_REPORT_DIR=<dir>` writes one JSON report per suite (`<suite>.json`): metrics, thresholds, failures, and details such as the golden-set misses and the per-context token counts. Every suite also prints a one-line summary to stderr.
 
 Two limits apply. The archive lane runs its host search here; the FTS worker's hybrid ranking is covered by its own tests. The private archive rows of the user's own workspace are readable on the owner's tool surface by design ("private" means not shared externally), so the privacy suite forbids them only on surfaces that can reach a channel (the briefing).
+
+## Paired memory quality replay
+
+`npm run qa:memory-quality` runs the memory-folder lifecycle benchmark, also included in
+`qa:memory-evals` and `qa:harness`. It compares enabled/disabled memory access over synthetic
+histories, with independent command-selection answer keys and gates for useful recall,
+unsupported/stale commands, forbidden exposure, paired task-proxy gain and estimated token
+overhead. It uses real Git/SQLite memory services and a scripted model/probe boundary.
+See [Memory quality benchmark](memory-quality-benchmark.md) for the corpus, artifact command,
+metric definitions and the distinction between deterministic probes and live-agent quality.
 
 ## Memory health check
 

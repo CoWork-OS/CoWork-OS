@@ -273,7 +273,7 @@ surface-level contract on top of it. Playbook capture uses the same task gate.
   `(imported)` or `(observed)` when the user did not state it. Blocks list their refs.
 - **Budgets** (`agent/content/prompt-budgets.ts`): `MEMORY_L0_TOKENS` 600,
   `MEMORY_L1_ITEMS_TOKENS` 400 (plan steps, inside `memory_context`), `MEMORY_L1_COMPACT_TOKENS`
-  250 (planning, chat, follow-up system prompt).
+  250 (pre-flight, planning, chat, follow-up system prompt).
 
 Where each layer lands:
 
@@ -281,13 +281,20 @@ Where each layer lands:
 |---|---|---|---|
 | Plan step | pinned `<cowork_user_profile>` block | `memory_context`, in the synthesizer's former hot-memory slot | kit slice without DESIGN.md, the generated USER.md / MEMORY.md blocks and the three shared-context files; playbook and summaries |
 | Follow-up | pinned block | system prompt `memory_context` | |
+| Pre-flight framing | system prompt (`<cowork_hot_memory>`) | system prompt (`<cowork_relevant_memory>`) | selected `<cowork_memory_repo>` block; same memory policy as planning |
 | Planning, chat, companion | system prompt (`<cowork_hot_memory>`) | system prompt (`<cowork_relevant_memory>`) | |
 | All | | | awareness snapshot without `user_*` beliefs |
 
 `task.prompt` no longer carries relationship memory. Retrieval queries use the undecorated
 prompt (`rawPrompt`, with any strategy block stripped).
 
-**Attribution.** Each surface emits a `memory_used` task event once per turn (chat turn, plan,
+Pre-flight framing uses the shared policy and context builder before describing assumptions.
+It treats memory as contextual evidence, preserves source-change and review warnings, and
+gives the current user request precedence. Missing or withheld context does not establish
+that no prior agreement exists. If policy resolution fails, framing is skipped and normal
+execution continues.
+
+**Attribution.** Each surface emits a `memory_used` task event once per turn (pre-flight, chat turn, plan,
 step, follow-up; `resetMemoryUsedAttribution`) and again when its set of injected refs changes
 within the turn: `{ surface, refs, source }` with `memory:<id>`, `archive:<id>` and
 `external:<provider>`. The event is hidden from the main timeline, is not indexed as

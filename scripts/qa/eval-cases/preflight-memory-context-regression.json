@@ -1,0 +1,18 @@
+{
+  "id": "preflight-memory-context-2026-11-07",
+  "title": "Pre-flight framing respects saved corrections and memory visibility policy",
+  "source": {
+    "audit": "isolated-live-memory-quality-evaluation-2026-11-07"
+  },
+  "prompt": "Save an Atlas verification command, correct it, and save a human-review requirement. Frame a verification task before execution, then repeat with memory disabled.",
+  "assertions": {
+    "requiredBehavior": "Pre-flight receives policy-filtered L0, repository, and relevant memory through the shared builder, preserving source/review warnings and attribution. Disabled, no-memory, group/public, verifier, and default sub-agent contexts do not retrieve personal memory. Missing context must not be described as proof that no prior memory or agreement exists.",
+    "failureBehavior": "If policy resolution fails, skip pre-flight framing and continue execution without making an ungrounded framing call."
+  },
+  "executableTests": [
+    "src/electron/agent/__tests__/executor-preflight-memory.test.ts",
+    "src/electron/agent/__tests__/executor-memory-prompt-surfaces.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/__tests__/executor-preflight-memory.test.ts src/electron/agent/__tests__/executor-memory-prompt-surfaces.test.ts",
+  "notes": "Traceability specification for the executable regressions, not a model-generated task-success score. Live runtime acceptance must independently verify terminal status, actual file writes, and memory exclusion; executor turn limits must allow pre-flight, planning, execution, and verification."
+}

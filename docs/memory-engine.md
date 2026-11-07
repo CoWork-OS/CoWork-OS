@@ -294,6 +294,16 @@ gives the current user request precedence. Missing or withheld context does not 
 that no prior agreement exists. If policy resolution fails, framing is skipped and normal
 execution continues.
 
+When the selected memory blocks contain no evidence references, pre-flight renders a fixed
+unknown-context framing without a model call. This covers policy-withheld memory, empty
+retrieval, and unavailable stores when no other source supplies evidence. Repository
+instructions and database headings without references do not count as retrieved facts.
+The framing gives explicit current-request details precedence and leaves any unestablished
+earlier agreement's status and contents unknown. It does not ask to access withheld memory.
+This is a brief generic framing for empty views; task-specific model framing continues when
+repository or database evidence is present. The model prompt asks for supported facts and
+unresolved details instead of requiring two or three invented assumptions.
+
 Framing requests allow 4,096 output tokens so hidden reasoning does not consume a tiny
 answer allowance. The prompt still asks for at most 180 words. A `max_tokens` response gets
 at most one fresh retry with 8,192 tokens, under the existing task/context ceilings and

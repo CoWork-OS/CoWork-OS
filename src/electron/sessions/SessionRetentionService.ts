@@ -1,5 +1,5 @@
 import type { Task, TaskEvent, Workspace } from "../../shared/types";
-import { isTerminalTaskStatus } from "../../shared/task-status";
+import { isActiveTaskStatus, isIdleFork, isTerminalTaskStatus } from "../../shared/task-status";
 import {
   TaskEventRepository,
   TaskStore,
@@ -18,6 +18,15 @@ type SessionPayload = Record<string, unknown>;
 const logger = createLogger("SessionRetentionService");
 
 const QUEUED_ATTACHMENT_ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
+/**
+ * Archiving hides a session from every list but does not stop it, so a session with running work
+ * would keep working (and could ask for approval) where nobody sees it. A fork waiting for its next
+ * message is pending but idle.
+ */
+function hasRunningWork(rows: readonly Task[]): boolean {
+  return rows.some((task) => isActiveTaskStatus(task.status) && !isIdleFork(task));
+}
+
 // Matches the session lineage cap used by archiveSession.
 const WORKSPACE_ARCHIVE_TASK_LIMIT = 10000;
 
@@ -107,6 +116,9 @@ export class SessionRetentionService {
     if (rows.length === 0) {
       throw new Error(`Session not found: ${sessionId}`);
     }
+    if (hasRunningWork(rows)) {
+      throw new Error("This session is still running. Stop it or let it finish, then archive it.");
+    }
     return {
       metadata: this.metadataRepo.archive(sessionId),
       taskCount: rows.length,
@@ -133,17 +145,23 @@ export class SessionRetentionService {
   archiveWorkspaceSessions(
     workspaceId: string,
     options: { excludeSources?: Array<NonNullable<Task["source"]>> } = {},
-  ): { sessionCount: number } {
+  ): { sessionCount: number; skippedRunning: number } {
     const tasks = this.taskRepo.findSidebarSummaries(WORKSPACE_ARCHIVE_TASK_LIMIT, 0, {
       workspaceId,
       includeArchivedSessions: false,
       excludeBotConversations: true,
       excludeSources: options.excludeSources,
     });
-    const sessionIds = tasks
-      .filter((task) => !task.parentTaskId)
-      .map((task) => task.sessionId || task.id);
-    return { sessionCount: this.metadataRepo.archiveMany(sessionIds) };
+    const sessionIds = [
+      ...new Set(
+        tasks.filter((task) => !task.parentTaskId).map((task) => task.sessionId || task.id),
+      ),
+    ];
+    const idle = sessionIds.filter((sessionId) => !hasRunningWork(this.tasksForSession(sessionId)));
+    return {
+      sessionCount: this.metadataRepo.archiveMany(idle),
+      skippedRunning: sessionIds.length - idle.length,
+    };
   }
 
   renameSession(sessionId: string, name: string): TaskSessionMetadata {

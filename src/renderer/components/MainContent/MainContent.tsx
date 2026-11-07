@@ -175,6 +175,8 @@ import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-comp
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { buildTaskTranscriptMarkdown } from "./task-transcript-markdown";
 import { announceSessionArchived } from "../../utils/session-archive-events";
+import { isActiveTaskStatus, isIdleFork } from "../../../shared/task-status";
+import { ipcErrorMessage } from "../../utils/ipc-error-message";
 import {
   deriveSharedTaskEventUiState,
   reconcileBotConversationSharedTaskEventUi,
@@ -6865,6 +6867,11 @@ function MainContentComponent({
     workspace?.permissions.write,
   ]);
 
+  // The main process refuses to archive a session with running work (it would keep going unseen).
+  const taskHeaderArchiveBlockedByRunningWork = Boolean(
+    task && isActiveTaskStatus(task.status) && !isIdleFork(task),
+  );
+
   const handleTaskHeaderArchive = useCallback(async () => {
     if (
       !task ||
@@ -6881,7 +6888,11 @@ function MainContentComponent({
       announceSessionArchived({ taskId: task.id, wasSelected: true });
     } catch (error) {
       console.error("Failed to archive task from header:", error);
-      setHeaderActionError("Could not archive. Please try again.");
+      setHeaderActionError(
+        error instanceof Error && ipcErrorMessage(error)
+          ? `Could not archive: ${ipcErrorMessage(error)}`
+          : "Could not archive. Please try again.",
+      );
     }
   }, [
     closeTaskHeaderMenu,
@@ -8928,13 +8939,16 @@ function MainContentComponent({
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                            !hasHostMethod("archiveTask")
+                            !hasHostMethod("archiveTask") ||
+                            taskHeaderArchiveBlockedByRunningWork
                           }
                           title={
                             taskHeaderTaskMutationUnavailableReason ??
                             (!hasHostMethod("archiveTask")
                               ? "Archiving is not available on this browser host."
-                              : undefined)
+                              : taskHeaderArchiveBlockedByRunningWork
+                                ? "Stop this session or let it finish before archiving it."
+                                : undefined)
                           }
                           onClick={handleTaskHeaderArchive}
                         >
@@ -8998,13 +9012,16 @@ function MainContentComponent({
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                            !hasHostMethod("archiveTask")
+                            !hasHostMethod("archiveTask") ||
+                            taskHeaderArchiveBlockedByRunningWork
                           }
                           title={
                             taskHeaderTaskMutationUnavailableReason ??
                             (!hasHostMethod("archiveTask")
                               ? "Archiving is not available on this browser host."
-                              : undefined)
+                              : taskHeaderArchiveBlockedByRunningWork
+                                ? "Stop this session or let it finish before archiving it."
+                                : undefined)
                           }
                           onClick={handleTaskHeaderArchive}
                         >

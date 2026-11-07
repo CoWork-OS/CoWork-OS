@@ -175,7 +175,7 @@ describe("memory layers for prompt surfaces", () => {
       l0: true,
       l1Tokens: 200,
     });
-    expect(repoBuild).toHaveBeenCalledWith({ workspaceId: "ws-1", botId: null });
+    expect(repoBuild).toHaveBeenCalledWith({ workspaceId: "ws-1", botId: null, query: "Prompt" });
     expect(chat.repo).toMatch(/^<cowork_memory_repo>/);
     expect(build).toHaveBeenCalledWith(expect.objectContaining({ excludeHashes: ["h-tea"] }));
     expect(executor.emitEvent).toHaveBeenCalledWith("memory_used", {
@@ -232,6 +232,27 @@ describe("memory layers for prompt surfaces", () => {
       "Fix the login bug\n\n[AGENT_STRATEGY_CONTEXT_V1]\nintent=execution\n[/AGENT_STRATEGY_CONTEXT_V1]";
 
     expect(executor.getMemoryQueryPrompt()).toBe("Fix the login bug");
+  });
+
+  it("passes current user intent ahead of the undecorated task on every repo load", async () => {
+    const executor = createExecutor();
+    executor.task.prompt =
+      "Fix login\n[AGENT_STRATEGY_CONTEXT_V1]\ninternal strategy\n[/AGENT_STRATEGY_CONTEXT_V1]";
+    executor.lastUserMessage = "Now inspect billing migrations";
+    const build = vi.spyOn(MemoryRepoContext.prototype, "build").mockResolvedValue(null);
+    const decision = resolveMemoryInjection({ memoryRepoEnabled: true });
+    await executor.loadMemoryRepoBlock(decision);
+    await executor.loadMemoryRepoBlock(decision);
+    expect(build).toHaveBeenLastCalledWith({
+      workspaceId: "ws-1",
+      botId: null,
+      query: "Now inspect billing migrations\nFix login",
+    });
+    executor.lastUserMessage = "Check release notes";
+    await executor.loadMemoryRepoBlock(decision);
+    expect(build).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "Check release notes\nFix login" }),
+    );
   });
 
   it("never captures memory_used events into the archive", () => {

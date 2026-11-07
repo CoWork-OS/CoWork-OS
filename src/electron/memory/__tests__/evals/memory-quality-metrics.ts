@@ -5,6 +5,8 @@ export interface QualityExpectation {
   supportedCommands: string[];
   staleCommands: string[];
   mustNotExpose: string[];
+  irrelevantContextMarkers?: string[];
+  requiredContextMarkers?: string[];
 }
 export interface QualityObservation {
   command: string | null;
@@ -111,4 +113,83 @@ export function gradeMemoryQuality(pairs: QualityPair[], thresholds: QualityThre
       failures.push(`${name}: memory token budget exceeded`);
   }
   return { passed: !failures.length, failures, enabled, disabled, successGain };
+}
+
+export type SelectiveQualityPair = QualityPair & { baseline: QualityObservation };
+export interface SelectiveQualityThresholds {
+  minMeanContextReduction: number;
+  minInjectedRecallGain: number;
+  maxIrrelevantContextHits: number;
+}
+
+/** Compare selective injection with the previous file-order builder over identical histories.
+ * Task accuracy and tool recall must not regress to obtain savings. */
+export function gradeSelectiveMemoryQuality(
+  pairs: SelectiveQualityPair[],
+  thresholds: SelectiveQualityThresholds,
+) {
+  const selected = gradeQualityArm(pairs, "enabled");
+  const baseline = gradeQualityArm(
+    pairs.map((pair) => ({ ...pair, enabled: pair.baseline })),
+    "enabled",
+  );
+  const meanContextTokens = (arm: "enabled" | "baseline") =>
+    pairs.length
+      ? pairs.reduce((sum, pair) => sum + Math.ceil(pair[arm].context.length / 4), 0) / pairs.length
+      : 0;
+  const selectedTokens = meanContextTokens("enabled");
+  const baselineTokens = meanContextTokens("baseline");
+  const meanContextReduction = baselineTokens
+    ? (baselineTokens - selectedTokens) / baselineTokens
+    : 0;
+  const eligible = pairs.filter(
+    (pair) => pair.expectation.requiresRecall && pair.expectation.expectedCommand !== null,
+  );
+  const injectedRecall = (arm: "enabled" | "baseline") =>
+    eligible.length
+      ? eligible.filter((pair) =>
+          pair[arm].context.includes("`" + pair.expectation.expectedCommand + "`"),
+        ).length / eligible.length
+      : 0;
+  const injectedRecallGain = injectedRecall("enabled") - injectedRecall("baseline");
+  const irrelevantContextHits = pairs.reduce(
+    (sum, pair) =>
+      sum +
+      (pair.expectation.irrelevantContextMarkers ?? []).filter((marker) =>
+        pair.enabled.context.includes(marker),
+      ).length,
+    0,
+  );
+  const missingRequiredContext = pairs.reduce(
+    (sum, pair) =>
+      sum +
+      (pair.expectation.requiredContextMarkers ?? []).filter(
+        (marker) => !pair.enabled.context.includes(marker),
+      ).length,
+    0,
+  );
+  const failures: string[] = [];
+  if (!pairs.length || !eligible.length || !baselineTokens)
+    failures.push("Selective comparison requires positive cases and a nonempty baseline");
+  if (selected.successRate < baseline.successRate)
+    failures.push("Selective task-proxy success regressed");
+  if (selected.recallAt5 < baseline.recallAt5) failures.push("Selective tool recall regressed");
+  if (meanContextReduction < thresholds.minMeanContextReduction)
+    failures.push("Selective context token reduction below threshold");
+  if (injectedRecallGain < thresholds.minInjectedRecallGain)
+    failures.push("Selective injected recall gain below threshold");
+  if (missingRequiredContext) failures.push("Required user context missing from selection");
+  if (irrelevantContextHits > thresholds.maxIrrelevantContextHits)
+    failures.push("Irrelevant notes remain in selective context");
+  return {
+    passed: !failures.length,
+    failures,
+    baseline,
+    selectedTokens,
+    baselineTokens,
+    meanContextReduction,
+    injectedRecallGain,
+    irrelevantContextHits,
+    missingRequiredContext,
+  };
 }

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "thresholds": {
     "minSuccessRate": 1,
     "minSuccessGain": 0.4,
@@ -264,7 +264,8 @@
       "supportedCommands": ["npm run verify:budget"],
       "staleCommands": [],
       "mustNotExpose": [],
-      "requiresRecall": true
+      "requiresRecall": true,
+      "irrelevantContextMarkers": ["inventory documentation item"]
     },
     {
       "id": "current-request-override",
@@ -281,6 +282,33 @@
       "staleCommands": ["npm run verify:old"],
       "mustNotExpose": [],
       "requiresRecall": false
+    },
+    {
+      "id": "user-constraint-retention",
+      "category": "constraints",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Require human review before deploying changes.",
+          "kind": "rule"
+        },
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:rules`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:rules",
+      "supportedCommands": ["npm run verify:rules"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": true,
+      "requiredContextMarkers": ["Require human review before deploying changes."]
     }
-  ]
+  ],
+  "selectionThresholds": {
+    "minMeanContextReduction": 0.05,
+    "minInjectedRecallGain": 0.1,
+    "maxIrrelevantContextHits": 0
+  }
 }

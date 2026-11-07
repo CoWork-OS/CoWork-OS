@@ -28,10 +28,12 @@ function createExecutor(): Any {
   executor.getExecutionTaskPrompt = () => executor.task.prompt;
   executor.buildUserContent = vi.fn(async (text: string) => [{ type: "text", text }]);
   executor.createMessageWithTimeout = vi.fn().mockResolvedValue({
+    stopReason: "end_turn",
     content: [{ type: "text", text: "Use the corrected command and retain human review." }],
     usage: { inputTokens: 90, outputTokens: 12 },
   });
   executor.updateTracking = vi.fn();
+  executor.checkBudgets = vi.fn();
   executor.emitEvent = vi.fn();
   return executor;
 }
@@ -229,5 +231,162 @@ describe("pre-flight memory context", () => {
       message: "Pre-flight framing failed; continuing with execution.",
       error: "policy unavailable",
     });
+  });
+
+  it("leaves reasoning headroom while requesting concise framing", async () => {
+    const executor = createExecutor();
+
+    await executor.emitPreflightFraming();
+
+    const request = executor.createMessageWithTimeout.mock.calls[0][0];
+    expect(request.maxTokens).toBeGreaterThan(1024);
+    expect(request.maxTokens).toBeLessThanOrEqual(8192);
+    expect(executor.createMessageWithTimeout.mock.calls[0][1]).toBeGreaterThan(25_000);
+    expect(executor.createMessageWithTimeout.mock.calls[0][1]).toBeLessThanOrEqual(60_000);
+    expect(request.messages[0].content[0].text).toContain("at most 180 words");
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["", "**Task:** An incomplete framing"])(
+    "retries a token-limited response without publishing or replaying its partial text (%j)",
+    async (partial) => {
+      const executor = createExecutor();
+      executor.createMessageWithTimeout
+        .mockResolvedValueOnce({
+          stopReason: "max_tokens",
+          content: [{ type: "text", text: partial }],
+          usage: { inputTokens: 100, outputTokens: 4096 },
+        })
+        .mockResolvedValueOnce({
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "Complete framing using the corrected command." }],
+          usage: { inputTokens: 100, outputTokens: 4300 },
+        });
+
+      await executor.emitPreflightFraming();
+
+      const calls = executor.createMessageWithTimeout.mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[1][0].maxTokens).toBeGreaterThan(calls[0][0].maxTokens);
+      expect(calls[1][0].maxTokens).toBeLessThanOrEqual(8192);
+      expect(calls[1][0].messages).toEqual(calls[0][0].messages);
+      expect(calls[1][0].system).toBe(calls[0][0].system);
+      expect(calls.every((call: Any[]) => call[4]?.suppressStreaming === true)).toBe(true);
+      expect(executor.updateTracking.mock.calls).toEqual([
+        [100, 4096, undefined],
+        [100, 4300, undefined],
+      ]);
+      expect(
+        executor.emitEvent.mock.calls.filter(([type]: [string]) => type === "assistant_message"),
+      ).toEqual([
+        ["assistant_message", { message: "Complete framing using the corrected command." }],
+      ]);
+    },
+  );
+
+  it("stops after one retry and omits a still-truncated framing", async () => {
+    const executor = createExecutor();
+    executor.createMessageWithTimeout.mockResolvedValue({
+      stopReason: "max_tokens",
+      content: [{ type: "text", text: "Incomplete framing" }],
+    });
+
+    await executor.emitPreflightFraming();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(2);
+    expect(
+      executor.emitEvent.mock.calls.some(([type]: [string]) => type === "assistant_message"),
+    ).toBe(false);
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        message:
+          "Pre-flight framing exhausted its output token allowance; continuing with execution.",
+      }),
+    );
+  });
+
+  it.each(["task", "context"])(
+    "honors a small %s ceiling instead of retrying the same cap",
+    async (ceiling) => {
+      const executor = createExecutor();
+      if (ceiling === "task") executor.task.agentConfig.maxTokens = 512;
+      else executor.contextManager = { estimateMaxOutputTokens: () => 512 };
+      executor.createMessageWithTimeout.mockResolvedValue({
+        stopReason: "max_tokens",
+        content: [],
+      });
+
+      await executor.emitPreflightFraming();
+
+      expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+      expect(executor.createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(512);
+      expect(
+        executor.emitEvent.mock.calls.some(([type]: [string]) => type === "assistant_message"),
+      ).toBe(false);
+    },
+  );
+
+  it("does not retry or publish framing after cancellation", async () => {
+    const executor = createExecutor();
+    executor.createMessageWithTimeout.mockImplementationOnce(async () => {
+      executor.cancelled = true;
+      return { stopReason: "max_tokens", content: [] };
+    });
+
+    await executor.emitPreflightFraming();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(
+      executor.emitEvent.mock.calls.some(([type]: [string]) => type === "assistant_message"),
+    ).toBe(false);
+  });
+
+  it("rechecks the task budget before the larger retry", async () => {
+    const executor = createExecutor();
+    executor.createMessageWithTimeout.mockResolvedValue({ stopReason: "max_tokens", content: [] });
+    executor.checkBudgets
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {
+        throw new Error("Task token budget exhausted");
+      });
+
+    await expect(executor.emitPreflightFraming()).resolves.toBeUndefined();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        error: "Task token budget exhausted",
+      }),
+    );
+  });
+
+  it("logs an empty non-truncated response without spending another model call", async () => {
+    const executor = createExecutor();
+    executor.createMessageWithTimeout.mockResolvedValue({ stopReason: "end_turn", content: [] });
+
+    await executor.emitPreflightFraming();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.emitEvent).toHaveBeenCalledWith("log", {
+      message: "Pre-flight framing returned no text; continuing with execution.",
+      stopReason: "end_turn",
+    });
+  });
+
+  it("fails softly on a provider error without an additional retry", async () => {
+    const executor = createExecutor();
+    executor.createMessageWithTimeout.mockRejectedValue(new Error("Provider timed out"));
+
+    await expect(executor.emitPreflightFraming()).resolves.toBeUndefined();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        error: "Provider timed out",
+      }),
+    );
   });
 });

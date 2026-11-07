@@ -26,14 +26,18 @@ describeEval("memory quality: paired history replay", () => {
         staleRate: report.enabled.staleRate,
         exposures: report.enabled.exposures,
         meanEstimatedMemoryTokens: report.enabled.meanEstimatedMemoryTokens,
+        meanContextReduction: report.selection.meanContextReduction,
+        injectedRecallGain: report.selection.injectedRecallGain,
       },
-      thresholds: report.thresholds,
+      thresholds: { ...report.thresholds, selection: report.selectionThresholds },
       failures: report.failures,
       details: {
+        protocolVersion: report.version,
         responder: report.responder,
         enabled: report.enabled,
         disabled: report.disabled,
         pairs: report.pairs,
+        selection: report.selection,
       },
     });
     expect(report.failures, JSON.stringify(report, null, 2)).toEqual([]);
@@ -50,7 +54,9 @@ describeEval("memory quality: paired history replay", () => {
       report.pairs.find((pair) => pair.id === "current-request-control")?.disabled.command,
     ).toBe("npm run verify:request");
     const pressure = report.pairs.find((pair) => pair.id === "recall-under-budget-pressure")!;
-    expect(pressure.enabled.context).not.toContain("npm run verify:budget");
+    expect(pressure.baseline.context).not.toContain("npm run verify:budget");
+    expect(pressure.enabled.context).toContain("npm run verify:budget");
+    expect(pressure.enabled.context).not.toContain("inventory documentation item");
     expect(pressure.enabled.recalled.join("\n")).toContain("npm run verify:budget");
   }, 60000);
 
@@ -65,7 +71,7 @@ describeEval("memory quality: paired history replay", () => {
       expect(JSON.stringify(request)).not.toContain("expectedCommand");
       return commandSelectionProbe(request);
     });
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
     expect(pair.enabled.command).toBe(testCase.expectedCommand);
     expect(pair.disabled.command).toBeNull();
   }, 30000);

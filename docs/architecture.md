@@ -250,6 +250,14 @@ by later dreams.
 
 Facts about the user, workspaces and lessons live in the **memory folder** (`~/CoWork Memory`, a local git repo of markdown notes in the Agent Memory Repo format); commitments and notes about other people stay in `memory_items`. Both are written only through `MemoryWriter` (salience, redaction, policy, dedupe, supersession by subject, hot-memory invalidation). The `memories` archive keeps episodic outcomes. The legacy lanes (curated entries, user profile, relationship memory, awareness beliefs, adaptive style) were copied in once by a migration that runs at startup before anything reads memory; there are no dual writes, the old services are views of `memory_items`, a later migration copied global and workspace facts into the memory folder, and a one-time data retirement exports the old stores to an encrypted backup and drops them. Every producer (agent tools, Memory Hub, core memory candidates, imports, Chronicle) goes through the same hygiene. Recall (`MemoryRecall`) fuses facts, the archive, conversations and knowledge; four agent tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) cover it. See [Memory Engine](memory-engine.md).
 
+Workspace and bot prompt notes use bounded lexical selection from current user intent,
+while the personal index and typed user constraints retain their priority within existing
+budgets. The context cache includes query terms, and selected refs/hashes drive attribution
+and L0/L1 deduplication. The memory quality benchmark compares selective, file-order and
+no-memory arms with accuracy, recall, retention and token-overhead gates. See
+[Selective memory recall](selective-memory-recall.md).
+
+
 ## Workspace Kit
 
 The `.cowork/` workspace kit holds durable human-edited operating context.

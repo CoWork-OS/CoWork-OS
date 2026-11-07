@@ -9368,7 +9368,7 @@ ${transcript}
 
   /**
    * The memory folder's `<cowork_memory_repo>` block (design §6.1) under the `memoryRepo`
-   * layer: MEMORY.md plus this workspace's file, cached by repo version and workspace.
+   * layer: MEMORY.md plus selected workspace notes, cached by version, workspace and query.
    */
   private async loadMemoryRepoBlock(
     decision: MemoryLayerDecision,
@@ -9378,6 +9378,12 @@ ${transcript}
       return await getMemoryRepoContext().build({
         workspaceId: this.workspace?.id ?? null,
         botId: this.task.assignedAgentRoleId ?? null,
+        // One user-derived query for every prompt surface, including the pinned block
+        // and its L0 dedupe hashes. The latest follow-up precedes the original task.
+        query: [this.lastUserMessage, this.getMemoryQueryPrompt()]
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, 4000),
       });
     } catch (error) {
       logger.warn("[Executor] Memory repo block build failed:", (error as Error)?.message ?? error);

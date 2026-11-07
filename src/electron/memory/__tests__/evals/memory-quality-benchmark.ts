@@ -19,8 +19,9 @@ import { resolveMemoryInjection } from "../../MemoryInjectionPolicy";
 import { runWithMemoryRepoAccess } from "../../../security/memory-repo-access";
 import {
   gradeMemoryQuality,
+  gradeSelectiveMemoryQuality,
   type QualityObservation,
-  type QualityPair,
+  type SelectiveQualityPair,
 } from "./memory-quality-metrics";
 
 const Step = z
@@ -29,12 +30,20 @@ const Step = z
     text: z.string().min(8).max(260),
     workspace: z.enum(["atlas", "harbor"]).optional(),
     noMemory: z.boolean().optional(),
+    kind: z.enum(["project_fact", "rule", "preference", "identity", "commitment"]).optional(),
     review: z.enum(["accept", "pending", "invalidate"]).optional(),
   })
   .strict();
 export const QualityCorpus = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
+    selectionThresholds: z
+      .object({
+        minMeanContextReduction: z.number().min(0).max(1),
+        minInjectedRecallGain: z.number().min(0).max(1),
+        maxIrrelevantContextHits: z.number().int().nonnegative(),
+      })
+      .strict(),
     thresholds: z
       .object({
         minSuccessRate: z.number().min(0).max(1),
@@ -59,6 +68,8 @@ export const QualityCorpus = z
             supportedCommands: z.array(z.string().min(1)),
             staleCommands: z.array(z.string().min(1)),
             mustNotExpose: z.array(z.string().min(1)),
+            irrelevantContextMarkers: z.array(z.string().min(1)).default([]),
+            requiredContextMarkers: z.array(z.string().min(1)).default([]),
           })
           .strict(),
       )
@@ -108,7 +119,7 @@ const NOW = Date.UTC(2026, 10, 7, 12);
 export async function replayQualityCase(
   testCase: QualityCase,
   responder: QualityResponder = commandSelectionProbe,
-): Promise<QualityPair> {
+): Promise<SelectiveQualityPair> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-memory-quality-"));
   const db = new Database(":memory:");
   let clock = NOW;
@@ -158,7 +169,7 @@ export async function replayQualityCase(
       if (step.op === "remember") {
         const result = await service.remember({
           text: step.text,
-          kind: "project_fact",
+          kind: step.kind ?? "project_fact",
           scope: "workspace",
           workspaceId,
           workspaceName: workspaceId,
@@ -253,7 +264,7 @@ export async function replayQualityCase(
           op: "add",
           file: "workspaces/atlas.md",
           text: step.text,
-          kind: "project_fact",
+          kind: step.kind ?? "project_fact",
           evidence: [{ task: "T1", quote: step.text }],
         };
       else if (step.op === "lesson") {
@@ -315,7 +326,7 @@ export async function replayQualityCase(
           throw new Error(`Unexpected review result: ${JSON.stringify(accepted)}`);
       }
     }
-    const observe = async (enabled: boolean): Promise<QualityObservation> => {
+    const observe = async (enabled: boolean, selective = true): Promise<QualityObservation> => {
       const policy = resolveMemoryInjection({
         retainMemory: enabled,
         memoryRepoEnabled: enabled,
@@ -323,7 +334,10 @@ export async function replayQualityCase(
         gatewayContext: "private",
       });
       const block = policy.layers.memoryRepo
-        ? await context!.build({ workspaceId: "atlas" })
+        ? await context!.build({
+            workspaceId: "atlas",
+            ...(selective ? { query: testCase.question } : {}),
+          })
         : null;
       const recall = new MemoryRecallService({
         ...defaultMemoryRecallDeps(),
@@ -371,9 +385,12 @@ export async function replayQualityCase(
         supportedCommands: testCase.supportedCommands,
         staleCommands: testCase.staleCommands,
         mustNotExpose: testCase.mustNotExpose,
+        irrelevantContextMarkers: testCase.irrelevantContextMarkers,
+        requiredContextMarkers: testCase.requiredContextMarkers,
       },
       enabled: await observe(true),
       disabled: await observe(false),
+      baseline: await observe(true, false),
     };
   } finally {
     context?.dispose();
@@ -390,13 +407,19 @@ export async function runMemoryQualityBenchmark(
   responder: QualityResponder = commandSelectionProbe,
 ) {
   const corpus = QualityCorpus.parse(raw);
-  const pairs: QualityPair[] = [];
+  const pairs: SelectiveQualityPair[] = [];
   for (const testCase of corpus.cases) pairs.push(await replayQualityCase(testCase, responder));
+  const quality = gradeMemoryQuality(pairs, corpus.thresholds);
+  const selection = gradeSelectiveMemoryQuality(pairs, corpus.selectionThresholds);
   return {
-    version: 1,
+    version: 2,
     responder:
       responder === commandSelectionProbe ? "deterministic-command-selection-v1" : "custom-probe",
-    ...gradeMemoryQuality(pairs, corpus.thresholds),
+    ...quality,
+    passed: quality.passed && selection.passed,
+    failures: [...quality.failures, ...selection.failures],
+    selection,
+    selectionThresholds: corpus.selectionThresholds,
     thresholds: corpus.thresholds,
     pairs,
   };

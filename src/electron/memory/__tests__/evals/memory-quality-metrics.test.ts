@@ -81,3 +81,56 @@ describe("memory quality grading regressions", () => {
     expect(grade(pair).failures).toContain("No positive recall cases");
   });
 });
+
+describe("selective recall comparison gates", () => {
+  const thresholds = {
+    minMeanContextReduction: 0.05,
+    minInjectedRecallGain: 0.1,
+    maxIrrelevantContextHits: 0,
+  };
+  const pair = () => ({
+    ...good(),
+    baseline: { ...good().enabled, context: "irrelevant ".repeat(40) },
+  });
+  it("requires context savings and better injected recall with preserved task success", async () => {
+    const { gradeSelectiveMemoryQuality } = await import("./memory-quality-metrics");
+    expect(gradeSelectiveMemoryQuality([pair()], thresholds)).toMatchObject({
+      passed: true,
+      injectedRecallGain: 1,
+    });
+  });
+  it("rejects removing useful memory to save tokens", async () => {
+    const { gradeSelectiveMemoryQuality } = await import("./memory-quality-metrics");
+    const p = pair();
+    p.enabled = { command: null, context: "", recalled: [], estimatedMemoryTokens: 0 };
+    expect(gradeSelectiveMemoryQuality([p], thresholds).failures).toEqual(
+      expect.arrayContaining([
+        "Selective task-proxy success regressed",
+        "Selective tool recall regressed",
+        "Selective injected recall gain below threshold",
+      ]),
+    );
+  });
+  it("rejects a no-op selector, irrelevant context, and empty comparisons", async () => {
+    const { gradeSelectiveMemoryQuality } = await import("./memory-quality-metrics");
+    const p = pair();
+    p.baseline = { ...p.enabled };
+    expect(gradeSelectiveMemoryQuality([p], thresholds).passed).toBe(false);
+    const noisy = {
+      ...pair(),
+      expectation: { ...good().expectation, irrelevantContextMarkers: ["noise"] },
+    };
+    noisy.enabled.context += " noise";
+    expect(gradeSelectiveMemoryQuality([noisy], thresholds).failures).toContain(
+      "Irrelevant notes remain in selective context",
+    );
+    const missingRule = {
+      ...pair(),
+      expectation: { ...good().expectation, requiredContextMarkers: ["Human review required"] },
+    };
+    expect(gradeSelectiveMemoryQuality([missingRule], thresholds).failures).toContain(
+      "Required user context missing from selection",
+    );
+    expect(gradeSelectiveMemoryQuality([], thresholds).passed).toBe(false);
+  });
+});

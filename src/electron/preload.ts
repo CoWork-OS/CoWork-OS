@@ -3336,6 +3336,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     excludeBotConversations?: boolean;
     excludeSources?: string[];
     workspaceId?: string;
+    /** Top-level tasks of archived sessions only, most recently archived first. */
+    archivedSessionsOnly?: boolean;
     cursor?: {
       id?: string;
       pinned?: boolean;
@@ -3512,6 +3514,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     reasoningEffort?: LLMReasoningEffort;
   }) => ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_MODEL, selection),
   archiveTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE, id),
+  unarchiveTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_UNARCHIVE, id),
   archiveWorkspaceSessions: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE_WORKSPACE_SESSIONS, workspaceId),
   deleteTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, id),
@@ -7490,6 +7493,8 @@ export interface ElectronAPI {
     excludeBotConversations?: boolean;
     excludeSources?: string[];
     workspaceId?: string;
+    /** Top-level tasks of archived sessions only, most recently archived first. */
+    archivedSessionsOnly?: boolean;
     cursor?: {
       id?: string;
       pinned?: boolean;
@@ -7533,6 +7538,8 @@ export interface ElectronAPI {
     reasoningEffort?: LLMReasoningEffort;
   }) => Promise<Task>;
   archiveTask: (id: string) => Promise<Any>;
+  /** Brings an archived session back to the sidebar. */
+  unarchiveTask?: (id: string) => Promise<{ metadata: unknown; taskCount: number }>;
   archiveWorkspaceSessions?: (workspaceId: string) => Promise<{ sessionCount: number }>;
   deleteTask: (id: string) => Promise<void>;
   onTaskEvent: (callback: (event: Any) => void) => () => void;

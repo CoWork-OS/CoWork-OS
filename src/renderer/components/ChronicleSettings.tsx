@@ -274,7 +274,13 @@ function ChronicleSettingsPanel() {
             </div>
           </div>
           <div className="computer-use-active-actions">
-            <button type="button" className="button-secondary" onClick={() => void refresh()}>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => void refresh()}
+              title="Refresh status"
+              aria-label="Refresh Chronicle status"
+            >
               <RefreshCw size={16} strokeWidth={2} />
             </button>
           </div>

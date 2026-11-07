@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef } from "react";
 import { ArrowUp, ExternalLink, Loader2, MessageSquarePlus, X } from "lucide-react";
 import type { ComposerDraft } from "../../shared/composer-drafts";
 import type { Task, TaskEvent } from "../../shared/types";
+import { isIdleFork } from "../../shared/task-status";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import "./side-chat-panel.css";
@@ -68,6 +69,9 @@ function deriveMessages(events: TaskEvent[]): SideChatMessage[] {
 
 function getTaskStatusLabel(task?: Task | null): string {
   if (!task) return "Unavailable";
+  // A side chat is a branch of its parent, created pending and handed back to pending after
+  // each answer: it waits for the user, not in a queue.
+  if (isIdleFork(task)) return "Ready";
   switch (task.status) {
     case "executing":
     case "planning":
@@ -194,7 +198,11 @@ export const SideChatPanel = memo(function SideChatPanel({
           </div>
         </div>
         <div className="side-chat-meta-row">
-          <span className={`side-chat-status side-chat-status-${sideTask?.status || "unknown"}`}>
+          <span
+            className={`side-chat-status side-chat-status-${
+              sideTask && isIdleFork(sideTask) ? "ready" : sideTask?.status || "unknown"
+            }`}
+          >
             {headerStatus}
           </span>
           <span className="side-chat-meta-separator" aria-hidden="true" />

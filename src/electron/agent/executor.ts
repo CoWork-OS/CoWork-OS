@@ -478,6 +478,7 @@ import {
 } from "./tool-policy-engine";
 import { userTypedFollowUpText } from "./follow-up-provenance";
 import { userTypedWords } from "./user-typed-words";
+import { listAttachedFilePaths } from "./runtime/composer-draft-sent-check";
 import { isTaskPromptFromUser } from "./task-prompt-provenance";
 
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
@@ -2586,9 +2587,14 @@ export class TaskExecutor {
     // and swap the role's tool-backed plan for the internal extraction pipeline.
     if (resolveWorkerRoleKind(this.task?.workerRole)) return false;
     const taskTitle = String(this.task?.title || "");
-    const rawTaskPrompt = String(
+    const promptWithAttachments = String(
       this.task?.rawPrompt || this.task?.userPrompt || this.getContractPrompt() || "",
     );
+    // Attached files ride after the typed words (attachment-summary.ts). Their names are
+    // sources, but their text is not the request: a file that says "review" or "chapter"
+    // must not turn "Summarize the attached files" into a manuscript review.
+    const attachedPaths = listAttachedFilePaths(promptWithAttachments);
+    const rawTaskPrompt = [userTypedWords(promptWithAttachments), ...attachedPaths].join("\n");
     const normalized = normalizePromptForContractsUtil(`${taskTitle}\n${rawTaskPrompt}`)
       .trim()
       .toLowerCase();
@@ -2599,14 +2605,17 @@ export class TaskExecutor {
     // This pipeline extracts one source. Multi-file comparisons need the
     // regular tools so a complete review does not silently omit other inputs.
     const sourceReferences = new Set(normalized.match(/[\w./~-]+\.(?:docx|pdf|md|txt)\b/g) || []);
-    if (sourceReferences.size > 1) return false;
+    if (sourceReferences.size > 1 || attachedPaths.length > 1) return false;
     // An explicit manuscript review ("character continuity", "kitap") keeps the pipeline
     // whatever the length; anything else about a short text file reads it directly.
     const hasManuscriptReviewCue =
       /(?:book|manuscript|novel|chapter|character|continuity|kitap|bölüm|karakter|devamlılık)/.test(
         normalized,
       );
-    if (!hasManuscriptReviewCue && this.namesShortTextSource(`${taskTitle}\n${rawTaskPrompt}`)) {
+    if (
+      !hasManuscriptReviewCue &&
+      this.namesShortTextSource(`${taskTitle}\n${rawTaskPrompt}`, attachedPaths)
+    ) {
       return false;
     }
     const hasDocumentScope =
@@ -2660,8 +2669,11 @@ export class TaskExecutor {
    * routing "Summarize README.md" through it ran a manuscript review ("gaps,
    * contradictions, character continuity") on a few lines.
    */
-  private namesShortTextSource(request: string): boolean {
-    const [source] = request.match(/[\w./~-]+\.(?:md|txt)\b/i) || [];
+  private namesShortTextSource(request: string, attachedPaths: string[] = []): boolean {
+    // An attached file's name may hold spaces ("meeting notes.md"), which the pattern cannot see.
+    const source =
+      attachedPaths.find((attachedPath) => /\.(?:md|txt)$/i.test(attachedPath)) ??
+      (request.match(/[\w./~-]+\.(?:md|txt)\b/i) || [])[0];
     if (!source || !this.workspace?.path) return false;
     try {
       const absolute = path.resolve(this.workspace.path, source);
@@ -21997,15 +22009,16 @@ You are continuing a previous conversation. The context from the previous conver
           })) as { success: boolean; exitCode: number | null; stdout: string; stderr: string };
         }
 
-        const ok = result.exitCode === 0;
-        const msg =
-          result.exitCode === 0
-            ? `Verification passed: ${verification.command}`
-            : `Verification failed (exit ${result.exitCode}): ${(result.stderr || result.stdout || "").slice(0, 500)}`;
+        const ok = result.success === true && result.exitCode === 0;
+        const msg = ok
+          ? `Verification passed: ${verification.command}`
+          : `Verification failed (exit ${result.exitCode}): ${(result.stderr || result.stdout || "").slice(0, 500)}`;
         this.pushVerificationEvidence({
           kind: "shell_command",
           ok,
-          detail: msg.slice(0, 1200),
+          // Preserve the complete checked command. Bounded consumers can omit an
+          // overlong observation, but must never mistake its prefix for the target.
+          detail: msg,
           capturedAt: now,
         });
         return { success: ok, message: msg };
@@ -22021,14 +22034,16 @@ You are continuing a previous conversation. The context from the previous conver
       }
     }
 
-    if (verification.type === "file_exists" && verification.filePaths) {
+    if (verification.type === "file_exists" && verification.filePaths?.length) {
       const missing = verification.filePaths.filter((p) => {
         const fullPath = path.resolve(this.workspace.path, p);
         return !this.canReadWorkspacePath(fullPath) || !fs.existsSync(fullPath);
       });
       const ok = missing.length === 0;
       const msg =
-        missing.length === 0 ? "All required files exist" : `Missing files: ${missing.join(", ")}`;
+        missing.length === 0
+          ? `All required files exist (existence only): ${verification.filePaths.map((file) => JSON.stringify(file)).join(", ")}`
+          : `Missing files: ${missing.join(", ")}`;
       this.pushVerificationEvidence({
         kind: "file_exists",
         ok,
@@ -22092,10 +22107,13 @@ You are continuing a previous conversation. The context from the previous conver
           command: `curl -sS -o /dev/null -w "%{http_code}" ${JSON.stringify(raw)}`,
         })) as { success: boolean; exitCode: number | null; stdout: string; stderr: string };
         const code = parseInt(String(result.stdout || "").trim(), 10);
-        const ok = Number.isFinite(code) && code === expected;
+        const executionSucceeded = result.success === true && result.exitCode === 0;
+        const ok = executionSucceeded && Number.isFinite(code) && code === expected;
         const msg = ok
-          ? `HTTP ${code} for ${raw.slice(0, 200)}`
-          : `Expected HTTP ${expected}, got ${Number.isFinite(code) ? code : "invalid"} for ${raw.slice(0, 200)}`;
+          ? `HTTP ${code} for ${raw}`
+          : !executionSucceeded
+            ? `HTTP verification command failed (exit ${result.exitCode ?? "unknown"}) for ${raw.slice(0, 200)}`
+            : `Expected HTTP ${expected}, got ${Number.isFinite(code) ? code : "invalid"} for ${raw.slice(0, 200)}`;
         this.pushVerificationEvidence({
           kind: "http_head",
           ok,
@@ -24117,6 +24135,9 @@ You are continuing a previous conversation. The context from the previous conver
     if (additionalIdx > 0) raw = raw.slice(0, additionalIdx);
     const userUpdateIdx = raw.indexOf("\nUSER UPDATE:\n");
     if (userUpdateIdx > 0) raw = raw.slice(0, userUpdateIdx);
+    // Attached file names and their text are not a request for a project: "config.json" in the
+    // attachment list matched the file pattern and paused a new session to ask for a folder.
+    raw = userTypedWords(raw);
 
     const text = raw.toLowerCase().trim();
 

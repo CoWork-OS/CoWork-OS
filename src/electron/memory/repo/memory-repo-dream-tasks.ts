@@ -5,12 +5,18 @@
  * Left out: tasks with `<no-memory>`, sub-agent tasks, automated sources whose "user"
  * messages are not the user's words (hooks, improvement and background loops, samples),
  * shared gateway contexts (group, public), channel tasks from anyone but the owner, and
- * workspaces whose memory is off or strict-private. Tool output is never read.
+ * workspaces whose memory is off or strict-private. Raw tool output is never read;
+ * successful runtime check receipts can supply separately attributed execution evidence.
  */
 import type { Task, TaskEvent, TaskStatus } from "../../../shared/types";
 import { isThirdPartyGatewayTask } from "../../gateway/gateway-sender-identity";
 import { createLogger } from "../../utils/logger";
-import type { MemoryWorkspacePolicy } from "../MemoryWriter";
+import {
+  DREAM_EXECUTION_EVENT_TYPES,
+  DREAM_EXECUTION_MAX_EVENTS,
+  extractDreamExecutionEvidence,
+  type DreamExecutionWorkspacePolicy,
+} from "./memory-repo-dream-execution";
 import { containsNoMemoryDirective, taskDisablesMemoryCapture } from "../no-memory-directive";
 import type { DreamTaskInput } from "./memory-repo-dream-plan";
 
@@ -28,13 +34,13 @@ const EXCLUDED_SOURCES: ReadonlySet<string> = new Set([
 /** Most candidate rows read per dream (the repository's own cap). */
 const CANDIDATE_LIMIT = 200;
 /** Most conversation events read per task (the newest ones). */
-const MAX_EVENTS_PER_TASK = 80;
+const MAX_EVENTS_PER_TASK = DREAM_EXECUTION_MAX_EVENTS;
 const MAX_USER_MESSAGES = 8;
 const MAX_MESSAGE_CHARS = 600;
 const MAX_REPLY_CHARS = 800;
 const MAX_TITLE_CHARS = 160;
 
-export const DREAM_TASK_EVENT_TYPES = ["user_message", "assistant_message", "task_completed"];
+export const DREAM_TASK_EVENT_TYPES = DREAM_EXECUTION_EVENT_TYPES;
 
 export interface DreamTaskSourceDeps {
   /** Tasks with `startMs <= created_at < endMs`, newest first. */
@@ -45,8 +51,9 @@ export interface DreamTaskSourceDeps {
   }) => Promise<Task[]>;
   /** The task's events of these types, oldest first (at most `maxEvents`, the newest). */
   findTaskEvents: (taskId: string, types: string[], maxEvents: number) => Promise<TaskEvent[]>;
+  findTaskById?: (taskId: string) => Promise<Task | null | undefined>;
   workspaceName?: (workspaceId: string) => Promise<string | null>;
-  getWorkspacePolicy?: (workspaceId: string) => Promise<MemoryWorkspacePolicy | null>;
+  getWorkspacePolicy?: (workspaceId: string) => Promise<DreamExecutionWorkspacePolicy | null>;
   now?: () => number;
 }
 
@@ -131,7 +138,7 @@ export function extractDreamConversation(
   return { userMessages: bounded, finalReply: finalReply ?? completionSummary };
 }
 
-function policyAllows(policy: MemoryWorkspacePolicy | null): boolean {
+function policyAllows(policy: DreamExecutionWorkspacePolicy | null): boolean {
   if (!policy) return true;
   return policy.enabled && policy.privacyMode !== "disabled" && policy.privacyMode !== "strict";
 }
@@ -162,7 +169,7 @@ export function createDreamTaskLister(
     const candidates = created
       .filter((task) => task.createdAt < oldestRunning && isDreamCandidateTask(task))
       .sort((a, b) => a.createdAt - b.createdAt);
-    const policies = new Map<string, boolean>();
+    const policies = new Map<string, DreamExecutionWorkspacePolicy | null>();
     const names = new Map<string, string | null>();
     const result: DreamTaskInput[] = [];
     for (const task of candidates) {
@@ -170,12 +177,9 @@ export function createDreamTaskLister(
       try {
         if (deps.getWorkspacePolicy && task.workspaceId) {
           if (!policies.has(task.workspaceId)) {
-            policies.set(
-              task.workspaceId,
-              policyAllows(await deps.getWorkspacePolicy(task.workspaceId)),
-            );
+            policies.set(task.workspaceId, await deps.getWorkspacePolicy(task.workspaceId));
           }
-          if (!policies.get(task.workspaceId)) continue;
+          if (!policyAllows(policies.get(task.workspaceId) ?? null)) continue;
         }
         const events = await deps.findTaskEvents(
           task.id,
@@ -184,6 +188,11 @@ export function createDreamTaskLister(
         );
         const conversation = extractDreamConversation(task, events);
         if (!conversation || conversation.userMessages.length === 0) continue;
+        const executionEvidence = extractDreamExecutionEvidence(
+          task,
+          events,
+          task.workspaceId ? policies.get(task.workspaceId) : null,
+        );
         if (deps.workspaceName && task.workspaceId && !names.has(task.workspaceId)) {
           names.set(task.workspaceId, await deps.workspaceName(task.workspaceId));
         }
@@ -195,6 +204,7 @@ export function createDreamTaskLister(
           createdAt: task.createdAt,
           userMessages: conversation.userMessages,
           finalReply: conversation.finalReply,
+          ...(executionEvidence ? { executionEvidence } : {}),
         });
       } catch (error) {
         logger.warn(`Skipping task ${task.id} for the dream:`, error);

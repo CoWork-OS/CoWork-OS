@@ -31,6 +31,23 @@ export function assertValidConditionPatterns(conditions: readonly TriggerConditi
 }
 
 /**
+ * Throws for a "matches" condition whose pattern does not compile. The evaluator reads such a
+ * pattern as "no match", so saving it made a trigger that could never fire.
+ */
+export function assertValidConditionPatterns(conditions: readonly TriggerCondition[] = []): void {
+  for (const condition of conditions) {
+    if (condition?.operator !== "matches") continue;
+    try {
+      new RegExp(String(condition.value ?? ""), "i");
+    } catch {
+      throw new Error(
+        `"${String(condition.value ?? "").slice(0, 80)}" is not a valid regular expression.`,
+      );
+    }
+  }
+}
+
+/**
  * Evaluate all conditions against an event.
  * @param event   The incoming event with field values
  * @param conditions  Array of conditions to check

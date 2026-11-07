@@ -531,6 +531,7 @@ import {
   upsertGoogleWorkspaceAccount,
 } from "../../shared/google-workspace";
 import { setupTaskTraceHandlers } from "./task-trace-handlers";
+import { setupSessionArchiveHandlers } from "./session-archive-handlers";
 import { createTaskReadHandler } from "./task-read-authorization";
 import { PrincipalCapabilityMiddleware } from "../security/PrincipalCapabilityMiddleware";
 import { buildVideoPreviewTranscodeArgs } from "./video-preview-transcode";
@@ -5965,6 +5966,7 @@ export async function setupIpcHandlers(
         excludeBotConversations?: boolean;
         excludeSources?: Array<NonNullable<Task["source"]>>;
         workspaceId?: string;
+        archivedSessionsOnly?: boolean;
         cursor?: {
           id?: string;
           pinned?: boolean;
@@ -5991,6 +5993,7 @@ export async function setupIpcHandlers(
             excludeBotConversations: opts?.excludeBotConversations !== false,
             excludeSources: opts?.excludeSources,
             workspaceId,
+            archivedSessionsOnly: opts?.archivedSessionsOnly === true,
             cursor: opts?.cursor,
           }),
         "view",
@@ -6566,13 +6569,9 @@ export async function setupIpcHandlers(
     return task;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_ARCHIVE, async (_, id: string) => {
-    const validated = validateInput(UUIDSchema, id, "task ID");
-    const task = await taskRepo.findById(validated);
-    if (!task) {
-      throw new Error(`Task not found: ${validated}`);
-    }
-    return sessionRetentionService.archiveSession(task.sessionId || task.id);
+  setupSessionArchiveHandlers({
+    findTask: (taskId) => taskRepo.findById(taskId),
+    sessions: sessionRetentionService,
   });
 
   ipcMain.handle(
@@ -11491,7 +11490,22 @@ export async function setupIpcHandlers(
                 workspaceName: labelForWorkspace(id),
               })),
           );
-          const tasks = perWorkspace.flat();
+          // A session started without a folder runs in its own temporary workspace. "All
+          // workspaces" counts those too, as Usage Insights does: without them the summary
+          // was empty for anyone who never picked a folder.
+          const temporarySessions = allMode
+            ? (
+                (await taskRepo.findByCreatedAtRange({
+                  startMs: sinceMs,
+                  endMs: Date.now(),
+                  limit: 200,
+                })) || []
+              )
+                .filter((task) => isTempWorkspaceId(task.workspaceId))
+                .slice(0, 100)
+                .map((task) => ({ ...task, workspaceName: "Temporary workspace" }))
+            : [];
+          const tasks = [...perWorkspace.flat(), ...temporarySessions];
           return tasks.sort((a: Any, b: Any) => (b.createdAt || 0) - (a.createdAt || 0));
         },
         searchMemory: async (_currentWorkspaceId, query, limit) => {

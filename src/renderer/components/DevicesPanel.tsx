@@ -1317,7 +1317,13 @@ export function DevicesPanel({
             )}
           </div>
           <span className="dp-input-spacer" />
-          <button className="dp-input-action-btn" disabled>
+          <button
+            type="button"
+            className="dp-input-action-btn"
+            disabled
+            aria-label="Voice input"
+            title="Voice input isn't available for device tasks"
+          >
             <Mic size={20} />
           </button>
           <button

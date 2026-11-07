@@ -382,6 +382,10 @@ export class PersonalityManager {
       delete rest.responseStyleExplicit;
       const sanitized: PersonalityConfigV2 = {
         ...rest,
+        // The name goes into the system prompt and the app as typed; "Nova  " kept its spaces.
+        ...(typeof rest.agentName === "string"
+          ? { agentName: rest.agentName.trim() || DEFAULT_AGENT_NAME }
+          : {}),
         ...(explicit ? { responseStyleExplicit: true } : {}),
         relationship: this.sanitizeRelationshipData(config.relationship) as RelationshipData,
       };

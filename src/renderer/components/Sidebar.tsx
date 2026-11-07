@@ -4,6 +4,7 @@ import {
   hasBrowserHostFolderPicker,
 } from "../host/browser-host-folders";
 import { SidebarNotices } from "./sidebar/SidebarNotices";
+import { SidebarArchivedSessions } from "./sidebar/SidebarArchivedSessions";
 import {
   useState,
   useRef,
@@ -75,6 +76,8 @@ const SESSION_STATE_FILTER_LABELS: Record<SidebarSessionFilter, string> = Object
   SESSION_STATE_FILTERS,
 ) as Record<SidebarSessionFilter, string>;
 const SIDEBAR_DATE_HEADER_HEIGHT = 40;
+// How long "Session archived · Undo" stays after archiving from the sidebar.
+const ARCHIVE_UNDO_MS = 8000;
 const SIDEBAR_FOCUSED_ITEM_HEIGHT = 32;
 const SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT = 40;
 // Must match the .sidebar-navigation-section-header height in CSS: rows are absolutely
@@ -967,6 +970,18 @@ function SidebarComponent({
   const [sessionStateFilter, setSessionStateFilter] = useState<SidebarSessionFilter>("all");
   const [pinActionError, setPinActionError] = useState<string | null>(null);
   const [archiveActionError, setArchiveActionError] = useState<string | null>(null);
+  // Archived sessions leave every list; this view is how they come back.
+  const canShowArchivedSessions =
+    typeof window !== "undefined" &&
+    hasHostMethod("unarchiveTask") &&
+    typeof window.electronAPI?.unarchiveTask === "function";
+  const sessionFilterPanelAvailable = uiDensity === "focused" || isCalm || canShowArchivedSessions;
+  const [showArchivedSessions, setShowArchivedSessions] = useState(false);
+  const [archiveUndo, setArchiveUndo] = useState<{ taskId: string; wasSelected: boolean } | null>(
+    null,
+  );
+  const [undoingArchive, setUndoingArchive] = useState(false);
+  const archiveUndoTimeoutRef = useRef<number | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
   const [sidebarWorkspaces, setSidebarWorkspaces] = useState<Workspace[]>([]);
   const [workspaceNavSettings, setWorkspaceNavSettings] = useState<SidebarWorkspaceSettings>(() =>
@@ -2169,10 +2184,21 @@ function SidebarComponent({
     setArchiveActionError(null);
     try {
       await window.electronAPI.archiveTask(taskId);
-      if (selectedTaskId === taskId) {
+      const wasSelected = selectedTaskId === taskId;
+      if (wasSelected) {
         onSelectTask(null);
       }
       onTasksChanged();
+      if (canShowArchivedSessions) {
+        setArchiveUndo({ taskId, wasSelected });
+        if (archiveUndoTimeoutRef.current !== null) {
+          window.clearTimeout(archiveUndoTimeoutRef.current);
+        }
+        archiveUndoTimeoutRef.current = window.setTimeout(() => {
+          archiveUndoTimeoutRef.current = null;
+          setArchiveUndo(null);
+        }, ARCHIVE_UNDO_MS);
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to archive session. Please try again.";
@@ -2186,6 +2212,53 @@ function SidebarComponent({
       }, 2500);
     }
   };
+
+  const handleUndoArchive = async () => {
+    const undo = archiveUndo;
+    const unarchiveTask = window.electronAPI?.unarchiveTask;
+    if (!undo || !unarchiveTask || undoingArchive) return;
+    setUndoingArchive(true);
+    try {
+      await unarchiveTask(undo.taskId);
+      if (archiveUndoTimeoutRef.current !== null) {
+        window.clearTimeout(archiveUndoTimeoutRef.current);
+        archiveUndoTimeoutRef.current = null;
+      }
+      setArchiveUndo(null);
+      onTasksChanged();
+      if (undo.wasSelected) onSelectTask(undo.taskId);
+    } catch (error) {
+      console.error("Failed to undo archive:", error);
+      setArchiveUndo(null);
+      setArchiveActionError("Could not undo. Find the session under Archived sessions.");
+      if (pinActionErrorTimeoutRef.current !== null) {
+        window.clearTimeout(pinActionErrorTimeoutRef.current);
+      }
+      pinActionErrorTimeoutRef.current = window.setTimeout(() => {
+        setArchiveActionError(null);
+      }, 4000);
+    } finally {
+      setUndoingArchive(false);
+    }
+  };
+
+  useEffect(
+    () => () => {
+      if (archiveUndoTimeoutRef.current !== null) {
+        window.clearTimeout(archiveUndoTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  const archivedSessionTitle = useCallback((task: Task) => getSidebarSessionTitle({ task }), []);
+  const handleOpenRestoredSession = useCallback(
+    (taskId: string) => {
+      setShowArchivedSessions(false);
+      onSelectTask(taskId);
+    },
+    [onSelectTask],
+  );
 
   const toggleCollapse = (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
@@ -3393,6 +3466,18 @@ function SidebarComponent({
                     {pinActionError || archiveActionError || workspaceActionError}
                   </div>
                 )}
+                {archiveUndo && (
+                  <div className="sidebar-archive-undo" role="status">
+                    <span>Session archived</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleUndoArchive()}
+                      disabled={undoingArchive}
+                    >
+                      Undo
+                    </button>
+                  </div>
+                )}
 
                 <div className="sidebar-panel-search">
                   <label className="sidebar-sessions-search">
@@ -3404,7 +3489,7 @@ function SidebarComponent({
                       type="search"
                       aria-label="Search sessions"
                       aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
-                      placeholder="Search"
+                      placeholder={showArchivedSessions ? "Search archived" : "Search"}
                       title={
                         hasMoreTasks
                           ? `Search loaded sessions by title, prompt, or ID (${sessionSearchShortcut}). Load older sessions to search more history.`
@@ -3431,10 +3516,10 @@ function SidebarComponent({
                         <X size={11} strokeWidth={2.4} aria-hidden="true" />
                       </button>
                     )}
-                    {(uiDensity === "focused" || isCalm) && (
+                    {sessionFilterPanelAvailable && (
                       <button
                         type="button"
-                        className={`sidebar-panel-icon-btn sidebar-search-filter-btn${showSessionFilters ? " active" : ""}`}
+                        className={`sidebar-panel-icon-btn sidebar-search-filter-btn${showSessionFilters || showArchivedSessions ? " active" : ""}`}
                         onClick={() => setShowSessionFilters((value) => !value)}
                         aria-pressed={showSessionFilters}
                         aria-label={
@@ -3463,7 +3548,7 @@ function SidebarComponent({
                   className="sidebar-session-state-filters"
                   role="group"
                   aria-label="Session status"
-                  hidden={isCalm}
+                  hidden={isCalm || showArchivedSessions}
                 >
                   {SESSION_STATE_FILTERS.map(([filter, label]) => (
                     <button
@@ -3502,9 +3587,9 @@ function SidebarComponent({
                   </div>
                 )}
 
-                {/* Stopped sessions are only hidden in focused density, so the
-                    filter panel has nothing to offer elsewhere. */}
-                {(uiDensity === "focused" || isCalm) && showSessionFilters && (
+                {/* Stopped sessions are only hidden in focused density; every
+                    density can open the archived sessions. */}
+                {sessionFilterPanelAvailable && showSessionFilters && (
                   <div className="sidebar-session-filter-panel">
                     {isCalm && (
                       <div
@@ -3545,14 +3630,43 @@ function SidebarComponent({
                         {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
                       </button>
                     )}
+                    {canShowArchivedSessions && (
+                      <button
+                        type="button"
+                        className={`sidebar-session-filter-option sidebar-session-filter-archived ${showArchivedSessions ? "active" : ""}`}
+                        onClick={() => {
+                          setShowArchivedSessions((value) => !value);
+                          setShowSessionFilters(false);
+                        }}
+                        aria-pressed={showArchivedSessions}
+                      >
+                        <span>Archived</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
+
+              {/* The session list stays mounted underneath, so closing the
+                  archived view returns to the same scroll position. */}
+              {showArchivedSessions && (
+                <div className="task-list cli-task-list">
+                  <SidebarArchivedSessions
+                    normalizedSearch={normalizedSessionSearch}
+                    workspaces={sidebarWorkspaces}
+                    titleFor={archivedSessionTitle}
+                    onClose={() => setShowArchivedSessions(false)}
+                    onUnarchived={onTasksChanged}
+                    onOpenRestored={handleOpenRestoredSession}
+                  />
+                </div>
+              )}
 
               {/* Sessions Scrollable List */}
               <div
                 className={`task-list cli-task-list ${useVirtualizedTaskRows ? "task-list-virtualized" : ""}`}
                 ref={taskListRef}
+                hidden={showArchivedSessions}
               >
                 <>
                   {!hasSessionResults && (hasSessionSearch || hasSessionStateFilter) && (

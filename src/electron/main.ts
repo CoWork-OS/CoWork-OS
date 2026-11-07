@@ -841,6 +841,27 @@ function prepareBrowserWorkbenchPartition(partition: string): Electron.Session {
   return browserSession;
 }
 
+let nativeThemeFollowsAppearance = false;
+
+/**
+ * Native materials follow the app's Light/Dark choice, not only the OS. The window's
+ * vibrancy shows through the transparent title bar, so a Dark app on a Light Mac had a light
+ * strip across the top (and light native controls).
+ */
+function syncNativeThemeWithAppearance(): void {
+  const apply = (mode: unknown) => {
+    nativeTheme.themeSource = mode === "light" || mode === "dark" ? mode : "system";
+  };
+  try {
+    apply(AppearanceManager.loadSettings().themeMode);
+  } catch {
+    // Settings are not readable yet: keep following the OS.
+  }
+  if (nativeThemeFollowsAppearance) return;
+  nativeThemeFollowsAppearance = true;
+  AppearanceManager.onChange((settings) => apply(settings.themeMode));
+}
+
 /** Guest handling for an in-app browser page: the same for a <webview> tab and a native tab view. */
 function attachBrowserWorkbenchGuest(guest: Electron.WebContents, partition: string): void {
   attachBrowserColorScheme(guest, {
@@ -2098,6 +2119,7 @@ if (isMacSafeStorageMigrationWorker) {
     }
 
     function createWindow() {
+      syncNativeThemeWithAppearance();
       const isMac = process.platform === "darwin";
       const usesNativeWindowFrame = shouldUseNativeWindowFrame({
         platform: process.platform,
@@ -2792,6 +2814,7 @@ if (isMacSafeStorageMigrationWorker) {
             memoryRepoWorkspaces ? ((await memoryRepoWorkspaces.findById(id))?.name ?? null) : null,
           findTasksCreatedBetween: async (params) =>
             hostTaskRepository ? hostTaskRepository.findByCreatedAtRange(params) : [],
+          findTaskById: async (taskId) => hostTaskRepository?.findById(taskId) ?? null,
           findTaskEvents: async (taskId, types, maxEvents) =>
             hostTaskEventReplayRepository
               ? hostTaskEventReplayRepository.findByTaskIdAndTypes(taskId, types, maxEvents)

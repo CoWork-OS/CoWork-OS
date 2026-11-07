@@ -3399,3 +3399,106 @@ export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown, context
   }
   return result.data;
 }
+
+// ============ Event trigger IPC ============
+// The Settings form sends these; the main process alone sets agentConfig, eventWait and
+// speculateFix on a trigger's action, so they are not accepted from the renderer.
+
+const TriggerConditionSchema = z
+  .object({
+    field: z.string().trim().min(1).max(100),
+    operator: z.enum([
+      "equals",
+      "not_equals",
+      "contains",
+      "not_contains",
+      "matches",
+      "starts_with",
+      "ends_with",
+      "gt",
+      "lt",
+    ]),
+    value: z.string().max(2000),
+  })
+  .strict();
+
+const TriggerActionSchema = z
+  .object({
+    type: z.enum(["create_task", "send_message", "wake_agent"]),
+    config: z
+      .object({
+        prompt: z.string().max(20_000).optional(),
+        title: z.string().max(500).optional(),
+        channelType: z.string().max(100).optional(),
+        channelId: z.string().max(500).optional(),
+        message: z.string().max(20_000).optional(),
+        agentRoleId: z.string().max(200).optional(),
+        workspaceId: z.string().max(500).optional(),
+        runMode: z.enum(["new_task", "thread_follow_up"]).optional(),
+        targetTaskId: z.string().max(200).optional(),
+        mcpEvent: z
+          .object({
+            serverId: z.string().min(1).max(200),
+            name: z.string().min(1).max(200),
+            arguments: z.record(z.string(), z.unknown()),
+            delivery: z.enum(["webhook", "poll"]),
+            callbackUrl: z.string().max(2000).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const EventTriggerCreateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    description: z.string().max(2000).optional(),
+    enabled: z.boolean(),
+    source: z.enum([
+      "channel_message",
+      "email",
+      "mailbox_event",
+      "webhook",
+      "connector_event",
+      "mcp_event",
+      "github_event",
+      "file_change",
+      "cron_event",
+    ]),
+    conditions: z.array(TriggerConditionSchema).max(50),
+    conditionLogic: z.enum(["all", "any"]).optional(),
+    action: TriggerActionSchema,
+    workspaceId: z.string().max(500),
+    cooldownMs: z
+      .number()
+      .int()
+      .min(0)
+      .max(7 * 24 * 60 * 60 * 1000)
+      .optional(),
+  })
+  .strict();
+
+/**
+ * What the Settings list changes on an existing trigger. Not its action, source or
+ * workspace: an update replaces the whole action, which would let the renderer rewrite a
+ * trigger the main process made (a routine's, a wait_for_event resume, a speculate_fix).
+ */
+export const EventTriggerUpdateSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    updates: EventTriggerCreateSchema.pick({
+      name: true,
+      description: true,
+      enabled: true,
+      conditions: true,
+      conditionLogic: true,
+      cooldownMs: true,
+    })
+      .partial()
+      .strict(),
+  })
+  .strict();
+
+export const EventTriggerIdSchema = z.string().min(1).max(200);

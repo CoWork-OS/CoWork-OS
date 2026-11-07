@@ -1,6 +1,7 @@
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse, LLMProviderError } from "./types";
 import { getProviderImageCaps } from "./image-utils";
 import { reasoningFromChatCompletionMessage } from "./reasoning-replay";
+import { unreachableEndpointMessage } from "./unreachable-endpoint-message";
 import {
   getDiscontinuedKimiModel,
   kimiBareModelId,
@@ -746,7 +747,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
       return {
         success: false,
-        error: error.message || `Failed to connect to ${this.providerName} API`,
+        error:
+          unreachableEndpointMessage(error, this.chatCompletionsUrl) ||
+          error.message ||
+          `Failed to connect to ${this.providerName} API`,
       };
     } finally {
       deadline.cleanup();
@@ -866,7 +870,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
         status: "unreachable",
         models: [],
         durationMs: Date.now() - startedAt,
-        error: error?.message || `Failed to fetch models from ${this.providerName}.`,
+        error:
+          unreachableEndpointMessage(error, this.modelsUrl) ||
+          error?.message ||
+          `Failed to fetch models from ${this.providerName}.`,
       };
     } finally {
       deadline.cleanup();

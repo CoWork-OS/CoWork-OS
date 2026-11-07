@@ -191,6 +191,30 @@ describeWithSqlite("SessionProgressService", () => {
     expect(service.get(fork.id)?.phase).toBe("executing");
   });
 
+  it("shows a pause that asked the user something as waiting for an answer, not resumable", () => {
+    const task = createTask("Summarize the attached files");
+    taskRepo.update(task.id, { status: "paused" });
+    // Stored before the pause recorded its reason: a plain pause is resumable.
+    expect(service.get(task.id)?.waiting).toMatchObject({ kind: "paused" });
+
+    taskRepo.update(task.id, {
+      terminalStatus: "needs_user_action",
+      awaitingUserInputReasonCode: "skill_parameters",
+    });
+    const state = service.get(task.id)!;
+    expect(state.phase).toBe("waiting");
+    expect(state.waiting).toEqual({
+      kind: "input",
+      reason: "It needs a few details from you before it can go on.",
+    });
+    expect(state.headline).toBe("It needs a few details from you before it can go on.");
+
+    taskRepo.update(task.id, { awaitingUserInputReasonCode: "workspace_required" });
+    expect(service.rebuild(task.id)?.waiting?.reason).toBe(
+      "It's waiting for your input before it can go on.",
+    );
+  });
+
   it("marks interrupted sessions stale and exposes a safe resume checkpoint", () => {
     const task = createTask("Recover interrupted work");
     addEvent(task.id, "event-3", "conversation_snapshot", { summary: "checkpoint" });

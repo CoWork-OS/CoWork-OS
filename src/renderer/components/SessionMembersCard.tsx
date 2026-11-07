@@ -19,7 +19,10 @@ function roleLabel(role: SessionHumanRole): string {
   return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
-function presenceLabel(lastSeenAt?: number): string {
+function presenceLabel(lastSeenAt: number | undefined, isViewer: boolean): string {
+  // The person looking at this card is here, however long ago they last acted in the
+  // session: presence is only touched by recorded actions, so the owner read "Away".
+  if (isViewer) return "Active now";
   if (!lastSeenAt) return "Not seen yet";
   return Date.now() - lastSeenAt < 2 * 60 * 1000 ? "Active now" : "Away";
 }
@@ -224,7 +227,9 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
             <span className={`session-member-dot ${member.status}`} aria-hidden="true" />
             <span className="session-member-name">{member.displayName}</span>
             <span className="session-member-role">{roleLabel(member.role)}</span>
-            <span className="session-member-presence">{presenceLabel(member.lastSeenAt)}</span>
+            <span className="session-member-presence">
+              {presenceLabel(member.lastSeenAt, member.id === snapshot.actor.id)}
+            </span>
             {snapshot.actor.role === "owner" &&
             member.id !== snapshot.actor.id &&
             member.status === "active" ? (

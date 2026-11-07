@@ -7,6 +7,7 @@ import { MemoryRepoService } from "../MemoryRepoService";
 import { MemoryRepoDreamer, type DreamModelClient } from "../MemoryRepoDreamer";
 import type { DreamTaskInput } from "../memory-repo-dream-plan";
 import type { MemorySourceRow } from "../../memory-source-sql";
+import type { MemorySourceRecheck } from "../../MemorySourceRecheckService";
 
 function hasGit(): boolean {
   try {
@@ -47,6 +48,39 @@ describeWithGit("MemoryRepoDreamer", () => {
       settings: () => settings,
       now: () => now,
     });
+
+  const makeSourceRecheck = async (
+    overrides: Partial<MemorySourceRecheck> = {},
+  ): Promise<MemorySourceRecheck> => {
+    const berlin = (await service.entries("me.md")).find((entry) =>
+      entry.text.includes("Lives in Berlin"),
+    )!;
+    return {
+      row: { id: "r1" } as MemorySourceRow,
+      file: "me.md",
+      entryHash: berlin.hash,
+      source: "docs/profile.md",
+      changedAt: now - 1_000,
+      excerpt: "Lives in Berlin. The profile was updated in October 2026.",
+      evidenceAvailable: true,
+      observedContentHash: "current-profile-hash",
+      ...overrides,
+    };
+  };
+
+  const makeRecheckDreamer = (pending: MemorySourceRecheck[]) => {
+    const reviewed = vi.fn(async (_rechecks: MemorySourceRecheck[]) => {});
+    const forget = vi.fn(async (_rows: MemorySourceRow[]) => {});
+    const dreamer = new MemoryRepoDreamer({
+      getService: () => service,
+      client,
+      listRecentTasks: async () => [],
+      settings: () => settings,
+      now: () => now,
+      sourceRechecks: { pending: async () => pending, reviewed, forget },
+    });
+    return { dreamer, reviewed, forget };
+  };
 
   beforeEach(async () => {
     base = fs.mkdtempSync(path.join(os.tmpdir(), "memory-repo-dream-"));
@@ -218,44 +252,24 @@ describeWithGit("MemoryRepoDreamer", () => {
     expect(client.calls).toBe(1);
   });
 
-  it("rechecks memories whose source changed, then marks them reviewed", async () => {
-    const berlin = (await service.entries("me.md")).find((entry) =>
-      entry.text.includes("Lives in Berlin"),
-    )!;
-    const reviewed = vi.fn(async () => {});
-    const forget = vi.fn(async () => {});
-    const row = (id: string) => ({ id }) as MemorySourceRow;
+  it("keeps a contradicted memory stale when the dream sees the source but returns no verdict", async () => {
     const pending = [
-      {
-        row: row("r1"),
-        file: "me.md",
-        entryHash: berlin.hash,
-        source: "docs/profile.md",
-        changedAt: now - 1_000,
+      await makeSourceRecheck({
         excerpt: "Moved to Lisbon in October 2026.",
-      },
-      {
-        row: row("r2"),
-        file: "me.md",
+      }),
+      await makeSourceRecheck({
+        row: { id: "r2" } as MemorySourceRow,
         entryHash: "no-such-entry",
         source: "docs/old.md",
-        changedAt: now - 1_000,
         excerpt: "x",
-      },
+      }),
     ];
     let seen = "";
     answer = (user) => {
       seen = user;
       return JSON.stringify({ summary: "", operations: [] });
     };
-    const dreamer = new MemoryRepoDreamer({
-      getService: () => service,
-      client,
-      listRecentTasks: async () => [],
-      settings: () => settings,
-      now: () => now,
-      sourceRechecks: { pending: async () => pending, reviewed, forget },
-    });
+    const { dreamer, reviewed, forget } = makeRecheckDreamer(pending);
     // Nothing else is new: the changed source alone makes the dream run.
     fs.writeFileSync(path.join(service.root, "inbox.md"), "# Inbox\n");
     expect((await dreamer.run("daily")).ran).toBe(true);
@@ -264,8 +278,154 @@ describeWithGit("MemoryRepoDreamer", () => {
     expect(seen).toContain("<source_changes>");
     expect(seen).toContain("docs/profile.md changed on");
     expect(seen).toContain("Moved to Lisbon in October 2026.");
-    expect(forget).toHaveBeenCalledWith([row("r2")]);
-    expect(reviewed).toHaveBeenCalledWith([row("r1")]);
+    expect(forget).toHaveBeenCalledWith([pending[1].row]);
+    expect(reviewed).not.toHaveBeenCalled();
+    expect(read("me.md")).toContain("Lives in Berlin");
+  });
+
+  it("marks an unchanged memory reviewed only with an explicit source-backed confirmation", async () => {
+    const pending = [await makeSourceRecheck()];
+    answer = () =>
+      JSON.stringify({
+        operations: [],
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Berlin" }],
+      });
+    const { dreamer, reviewed, forget } = makeRecheckDreamer(pending);
+
+    expect((await dreamer.run("manual")).ran).toBe(true);
+    expect(reviewed).toHaveBeenCalledExactlyOnceWith(pending);
+    expect(forget).not.toHaveBeenCalled();
+    expect(read("me.md")).toContain("Lives in Berlin");
+  });
+
+  it.each([
+    {
+      name: "a contradicted verdict",
+      rechecks: [{ source: "R1", verdict: "contradicted", quote: "Lives in Berlin" }],
+    },
+    {
+      name: "insufficient evidence",
+      rechecks: [{ source: "R1", verdict: "insufficient_evidence" }],
+    },
+    { name: "a missing quote", rechecks: [{ source: "R1", verdict: "confirmed" }] },
+    {
+      name: "a quote too short to support a claim",
+      rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives" }],
+    },
+    {
+      name: "an invented quote",
+      rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Munich" }],
+    },
+    {
+      name: "a source the dream was not shown",
+      rechecks: [{ source: "R999", verdict: "confirmed", quote: "Lives in Berlin" }],
+    },
+    {
+      name: "conflicting verdicts for one source",
+      rechecks: [
+        { source: "R1", verdict: "confirmed", quote: "Lives in Berlin" },
+        { source: "R1", verdict: "contradicted", quote: "Lives in Berlin" },
+      ],
+    },
+  ])("does not clear source-change flags for $name", async ({ rechecks }) => {
+    answer = () => JSON.stringify({ operations: [], rechecks });
+    const { dreamer, reviewed } = makeRecheckDreamer([await makeSourceRecheck()]);
+
+    expect((await dreamer.run("manual")).ran).toBe(true);
+    expect(reviewed).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an unavailable connector placeholder as confirming evidence", async () => {
+    const excerpt =
+      "(the connector reported that this record was updated; its current content is not available here)";
+    answer = () =>
+      JSON.stringify({
+        operations: [],
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: excerpt }],
+      });
+    const { dreamer, reviewed } = makeRecheckDreamer([
+      await makeSourceRecheck({
+        source: "mcp://contacts/sam",
+        evidenceAvailable: false,
+        observedContentHash: null,
+        excerpt,
+      }),
+    ]);
+
+    expect((await dreamer.run("manual")).ran).toBe(true);
+    expect(reviewed).not.toHaveBeenCalled();
+  });
+
+  it("keeps the flag while a correction to a user memory awaits approval", async () => {
+    answer = (user) =>
+      JSON.stringify({
+        operations: [
+          { op: "update", line: alias(user, "Lives in Berlin"), text: "Lives in Lisbon" },
+        ],
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Berlin" }],
+      });
+    const { dreamer, reviewed } = makeRecheckDreamer([await makeSourceRecheck()]);
+
+    const outcome = await dreamer.run("manual");
+    expect(outcome).toMatchObject({
+      ran: true,
+      record: { reviewStatus: "pending", reviewCount: 1 },
+    });
+    expect(reviewed).not.toHaveBeenCalled();
+    expect(read("me.md")).toContain("Lives in Berlin");
+  });
+
+  it("does not clear a flag when the proposed edit was rejected", async () => {
+    answer = (user) =>
+      JSON.stringify({
+        operations: [{ op: "move", line: alias(user, "Lives in Berlin"), file: "../escape.md" }],
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Berlin" }],
+      });
+    const { dreamer, reviewed } = makeRecheckDreamer([await makeSourceRecheck()]);
+
+    expect(await dreamer.run("manual")).toMatchObject({ ran: true, record: { rejected: 1 } });
+    expect(reviewed).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm a memory edited while the model was checking its old text", async () => {
+    answer = () => {
+      fs.writeFileSync(
+        path.join(service.root, "me.md"),
+        read("me.md").replace("Berlin", "Hamburg"),
+      );
+      return JSON.stringify({
+        operations: [],
+        rechecks: [{ source: "R1", verdict: "confirmed", quote: "Lives in Berlin" }],
+      });
+    };
+    const { dreamer, reviewed } = makeRecheckDreamer([await makeSourceRecheck()]);
+
+    expect((await dreamer.run("manual")).ran).toBe(true);
+    expect(reviewed).not.toHaveBeenCalled();
+    expect(read("me.md")).toContain("Lives in Hamburg");
+  });
+
+  it("confirms only the explicitly verified source when a memory has multiple sources", async () => {
+    const pending = [
+      await makeSourceRecheck(),
+      await makeSourceRecheck({
+        row: { id: "r2" } as MemorySourceRow,
+        source: "docs/contacts.md",
+        excerpt: "Moved to Lisbon in October 2026.",
+      }),
+    ];
+    answer = () =>
+      JSON.stringify({
+        operations: [],
+        rechecks: [
+          { source: "R1", verdict: "confirmed", quote: "Lives in Berlin" },
+          { source: "R2", verdict: "contradicted", quote: "Moved to Lisbon" },
+        ],
+      });
+    const { dreamer, reviewed } = makeRecheckDreamer(pending);
+
+    expect((await dreamer.run("manual")).ran).toBe(true);
+    expect(reviewed).toHaveBeenCalledExactlyOnceWith([pending[0]]);
   });
 
   it("records a failed or malformed model answer without touching the folder", async () => {

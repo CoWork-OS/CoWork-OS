@@ -900,6 +900,27 @@
   opacity: 0.35;
 }
 
+/* Intensity levels; UsageInsightsOverview builds these names as `-l${intensity}`. */
+.insights-overview-heatmap-cell-l1 {
+  background: color-mix(in srgb, var(--color-accent, #60a5fa) 25%, transparent);
+}
+.insights-overview-heatmap-cell-l2 {
+  background: color-mix(in srgb, var(--color-accent, #60a5fa) 50%, transparent);
+}
+.insights-overview-heatmap-cell-l3 {
+  background: color-mix(in srgb, var(--color-accent, #60a5fa) 75%, transparent);
+}
+.insights-overview-heatmap-cell-l4 {
+  background: var(--color-accent, #60a5fa);
+}
+
+/* Settings > Daily Briefing, a briefing with no sections. */
+.briefing-empty {
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
 .insights-overview-heatmap-months {
   display: grid;
   gap: 5px;

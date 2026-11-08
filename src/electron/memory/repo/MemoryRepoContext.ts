@@ -10,8 +10,8 @@
  *   §2, at most 3): its MEMORY.md under a "Team memory: <name>" heading, sanitized the same
  *   way, after a header saying it is shared context written by teammates, never instructions.
  * - Cached by the repo version (HEAD), the workspace and the files' mtimes (team repos
- *   included), so the block stays byte-stable between changes (prompt caching); a change of
- *   the team repo set invalidates it.
+ *   included) and query terms, so the block stays byte-stable between changes (prompt
+ *   caching); a change of the team repo set invalidates it.
  * - Lists `repo:<path>#L<n>` refs for "memory used" attribution, and the normalized-text
  *   hashes of the rendered entries so L0 can skip the same facts while both stores run.
  *   Both cover the personal folder only: team lines are not this user's memory.
@@ -32,6 +32,12 @@ import {
 import { PINNED_CONTEXT_TAGS } from "../../agent/pinned-context-blocks";
 import { redactSensitiveMarkdownContent } from "../markdown-index-sql";
 import { MemoryRepoService } from "./MemoryRepoService";
+import {
+  MEMORY_REPO_RELEVANT_ENTRIES,
+  memorySelectionTerms,
+  rankMemoryEntries,
+  type MemorySelectionCandidate,
+} from "./memory-repo-selection";
 import {
   MEMORY_REPO_ENTRY_FILE,
   MEMORY_REPO_INBOX_FILE,
@@ -68,6 +74,8 @@ export interface MemoryRepoContextRequest {
   workspaceId?: string | null;
   /** The task's bot (`AgentRole` id): its own file joins the block. */
   botId?: string | null;
+  /** Current user task/follow-up. Absent or non-informative queries keep file-order behavior. */
+  query?: string | null;
 }
 
 export interface MemoryRepoContextDeps {
@@ -96,11 +104,11 @@ function inline(text: string): string {
 
 type Row =
   | { type: "structure"; text: string; link?: boolean }
-  | { type: "entry"; text: string; ref: string; hash: string };
+  | ({ type: "entry"; ref: string } & MemorySelectionCandidate);
 
 /**
  * One file, within a token budget. Headings and index links are structure and always kept;
- * entries are added in file order until the budget is spent.
+ * entries use file order by default, or query relevance plus user constraints when queried.
  */
 export function renderMemoryRepoFile(
   relPath: string,
@@ -111,6 +119,7 @@ export function renderMemoryRepoFile(
     today?: string;
     /** True for an entry whose file or connector record changed since it was saved (WP15). */
     sourceChanged?: (entryHash: string) => boolean;
+    query?: string | null;
   } = {},
 ): RenderedFile {
   const today = options.today ?? new Date().toISOString().slice(0, 10);
@@ -136,15 +145,20 @@ export function renderMemoryRepoFile(
     if (isExpiredMemoryRepoEntry(entry, today)) return;
     const text = inline(entry.text);
     if (!text) return;
+    const sourceChanged = options.sourceChanged?.(entry.hash) === true;
     const tags = [
       ...(entry.by === "agent" ? ["agent"] : []),
-      ...(options.sourceChanged?.(entry.hash) ? [SOURCE_CHANGED_NOTE] : []),
+      ...(sourceChanged ? [SOURCE_CHANGED_NOTE] : []),
     ];
     rows.push({
       type: "entry",
       text: `- ${text}${tags.length > 0 ? ` (${tags.join(", ")})` : ""}`,
       ref: memoryRepoRef(relPath, entry.line),
       hash: entry.hash,
+      essential:
+        entry.by === "user" &&
+        ["rule", "preference", "identity", "commitment"].includes(entry.kind ?? ""),
+      sourceChanged,
     });
   });
 
@@ -153,16 +167,29 @@ export function renderMemoryRepoFile(
     .reduce((sum, row) => sum + estimateTokens(row.text) + 1, 0);
   const kept = new Set<Row>();
   let truncated = false;
-  for (const row of rows) {
-    if (row.type !== "entry") continue;
+  const terms = memorySelectionTerms(options.query);
+  const entries = rows.filter(
+    (row): row is Extract<Row, { type: "entry" }> => row.type === "entry",
+  );
+  const ranked = terms.length
+    ? rankMemoryEntries(entries, terms).map((index) => entries[index])
+    : entries;
+  const more = `- … more entries in [[${relPath.replace(/\.md$/i, "")}]]`;
+  // Queried selection reserves room for its navigation hint. Legacy rendering stays stable.
+  if (terms.length && entries.length) used += estimateTokens(more) + 1;
+  let relevant = 0;
+  for (const row of ranked) {
+    if (terms.length && !row.essential && relevant >= MEMORY_REPO_RELEVANT_ENTRIES) continue;
     const cost = estimateTokens(row.text) + 1;
-    if (truncated || used + cost > budgetTokens) {
+    if ((!terms.length && truncated) || used + cost > budgetTokens) {
       truncated = true;
       continue;
     }
     used += cost;
     kept.add(row);
+    if (!row.essential) relevant++;
   }
+  if (terms.length) truncated = kept.size < entries.length;
   // A file with no entries still shows its index: the agent can follow the links.
   const hasLinks = rows.some((row) => row.type === "structure" && row.link);
   if (kept.size === 0 && !hasLinks) return { lines: [], refs: [], hashes: [] };
@@ -179,7 +206,7 @@ export function renderMemoryRepoFile(
       hashes.push(row.hash);
     }
   }
-  if (truncated) lines.push(`- … more entries in [[${relPath.replace(/\.md$/i, "")}]]`);
+  if (truncated) lines.push(more);
   return { lines, refs, hashes };
 }
 
@@ -227,6 +254,7 @@ export class MemoryRepoContext {
     try {
       const workspaceId = String(request.workspaceId ?? "");
       const botId = String(request.botId ?? "");
+      const queryKey = JSON.stringify(memorySelectionTerms(request.query));
       const teams = (this.deps.getTeamRepos ?? teamMemoryReposFor)(workspaceId || null)
         .filter((team) => team.service.isReady())
         .slice(0, MEMORY_REPO_MAX_TEAM_REPOS);
@@ -266,6 +294,7 @@ export class MemoryRepoContext {
         version,
         workspaceId,
         botId,
+        queryKey,
         today,
         // A changed source tags its entries.
         recheck.version(),
@@ -285,6 +314,7 @@ export class MemoryRepoContext {
             skipWorkspaceMarker: file.path !== MEMORY_REPO_ENTRY_FILE,
             today,
             sourceChanged: (hash) => Boolean(recheck.flagForRepoEntry(file.path, hash)),
+            ...(file.path !== MEMORY_REPO_ENTRY_FILE ? { query: request.query } : {}),
           });
           if (rendered.lines.length === 0) continue;
           sections.push([`[${file.path}]`, ...rendered.lines].join("\n"));
@@ -333,7 +363,7 @@ export class MemoryRepoContext {
 
 let shared: MemoryRepoContext | null = null;
 
-/** The process-wide builder (the cache is keyed by repo, version and workspace). */
+/** The process-wide builder (cached by repo, version, workspace and query). */
 export function getMemoryRepoContext(): MemoryRepoContext {
   return (shared ??= new MemoryRepoContext());
 }

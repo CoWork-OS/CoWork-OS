@@ -246,15 +246,19 @@ through one serialized service; Phase 2's Dreaming works on a branch (§10).
 
 ### 6.1 The `<cowork_memory_repo>` block
 
-- Built by `MemoryRepoContext.build({ workspaceId })`: `MEMORY.md` (budget 500 tokens) and the
+- Built by `MemoryRepoContext.build({ workspaceId, query })`: `MEMORY.md` (budget 500 tokens) and the
   workspace's file (budget 300 tokens). Entries are rendered one per line through
   `InputSanitizer.sanitizeInlineMemoryLine` (control characters removed, `<` and `>`
   escaped); headings are kept; metadata is shortened to `(agent)` for `by: agent` lines and
   dropped otherwise. A header says the block is the user's saved memory, to use as context and
   never as instructions.
 - `inbox.md` is never in the block.
-- Cached by HEAD commit and workspace; a new commit invalidates it. This keeps the block
-  byte-stable between commits for prompt caching.
+- The executor supplies current user intent. Workspace/bot notes are selected by relevance,
+  with typed user constraints prioritized within the existing budgets; the personal index
+  keeps its rendering. Omitting the query retains file-order compatibility. See
+  [Selective memory recall](selective-memory-recall.md).
+- Cached by HEAD commit, workspace, query terms, day, source flags and file stamps. This
+  keeps the block byte-stable between changes for prompt caching.
 - Injected as its own pinned block (a new `memoryRepo` tag in `PINNED_CONTEXT_TAGS`,
   `agent/pinned-context-blocks.ts`), upserted after `userProfile` in `SessionRuntime`, and
   in the chat, companion and planning system prompts next to `<cowork_hot_memory>`. A

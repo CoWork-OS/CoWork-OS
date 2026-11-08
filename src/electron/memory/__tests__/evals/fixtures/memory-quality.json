@@ -1,0 +1,314 @@
+{
+  "version": 2,
+  "thresholds": {
+    "minSuccessRate": 1,
+    "minSuccessGain": 0.4,
+    "minRecallAt5": 1,
+    "maxUnsupportedRate": 0,
+    "maxStaleRate": 0,
+    "maxExposures": 0,
+    "maxEstimatedMemoryTokens": 4000
+  },
+  "cases": [
+    {
+      "id": "learned-command",
+      "category": "learning",
+      "history": [
+        {
+          "op": "learn",
+          "text": "Atlas upgrade migrations use `npm run verify:upgrade`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:upgrade",
+      "supportedCommands": ["npm run verify:upgrade"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": true
+    },
+    {
+      "id": "user-correction",
+      "category": "correction",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:old`."
+        },
+        {
+          "op": "correct",
+          "text": "Atlas upgrade migrations use `npm run verify:new`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:new",
+      "supportedCommands": ["npm run verify:new"],
+      "staleCommands": ["npm run verify:old"],
+      "mustNotExpose": [],
+      "requiresRecall": true
+    },
+    {
+      "id": "source-correction",
+      "category": "source-change",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:old`."
+        },
+        {
+          "op": "source-change",
+          "text": "Atlas upgrade migrations use `npm run verify:current`."
+        },
+        {
+          "op": "source-correct",
+          "text": "Atlas upgrade migrations use `npm run verify:current`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:current",
+      "supportedCommands": ["npm run verify:current"],
+      "staleCommands": ["npm run verify:old"],
+      "mustNotExpose": [],
+      "requiresRecall": true
+    },
+    {
+      "id": "stale-source-abstain",
+      "category": "stale-source",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:old`."
+        },
+        {
+          "op": "source-change",
+          "text": "The command is temporarily unavailable."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": null,
+      "supportedCommands": [],
+      "staleCommands": ["npm run verify:old"],
+      "mustNotExpose": [],
+      "requiresRecall": false
+    },
+    {
+      "id": "conflicting-workspace",
+      "category": "conflict",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Harbor upgrade migrations use `npm run harbor:upgrade`.",
+          "workspace": "harbor"
+        },
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run atlas:upgrade`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run atlas:upgrade",
+      "supportedCommands": ["npm run atlas:upgrade"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": true
+    },
+    {
+      "id": "verified-lesson",
+      "category": "execution",
+      "history": [
+        {
+          "op": "lesson",
+          "text": "For Atlas upgrade migrations, try `npm run verify:upgrade`.",
+          "review": "accept"
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:upgrade",
+      "supportedCommands": ["npm run verify:upgrade"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": true
+    },
+    {
+      "id": "pending-lesson",
+      "category": "review",
+      "history": [
+        {
+          "op": "lesson",
+          "text": "For Atlas upgrade migrations, try `npm run verify:pending`.",
+          "review": "pending"
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": null,
+      "supportedCommands": [],
+      "staleCommands": [],
+      "mustNotExpose": ["npm run verify:pending"],
+      "requiresRecall": false
+    },
+    {
+      "id": "corrected-lesson",
+      "category": "invalidation",
+      "history": [
+        {
+          "op": "lesson",
+          "text": "For Atlas upgrade migrations, try `npm run verify:invalid`.",
+          "review": "invalidate"
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": null,
+      "supportedCommands": [],
+      "staleCommands": ["npm run verify:invalid"],
+      "mustNotExpose": ["npm run verify:invalid"],
+      "requiresRecall": false
+    },
+    {
+      "id": "no-memory",
+      "category": "privacy",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:private`.",
+          "noMemory": true
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": null,
+      "supportedCommands": [],
+      "staleCommands": [],
+      "mustNotExpose": ["npm run verify:private"],
+      "requiresRecall": false
+    },
+    {
+      "id": "current-request-control",
+      "category": "control",
+      "history": [],
+      "question": "For Atlas upgrade migrations, use `npm run verify:request`. Which command should run?",
+      "expectedCommand": "npm run verify:request",
+      "supportedCommands": ["npm run verify:request"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": false
+    },
+    {
+      "id": "recall-under-budget-pressure",
+      "category": "budget",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 0 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 1 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 2 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 3 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 4 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 5 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 6 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 7 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 8 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 9 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 10 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 11 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 12 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 13 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas inventory documentation item 14 explains invoice retention and accounting fields used only during quarterly record audits."
+        },
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:budget`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:budget",
+      "supportedCommands": ["npm run verify:budget"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": true,
+      "irrelevantContextMarkers": ["inventory documentation item"]
+    },
+    {
+      "id": "current-request-override",
+      "category": "current-correction",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:old`."
+        }
+      ],
+      "question": "For Atlas upgrade migrations, use `npm run verify:override` instead of the earlier command. Which command should run?",
+      "expectedCommand": "npm run verify:override",
+      "supportedCommands": ["npm run verify:override"],
+      "staleCommands": ["npm run verify:old"],
+      "mustNotExpose": [],
+      "requiresRecall": false
+    },
+    {
+      "id": "user-constraint-retention",
+      "category": "constraints",
+      "history": [
+        {
+          "op": "remember",
+          "text": "Require human review before deploying changes.",
+          "kind": "rule"
+        },
+        {
+          "op": "remember",
+          "text": "Atlas upgrade migrations use `npm run verify:rules`."
+        }
+      ],
+      "question": "Which command verifies Atlas upgrade migrations?",
+      "expectedCommand": "npm run verify:rules",
+      "supportedCommands": ["npm run verify:rules"],
+      "staleCommands": [],
+      "mustNotExpose": [],
+      "requiresRecall": true,
+      "requiredContextMarkers": ["Require human review before deploying changes."]
+    }
+  ],
+  "selectionThresholds": {
+    "minMeanContextReduction": 0.05,
+    "minInjectedRecallGain": 0.1,
+    "maxIrrelevantContextHits": 0
+  }
+}

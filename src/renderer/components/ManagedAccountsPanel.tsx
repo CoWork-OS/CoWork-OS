@@ -64,12 +64,29 @@ const STATUSES: ManagedAccountStatus[] = [
 
 const accountApi = () => window.electronAPI as typeof window.electronAPI & ManagedAccountApi;
 
-export function ManagedAccountsPanel() {
-  const available = hasHostMethods(
-    "listManagedAccounts",
-    "upsertManagedAccount",
-    "removeManagedAccount",
+const MANAGED_ACCOUNT_METHODS = [
+  "listManagedAccounts",
+  "upsertManagedAccount",
+  "removeManagedAccount",
+] as const;
+
+/**
+ * Only a paired host serves managed accounts; the desktop preload has no such methods, and
+ * hasHostMethods is always true on desktop. Without checking the methods themselves, the optional
+ * calls below did nothing there and the form still said the account was saved.
+ */
+export function managedAccountsAvailable(): boolean {
+  const api = (typeof window === "undefined" ? undefined : window.electronAPI) as
+    | ManagedAccountApi
+    | undefined;
+  return (
+    hasHostMethods(...MANAGED_ACCOUNT_METHODS) &&
+    MANAGED_ACCOUNT_METHODS.every((method) => typeof api?.[method] === "function")
   );
+}
+
+export function ManagedAccountsPanel() {
+  const available = managedAccountsAvailable();
   const [accounts, setAccounts] = useState<ManagedAccountView[]>([]);
   const [draft, setDraft] = useState<ManagedAccountUpsert>(EMPTY_DRAFT);
   const [secretDrafts, setSecretDrafts] = useState<SecretDraft[]>([{ key: "", value: "" }]);

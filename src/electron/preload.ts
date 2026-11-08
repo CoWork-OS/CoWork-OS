@@ -7540,7 +7540,9 @@ export interface ElectronAPI {
   archiveTask: (id: string) => Promise<Any>;
   /** Brings an archived session back to the sidebar. */
   unarchiveTask?: (id: string) => Promise<{ metadata: unknown; taskCount: number }>;
-  archiveWorkspaceSessions?: (workspaceId: string) => Promise<{ sessionCount: number }>;
+  archiveWorkspaceSessions?: (
+    workspaceId: string,
+  ) => Promise<{ sessionCount: number; skippedRunning?: number }>;
   deleteTask: (id: string) => Promise<void>;
   onTaskEvent: (callback: (event: Any) => void) => () => void;
   onTaskLearningEvent: (callback: (event: TaskLearningProgress) => void) => () => void;

@@ -11,6 +11,7 @@ import type {
   Workspace,
 } from "../../shared/types";
 import { formatCount } from "../utils/plural";
+import { promptForText } from "./TextPromptDialog";
 import {
   agentMailApiKeyConfigured,
   agentMailErrorMessage,
@@ -246,10 +247,11 @@ export function AgentMailSettings() {
   };
 
   const renameInbox = async (inbox: AgentMailInbox) => {
-    const nextDisplayName = window.prompt(
-      "Display name",
-      inbox.displayName || inbox.email || inbox.inboxId,
-    );
+    const nextDisplayName = await promptForText({
+      title: "Display name",
+      defaultValue: inbox.displayName || inbox.email || inbox.inboxId,
+      confirmLabel: "Save",
+    });
     if (!nextDisplayName || !selectedWorkspaceId) return;
     await withBusy(`rename-${inbox.inboxId}`, async () => {
       await window.electronAPI.updateAgentMailInbox({

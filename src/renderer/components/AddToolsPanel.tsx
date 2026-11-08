@@ -411,6 +411,7 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
       <div className="add-tools-search">
         <Search size={17} aria-hidden="true" />
         <input
+          type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search packs, skills, connectors, channels, and MCP servers"

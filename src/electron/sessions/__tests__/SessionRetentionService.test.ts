@@ -198,7 +198,52 @@ describeWithSqlite("SessionRetentionService", () => {
     const task = createTask("completed", "Already archived");
     service.archiveSession(task.id);
 
-    expect(service.archiveWorkspaceSessions(workspaceId)).toEqual({ sessionCount: 0 });
+    expect(service.archiveWorkspaceSessions(workspaceId)).toEqual({
+      sessionCount: 0,
+      skippedRunning: 0,
+    });
+  });
+
+  it("refuses to archive a session that is still running", () => {
+    const running = createTask("executing", "Still working");
+    expect(() => service.archiveSession(running.id)).toThrow(/still running/);
+    expect(
+      taskRepo.findSidebarSummaries(10, 0, { includeArchivedSessions: false }).map((r) => r.id),
+    ).toContain(running.id);
+
+    // A running subtask keeps its parent's session running too.
+    const parent = createTask("completed", "Parent");
+    const child = taskRepo.create({
+      title: "Child",
+      prompt: "Child",
+      status: "executing",
+      workspaceId,
+      parentTaskId: parent.id,
+    });
+    taskRepo.update(child.id, { sessionId: parent.id });
+    expect(() => service.archiveSession(parent.id)).toThrow(/still running/);
+  });
+
+  it("archives an idle fork, which waits pending for its next message", () => {
+    const source = createTask("completed", "Source");
+    const fork = taskRepo.create({ title: "Fork", prompt: "Fork", status: "pending", workspaceId });
+    taskRepo.update(fork.id, { branchFromTaskId: source.id });
+    expect(service.archiveSession(fork.id).taskCount).toBe(1);
+  });
+
+  it("leaves running sessions in place when archiving a workspace", () => {
+    const done = createTask("completed", "Done");
+    const running = createTask("executing", "Running");
+
+    expect(service.archiveWorkspaceSessions(workspaceId)).toEqual({
+      sessionCount: 1,
+      skippedRunning: 1,
+    });
+    const visibleIds = taskRepo
+      .findSidebarSummaries(10, 0, { includeArchivedSessions: false })
+      .map((row) => row.id);
+    expect(visibleIds).toContain(running.id);
+    expect(visibleIds).not.toContain(done.id);
   });
 
   it("prunes only terminal unpinned sessions matching the retention window", async () => {

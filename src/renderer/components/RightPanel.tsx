@@ -2518,7 +2518,7 @@ function RightPanelComponent({
   };
 
   const preservedOutputsTooltip =
-    "Completed with preserved outputs. Cowork kept the files and summary it produced, even though some checks or steps did not fully finish.";
+    "Completed with preserved outputs. CoWork kept the files and summary it produced, even though some checks or steps did not fully finish.";
 
   return (
     <div className="right-panel cli-panel">

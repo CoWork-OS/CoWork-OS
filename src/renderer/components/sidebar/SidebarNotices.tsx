@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ArrowUpRight, Box, Orbit, Sparkles, X } from "lucide-react";
 import { useComposerPredictionAvailable } from "../../hooks/useComposerPredictions";
 import { UseCasesGallery } from "../UseCasesGallery";
-import { requestUseCasesGallery } from "../use-cases-events";
+import { requestUseCasesGallery, requestUseCasesGalleryWhenReady } from "../use-cases-events";
 import "./sidebar-notices.css";
 
 /**
@@ -31,6 +31,8 @@ export interface SidebarNotice {
 
 export interface SidebarNoticeContext {
   openUseCasesFallback: () => void;
+  /** Opens a new session, whose welcome screen has a composer to fill. */
+  startNewSession?: () => void;
 }
 
 export const SIDEBAR_NOTICES: SidebarNotice[] = [
@@ -71,8 +73,18 @@ export const SIDEBAR_NOTICES: SidebarNotice[] = [
     icon: Orbit,
     label: "See how people use CoWork OS",
     onActivate: (ctx) => {
-      // Prefer the gallery centered over the visible composer; fall back to a window-level one.
-      if (!requestUseCasesGallery()) ctx.openUseCasesFallback();
+      // Prefer the gallery centered over the visible composer: a picked example fills it.
+      if (requestUseCasesGallery()) return;
+      // With a session open there is none, and the window-level gallery can only be browsed
+      // (its examples are disabled). Open a new session and ask its welcome screen instead.
+      if (!ctx.startNewSession) {
+        ctx.openUseCasesFallback();
+        return;
+      }
+      ctx.startNewSession();
+      void requestUseCasesGalleryWhenReady().then((opened) => {
+        if (!opened) ctx.openUseCasesFallback();
+      });
     },
   },
 ];
@@ -184,7 +196,7 @@ function SidebarNoticeTip({
   );
 }
 
-export function SidebarNotices() {
+export function SidebarNotices({ onStartNewSession }: { onStartNewSession?: () => void } = {}) {
   const composerPredictionAvailable = useComposerPredictionAvailable();
   const [dismissed, setDismissed] = useState(() => readIds(DISMISSED_KEY));
   // Snapshot of notices seen before this mount, so only brand-new ones animate.
@@ -215,7 +227,10 @@ export function SidebarNotices() {
 
   const activate = (notice: SidebarNotice) => {
     setActiveTip(null);
-    notice.onActivate({ openUseCasesFallback: () => setGalleryOpen(true) });
+    notice.onActivate({
+      openUseCasesFallback: () => setGalleryOpen(true),
+      startNewSession: onStartNewSession,
+    });
   };
   const tipNotice = visible.find((notice) => notice.id === activeTip);
   const tipAnchor = tipNotice ? anchors.current.get(tipNotice.id) : undefined;

@@ -1299,16 +1299,25 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
 
   const renderPersonalizedRecap = () => {
     const workspaceSummary = buildOnboardingWorkspaceSummary(onboarding.data);
+    // Onboarding sets up an OpenAI-compatible route only for a detected LM Studio, which runs
+    // on this computer; without this it read "openai-compatible · Gateway".
+    const isLmStudio =
+      onboarding.data.selectedProvider === "openai-compatible" &&
+      Boolean(onboarding.data.detectedLmStudioModel);
     const providerName = onboarding.data.selectedProvider
       ? onboarding.data.selectedProvider === "openai" && !onboarding.data.apiKey
         ? "ChatGPT"
-        : PROVIDERS.find((provider) => provider.id === onboarding.data.selectedProvider)?.name ||
-          onboarding.data.selectedProvider
+        : isLmStudio
+          ? "LM Studio"
+          : PROVIDERS.find((provider) => provider.id === onboarding.data.selectedProvider)?.name ||
+            getModelAccessDescriptor(onboarding.data.selectedProvider).name
       : "Not configured yet";
     const providerAccess = onboarding.data.selectedProvider
       ? onboarding.data.selectedProvider === "openai" && !onboarding.data.apiKey
         ? "Account sign-in"
-        : getModelAccessDescriptor(onboarding.data.selectedProvider).label
+        : isLmStudio
+          ? "Local"
+          : getModelAccessDescriptor(onboarding.data.selectedProvider).label
       : "Connect later";
     const workStyleLabel =
       onboarding.data.workStyle === "planner"

@@ -3812,7 +3812,7 @@ function SidebarComponent({
               </div>
 
               {/* Sidebar notification area: add new notices in sidebar/SidebarNotices.tsx. */}
-              <SidebarNotices />
+              <SidebarNotices onStartNewSession={handleNewTask} />
 
               {showAutomatedDrawer && (
                 <section className="sidebar-automated-section" aria-label="Automated sessions">

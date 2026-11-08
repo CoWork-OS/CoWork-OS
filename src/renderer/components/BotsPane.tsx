@@ -1,5 +1,5 @@
 import { BotWorkDialog } from "./BotWorkDialog";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import { UseCasesGallery } from "./UseCasesGallery";
@@ -659,6 +659,12 @@ export function BotsPane({
   const createOpen = createOpenProp ?? ownCreateOpen;
   const [useCasesOpen, setUseCasesOpen] = useState(false);
   const setCreateOpen = onCreateOpenChange ?? setOwnCreateOpen;
+  // A bot example picked in the gallery starts the create dialog with it as the description.
+  const [createPrefill, setCreatePrefill] = useState<CreateBotPrefill | undefined>(undefined);
+  useEffect(() => {
+    // Closed (cancelled or created): the next New bot starts empty.
+    if (!createOpen) setCreatePrefill(undefined);
+  }, [createOpen]);
   const [editingBot, setEditingBot] = useState<BotRole | null>(null);
 
   const visibleBots = useMemo(
@@ -702,6 +708,14 @@ export function BotsPane({
         open={useCasesOpen}
         initialCategory="bots"
         onClose={() => setUseCasesOpen(false)}
+        onSelect={
+          onBotCreated
+            ? (prompt) => {
+                setCreatePrefill({ description: prompt });
+                setCreateOpen(true);
+              }
+            : undefined
+        }
       />
 
       <label className="sidebar-bots-search">
@@ -820,6 +834,7 @@ export function BotsPane({
       {createOpen && onBotCreated && (
         <CreateBotDialog
           existingBots={roles}
+          prefill={createPrefill}
           onClose={() => setCreateOpen(false)}
           onCreated={onBotCreated}
         />

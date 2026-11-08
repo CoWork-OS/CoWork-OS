@@ -163,7 +163,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
       setRecallError(null);
     } catch (error) {
       console.error("Failed to query unified recall:", error);
-      setRecallError("Unable to search Cowork memory.");
+      setRecallError("Unable to search CoWork memory.");
     } finally {
       setRecallLoading(false);
     }
@@ -459,7 +459,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
 
       <div className="mc-v2-detail-section mc-v2-learning-section">
         <div className="mc-v2-section-header">
-          <h4>What Cowork learned</h4>
+          <h4>What CoWork learned</h4>
           <span className="mc-v2-section-hint">
             Memory, playbook, and skill promotion are tracked here after every task.
           </span>
@@ -556,7 +556,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
           <input
             type="search"
             className="mc-v2-recall-input"
-            placeholder="Search Cowork memory, tasks, messages, and files"
+            placeholder="Search CoWork memory, tasks, messages, and files"
             value={recallQuery}
             onChange={(e) => setRecallQuery(e.target.value)}
           />
@@ -609,7 +609,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
         ) : (
           <div className="mc-v2-empty">
             {recallLoading
-              ? "Searching Cowork memory..."
+              ? "Searching CoWork memory..."
               : "Search everything to pull a single unified result list across tasks, messages, files, notes, memory, screen context, and the knowledge graph."}
           </div>
         )}

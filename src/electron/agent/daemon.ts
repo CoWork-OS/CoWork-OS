@@ -13572,7 +13572,7 @@ export class AgentDaemon extends EventEmitter {
           agentRoleId,
           actorType,
           activityType: "info",
-          title: "What Cowork learned",
+          title: "What CoWork learned",
           description: payload?.summary || task.title,
           metadata: {
             ...payload,

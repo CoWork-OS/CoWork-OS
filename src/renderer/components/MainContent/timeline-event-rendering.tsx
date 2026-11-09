@@ -1055,12 +1055,13 @@ export function renderEventTitle(
       return "Verified business receipt";
     case "pact_evidence_issue":
       return `Business evidence needs review: ${String(event.payload?.issue ?? event.payload?.reason ?? event.payload?.verification ?? "issue").replace(/_/g, " ")}`;
+    // Question and approval cards; "structured input" is the internal name.
     case "input_request_created":
-      return "Structured input requested";
+      return "Asked for your input";
     case "input_request_resolved":
-      return "Structured input submitted";
+      return "You answered";
     case "input_request_dismissed":
-      return "Structured input dismissed";
+      return "You dismissed the question";
     case "log": {
       const logMsg = event.payload?.message;
       return typeof logMsg === "string" ? humanizeTimelineMessage(logMsg) : "Log";

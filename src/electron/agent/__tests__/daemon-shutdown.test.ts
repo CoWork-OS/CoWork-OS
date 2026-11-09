@@ -88,6 +88,42 @@ describe("daemon shutdown persistence", () => {
     },
   );
 
+  // Live 2026-11-09: a session paused for a reply after a refused command was marked
+  // interrupted on quit, resumed on the next launch and re-ran the step without the answer.
+  it.each([
+    { isRunning: false, interrupted: false },
+    { isRunning: true, interrupted: true },
+  ])("keeps a paused session paused unless its run is still going: %j", async (state) => {
+    const executor = {
+      isRunning: state.isRunning,
+      hasPendingFollowUps: false,
+      saveConversationSnapshot: vi.fn(),
+      cancel: vi.fn(async () => undefined),
+    };
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      orchestrationGraphEngine: { stop: vi.fn() },
+      workSessionProtocolService: { getReliabilityService: () => ({ stop: vi.fn() }) },
+      pendingApprovals: new Map(),
+      pendingDurableApprovalGrants: new Map(),
+      pendingInputRequests: new Map(),
+      pendingRetries: new Map(),
+      pendingTaskImages: new Map(),
+      activeTasks: new Map([["task", { status: "active", executor }]]),
+      taskRepo: {
+        findById: () => ({ id: "task", status: "paused", terminalStatus: "needs_user_action" }),
+        update: vi.fn(),
+      },
+      logEvent: vi.fn(),
+      removeAllListeners: vi.fn(),
+    });
+    await daemon.shutdown();
+    expect(executor.saveConversationSnapshot).toHaveBeenCalledOnce();
+    expect(
+      daemon.logEvent.mock.calls.some((call: unknown[]) => call[1] === "task_interrupted"),
+    ).toBe(state.interrupted);
+    expect(daemon.taskRepo.update.mock.calls.length > 0).toBe(state.interrupted);
+  });
+
   it.each(["updateTask", "updateTaskStatus"])(
     "%s retires a completed follow-up in the cache",
     (method) => {

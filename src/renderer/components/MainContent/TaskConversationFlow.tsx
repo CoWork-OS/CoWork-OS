@@ -22,6 +22,7 @@ import {
 } from "../../../shared/types";
 import { parseCodeBlockRunMessage } from "../../../shared/terminal-output-text";
 import { approvalReplyDisplayText } from "../../../shared/approval-reply-message";
+import { MESSAGE_FEEDBACK_REASON_OPTIONS } from "../../../shared/message-feedback-reasons";
 import { type CodeBlockRunTarget } from "../../utils/code-block-runs";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
 import { parseUserMessageAttachmentMetadata } from "../../../shared/user-message-attachments";
@@ -2860,15 +2861,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                                     </button>
                                     {rejectMenuOpenFor === event.id && (
                                       <div className="message-feedback-menu" role="menu">
-                                        {(
-                                          [
-                                            ["incorrect", "Incorrect"],
-                                            ["too_verbose", "Too verbose"],
-                                            ["ignored_instructions", "Ignored instructions"],
-                                            ["wrong_tone", "Wrong tone"],
-                                            ["unsafe", "Unsafe / unwanted"],
-                                          ] as const
-                                        ).map(([reason, label]) => (
+                                        {MESSAGE_FEEDBACK_REASON_OPTIONS.map(([reason, label]) => (
                                           <button
                                             key={reason}
                                             type="button"

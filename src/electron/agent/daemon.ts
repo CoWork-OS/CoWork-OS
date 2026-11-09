@@ -21055,6 +21055,17 @@ export class AgentDaemon extends EventEmitter {
         console.error(`[AgentDaemon] Failed to save snapshot for task ${taskId} on shutdown:`, err);
       }
 
+      // A session paused for the person's reply is not running: its run ended when it asked.
+      // Marked interrupted, it resumed on the next launch and re-ran the step without the
+      // answer (e.g. a refused command). It stays paused; the reply continues it.
+      if (
+        currentTask?.status === "paused" &&
+        cached.executor.isRunning === false &&
+        !cached.executor.hasPendingFollowUps
+      ) {
+        return;
+      }
+
       // Mark as "interrupted" instead of "cancelled" so we can resume on restart
       try {
         const interruptedOutcome = decideTaskOutcome({

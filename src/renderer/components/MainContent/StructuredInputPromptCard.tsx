@@ -436,11 +436,7 @@ export function StructuredInputPromptCard({
     const submitOption = (optionIndex: number) =>
       onSubmit({ [activeQuestion.id]: { optionLabel: activeOptions[optionIndex]?.label } });
     return (
-      <div
-        className="input-request-composer-shell"
-        role="region"
-        aria-label="Structured input required"
-      >
+      <div className="input-request-composer-shell" role="region" aria-label="Your input needed">
         <div className="input-request-card input-request-card-inline input-request-card-approval">
           <InlineApprovalDraftReview
             request={request}
@@ -540,11 +536,7 @@ export function StructuredInputPromptCard({
   }
 
   return (
-    <div
-      className="input-request-composer-shell"
-      role="region"
-      aria-label="Structured input required"
-    >
+    <div className="input-request-composer-shell" role="region" aria-label="Your input needed">
       <div className="input-request-card input-request-card-inline">
         <div className="input-request-progress">
           <span className="input-request-header">{activeQuestion.header || "Question"}</span>

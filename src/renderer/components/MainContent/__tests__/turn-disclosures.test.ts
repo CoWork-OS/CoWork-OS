@@ -73,6 +73,55 @@ describe("applyTurnDisclosures", () => {
     eventRow("answer-2", 400, "assistant_message", { message: "Fixed." }),
   ];
 
+  // Live 2026-11-09: a run stopped after an approval led with "You chose: Allow once" as its
+  // answer and read "Worked for 0s" although the command ran for seconds.
+  it("does not take the echo of a card answer as the turn's answer", () => {
+    const { turns } = applyTurnDisclosures(
+      [
+        eventRow("prompt-card", 110, "assistant_message", {
+          message: "I need your decision. Choose Deny or Allow once below.",
+          source: "assistant_approval_request",
+        }),
+        eventRow("choice", 120, "assistant_message", {
+          message: "You chose:\n- Permission: Allow once",
+          source: "structured_input_selection",
+        }),
+        blockRow("block-run", [makeEvent("call-run", 130, "tool_call", { tool: "run_command" })]),
+        eventRow("cancelled", 5_000, "task_cancelled", {}),
+      ],
+      { isTaskWorking: false, taskStartedAt: 100, isTurnExpanded: () => false },
+    );
+    expect(turns[0]).toMatchObject({ startedAt: 100, endedAt: 5_000 });
+
+    // While the card is still open, its prompt is what the turn shows.
+    const waiting = applyTurnDisclosures(
+      [
+        blockRow("block-ask", [makeEvent("call-ask", 105, "tool_call", { tool: "run_command" })]),
+        eventRow("prompt-open", 110, "assistant_message", {
+          message: "I need your decision. Choose Deny or Allow once below.",
+          source: "assistant_approval_request",
+        }),
+      ],
+      { isTaskWorking: false, taskStartedAt: 100, isTurnExpanded: () => false },
+    );
+    expect(waiting.turns[0]).toMatchObject({ endedAt: 110, collapsible: true });
+
+    // A run stopped after its opening message is timed to the stop.
+    const stopped = applyTurnDisclosures(
+      [
+        eventRow("user-3", 1_000, "user_message", { message: "Run the slow build" }),
+        blockRow("block-read", [makeEvent("call-read", 1_005, "tool_call", { tool: "read_file" })]),
+        eventRow("kickoff", 1_010, "assistant_message", { message: "Starting the build." }),
+        blockRow("block-slow", [
+          makeEvent("call-slow", 1_020, "tool_call", { tool: "run_command" }),
+        ]),
+        eventRow("stop", 6_000, "task_cancelled", {}),
+      ],
+      { isTaskWorking: false, taskStartedAt: 900, isTurnExpanded: () => false },
+    );
+    expect(stopped.turns.at(-1)).toMatchObject({ startedAt: 1_000, endedAt: 6_000 });
+  });
+
   it("folds each finished turn's work behind its own header", () => {
     const { rows, turns } = applyTurnDisclosures([...firstTurn, ...secondTurn], {
       isTaskWorking: false,

@@ -153,6 +153,11 @@ vi.mock("../mention-tools", () => {
 });
 
 import { ToolRegistry } from "../registry";
+import { buildCompletionContract } from "../../executor-completion-utils";
+import {
+  promptRequestsDecision,
+  promptRequiresDirectAnswer,
+} from "../../executor-prompt-heuristics-utils";
 
 describe("ToolRegistry child task control tools", () => {
   let workspace: Workspace;
@@ -1590,6 +1595,80 @@ describe("ToolRegistry child task control tools", () => {
 
     expect(inferredCall.workerRole).toBe("researcher");
     expect(inferredCall.prompt).toContain("Resolved worker role: Researcher");
+  });
+
+  // The brief's own words ("Known findings or evidence", "implementation",
+  // "verification") and the parent's prompt used to feed the helper's
+  // completion check, so a helper asked only to list things failed with
+  // "Task missing verification evidence".
+  it("derives a helper's completion contract from its delegated request, not the brief", async () => {
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue({
+        id: "parent-task",
+        title: "Parent task",
+        prompt: "Ask a helper agent to review our pricing and verify the totals?",
+        status: "executing",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        depth: 0,
+      }),
+      getTaskEvents: vi.fn().mockReturnValue([
+        {
+          type: "assistant_message",
+          payload: { message: "Should we check the build evidence before shipping?" },
+        },
+      ]),
+      getChildTasks: vi.fn().mockResolvedValue([]),
+      createChildTask: vi.fn().mockResolvedValue({
+        id: "child-helper",
+        title: "List competitors",
+        prompt: "x",
+        status: "pending",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "parent-task");
+    await registry.executeTool("spawn_agent", {
+      title: "List competitors",
+      prompt: "List three competitors of Acme as short bullets.",
+      worker_role: "implementer",
+    });
+    await registry.executeTool("spawn_agent", {
+      title: "Check totals",
+      prompt: "Review the pricing table in prices.md and verify the totals add up.",
+      worker_role: "implementer",
+    });
+
+    const contractFor = (call: { title: string; prompt: string }) =>
+      buildCompletionContract({
+        taskTitle: call.title,
+        taskPrompt: call.prompt,
+        requiresDirectAnswer: promptRequiresDirectAnswer(call.title, call.prompt),
+        requiresDecisionSignal: promptRequestsDecision(call.title, call.prompt),
+        isWatchSkipRecommendationTask: false,
+      });
+    const listCall = daemon.createChildTask.mock.calls[0][0];
+    expect(listCall.prompt).toContain("STRUCTURED DELEGATION BRIEF");
+    expect(listCall.prompt).toContain("Known findings or evidence:");
+    expect(listCall.prompt).not.toContain("verification commands");
+    const listContract = contractFor(listCall);
+    expect(listContract.requiresExecutionEvidence).toBe(false);
+    expect(listContract.requiresVerificationEvidence).toBe(false);
+    expect(listContract.requiresArtifactEvidence).toBe(false);
+    expect(listContract.requiresDirectAnswer).toBe(false);
+    expect(listContract.requiresDecisionSignal).toBe(false);
+
+    // A delegated request that asks for a review still owes one.
+    const reviewContract = contractFor(daemon.createChildTask.mock.calls[1][0]);
+    expect(reviewContract.requiresVerificationEvidence).toBe(true);
   });
 
   describe("spawn_agent model and turn defaults", () => {

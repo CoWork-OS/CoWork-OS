@@ -1,5 +1,10 @@
 import { ExecutionEnvironmentController } from "../../environments/ExecutionEnvironmentController";
 import { describeToolApprovalRequest } from "../tool-approval-description";
+import {
+  DELEGATED_REQUEST_HEADER,
+  DELEGATION_BRIEF_COMPLETION_HEADER,
+  STRUCTURED_DELEGATION_BRIEF_HEADER,
+} from "../executor-prompt-heuristics-utils";
 import { isEnvironmentTool } from "../../../shared/execution-environment";
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import { trailingBackgroundCommand } from "./trailing-background-command";
@@ -12630,7 +12635,7 @@ ${skillDescriptions}`;
       researcher:
         "A concise findings report with concrete file paths, commands, risks, and unresolved questions.",
       implementer:
-        "A completed implementation summary with exact changed files plus the verification commands or checks run.",
+        "The completed work, with any files changed and any tests, commands, or checks run.",
       verifier:
         "A verification report that starts with VERDICT: PASS, FAIL, or PARTIAL and then cites the supporting evidence.",
       synthesizer:
@@ -12641,7 +12646,7 @@ ${skillDescriptions}`;
       researcher:
         "Cite the files, commands, search results, or observations that support each material finding.",
       implementer:
-        "Report the concrete edits made and the tests, commands, or runtime checks that validate the change.",
+        "If you changed files, report the edits and the tests, commands, or runtime checks that validate them.",
       verifier:
         "Include the command/output/file evidence behind the verdict and at least one adversarial probe.",
       synthesizer:
@@ -12649,7 +12654,7 @@ ${skillDescriptions}`;
     };
 
     const lines = [
-      "STRUCTURED DELEGATION BRIEF",
+      STRUCTURED_DELEGATION_BRIEF_HEADER,
       "",
       "Objective:",
       params.originalPrompt.trim(),
@@ -12691,7 +12696,7 @@ ${skillDescriptions}`;
       "Evidence requirements:",
       `- ${evidenceRequirementsByRole[params.workerRole]}`,
       "",
-      "Completion contract:",
+      DELEGATION_BRIEF_COMPLETION_HEADER,
       `- ${spec.completionContract}`,
     ];
 
@@ -12819,7 +12824,7 @@ ${skillDescriptions}`;
       knownFindings,
       extractionMode,
     });
-    const contractedPrompt = `${structuredBrief}\n\nDelegated request:\n${delegatedPromptBody}`;
+    const contractedPrompt = `${structuredBrief}\n\n${DELEGATED_REQUEST_HEADER}\n${delegatedPromptBody}`;
 
     let dispatchTarget: "native_child_task" | "local_role" | "remote_acp" | "external_runtime" =
       externalRuntime ? "external_runtime" : "native_child_task";

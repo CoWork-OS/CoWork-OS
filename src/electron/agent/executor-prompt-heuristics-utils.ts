@@ -147,7 +147,7 @@ export function isLatexPdfRequest(prompt: string): boolean {
 }
 
 export function promptRequiresDirectAnswer(taskTitle: string, taskPrompt: string): boolean {
-  const prompt = `${taskTitle}\n${taskPrompt}`.toLowerCase();
+  const prompt = `${taskTitle}\n${stripEmbeddedAgentOutputs(taskPrompt)}`.toLowerCase();
   if (prompt.includes("?")) return true;
   return (
     /\blet me know\b/.test(prompt) ||
@@ -172,12 +172,39 @@ const PREDECESSOR_RESULTS_BLOCK =
 const LEGACY_PREDECESSOR_RESULTS_TAIL = /\n\s*predecessor results:\n[\s\S]*$/i;
 
 /**
+ * spawn_agent and orchestrate_agents wrap a sub-agent's request in a brief:
+ * role guidance, the parent's prompt, captured findings, then the request
+ * itself after the delegated-request header.
+ */
+export const STRUCTURED_DELEGATION_BRIEF_HEADER = "STRUCTURED DELEGATION BRIEF";
+export const DELEGATION_BRIEF_COMPLETION_HEADER = "Completion contract:";
+export const DELEGATED_REQUEST_HEADER = "Delegated request:";
+
+/**
+ * The brief's own wording ("Known findings or evidence", "implementation
+ * summary", "verification commands") and the parent's prompt are guidance for
+ * the sub-agent, not its request. Only the delegated request may set what the
+ * sub-agent owes, or every helper would owe a verification step.
+ */
+function delegatedRequestFromBrief(prompt: string): string {
+  const lower = prompt.toLowerCase();
+  if (!lower.trimStart().startsWith(STRUCTURED_DELEGATION_BRIEF_HEADER.toLowerCase())) {
+    return prompt;
+  }
+  const completionIndex = lower.indexOf(`\n${DELEGATION_BRIEF_COMPLETION_HEADER.toLowerCase()}\n`);
+  const requestMarker = `\n\n${DELEGATED_REQUEST_HEADER.toLowerCase()}\n`;
+  const requestIndex = lower.indexOf(requestMarker, Math.max(completionIndex, 0));
+  return requestIndex >= 0 ? prompt.slice(requestIndex + requestMarker.length) : prompt;
+}
+
+/**
  * Remove other agents' outputs quoted into a coordination prompt: dependency
  * outputs prepended to an orchestration node, predecessor results given to an
  * ordered team lane, and the team analyses or results embedded in a synthesis
  * prompt. That material is input to work on, not the user's request, so
  * wording inside it ("decide whether...", "this read-only review...") must not
- * create obligations or constraints for the current agent.
+ * create obligations or constraints for the current agent. A sub-agent's
+ * delegation brief is reduced to the request it carries for the same reason.
  */
 export function stripEmbeddedAgentOutputs(prompt: string): string {
   let remaining = String(prompt || "");
@@ -187,6 +214,7 @@ export function stripEmbeddedAgentOutputs(prompt: string): string {
       remaining = remaining.slice(taskIndex + ORCHESTRATION_NODE_TASK_MARKER.length);
     }
   }
+  remaining = delegatedRequestFromBrief(remaining);
   return remaining
     .replace(TEAM_MEMBER_OUTPUT_BLOCK, " ")
     .replace(PREDECESSOR_RESULTS_BLOCK, " ")

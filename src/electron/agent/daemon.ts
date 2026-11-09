@@ -7075,6 +7075,14 @@ export class AgentDaemon extends EventEmitter {
           includeRoleDetails: false,
           includeRoleProfile: true,
           workspacePath,
+          readGuard: (candidatePath) => {
+            try {
+              this.assertTaskWorkspaceFilesystemAccess(task.id, candidatePath, "read");
+              return true;
+            } catch {
+              return false;
+            }
+          },
           fileOwnershipZone: myZone?.zone,
           peerAgentZones: peerZones,
         },

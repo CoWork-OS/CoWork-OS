@@ -505,9 +505,9 @@ export class BrowserSessionManager {
   >();
   private guardedWebRequestSessions = new WeakSet<object>();
   /** Exact local HTML file URLs an agent or preview service opened (TTL). */
-  private allowedLocalPreviewUrls = new Map<string, number>();
+  private allowedLocalPreviewUrls = new Map<string, Map<string, number>>();
   /** Loopback dev-server origins an agent or preview service opened (TTL). */
-  private allowedLoopbackOrigins = new Map<string, number>();
+  private allowedLoopbackOrigins = new Map<string, Map<string, number>>();
   /** Loopback origins the user opened from the address bar, per session (no TTL). */
   private userLoopbackOrigins = new Map<string, Set<string>>();
   private navigationBlockedListener: ((event: BrowserNavigationBlockedEvent) => void) | null = null;
@@ -572,7 +572,23 @@ export class BrowserSessionManager {
   }
 
   setAccessPolicy(taskId: string, policy: BrowserSessionAccessPolicy, sessionId?: unknown): void {
-    this.accessPolicies.set(sessionKey(taskId, sessionId), {
+    const key = sessionKey(taskId, sessionId);
+    const previous = this.accessPolicies.get(key);
+    if (
+      previous &&
+      JSON.stringify(previous) !==
+        JSON.stringify({
+          networkEnabled: policy?.networkEnabled === true,
+          accessNetworkMode: policy?.accessNetworkMode,
+          profileDomainRules: policy?.profileDomainRules
+            ? [...policy.profileDomainRules]
+            : undefined,
+        })
+    ) {
+      this.allowedLoopbackOrigins.delete(key);
+      this.allowedLocalPreviewUrls.delete(key);
+    }
+    this.accessPolicies.set(key, {
       networkEnabled: policy?.networkEnabled === true,
       accessNetworkMode: policy?.accessNetworkMode,
       profileDomainRules: policy?.profileDomainRules ? [...policy.profileDomainRules] : undefined,
@@ -581,6 +597,8 @@ export class BrowserSessionManager {
 
   clearAccessPolicy(taskId: string, sessionId?: unknown): void {
     this.accessPolicies.delete(sessionKey(taskId, sessionId));
+    this.allowedLoopbackOrigins.delete(sessionKey(taskId, sessionId));
+    this.allowedLocalPreviewUrls.delete(sessionKey(taskId, sessionId));
     this.userLoopbackOrigins.delete(sessionKey(taskId, sessionId));
   }
 
@@ -597,33 +615,34 @@ export class BrowserSessionManager {
    * must be registered. A loopback dev server is allowed by origin (its
    * scripts, styles and routes live under it) for a refreshed TTL.
    */
-  allowLocalPreviewUrl(rawUrl: string): void {
+  allowLocalPreviewUrl(rawUrl: string, taskId: string, sessionId?: unknown): void {
+    if (!taskId) return;
+    const key = sessionKey(taskId, sessionId);
+    const loops = this.allowedLoopbackOrigins.get(key) ?? new Map<string, number>();
+    const files = this.allowedLocalPreviewUrls.get(key) ?? new Map<string, number>();
+    this.allowedLoopbackOrigins.set(key, loops);
+    this.allowedLocalPreviewUrls.set(key, files);
     const origin = loopbackOrigin(rawUrl);
     if (origin) {
-      this.allowedLoopbackOrigins.set(
-        origin,
-        Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
-      );
+      loops.set(origin, Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS);
       return;
     }
     if (!isLocalHtmlFileUrl(rawUrl)) return;
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
-    this.allowedLocalPreviewUrls.set(
-      normalized,
-      Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
-    );
+    files.set(normalized, Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS);
   }
 
-  revokeLocalPreviewUrl(rawUrl: string): void {
+  revokeLocalPreviewUrl(rawUrl: string, taskId: string, sessionId?: unknown): void {
+    const key = sessionKey(taskId, sessionId);
     const origin = loopbackOrigin(rawUrl);
     if (origin) {
-      this.allowedLoopbackOrigins.delete(origin);
+      this.allowedLoopbackOrigins.get(key)?.delete(origin);
       return;
     }
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
-    this.allowedLocalPreviewUrls.delete(normalized);
+    this.allowedLocalPreviewUrls.get(key)?.delete(normalized);
   }
 
   /**
@@ -673,17 +692,19 @@ export class BrowserSessionManager {
       ) {
         return true;
       }
-      return this.touchAllowance(this.allowedLoopbackOrigins, origin);
+      return !!key && this.touchAllowance(this.allowedLoopbackOrigins.get(key), origin);
     }
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return false;
     return (
-      this.touchAllowance(this.allowedLocalPreviewUrls, normalized) &&
+      !!key &&
+      this.touchAllowance(this.allowedLocalPreviewUrls.get(key), normalized) &&
       isCanonicalLocalFileUrl(normalized)
     );
   }
 
-  private touchAllowance(allowances: Map<string, number>, key: string): boolean {
+  private touchAllowance(allowances: Map<string, number> | undefined, key: string): boolean {
+    if (!allowances) return false;
     const expiresAt = allowances.get(key);
     if (!expiresAt) return false;
     if (expiresAt <= Date.now()) {
@@ -853,6 +874,9 @@ export class BrowserSessionManager {
     }
     if (workbench.tabs.size === 0) {
       this.sessions.delete(key);
+      this.allowedLoopbackOrigins.delete(key);
+      this.allowedLocalPreviewUrls.delete(key);
+      this.userLoopbackOrigins.delete(key);
       return { activeTabClosed };
     }
     if (activeTabClosed) {

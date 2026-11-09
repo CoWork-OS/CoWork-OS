@@ -129,7 +129,6 @@ export function toPosixRelPath(workspacePath: string, absPath: string): string {
 
 // ── Voice / audio helpers ───────────────────────────────────────────────────
 
-import * as os from "os";
 import type { IncomingMessage } from "./channels/types";
 import { getVoiceService } from "../voice/VoiceService";
 
@@ -164,7 +163,6 @@ export async function transcribeAudioAttachments(
   console.log(`[Router] Transcribing ${audioAttachments.length} audio attachment(s)...`);
 
   for (const attachment of audioAttachments) {
-    let savedAudioPath: string | undefined;
     try {
       let audioBuffer: Buffer | undefined;
 
@@ -199,20 +197,6 @@ export async function transcribeAudioAttachments(
           ? `\n[Audio: ${fileName} - could not load]`
           : `[Audio: ${fileName} - could not load]`;
         continue;
-      }
-
-      // Save audio file to temp directory for transcription
-      try {
-        const tempDir = path.join(os.tmpdir(), "cowork-audio");
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        const audioFileName = attachment.fileName || `voice_message_${Date.now()}.ogg`;
-        savedAudioPath = path.join(tempDir, audioFileName);
-        fs.writeFileSync(savedAudioPath, audioBuffer);
-        console.log(`[Router] Saved audio file to: ${savedAudioPath}`);
-      } catch (saveError) {
-        console.error("[Router] Failed to save audio file:", saveError);
       }
 
       // Transcribe the audio
@@ -257,14 +241,6 @@ export async function transcribeAudioAttachments(
       message.text += message.text
         ? `\n[Audio: ${fileName} - transcription failed]`
         : `[Audio: ${fileName} - transcription failed]`;
-    } finally {
-      if (savedAudioPath && fs.existsSync(savedAudioPath)) {
-        try {
-          fs.unlinkSync(savedAudioPath);
-        } catch (cleanupError) {
-          console.error("[Router] Failed to delete temp audio file:", cleanupError);
-        }
-      }
     }
   }
 }

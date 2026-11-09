@@ -1,4 +1,4 @@
-import type { TaskEvent } from "../../shared/types";
+import { isTempWorkspaceId, type TaskEvent, type Workspace } from "../../shared/types";
 import type {
   TaskEventMutation,
   TaskEventMutationPageResult,
@@ -34,6 +34,7 @@ const PRIVATE_CONTENT_KEY_RE =
   /^(prompt|systemPrompt|input|inputs|questions|answers|request|details|args|parameters|command|output|stdout|stderr|result|response|environment|env|headers|path|filePath|cwd|url)$/i;
 
 export interface BrowserTaskEventSources {
+  resolveWorkspace: (workspaceId: string) => Promise<Workspace | null>;
   findScopedTimelineSnapshot: (
     request: TaskEventScopedTimelineSnapshotRequest,
   ) => Promise<TaskEventScopedTimelineSnapshotResult>;
@@ -69,14 +70,27 @@ interface HistoryPageRequest {
 export function createBrowserTaskEventMethods(
   sources: BrowserTaskEventSources,
 ): Record<string, WebRpcMethod> {
+  const authorizeRead = async (context: WebRequestContext, workspaceId: string) => {
+    requireSessionScope(context);
+    if (isTempWorkspaceId(workspaceId)) throw unavailable();
+    const workspace = await sources.resolveWorkspace(workspaceId);
+    if (
+      !workspace ||
+      workspace.id !== workspaceId ||
+      workspace.isTemp ||
+      !workspace.permissions.read
+    )
+      throw unavailable();
+  };
   return {
     "task.events.snapshot": {
       capability: "tasks.events",
       validateParams: parseSnapshotRequest,
       handler: async (context, params) => {
         const request = params as SnapshotRequest;
-        requireSessionScope(context);
+        await authorizeRead(context, request.workspaceId);
         const snapshot = await sources.findScopedTimelineSnapshot(request);
+        await authorizeRead(context, request.workspaceId);
         if (snapshot.outcome !== "available") throw unavailable();
         return {
           taskId: request.taskId,
@@ -93,10 +107,11 @@ export function createBrowserTaskEventMethods(
       validateParams: parseMutationPageRequest,
       handler: async (context, params) => {
         const request = params as MutationPageRequest;
-        requireSessionScope(context);
+        await authorizeRead(context, request.workspaceId);
         const result = await sources.findScopedMutationPage({
           ...request,
         });
+        await authorizeRead(context, request.workspaceId);
         if (result.outcome !== "available") throw unavailable();
         const page = result.page;
         if (page.outcome !== "page" && page.outcome !== "page_with_more") return page;
@@ -108,8 +123,9 @@ export function createBrowserTaskEventMethods(
       validateParams: parseHistoryPageRequest,
       handler: async (context, params) => {
         const request = params as HistoryPageRequest;
-        requireSessionScope(context);
+        await authorizeRead(context, request.workspaceId);
         const result = await sources.findScopedTimelineHistoryPage(request);
+        await authorizeRead(context, request.workspaceId);
         if (result.outcome !== "available") throw unavailable();
         return {
           events: result.page.events.map(toBrowserSafeTaskEvent),

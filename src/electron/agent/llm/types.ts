@@ -17,10 +17,13 @@ import type {
   HumanInputPolicy,
   MoaPreset,
 } from "../../../shared/types";
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 
 export type { LLMProviderType, AzureReasoningEffort, OpenAIReasoningEffort, LLMTextVerbosity };
 
 export interface LLMProviderConfig {
+  /** Trusted host transport for discovery/connection tests; never used for inference. */
+  diagnosticFetch?: ProviderDiagnosticFetch;
   type: LLMProviderType;
   model: string;
   // Anthropic-specific

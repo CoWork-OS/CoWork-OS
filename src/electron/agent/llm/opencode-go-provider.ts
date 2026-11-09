@@ -2,6 +2,7 @@ import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
 import { OpenAIProvider } from "./openai-provider";
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse } from "./types";
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
   getOpenCodeModelTransport,
   isOpenCodeGoBaseUrl,
@@ -11,6 +12,7 @@ import {
 } from "./opencode-go-routing";
 
 export interface OpenCodeProviderOptions {
+  diagnosticFetch?: ProviderDiagnosticFetch;
   type: LLMProviderType;
   providerName: string;
   apiKey: string;
@@ -25,8 +27,10 @@ export class OpenCodeProvider implements LLMProvider {
   private anthropicProvider: AnthropicCompatibleProvider;
   private responsesProvider: OpenAIProvider;
   private product: OpenCodeProduct;
+  private diagnosticFetch?: ProviderDiagnosticFetch;
 
   constructor(options: OpenCodeProviderOptions) {
+    this.diagnosticFetch = options.diagnosticFetch;
     this.type = options.type;
     this.defaultModel = options.defaultModel;
     this.product = isOpenCodeGoBaseUrl(options.baseUrl) ? "go" : "zen";
@@ -71,6 +75,14 @@ export class OpenCodeProvider implements LLMProvider {
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
+    if (this.diagnosticFetch) {
+      // The Responses SDK does not use the host diagnostic transport. Verify
+      // browser connectivity through the same bounded model endpoint instead.
+      const models = await this.openaiProvider.getAvailableModels();
+      return models.length
+        ? { success: true }
+        : { success: false, error: "Provider model discovery failed or returned no models." };
+    }
     switch (getOpenCodeModelTransport(this.defaultModel, this.product)) {
       case "responses":
         return this.responsesProvider.testConnection();

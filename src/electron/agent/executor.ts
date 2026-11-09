@@ -9186,7 +9186,9 @@ ${transcript}
           lines.push(role.systemPrompt.trim());
         }
 
-        const rolePersona = buildRolePersonaPrompt(role, this.workspace.path);
+        const rolePersona = buildRolePersonaPrompt(role, this.workspace.path, {
+          readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
+        });
         if (rolePersona) {
           lines.push(rolePersona);
         }
@@ -39409,8 +39411,8 @@ Return ONLY a JSON object:
           // The command text stays out of the reason: failure classifiers scan
           // it for words like "login" or "auth" and would treat it as a user
           // blocker. The commands go to the event log instead.
-          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map((kind) =>
-            kind === "test" ? "test" : "build/check",
+          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map(
+            (kind) => (kind === "test" ? "test" : "build/check"),
           );
           lastFailureReason =
             `run_command failed: the last ${failedKinds.join(" and ")} run did not pass, ` +

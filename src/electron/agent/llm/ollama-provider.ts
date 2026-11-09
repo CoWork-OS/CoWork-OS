@@ -1,3 +1,4 @@
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -167,12 +168,14 @@ export interface OllamaProviderOptions {
 export class OllamaProvider implements LLMProvider {
   readonly type = "ollama" as const;
   private baseUrl: string;
+  private diagnosticFetch?: ProviderDiagnosticFetch;
   private apiKey?: string;
   private readonly profileByModel = new Map<string, Promise<OllamaModelProfile>>();
   private readonly textToolCallFallback: boolean;
 
   constructor(config: LLMProviderConfig, options: OllamaProviderOptions = {}) {
     this.baseUrl = config.ollamaBaseUrl || "http://localhost:11434";
+    this.diagnosticFetch = config.diagnosticFetch;
     this.apiKey = config.ollamaApiKey;
     this.textToolCallFallback =
       options.textToolCallFallback ?? isTextToolCallFallbackEnabledByDefault("ollama");
@@ -396,7 +399,9 @@ export class OllamaProvider implements LLMProvider {
       }
 
       // First check if Ollama is running
-      const response = await fetch(`${this.baseUrl}/api/tags`, { headers });
+      const response = await (this.diagnosticFetch ?? fetch)(`${this.baseUrl}/api/tags`, {
+        headers,
+      });
       if (!response.ok) {
         throw new Error(`Failed to connect to Ollama: ${response.status}`);
       }
@@ -428,7 +433,9 @@ export class OllamaProvider implements LLMProvider {
         headers["Authorization"] = `Bearer ${this.apiKey}`;
       }
 
-      const response = await fetch(`${this.baseUrl}/api/tags`, { headers });
+      const response = await (this.diagnosticFetch ?? fetch)(`${this.baseUrl}/api/tags`, {
+        headers,
+      });
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.status}`);
       }

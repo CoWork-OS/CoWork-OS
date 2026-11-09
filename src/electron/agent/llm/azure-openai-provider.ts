@@ -31,6 +31,7 @@ import {
 } from "./prompt-cache";
 import { withReasoningOutputHeadroom } from "./output-token-policy";
 import { createLogger } from "../../utils/logger";
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 
 const logger = createLogger("azure-openai");
 const DEFAULT_AZURE_API_VERSION = "2024-12-01-preview";
@@ -57,6 +58,7 @@ export class AzureOpenAIProvider implements LLMProvider {
   private deployment: string;
   private apiVersion: string;
   private reasoningEffort?: AzureReasoningEffort;
+  private diagnosticFetch?: ProviderDiagnosticFetch;
 
   constructor(config: LLMProviderConfig) {
     const apiKey = config.azureApiKey?.trim();
@@ -74,6 +76,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     }
 
     this.apiKey = apiKey;
+    this.diagnosticFetch = config.diagnosticFetch;
     this.endpoint = endpoint.replace(/\/+$/, "");
     this.deployment = deployment;
     this.apiVersion = config.azureApiVersion?.trim() || DEFAULT_AZURE_API_VERSION;
@@ -346,7 +349,8 @@ export class AzureOpenAIProvider implements LLMProvider {
     if (kind && model) {
       this.logRequestReasoning(kind, model);
     }
-    return fetch(url, {
+    const request = kind === "test_connection" ? (this.diagnosticFetch ?? fetch) : fetch;
+    return request(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

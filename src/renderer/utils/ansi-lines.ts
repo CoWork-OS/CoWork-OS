@@ -15,10 +15,16 @@ type CellStyle = Omit<AnsiSpan, "text">;
 type Cell = { char: string; style: CellStyle };
 
 // Escapes are built from strings: the formatter rewrites \u escapes as invisible characters.
-const CSI_PATTERN = new RegExp("\\u001b\\[([0-?]*)[ -/]*([@-~])", "g");
+const CSI_PATTERN = new RegExp("\\u001b\\[([0-?]*)[ -/]*([@-~])", "y");
 const OTHER_ESCAPE_PATTERN = new RegExp("\\u001b[@-Z\\\\-_]", "g");
 const CONTROL_PATTERN = new RegExp("[\\u0000-\\u0007\\u000b\\u000c\\u000e-\\u001f\\u007f]");
 const ESC = String.fromCharCode(0x1b);
+export const ANSI_RENDER_LIMITS = {
+  inputChars: 256 * 1024,
+  columns: 4096,
+  cellWrites: 128 * 1024,
+  lines: 4000,
+} as const;
 
 function applySgr(style: CellStyle, params: string): CellStyle {
   const codes = params === "" ? [0] : params.split(";").map((part) => Number(part) || 0);
@@ -76,20 +82,32 @@ function cellsToSpans(cells: Cell[]): AnsiSpan[] {
  * erase-in-line clears it, and other escapes are dropped.
  */
 export function ansiToLines(raw: string): AnsiSpan[][] {
-  const text = stripOscSequences(raw).replace(OTHER_ESCAPE_PATTERN, "");
+  const text = stripOscSequences(raw.slice(0, ANSI_RENDER_LIMITS.inputChars)).replace(
+    OTHER_ESCAPE_PATTERN,
+    "",
+  );
   const lines: AnsiSpan[][] = [];
   let style: CellStyle = {};
-  for (const rawLine of text.split("\n")) {
+  let remainingWrites: number = ANSI_RENDER_LIMITS.cellWrites;
+  for (const rawLine of text.split("\n").slice(0, ANSI_RENDER_LIMITS.lines)) {
+    if (remainingWrites <= 0) break;
     const line = rawLine.endsWith("\r") ? rawLine.replace(/\r+$/, "") : rawLine;
     const cells: Cell[] = [];
     let cursor = 0;
     let index = 0;
     const put = (char: string) => {
-      while (cells.length < cursor) cells.push({ char: " ", style: {} });
+      if (cursor >= ANSI_RENDER_LIMITS.columns || remainingWrites <= 0) return false;
+      while (cells.length < cursor && remainingWrites > 0) {
+        cells.push({ char: " ", style: {} });
+        remainingWrites--;
+      }
+      if (remainingWrites <= 0) return false;
       cells[cursor] = { char, style };
+      remainingWrites--;
       cursor += 1;
+      return true;
     };
-    while (index < line.length) {
+    while (index < line.length && remainingWrites > 0) {
       const char = line[index];
       if (char === ESC && line[index + 1] === "[") {
         CSI_PATTERN.lastIndex = index;
@@ -100,7 +118,12 @@ export function ansiToLines(raw: string): AnsiSpan[][] {
           else if (final === "K") {
             if (params === "" || params === "0") cells.length = Math.min(cells.length, cursor);
             else if (params === "2") cells.length = 0;
-          } else if (final === "G") cursor = Math.max(0, (Number(params) || 1) - 1);
+          } else if (final === "G") {
+            const column = params === "" ? 1 : Number(params);
+            if (Number.isSafeInteger(column) && column >= 0) {
+              cursor = Math.min(ANSI_RENDER_LIMITS.columns, Math.max(0, column - 1));
+            }
+          }
           index += sequence.length;
           continue;
         }
@@ -109,7 +132,7 @@ export function ansiToLines(raw: string): AnsiSpan[][] {
       else if (char === "\b") cursor = Math.max(0, cursor - 1);
       else if (char === "\t") {
         const stop = (Math.floor(cursor / 8) + 1) * 8;
-        while (cursor < stop) put(" ");
+        while (cursor < stop) if (!put(" ")) break;
       } else if (!CONTROL_PATTERN.test(char)) put(char);
       index += 1;
     }

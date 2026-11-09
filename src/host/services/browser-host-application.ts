@@ -443,6 +443,7 @@ export function createBrowserHostApplication(
         })
       : {};
   const taskEventMethods = createBrowserTaskEventMethods({
+    resolveWorkspace: resolveBrowserWorkspace,
     findScopedTimelineSnapshot: (request) =>
       taskEventRepository.findScopedTimelineSnapshot(request),
     findScopedTimelineHistoryPage: (request) =>

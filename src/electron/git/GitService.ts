@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import os from "node:os";
 import { MergeResult, PullRequestResult } from "../../shared/types";
 
 /**
@@ -183,7 +184,7 @@ export class GitService {
       await GitService.exec(["add", "-A"], worktreePath);
     } else {
       // Staged-only mode: commit only what is already staged.
-      const { stdout: status } = await GitService.exec(["status", "--porcelain"], worktreePath);
+      const { stdout: status } = await GitService.execRead(["status", "--porcelain"], worktreePath);
       const hasStagedChanges = status
         .split("\n")
         .some((line) => line.length >= 2 && line[0] !== " " && line[0] !== "?");
@@ -197,7 +198,7 @@ export class GitService {
     const sha = await GitService.getHeadCommit(worktreePath);
 
     // Get files changed count
-    const { stdout: diffStat } = await GitService.exec(
+    const { stdout: diffStat } = await GitService.execRead(
       ["diff", "--stat", "HEAD~1..HEAD", "--numstat"],
       worktreePath,
     );
@@ -221,12 +222,12 @@ export class GitService {
     linesRemoved: number;
     diffOutput: string;
   }> {
-    const { stdout } = await GitService.exec(
+    const { stdout } = await GitService.execRead(
       ["diff", "--stat", `${baseBranch}..HEAD`],
       worktreePath,
     );
 
-    const { stdout: numstat } = await GitService.exec(
+    const { stdout: numstat } = await GitService.execRead(
       ["diff", "--numstat", `${baseBranch}..HEAD`],
       worktreePath,
     );
@@ -252,7 +253,7 @@ export class GitService {
 
   /** Files a worktree's commits changed since it left its base (`git diff --name-only`). */
   static async getChangedFiles(worktreePath: string, baseBranch: string): Promise<string[]> {
-    const { stdout } = await GitService.exec(
+    const { stdout } = await GitService.execRead(
       ["diff", "--name-only", `${baseBranch}..HEAD`],
       worktreePath,
     );
@@ -317,7 +318,7 @@ export class GitService {
    * Get full diff output for review.
    */
   static async getFullDiff(worktreePath: string, baseBranch: string): Promise<string> {
-    const { stdout } = await GitService.exec(["diff", `${baseBranch}..HEAD`], worktreePath);
+    const { stdout } = await GitService.execRead(["diff", `${baseBranch}..HEAD`], worktreePath);
     return stdout;
   }
 
@@ -385,7 +386,7 @@ export class GitService {
         // Try to get conflict file list
         let conflictFiles: string[] = [];
         try {
-          const { stdout } = await GitService.exec(
+          const { stdout } = await GitService.execRead(
             ["diff", "--name-only", "--diff-filter=U"],
             repoPath,
           );
@@ -415,7 +416,7 @@ export class GitService {
    * Check for uncommitted changes.
    */
   static async hasUncommittedChanges(worktreePath: string): Promise<boolean> {
-    const { stdout } = await GitService.exec(["status", "--porcelain"], worktreePath);
+    const { stdout } = await GitService.execRead(["status", "--porcelain"], worktreePath);
     return stdout.trim().length > 0;
   }
 
@@ -506,7 +507,7 @@ export class GitService {
    * Get short status output for display.
    */
   static async getStatus(worktreePath: string): Promise<string> {
-    const { stdout } = await GitService.exec(["status", "--short"], worktreePath);
+    const { stdout } = await GitService.execRead(["status", "--short"], worktreePath);
     return stdout;
   }
 
@@ -517,10 +518,10 @@ export class GitService {
     worktreePath: string,
     options?: { staged?: boolean; file?: string },
   ): Promise<string> {
-    const args = ["diff"];
+    const args = ["diff", "--no-ext-diff", "--no-textconv"];
     if (options?.staged) args.push("--cached");
     if (options?.file) args.push("--", options.file);
-    const { stdout } = await GitService.exec(args, worktreePath);
+    const { stdout } = await GitService.execRead(args, worktreePath);
     return stdout;
   }
 
@@ -544,6 +545,76 @@ export class GitService {
    */
   private static exec(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
     return GitService.execExternal("git", args, cwd, `git ${args[0]} failed`);
+  }
+
+  /** Read-only inspections must not execute repository or environment helpers. */
+  private static async execRead(
+    args: string[],
+    cwd: string,
+  ): Promise<{ stdout: string; stderr: string }> {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("GIT_")),
+    );
+    Object.assign(env, {
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_SYSTEM: os.devNull,
+      GIT_CONFIG_GLOBAL: os.devNull,
+      GIT_PAGER: "cat",
+      GIT_TERMINAL_PROMPT: "0",
+    });
+    if (args[0] === "diff") args = ["diff", "--no-ext-diff", "--no-textconv", ...args.slice(1)];
+    const base = [
+      "--no-optional-locks",
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      `core.hooksPath=${os.devNull}`,
+      "-c",
+      "core.pager=cat",
+    ];
+    const run = (command: string[], allowNoMatch = false) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFile(
+          "git",
+          [...base, ...command],
+          { cwd, env, maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
+          (error, stdout, stderr) => {
+            if (error && !(allowNoMatch && error.code === 1 && !stderr))
+              reject(new Error(`Read-only git failed: ${stderr || error.message}`));
+            else resolve({ stdout, stderr });
+          },
+        );
+      });
+    // Status may hash worktree content through clean/process filters. Disable
+    // every configured filter as well as external diff/textconv and fsmonitor.
+    const { stdout: keys } = await run(
+      [
+        "config",
+        "--null",
+        "--name-only",
+        "--get-regexp",
+        "^filter\\..*\\.(clean|smudge|process|required)$",
+      ],
+      true,
+    );
+    const filters = new Set(
+      keys
+        .split("\0")
+        .filter(Boolean)
+        .map((key) => key.replace(/\.(clean|smudge|process|required)$/i, "")),
+    );
+    const overrides: string[] = [];
+    for (const filter of filters)
+      // `git -c` splits at the first '='. Such a subsection cannot be
+      // overridden with this syntax; do not run a read with its helper active.
+      if (filter.includes("=") || /[\r\n]/.test(filter)) {
+        throw new Error("Cannot safely disable repository filter configuration");
+      }
+    for (const filter of filters)
+      for (const field of ["clean", "smudge", "process", "required"]) {
+        overrides.push("-c", `${filter}.${field}=${field === "required" ? "false" : ""}`);
+      }
+    return run([...overrides, ...args]);
   }
 
   private static async findPullRequest(

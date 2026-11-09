@@ -1,3 +1,4 @@
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
   LLMProvider,
   LLMProviderType,
@@ -93,6 +94,7 @@ function extractProviderErrorMessage(errorData: Any): string {
 }
 
 export interface AnthropicCompatibleProviderOptions {
+  diagnosticFetch?: ProviderDiagnosticFetch;
   type: LLMProviderType;
   providerName: string;
   apiKey: string;
@@ -114,6 +116,7 @@ interface ThinkingRequestOptions {
 
 export class AnthropicCompatibleProvider implements LLMProvider {
   readonly type: LLMProviderType;
+  private diagnosticFetch?: ProviderDiagnosticFetch;
   private apiKey: string;
   private baseUrl: string;
   private messagesUrl: string;
@@ -130,6 +133,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
   constructor(options: AnthropicCompatibleProviderOptions) {
     this.type = options.type;
+    this.diagnosticFetch = options.diagnosticFetch;
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl;
     this.messagesUrl = resolveMessagesUrl(options.baseUrl);
@@ -242,7 +246,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
       const model = this.normalizeModelForEndpoint(this.defaultModel);
-      const response = await fetch(this.messagesUrl, {
+      const response = await (this.diagnosticFetch ?? fetch)(this.messagesUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -289,7 +293,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         headers.Authorization = `Bearer ${this.apiKey}`;
       }
 
-      const response = await fetch(resolveModelsUrl(this.baseUrl), {
+      const response = await (this.diagnosticFetch ?? fetch)(resolveModelsUrl(this.baseUrl), {
         headers,
       });
 

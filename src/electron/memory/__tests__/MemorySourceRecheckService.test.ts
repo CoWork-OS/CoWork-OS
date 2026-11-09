@@ -3,7 +3,19 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const workspaceLookup = vi.hoisted(() => ({ value: null as Any }));
+vi.mock("../../database/repository-facades", async () => ({
+  ...(await vi.importActual<typeof import("../../database/repository-facades")>(
+    "../../database/repository-facades",
+  )),
+  WorkspaceRepository: class {
+    async findById() {
+      return workspaceLookup.value;
+    }
+  },
+}));
+import { MemoryService } from "../MemoryService";
 import { MEMORY_SOURCE_UNITS, ensureMemorySourcesSchema } from "../memory-source-sql";
 import {
   MemorySourceRecheckService,
@@ -37,6 +49,7 @@ function service() {
       return db.transaction(() => unit.run(db, unit.validate(args) as never))();
     },
     now: () => clock,
+    resolveSourceRoot: async () => fs.realpath(workspace),
   });
 }
 
@@ -50,11 +63,127 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  MemorySourceRecheckService.setDefault(null);
+  vi.restoreAllMocks();
   db?.close();
   await fs.rm(dir, { recursive: true, force: true });
 });
 
 describeWithSqlite("MemorySourceRecheckService", () => {
+  it("reauthorizes default-service evidence against current workspace root, privacy and read policy", async () => {
+    workspaceLookup.value = {
+      id: "ws-1",
+      path: workspace,
+      permissions: { read: true, write: true, delete: true, shell: false, network: false },
+    };
+    const settings = { enabled: true, privacyMode: "normal" };
+    vi.spyOn(MemoryService, "getDatabase").mockReturnValue(db);
+    vi.spyOn(MemoryService, "getSettings").mockImplementation(async () => settings as Any);
+    vi.spyOn(MemoryService, "getStatements").mockReturnValue({
+      unit: async (name: string, args: unknown[]) => {
+        const unit = MEMORY_SOURCE_UNITS[name as keyof typeof MEMORY_SOURCE_UNITS];
+        return db.transaction(() => unit.run(db, unit.validate(args) as never))();
+      },
+    } as Any);
+    const recheck = MemorySourceRecheckService.getDefault();
+    const file = path.join(workspace, "docs/default.md");
+    await fs.writeFile(file, "initial");
+    await recheck.trackFile({
+      workspaceId: "ws-1",
+      workspaceRoot: workspace,
+      file,
+      memoryRef: repoEntrySourceRef("me.md", "default"),
+    });
+    await fs.writeFile(file, "changed");
+    await recheck.onFileChanged({
+      workspaceId: "ws-1",
+      relPath: "docs/default.md",
+      absolutePath: file,
+    });
+    const available = async () => (await recheck.pendingForDream())[0].evidenceAvailable;
+    expect(await available()).toBe(true);
+    for (const mode of ["disabled", "strict"]) {
+      settings.privacyMode = mode;
+      expect(await available()).toBe(false);
+    }
+    settings.privacyMode = "normal";
+    settings.enabled = false;
+    expect(await available()).toBe(false);
+    settings.enabled = true;
+    workspaceLookup.value.permissions.read = false;
+    expect(await available()).toBe(false);
+    workspaceLookup.value.permissions.read = true;
+    expect(await available()).toBe(true);
+    workspaceLookup.value.path = dir;
+    expect(await available()).toBe(false);
+  });
+  it("withholds evidence and review clearing when current workspace authority is revoked", async () => {
+    let allowed = true;
+    const recheck = new MemorySourceRecheckService({
+      run: async (name, args) => {
+        const unit = MEMORY_SOURCE_UNITS[name as keyof typeof MEMORY_SOURCE_UNITS];
+        return db.transaction(() => unit.run(db, unit.validate(args) as never))();
+      },
+      resolveSourceRoot: async () => (allowed ? fs.realpath(workspace) : null),
+    });
+    const file = path.join(workspace, "docs/source.md");
+    await fs.writeFile(file, "initial");
+    await recheck.trackFile({
+      workspaceId: "ws-1",
+      workspaceRoot: workspace,
+      file,
+      memoryRef: repoEntrySourceRef("me.md", "fixture"),
+    });
+    await fs.writeFile(file, "changed");
+    await recheck.onFileChanged({
+      workspaceId: "ws-1",
+      relPath: "docs/source.md",
+      absolutePath: file,
+    });
+    const [before] = await recheck.pendingForDream();
+    expect(before.evidenceAvailable).toBe(true);
+    allowed = false;
+    expect((await recheck.pendingForDream())[0].evidenceAvailable).toBe(false);
+    await recheck.markReviewed([before]);
+    expect(await recheck.pendingForDream()).toHaveLength(1);
+  });
+  it.each(["leaf", "ancestor"])(
+    "does not hash or excerpt a tracked source replaced by a %s link",
+    async (kind) => {
+      const file = path.join(workspace, "docs/source.md");
+      await fs.writeFile(file, "initial");
+      const recheck = service();
+      await recheck.trackFile({
+        workspaceId: "ws-1",
+        workspaceRoot: workspace,
+        file,
+        memoryRef: repoEntrySourceRef("me.md", "fixture"),
+      });
+      const outside = path.join(dir, "outside");
+      await fs.mkdir(outside);
+      await fs.writeFile(path.join(outside, "source.md"), "PRIVATE_SENTINEL");
+      if (kind === "ancestor") {
+        await fs.rm(path.join(workspace, "docs"), { recursive: true });
+        await fs.symlink(outside, path.join(workspace, "docs"));
+      } else {
+        await fs.unlink(file);
+        await fs.symlink(path.join(outside, "source.md"), file);
+      }
+      expect(
+        await recheck.onFileChanged({
+          workspaceId: "ws-1",
+          relPath: "docs/source.md",
+          absolutePath: file,
+        }),
+      ).toBe(1);
+      const pending = await recheck.pendingForDream();
+      expect(pending).toHaveLength(1);
+      expect(pending[0].evidenceAvailable).toBe(false);
+      expect(pending[0].excerpt).not.toContain("PRIVATE_SENTINEL");
+      await recheck.markReviewed(pending);
+      expect(await recheck.pendingForDream()).toHaveLength(1);
+    },
+  );
   it("flags a memory when its file changes, and unflags it when the file is back", async () => {
     await fs.writeFile(path.join(workspace, "docs/pricing.md"), "Pro is $20");
     const recheck = service();

@@ -1066,6 +1066,16 @@ export class WebApplication {
     this.pruneExpiredRecords();
     const attemptKey = `${audience}:${remoteAddress}`;
     const now = Date.now();
+    // The socket can identify a shared HTTPS proxy. Failed guesses from one
+    // client must not lock out another client's valid high-entropy capability.
+    if (code.length >= 24 && code.length <= 128) {
+      const key = hash(code);
+      const record = this.pairingCodes.get(key);
+      if (record && record.audience === audience && record.expiresAt > now) {
+        this.pairingCodes.delete(key);
+        return;
+      }
+    }
     const attempt = this.pairingAttempts.get(attemptKey);
     if (
       attempt &&
@@ -1083,17 +1093,7 @@ export class WebApplication {
       attempt.count += 1;
     }
 
-    if (!code || code.length < 24 || code.length > 128) {
-      throw new WebApplicationError("UNAUTHENTICATED", "Invalid or expired pairing code.", 401);
-    }
-    const key = hash(code);
-    const record = this.pairingCodes.get(key);
-    if (!record || record.audience !== audience || record.expiresAt <= now) {
-      this.pairingCodes.delete(key);
-      throw new WebApplicationError("UNAUTHENTICATED", "Invalid or expired pairing code.", 401);
-    }
-    this.pairingCodes.delete(key);
-    this.pairingAttempts.delete(attemptKey);
+    throw new WebApplicationError("UNAUTHENTICATED", "Invalid or expired pairing code.", 401);
   }
 
   private createSession(audience: string): SessionRecord {

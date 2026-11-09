@@ -99,6 +99,29 @@ describe.skipIf(process.platform !== "darwin")("macOS sandbox developer toolchai
     return sandbox.execute(command, [], { cwd: workspace.path, timeout: 60_000 });
   };
 
+  it("keeps a host canary intact across cached executions after a child replaces npmrc", async () => {
+    const victim = path.join(base, "outside-canary");
+    fs.writeFileSync(victim, "preserve");
+    const script = path.join(workspace.path, "replace-npmrc.cjs");
+    fs.writeFileSync(
+      script,
+      [
+        "const fs = require('node:fs');",
+        "const config = process.env.NPM_CONFIG_USERCONFIG;",
+        "if (!config || !fs.readFileSync(config, 'utf8').includes('fund=false')) throw new Error('missing sanitized config');",
+        "fs.unlinkSync(config);",
+        `fs.symlinkSync(${JSON.stringify(victim)}, config);`,
+      ].join("\n"),
+    );
+    const sandbox = new MacOSSandbox(workspace);
+    sandboxes.push(sandbox);
+    const first = await sandbox.execute(process.execPath, [script], { cwd: workspace.path });
+    expect(first.exitCode, first.stderr).toBe(0);
+    const second = await sandbox.execute("/usr/bin/true", [], { cwd: workspace.path });
+    expect(second.exitCode, second.stderr).toBe(0);
+    expect(fs.readFileSync(victim, "utf8")).toBe("preserve");
+  });
+
   it("writes package caches under $HOME, including ones that do not exist yet", async () => {
     const result = await run(
       [

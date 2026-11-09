@@ -1,10 +1,13 @@
 import crypto from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { redactSensitiveMarkdownContent } from "./markdown-index-sql";
 import { MemoryService } from "./MemoryService";
 import type { MemorySourceKind, MemorySourceRow } from "./memory-source-sql";
+import { confinedFilePath } from "../utils/confined-file";
+import { WorkspaceRepository } from "../database/repository-facades";
+import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 
 /**
  * Source-tied memory (WP15): a memory saved from a workspace file or a connector record keeps
@@ -67,26 +70,29 @@ export interface MemorySourceRecheckDeps {
   run: MemorySourceUnitRunner;
   now?: () => number;
   log?: (message: string, error?: unknown) => void;
+  /** Current workspace and privacy/profile authority, resolved again for each read. */
+  resolveSourceRoot?: (workspaceId: string, filePath: string) => Promise<string | null>;
 }
 
-async function hashFile(filePath: string): Promise<string | null> {
+async function hashFile(filePath: string, root: string): Promise<string | null> {
   try {
-    const stat = await fs.stat(filePath);
-    if (!stat.isFile()) return null;
-    const hash = crypto.createHash("sha256");
-    for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
-    return hash.digest("hex");
+    return (await readFileEvidence(filePath, root))?.observedContentHash ?? null;
   } catch {
     return null;
   }
 }
 
 /** Hash the full file while retaining a bounded excerpt from that same read. */
-async function readFileEvidence(filePath: string): Promise<SourceEvidence | null> {
-  const handle = await fs.open(filePath, "r");
+async function readFileEvidence(filePath: string, root: string): Promise<SourceEvidence | null> {
+  // Registered roots and source paths are canonical. A root itself can also be replaced.
+  if ((await fs.realpath(root)) !== root) throw new Error("Source root changed");
+  const target = confinedFilePath(root, filePath);
+  const handle = await fs.open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const before = await handle.stat({ bigint: true });
     if (!before.isFile()) return null;
+    const named = await fs.lstat(confinedFilePath(root, filePath), { bigint: true });
+    if (named.dev !== before.dev || named.ino !== before.ino) return null;
     const hash = crypto.createHash("sha256");
     const prefix: Buffer[] = [];
     let remaining = DREAM_EXCERPT_CHARS * 4;
@@ -100,7 +106,12 @@ async function readFileEvidence(filePath: string): Promise<SourceEvidence | null
       }
     }
     const after = await handle.stat({ bigint: true });
+    const checked = confinedFilePath(root, filePath);
+    const current = await fs.lstat(checked, { bigint: true });
     if (
+      checked !== target ||
+      current.dev !== before.dev ||
+      current.ino !== before.ino ||
       before.size !== after.size ||
       before.mtimeNs !== after.mtimeNs ||
       before.ctimeNs !== after.ctimeNs
@@ -117,6 +128,19 @@ async function readFileEvidence(filePath: string): Promise<SourceEvidence | null
   } finally {
     await handle.close();
   }
+}
+
+/** Recover the canonical root recorded by the source path plus its relative key. */
+function sourceRoot(row: Pick<MemorySourceRow, "sourcePath" | "sourceKey">): string {
+  if (!row.sourcePath || !path.isAbsolute(row.sourcePath)) throw new Error("Invalid source path");
+  const parts = row.sourceKey.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || part.includes("\\")))
+    throw new Error("Invalid source key");
+  let root = row.sourcePath;
+  for (const _part of parts) root = path.dirname(root);
+  if (toPosix(path.relative(root, row.sourcePath)) !== row.sourceKey)
+    throw new Error("Invalid source binding");
+  return root;
 }
 
 function toPosix(relPath: string): string {
@@ -154,6 +178,22 @@ export class MemorySourceRecheckService {
         if (!sql) throw new Error("memory store is not initialized");
         return (sql.unit as (unit: string, unitArgs: unknown[]) => Promise<unknown>)(name, args);
       },
+      resolveSourceRoot: async (workspaceId, filePath) => {
+        const db = MemoryService.getDatabase();
+        if (!db) return null;
+        const workspace = await new WorkspaceRepository(db).findById(workspaceId);
+        if (!workspace) return null;
+        const settings = await MemoryService.getSettings(workspaceId);
+        if (
+          !settings.enabled ||
+          settings.privacyMode === "disabled" ||
+          settings.privacyMode === "strict"
+        )
+          return null;
+        if (evaluateWorkspaceFilesystemAccess(workspace, filePath, "read").decision !== "allow")
+          return null;
+        return fs.realpath(workspace.path);
+      },
     });
     return this.instance;
   }
@@ -164,6 +204,19 @@ export class MemorySourceRecheckService {
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+
+  private async authorizedRoot(
+    row: Pick<MemorySourceRow, "workspaceId" | "sourcePath" | "sourceKey">,
+  ): Promise<string> {
+    const root = sourceRoot(row);
+    if (this.deps.resolveSourceRoot) {
+      if (!row.workspaceId || !row.sourcePath) throw new Error("Source has no workspace");
+      const current = await this.deps.resolveSourceRoot(row.workspaceId, row.sourcePath);
+      if (!current || (await fs.realpath(current)) !== root)
+        throw new Error("Source authority changed");
+    }
+    return root;
   }
 
   /** Changes whenever a flag is set or cleared (prompt caches key on it). */
@@ -215,7 +268,19 @@ export class MemorySourceRecheckService {
   }): Promise<{ sourceKey: string } | undefined> {
     const resolved = await resolveInWorkspace(input.workspaceRoot, input.file);
     if (!resolved) return undefined;
-    const contentHash = await hashFile(resolved.absolute);
+    let contentHash: string | null = null;
+    try {
+      contentHash = await hashFile(
+        resolved.absolute,
+        await this.authorizedRoot({
+          workspaceId: input.workspaceId,
+          sourcePath: resolved.absolute,
+          sourceKey: resolved.key,
+        }),
+      );
+    } catch {
+      return undefined;
+    }
     if (!contentHash) return undefined;
     const row = (await this.deps.run("memorySources_track", [
       {
@@ -273,7 +338,16 @@ export class MemorySourceRecheckService {
       input.workspaceId,
     ])) as MemorySourceRow[];
     if (rows.length === 0) return 0;
-    const current = await hashFile(input.absolutePath);
+    const first = rows[0];
+    const observedPath = await fs.realpath(input.absolutePath).catch(() => null);
+    let current: string | null = null;
+    if (first.sourcePath && first.sourcePath === observedPath) {
+      try {
+        current = await hashFile(first.sourcePath, await this.authorizedRoot(first));
+      } catch {
+        /* unavailable source */
+      }
+    }
     const changed = rows.filter((row) => row.contentHash !== current);
     const restored = rows.filter((row) => row.needsRecheck && row.contentHash === current);
     const now = this.now();
@@ -355,7 +429,7 @@ export class MemorySourceRecheckService {
     if (!row.sourcePath) return unavailable("(the file's current content is not available)");
     try {
       return (
-        (await readFileEvidence(row.sourcePath)) ??
+        (await readFileEvidence(row.sourcePath, await this.authorizedRoot(row))) ??
         unavailable("(the file changed while its evidence was being read)")
       );
     } catch {
@@ -375,7 +449,13 @@ export class MemorySourceRecheckService {
         !row.sourcePath
       )
         continue;
-      if ((await hashFile(row.sourcePath)) !== observedContentHash) continue;
+      let current: string | null = null;
+      try {
+        current = await hashFile(row.sourcePath, await this.authorizedRoot(row));
+      } catch {
+        /* invalid saved binding */
+      }
+      if (current !== observedContentHash) continue;
       const cleared = await this.deps.run("memorySources_markReviewed", [
         row.id,
         observedContentHash,

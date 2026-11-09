@@ -73,13 +73,20 @@ describe("agent terminal IPC handlers", () => {
   let manager: BackgroundProcessManager;
   let authorizeTask: ReturnType<typeof vi.fn>;
   let recordAction: ReturnType<typeof vi.fn>;
+  let principals: Map<number, string>;
 
   beforeEach(() => {
     registeredHandlers.clear();
     manager = new BackgroundProcessManager();
     authorizeTask = vi.fn(async () => undefined);
     recordAction = vi.fn(async () => undefined);
-    setupAgentTerminalHandlers({ manager, authorizeTask, recordAction });
+    principals = new Map();
+    setupAgentTerminalHandlers({
+      manager,
+      authorizeTask,
+      recordAction,
+      principalForEvent: (event) => principals.get(event.sender.id) ?? "principal-1",
+    });
   });
 
   it("lists a task's processes as tabs after checking view access", async () => {
@@ -136,6 +143,7 @@ describe("agent terminal IPC handlers", () => {
     child.stdout!.emit("data", "ready\n");
     await flushOutput();
     child.emit("exit", 0, null);
+    await flushOutput();
 
     expect(watching.sent).toEqual([
       {
@@ -201,6 +209,81 @@ describe("agent terminal IPC handlers", () => {
     child.stdout!.emit("data", "after\n");
     await flushOutput();
     expect(sender.sent).toEqual([]);
+    await manager.stopAll("test");
+  });
+
+  it("drops queued output, status and removal events after revocation while another viewer continues", async () => {
+    const { child, summary } = startProcess(manager);
+    const revoked = fakeSender(1);
+    const allowed = fakeSender(2);
+    await handler(IPC_CHANNELS.AGENT_TERMINAL_LIST)({ sender: revoked }, { taskId: TASK_ID });
+    await handler(IPC_CHANNELS.AGENT_TERMINAL_LIST)({ sender: allowed }, { taskId: TASK_ID });
+    child.stdout!.emit("data", "QUEUED_PRIVATE\n");
+    authorizeTask.mockImplementation(async (event: Any) => {
+      if (event.sender.id === revoked.id) throw new Error("revoked");
+    });
+    child.emit("exit", 0, null);
+    await manager.remove(TASK_ID, summary.process_id, "test");
+    await flushOutput();
+    expect(revoked.sent).toEqual([]);
+    expect(allowed.sent.map((event) => event.kind)).toEqual(["output", "status", "removed"]);
+    await expect(
+      handler(IPC_CHANNELS.AGENT_TERMINAL_READ)(
+        { sender: revoked },
+        { taskId: TASK_ID, tabId: summary.process_id },
+      ),
+    ).rejects.toThrow("revoked");
+  });
+
+  it.each(["principal", "destroyed"])(
+    "invalidates a subscription when %s changes during a delivery authorization",
+    async (change) => {
+      const { child } = startProcess(manager);
+      const sender = fakeSender();
+      await handler(IPC_CHANNELS.AGENT_TERMINAL_LIST)({ sender }, { taskId: TASK_ID });
+      let release!: () => void;
+      authorizeTask.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      child.stdout!.emit("data", "OLD_IDENTITY\n");
+      await flushOutput();
+      expect(release).toBeTypeOf("function");
+      if (change === "principal") principals.set(sender.id, "principal-2");
+      else sender.emit("destroyed");
+      release();
+      await flushOutput();
+      expect(sender.sent).toEqual([]);
+      await manager.stopAll("test");
+    },
+  );
+
+  it("does not replay output included by a read while a previous delivery check is pending", async () => {
+    const { child, summary } = startProcess(manager);
+    const sender = fakeSender();
+    await handler(IPC_CHANNELS.AGENT_TERMINAL_LIST)({ sender }, { taskId: TASK_ID });
+    let release!: () => void;
+    authorizeTask.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    child.stdout!.emit("data", "first\n");
+    await flushOutput();
+    const read = await handler(IPC_CHANNELS.AGENT_TERMINAL_READ)(
+      { sender },
+      { taskId: TASK_ID, tabId: summary.process_id },
+    );
+    expect(read).toMatchObject({ output: "first\n" });
+    child.stdout!.emit("data", "second\n");
+    release();
+    await flushOutput();
+    expect(sender.sent).toEqual([
+      { kind: "output", taskId: TASK_ID, tabId: summary.process_id, output: "second\n" },
+    ]);
     await manager.stopAll("test");
   });
 });

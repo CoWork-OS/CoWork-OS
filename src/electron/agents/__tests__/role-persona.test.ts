@@ -21,6 +21,31 @@ describe("role-persona", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it.each(["leaf", "ancestor"])("omits a role profile through a %s symlink", (kind) => {
+    const outside = path.join(tmpDir, "outside");
+    fs.mkdirSync(outside);
+    writeFile(path.join(outside, "SOUL.md"), "PRIVATE_SENTINEL");
+    const roleDir = path.join(tmpDir, ".cowork/agents/reviewer");
+    fs.mkdirSync(path.dirname(roleDir), { recursive: true });
+    if (kind === "ancestor") fs.symlinkSync(outside, roleDir);
+    else {
+      fs.mkdirSync(roleDir);
+      fs.symlinkSync(path.join(outside, "SOUL.md"), path.join(roleDir, "SOUL.md"));
+    }
+    expect(buildRolePersonaPrompt({ name: "reviewer" }, tmpDir)).not.toContain("PRIVATE_SENTINEL");
+  });
+
+  it("applies the task read guard before injecting an ordinary role file", () => {
+    writeFile(path.join(tmpDir, ".cowork/agents/reviewer/SOUL.md"), "PROFILE_SENTINEL");
+    expect(buildRolePersonaPrompt({ name: "reviewer" }, tmpDir, { readGuard: () => false })).toBe(
+      "",
+    );
+    expect(
+      buildRolePersonaPrompt({ name: "reviewer" }, tmpDir, { readGuard: () => true }),
+    ).toContain("PROFILE_SENTINEL");
+    expect(buildRolePersonaPrompt({ name: ".." }, tmpDir)).toBe("");
+  });
+
   it("prefers role profile files over db soul", () => {
     writeFile(
       path.join(tmpDir, ".cowork", "agents", "qa-analyst", "SOUL.md"),

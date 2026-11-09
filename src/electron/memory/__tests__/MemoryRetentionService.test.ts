@@ -1,8 +1,9 @@
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
@@ -38,6 +39,7 @@ describeWithSqlite("MemoryRetentionService (LIFE-3)", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     manager?.close();
     if (previousUserDataDir === undefined) delete process.env.COWORK_USER_DATA_DIR;
     else process.env.COWORK_USER_DATA_DIR = previousUserDataDir;
@@ -230,6 +232,87 @@ describeWithSqlite("MemoryRetentionService (LIFE-3)", () => {
     expect(fs.readdirSync(path.join(denied.path, ".cowork", ".history", "USER.md")).length).toBe(
       26,
     );
+  });
+
+  it.each(["target", "runs", "run"])(
+    "keeps outside data when the %s component is a symlink",
+    async (component) => {
+      const workspace = addWorkspace(`linked-${component}`, {
+        read: true,
+        write: true,
+        delete: true,
+      });
+      const outside = path.join(tmpDir, `outside-${component}`);
+      const aged = path.join(outside, "old-run");
+      writeFile(path.join(aged, "keep.txt"), "outside canary", 40 * DAY);
+      fs.utimesSync(aged, new Date(now - 40 * DAY), new Date(now - 40 * DAY));
+      const targets = path.join(workspace.path, ".cowork", "subconscious", "targets");
+      fs.mkdirSync(targets, { recursive: true });
+      if (component === "target") {
+        fs.symlinkSync(outside, path.join(targets, "t1"));
+      } else {
+        const target = path.join(targets, "t1");
+        fs.mkdirSync(target);
+        if (component === "runs") fs.symlinkSync(outside, path.join(target, "runs"));
+        else {
+          fs.mkdirSync(path.join(target, "runs"));
+          fs.symlinkSync(aged, path.join(target, "runs", "old-run"));
+        }
+      }
+      const result = await (await makeService()).runOnce();
+      expect(result.errors).toEqual({});
+      expect(fs.readFileSync(path.join(aged, "keep.txt"), "utf8")).toBe("outside canary");
+    },
+  );
+
+  it("rechecks runs after an asynchronous metadata read", async () => {
+    const workspace = addWorkspace("swapped-runs", { read: true, write: true, delete: true });
+    const runs = path.join(workspace.path, ".cowork", "subconscious", "targets", "t1", "runs");
+    const original = path.join(runs, "old-run");
+    const outside = path.join(tmpDir, "outside-swap");
+    for (const dir of [original, path.join(outside, "old-run")]) {
+      writeFile(path.join(dir, "keep.txt"), "canary", 40 * DAY);
+      fs.utimesSync(dir, new Date(now - 40 * DAY), new Date(now - 40 * DAY));
+    }
+    const lstat = fsPromises.lstat.bind(fsPromises);
+    const realOriginal = fs.realpathSync(original);
+    let swapped = false;
+    vi.spyOn(fsPromises, "lstat").mockImplementation(async (...args) => {
+      const stat = await lstat(...args);
+      if (args[0] === realOriginal && !swapped) {
+        swapped = true;
+        fs.renameSync(runs, `${runs}-original`);
+        fs.symlinkSync(outside, runs);
+      }
+      return stat;
+    });
+    await (await makeService()).runOnce();
+    expect(swapped).toBe(true);
+    expect(fs.readFileSync(path.join(outside, "old-run", "keep.txt"), "utf8")).toBe("canary");
+  });
+
+  it("still rotates target journals when no runs directory exists", async () => {
+    const workspace = addWorkspace("journal-only", { read: true, write: true, delete: true });
+    const journal = path.join(
+      workspace.path,
+      ".cowork",
+      "subconscious",
+      "targets",
+      "t1",
+      "memory.jsonl",
+    );
+    writeFile(
+      journal,
+      Array.from({ length: 2100 }, (_, entry) =>
+        JSON.stringify({ entry, text: "x".repeat(600) }),
+      ).join("\n"),
+      DAY,
+    );
+    await (await makeService()).runOnce();
+    const lines = fs.readFileSync(journal, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(2000);
+    expect(JSON.parse(lines[0]).entry).toBe(100);
+    expect(JSON.parse(lines.at(-1)!).entry).toBe(2099);
   });
 
   it("prunes old suggestions, suggestion feedback and Playbook entries", async () => {

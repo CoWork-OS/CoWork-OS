@@ -549,8 +549,8 @@ export function withShellAppleScriptHint(
 function describeLoopbackViolation(violation: LoopbackListenerViolation): string {
   return (
     `Stopped: the command listened on ${violation.address} (pid ${violation.pid}), which is ` +
-    "reachable from the network, while shell network access is off. Bind servers to " +
-    "127.0.0.1 or localhost instead (for example --host 127.0.0.1)."
+    "reachable from the network, while shell network access is off. TCP listeners require " +
+    "network access enabled by the task profile and administrator policy."
   );
 }
 
@@ -1103,9 +1103,8 @@ export class ShellTools {
         sandbox.type === "docker"
           ? resolveDockerSandboxCwd(this.workspace.path, options.cwd)
           : options.cwd;
-      // With network denied the macOS profile still lets the command serve on
-      // loopback (test servers, Playwright webServer); the guard stops it if it
-      // listens anywhere else.
+      // The kernel denies TCP listeners when network access is off. The
+      // process-group monitor is supplementary and never grants authority.
       const guardLoopback = sandbox.type === "macos" && !allowShellNetwork;
       const loopbackGuard: { violation?: LoopbackListenerViolation; unwatch?: () => void } = {};
       if (sandbox.type === "space") this.activeRemoteController = new AbortController();
@@ -1120,7 +1119,7 @@ export class ShellTools {
         timeout: options.timeout,
         maxOutputSize: MAX_OUTPUT_SIZE,
         allowNetwork: allowShellNetwork,
-        allowLoopbackListen: guardLoopback,
+        allowLoopbackListen: false,
         onProcess: (process) => {
           this.activeProcess = process;
           this.activeProcessGroupPid = null;
@@ -1606,7 +1605,7 @@ export class ShellTools {
       spawned = sandbox.spawnProcess("/bin/sh", ["-c", command], {
         cwd: docker ? resolveDockerSandboxCwd(this.workspace.path, cwd) : cwd,
         allowNetwork: allowShellNetwork,
-        allowLoopbackListen: guardLoopback,
+        allowLoopbackListen: false,
         detached: !docker,
       });
     } catch (error) {
@@ -1626,7 +1625,7 @@ export class ShellTools {
     }
     if (guardLoopback) {
       notes.push(
-        "Shell network access is off: the process can serve on 127.0.0.1/localhost but cannot connect out. Listening on 0.0.0.0 or a LAN address stops it.",
+        "Shell network access is off: TCP listeners are denied. Dev servers require network access enabled by the task profile and administrator policy.",
       );
     }
     return {

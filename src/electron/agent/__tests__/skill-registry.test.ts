@@ -6,6 +6,18 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import JSZip from "jszip";
 import type { CustomSkill, SkillRegistryEntry, SkillSearchResult } from "../../../shared/types";
+// Legacy content fixtures stop at the transport seam. Security transport
+// regressions exercise the real redirect/DNS implementation separately.
+vi.mock("../../security/policy-checked-fetch", () => ({
+  fetchWithPolicyCheckedRedirects: async (
+    url: string,
+    init: RequestInit,
+    options: { onHop?: (url: string) => void },
+  ) => {
+    options.onHop?.(url);
+    return { response: await fetch(url, init), finalUrl: url, chain: [url] };
+  },
+}));
 
 // Track file system operations
 let mockFiles: Map<string, string> = new Map();
@@ -500,7 +512,10 @@ describe("SkillRegistry", () => {
 
       const result = await registry.search("test");
 
-      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/skills/search?q=test"));
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/skills/search?q=test"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       expect(result.total).toBe(2);
       expect(result.results).toHaveLength(2);
     });
@@ -516,6 +531,7 @@ describe("SkillRegistry", () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringMatching(/page=2.*pageSize=10|pageSize=10.*page=2/),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
 
@@ -553,7 +569,10 @@ describe("SkillRegistry", () => {
 
       const result = await registry.getSkillDetails("test-skill");
 
-      expect(mockFetch).toHaveBeenCalledWith("https://test-registry.com/api/skills/test-skill");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://test-registry.com/api/skills/test-skill",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       expect(result).toEqual(mockEntry);
     });
 
@@ -609,7 +628,10 @@ describe("SkillRegistry", () => {
 
       await registry.install("test-skill", "1.2.3");
 
-      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("version=1.2.3"));
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("version=1.2.3"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     it("should return error on failed download", async () => {

@@ -5138,6 +5138,7 @@ export async function setupIpcHandlers(
 
   // The agent's background processes, shown as read-only tabs in the terminal panel.
   setupAgentTerminalHandlers({
+    principalForEvent,
     authorizeTask: (event, taskId, capability) => authorizeTaskForEvent(event, taskId, capability),
     recordAction: async (event, taskId, action, tabId) => {
       const authorization = await authorizeTaskForEvent(event, taskId, "manage");

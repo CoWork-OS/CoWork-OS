@@ -17,6 +17,7 @@ export class KimiProvider implements LLMProvider {
     const baseUrl = config.kimiBaseUrl || KIMI_BASE_URL;
 
     this.client = new OpenAICompatibleProvider({
+      diagnosticFetch: config.diagnosticFetch,
       type: "kimi",
       providerName: "Kimi",
       apiKey,

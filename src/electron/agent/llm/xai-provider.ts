@@ -63,6 +63,7 @@ export class XAIProvider implements LLMProvider {
     }
 
     this.client = new OpenAICompatibleProvider({
+      diagnosticFetch: config.diagnosticFetch,
       type: "xai",
       providerName: "xAI",
       apiKey: config.xaiApiKey,

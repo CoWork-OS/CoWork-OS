@@ -17,6 +17,7 @@ import { app } from "electron";
 import { InstallSecurityOutcome } from "../../shared/types";
 import { getCapabilityBundleSecurityService } from "../security/capability-bundle-security";
 import { assertNetworkPolicyAllowed } from "../security/network-policy";
+import { fetchWithPolicyCheckedRedirects } from "../security/policy-checked-fetch";
 import { readBoundedResponse } from "../security/bounded-response";
 import { validateManifest } from "./loader";
 import { PluginManifest } from "./types";
@@ -440,7 +441,19 @@ export async function installFromUrl(
 
     let manifestData: unknown;
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      const { response } = await fetchWithPolicyCheckedRedirects(
+        url,
+        { signal: controller.signal },
+        {
+          toolName: "plugin_pack_url_install",
+          networkContext: { networkEnabled: true },
+          requirePinnedDestination: true,
+          onHop: (hop) => {
+            if (new URL(hop).protocol !== "https:")
+              throw new Error("Plugin packs must be installed over https");
+          },
+        },
+      );
       if (!response.ok) {
         await response.body?.cancel();
         return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };

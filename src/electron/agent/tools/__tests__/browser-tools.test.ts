@@ -1050,8 +1050,14 @@ describe("BrowserTools browser_navigate to local files", () => {
     // Navigation checks see the #fragment; the request guard never does.
     expect(browserWorkbenchService.allowLocalPreviewUrl).toHaveBeenCalledWith(
       `${canonicalPageUrl}#approvals`,
+      "task-1",
+      undefined,
     );
-    expect(browserWorkbenchService.allowLocalPreviewUrl).toHaveBeenCalledWith(canonicalPageUrl);
+    expect(browserWorkbenchService.allowLocalPreviewUrl).toHaveBeenCalledWith(
+      canonicalPageUrl,
+      "task-1",
+      undefined,
+    );
     expect(browserWorkbenchService.navigate).toHaveBeenCalledWith(
       expect.objectContaining({ url: `${canonicalPageUrl}#approvals` }),
     );

@@ -1,3 +1,4 @@
+import { browserProviderDiagnosticFetch } from "../../electron/agent/llm/provider-diagnostic-fetch";
 import { createHmac, randomBytes } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -32,7 +33,11 @@ import { GoogleWorkspaceSettingsManager } from "../../electron/settings/google-w
 import { RelationshipMemoryService } from "../../electron/memory/RelationshipMemoryService";
 import { UserProfileService } from "../../electron/memory/UserProfileService";
 import { isBlockedInternalHost, normalizeHostname } from "../../electron/security/address-classes";
-import { LLM_PROVIDER_TYPES, type LLMSettingsData } from "../../shared/types";
+import {
+  LLM_PROVIDER_TYPES,
+  CUSTOM_LLM_PROVIDER_TYPES,
+  type LLMSettingsData,
+} from "../../shared/types";
 import type { BrowserDesktopDefinitions } from "./browser-desktop-rpc";
 import { WebApplicationError } from "../web/WebApplication";
 
@@ -1174,7 +1179,10 @@ export function createBrowserSettingsDefinitions(
     getOllamaModels: define(
       async (args) => {
         const baseUrl = await validateBaseUrl(args[0], "Ollama", true);
-        const models = await LLMProviderFactory.getOllamaModels(baseUrl);
+        const models = await LLMProviderFactory.getOllamaModels(
+          baseUrl,
+          browserProviderDiagnosticFetch(true),
+        );
         cacheModels("ollama", models, (model) => ({
           key: stringField(model, "name"),
           displayName: stringField(model, "name"),
@@ -1220,6 +1228,7 @@ export function createBrowserSettingsDefinitions(
         const models = await LLMProviderFactory.getOpenRouterModels(
           args[0] as string | undefined,
           baseUrl,
+          browserProviderDiagnosticFetch(false),
         );
         cacheModels(
           "openrouter",
@@ -1248,6 +1257,7 @@ export function createBrowserSettingsDefinitions(
           await LLMProviderFactory.getOpenRouterImageModels(
             args[0] as string | undefined,
             await validateBaseUrl(args[1], "OpenRouter"),
+            browserProviderDiagnosticFetch(false),
           ),
           { apiKey: args[0] },
         ),
@@ -1287,6 +1297,7 @@ export function createBrowserSettingsDefinitions(
         const models = await LLMProviderFactory.getGroqModels(
           args[0] as string | undefined,
           await validateBaseUrl(args[1], "Groq"),
+          browserProviderDiagnosticFetch(false),
         );
         cacheModels(
           "groq",
@@ -1313,6 +1324,7 @@ export function createBrowserSettingsDefinitions(
         const models = await LLMProviderFactory.getXAIModels(
           args[0] as string | undefined,
           await validateBaseUrl(args[1], "xAI"),
+          browserProviderDiagnosticFetch(false),
         );
         cacheModels(
           "xai",
@@ -1339,6 +1351,7 @@ export function createBrowserSettingsDefinitions(
         const models = await LLMProviderFactory.getDeepSeekModels(
           args[0] as string | undefined,
           await validateBaseUrl(args[1], "DeepSeek"),
+          browserProviderDiagnosticFetch(false),
         );
         cacheModels(
           "deepseek",
@@ -1365,6 +1378,7 @@ export function createBrowserSettingsDefinitions(
         const models = await LLMProviderFactory.getKimiModels(
           args[0] as string | undefined,
           await validateBaseUrl(args[1], "Kimi"),
+          browserProviderDiagnosticFetch(false),
         );
         cacheModels(
           "kimi",
@@ -1418,7 +1432,7 @@ export function createBrowserSettingsDefinitions(
         const models = await LLMProviderFactory.getOpenAICompatibleModels(
           baseUrl,
           args[1] as string | undefined,
-          { cacheModels: cache },
+          { cacheModels: cache, diagnosticFetch: browserProviderDiagnosticFetch(true) },
         );
         if (cache) {
           cacheModels(
@@ -1470,7 +1484,10 @@ export function createBrowserSettingsDefinitions(
             }
           : undefined;
         return scrubResult(
-          await LLMProviderFactory.getCustomProviderModels(providerType as never, validated),
+          await LLMProviderFactory.getCustomProviderModels(providerType as never, {
+            ...validated,
+            diagnosticFetch: browserProviderDiagnosticFetch(true),
+          }),
           validated,
         );
       },
@@ -1499,7 +1516,10 @@ export function createBrowserSettingsDefinitions(
           ? { ...overrides, baseUrl: await validateBaseUrl(overrides.baseUrl, "Atomic Chat", true) }
           : undefined;
         return scrubResult(
-          await LLMProviderFactory.getAtomicChatModelsDetailed(validated),
+          await LLMProviderFactory.getAtomicChatModelsDetailed({
+            ...validated,
+            diagnosticFetch: browserProviderDiagnosticFetch(true),
+          }),
           validated,
         );
       },
@@ -1598,7 +1618,13 @@ export function createBrowserSettingsDefinitions(
           providerBaseUrl: effective.customProviders?.[providerType]?.baseUrl,
         };
         return scrubResult(
-          await LLMProviderFactory.testProvider(providerConfig as never),
+          await LLMProviderFactory.testProvider({
+            ...providerConfig,
+            diagnosticFetch: browserProviderDiagnosticFetch(
+              ["ollama", "openai-compatible"].includes(providerType) ||
+                CUSTOM_LLM_PROVIDER_TYPES.includes(providerType as never),
+            ),
+          } as never),
           effective,
         );
       },

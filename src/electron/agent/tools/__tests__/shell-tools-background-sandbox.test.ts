@@ -1,6 +1,6 @@
 /**
  * Background and foreground commands in the real macOS sandbox with shell
- * networking denied: loopback servers work, others are stopped.
+ * networking denied: the kernel denies listeners; authorized loopback servers work.
  */
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -43,8 +43,8 @@ function scriptCommand(root: string, name: string, script: string, executable = 
   return `${executable} ${JSON.stringify(file)}`;
 }
 
-function serverCommand(host: string, root: string): string {
-  const script = `const s = require("net").createServer((c) => c.end("pong")); s.listen(0, "${host}", () => console.log("listening on port " + s.address().port));`;
+function serverCommand(root: string): string {
+  const script = `const s = require("net").createServer((c) => c.end("pong")); s.on("error", e => { console.error("LISTEN_ERR " + e.code); process.exit(1); }); s.listen(0, "127.0.0.1", () => console.log("listening on port " + s.address().port));`;
   return scriptCommand(root, "server.cjs", script);
 }
 
@@ -70,6 +70,12 @@ describe.skipIf(process.platform !== "darwin")(
       taskIds.push(taskId);
       const daemon = { requestApproval: vi.fn().mockResolvedValue(true), logEvent: vi.fn() };
       return new ShellTools(workspace, daemon as unknown as AgentDaemon, taskId);
+    }
+
+    function enableNetwork() {
+      workspace.permissions.network = true;
+      workspace.permissions.accessNetworkMode = "enabled";
+      loadPolicies().runtime.network.allowShellNetwork = true;
     }
 
     beforeEach(() => {
@@ -108,17 +114,14 @@ describe.skipIf(process.platform !== "darwin")(
       fs.rmSync(base, { recursive: true, force: true });
     });
 
-    it("serves a background loopback server the host can reach", async () => {
+    it("serves an authorized background loopback server the host can reach", async () => {
+      enableNetwork();
       const shellTools = newShellTools();
-      const started = await shellTools.startBackgroundCommand(
-        serverCommand("127.0.0.1", workspace.path),
-        {
-          cwd: workspace.path,
-        },
-      );
+      const started = await shellTools.startBackgroundCommand(serverCommand(workspace.path), {
+        cwd: workspace.path,
+      });
 
       expect(started).toMatchObject({ success: true, running: true, sandbox: "macos" });
-      expect(String((started.notes as string[])[0])).toMatch(/127\.0\.0\.1\/localhost/);
       const port = Number(String(started.startup_output).match(/port (\d+)/)?.[1]);
       expect(port).toBeGreaterThan(0);
       expect(await fetchOnce(port)).toBe("pong");
@@ -176,14 +179,11 @@ describe.skipIf(process.platform !== "darwin")(
       30_000,
     );
 
-    it("stops a background server that listens on all interfaces", async () => {
+    it("rejects a background loopback listener at the kernel boundary when networking is denied", async () => {
       const shellTools = newShellTools();
-      const started = await shellTools.startBackgroundCommand(
-        serverCommand("0.0.0.0", workspace.path),
-        {
-          cwd: workspace.path,
-        },
-      );
+      const started = await shellTools.startBackgroundCommand(serverCommand(workspace.path), {
+        cwd: workspace.path,
+      });
       const processId = started.process_id as string;
       const manager = getBackgroundProcessManager();
       const deadline = Date.now() + 10_000;
@@ -199,16 +199,15 @@ describe.skipIf(process.platform !== "darwin")(
         });
       }
 
-      expect(status).toMatchObject({
-        running: false,
-        status: "stopped",
-        stop_reason: "listened_on_non_loopback_address",
-      });
-      expect(status.output).toMatch(/listened on \*\.\d+/);
+      expect(started).toMatchObject({ success: false, sandbox: "macos" });
+      expect(status).toMatchObject({ running: false, status: "exited", exit_code: 1 });
+      expect(status.output).toMatch(/LISTEN_ERR (EPERM|EACCES)/);
+      expect(status.output).not.toContain("listening on port");
       expect(manager.list("nobody")).toEqual([]);
     }, 30_000);
 
-    it("lets a foreground test server listen on loopback with networking denied", async () => {
+    it("lets an authorized foreground test server listen on loopback", async () => {
+      enableNetwork();
       const shellTools = newShellTools();
       const script =
         'const s = require("net").createServer((c) => c.end("pong")); s.listen(0, "127.0.0.1", () => { require("net").connect(s.address().port, "127.0.0.1").on("data", (d) => { console.log("got " + d); process.exit(0); }); });';
@@ -225,21 +224,19 @@ describe.skipIf(process.platform !== "darwin")(
       expect(result.stdout).toContain("got pong");
     }, 30_000);
 
-    it("stops a foreground command that listens on all interfaces", async () => {
+    it("denies foreground listeners even when the shell masks the process failure", async () => {
       const shellTools = newShellTools();
       const startedAt = Date.now();
 
-      const result = await shellTools.runCommand(
-        `${serverCommand("0.0.0.0", workspace.path)}; true`,
-        {
-          cwd: workspace.path,
-          timeout: 20_000,
-        },
-      );
+      const result = await shellTools.runCommand(`${serverCommand(workspace.path)}; true`, {
+        cwd: workspace.path,
+        timeout: 20_000,
+      });
 
       expect(Date.now() - startedAt).toBeLessThan(10_000);
-      expect(result).toMatchObject({ success: false, terminationReason: "error" });
-      expect(result.stderr).toMatch(/listened on \*\.\d+ .*Bind servers to 127\.0\.0\.1/s);
+      expect(result).toMatchObject({ success: true, exitCode: 0 });
+      expect(result.stderr).toMatch(/LISTEN_ERR (EPERM|EACCES)/);
+      expect(result.stdout).not.toContain("listening on port");
     }, 30_000);
   },
 );

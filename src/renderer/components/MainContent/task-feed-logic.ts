@@ -1010,7 +1010,15 @@ export function applyTurnDisclosures(
       rows.push(...work);
     } else {
       // Folded work still surfaces what needs attention: failures and requests for action.
+      // The turn's live canvas is what it made, so its latest card stays in view too.
+      const lastCanvasRow = [...work]
+        .reverse()
+        .find((row) => row.kind === "timeline" && row.item.kind === "canvas");
       for (const row of work) {
+        if (row === lastCanvasRow) {
+          rows.push(row);
+          continue;
+        }
         const isActivityBlock = row.kind === "timeline" && row.item.kind === "action_block";
         for (const { event, eventIndex, eventOrder } of getTaskFeedRowEvents(row)) {
           if (!isDeliveryCriticalEvent(event)) continue;

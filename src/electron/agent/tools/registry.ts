@@ -1,4 +1,5 @@
 import { ExecutionEnvironmentController } from "../../environments/ExecutionEnvironmentController";
+import { describeToolApprovalRequest } from "../tool-approval-description";
 import { isEnvironmentTool } from "../../../shared/execution-environment";
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import { trailingBackgroundCommand } from "./trailing-background-command";
@@ -3082,7 +3083,7 @@ export class ToolRegistry {
               ? "Allow CoWork OS to access your current location once?"
               : mcpApproval
                 ? mcpApproval.description
-                : `Allow ${context.request.name} to access the requested resource?`;
+                : describeToolApprovalRequest(context.request.name);
           // A local connector that can describe its write is asked what it would do, so the
           // approval shows the effect rather than raw arguments (WP13).
           const connectorPreview = mcpApproval
@@ -13450,8 +13451,10 @@ ${skillDescriptions}`;
   }> {
     const { tasks, timeout_seconds = 300 } = input;
 
-    if (!Array.isArray(tasks) || tasks.length < 2) {
-      throw new Error("orchestrate_agents requires at least 2 tasks");
+    // One task is allowed: a request to hand one piece of work to a helper is dispatched
+    // through this tool, and a two-task minimum made that step impossible to complete.
+    if (!Array.isArray(tasks) || tasks.length < 1) {
+      throw new Error("orchestrate_agents requires at least 1 task");
     }
     if (tasks.length > 8) {
       throw new Error("orchestrate_agents supports at most 8 tasks");
@@ -15560,7 +15563,7 @@ ${skillDescriptions}`;
             tasks: {
               type: "array",
               description:
-                "Array of 2-8 independent sub-tasks. At most the active child-agent limit (3 by default) run at once; " +
+                "Array of 1-8 independent sub-tasks (one runs a single helper and waits for it). At most the active child-agent limit (3 by default) run at once; " +
                 "the rest are queued and start as earlier ones finish, so allow a longer timeout_seconds for large batches.",
               items: {
                 type: "object",
@@ -15606,7 +15609,7 @@ ${skillDescriptions}`;
                 },
                 required: ["prompt"],
               },
-              minItems: 2,
+              minItems: 1,
               maxItems: 8,
             },
             timeout_seconds: {

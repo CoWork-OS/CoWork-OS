@@ -103,6 +103,26 @@ describe("deriveToolUsage", () => {
     expect(deriveToolUsage(events)).toEqual([{ name: "run_command", count: 2, lastUsed: 4 }]);
   });
 
+  // Live 2026-11-09: one canvas_create and one canvas_push showed as "2x" each under Tools used.
+  it("counts a tool's own copy of an open call once", () => {
+    expect(
+      deriveToolUsage([
+        makeEvent("create", 1, "tool_call", { tool: "canvas_create", toolUseId: "a" }),
+        makeEvent("create-copy", 2, "tool_call", { tool: "canvas_create" }),
+        makeEvent("create-copy-done", 3, "tool_result", { tool: "canvas_create" }),
+        makeEvent("create-done", 4, "tool_result", { tool: "canvas_create", toolUseId: "a" }),
+        makeEvent("push", 5, "tool_call", { tool: "canvas_push", toolUseId: "b" }),
+        makeEvent("push-copy", 6, "tool_call", { tool: "canvas_push" }),
+        makeEvent("push-done", 7, "tool_result", { tool: "canvas_push", toolUseId: "b" }),
+        // A call without an id after the open one closed is its own call.
+        makeEvent("legacy-push", 8, "tool_call", { tool: "canvas_push" }),
+      ]),
+    ).toEqual([
+      { name: "canvas_push", count: 2, lastUsed: 8 },
+      { name: "canvas_create", count: 1, lastUsed: 1 },
+    ]);
+  });
+
   it.each(["tool_result", "task_completed", "task_cancelled"])(
     "preserves a later standalone command after %s",
     (type) => {

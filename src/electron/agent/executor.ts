@@ -6,7 +6,10 @@ import {
 } from "./background-process-notifications";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
-import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
+import {
+  AGENT_DISPATCH_STEP_DESCRIPTION,
+  generatedPlanStepLabel,
+} from "../../shared/generated-plan-steps";
 import { BotDesktopTools } from "./tools/bot-desktop-tools";
 import { isUserActionRequiredFailure } from "./user-action-failure";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
@@ -34657,7 +34660,7 @@ Return ONLY a JSON object:
         const progress =
           totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
         const failedMutationDescriptions = unrecoveredMutationFailedSteps
-          .map((s) => s.description)
+          .map((s) => generatedPlanStepLabel(s.description) ?? s.description)
           .join("; ");
         this.emitEvent("progress_update", {
           phase: "execution",
@@ -34781,8 +34784,11 @@ Return ONLY a JSON object:
         const userFailedSteps = unrecoveredFailedSteps.filter((s) => s.kind !== "recovery");
         const listedFailedSteps =
           userFailedSteps.length > 0 ? userFailedSteps : unrecoveredFailedSteps;
+        // Steps the runtime wrote are instructions to the model; name them by their label.
         throw new Error(
-          `Task failed: ${listedFailedSteps.length} step(s) failed - ${listedFailedSteps.map((s) => s.description).join("; ")}`,
+          `Task failed: ${listedFailedSteps.length} step(s) failed - ${listedFailedSteps
+            .map((s) => generatedPlanStepLabel(s.description) ?? s.description)
+            .join("; ")}`,
         );
       }
     }

@@ -1,5 +1,6 @@
 import type { PlanStep, TaskEvent } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
+import { generatedPlanStepLabel } from "../../shared/generated-plan-steps";
 
 export const TASK_KICKOFF_PROMPT_RULES = [
   "TASK KICKOFF:",
@@ -22,6 +23,7 @@ const GERUND_BY_VERB: Record<string, string> = {
   fix: "fixing",
   gather: "gathering",
   generate: "generating",
+  hand: "handing",
   identify: "identifying",
   implement: "implementing",
   inspect: "inspecting",
@@ -47,16 +49,32 @@ const GERUND_BY_VERB: Record<string, string> = {
 };
 
 // Emphasis underscores sit at word edges; underscores inside names (run_command) stay.
+const MAX_KICKOFF_DESCRIPTION_LENGTH = 140;
+
 function cleanDescription(value: unknown): string {
-  return String(value || "")
+  const raw = String(value || "");
+  // A step the runtime wrote is an instruction to the model; say what it does instead.
+  const text = (generatedPlanStepLabel(raw) ?? raw)
     .replace(/^[\s#>*\-\d.)]+/, "")
     .replace(/[`*#]/g, "")
     .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
     .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[.!?:;]+$/, "")
-    .slice(0, 140)
     .trim();
+  return shortenToWholeWords(text)
+    .replace(/[.!?:;,]+$/, "")
+    .trim();
+}
+
+/** Long steps keep their first sentence, then whole words; never "Assign publ". */
+function shortenToWholeWords(text: string): string {
+  if (text.length <= MAX_KICKOFF_DESCRIPTION_LENGTH) return text;
+  const firstSentence = text.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? "";
+  if (firstSentence && firstSentence.length <= MAX_KICKOFF_DESCRIPTION_LENGTH) return firstSentence;
+  const cut = text.slice(0, MAX_KICKOFF_DESCRIPTION_LENGTH + 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (
+    lastSpace > 0 ? cut.slice(0, lastSpace) : cut.slice(0, MAX_KICKOFF_DESCRIPTION_LENGTH)
+  ).trim();
 }
 
 function toGerundPhrase(description: string): string | null {

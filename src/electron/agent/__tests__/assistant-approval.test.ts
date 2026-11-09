@@ -12,6 +12,34 @@ import {
   shouldUseAssistantApprovalInput,
 } from "../assistant-approval";
 import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../../shared/approval-draft-presentation";
+import { describeToolApprovalRequest } from "../tool-approval-description";
+
+// Live 2026-11-09: a canvas asked "Allow canvas_create to access the requested resource?" with
+// "Continue this external_service only once." under Allow once.
+describe("approval wording", () => {
+  it("names the action and the kind of operation in words", () => {
+    expect(describeToolApprovalRequest("canvas_create")).toBe(
+      "Allow CoWork OS to open a live canvas?",
+    );
+    expect(describeToolApprovalRequest("send_fax")).toBe(
+      "Allow CoWork OS to use the send fax tool?",
+    );
+    expect(describeToolApprovalRequest("lookup_tool")).toBe(
+      "Allow CoWork OS to use the lookup tool?",
+    );
+    const request = buildAssistantApprovalRequest(
+      "external_service",
+      describeToolApprovalRequest("canvas_create"),
+    );
+    const options = request.questions[0].options.map((option) => option.description);
+    expect(options).toContain("Continue this action only once.");
+    expect(options.join(" ")).not.toMatch(/external_service/);
+    expect(
+      buildAssistantApprovalRequest("run_command", "Run it?").questions[0].options.at(-1)
+        ?.description,
+    ).toBe("Continue this command only once.");
+  });
+});
 
 describe("assistant mediated approvals", () => {
   it("routes every permission ask through the assistant while keeping allow decisions silent", () => {

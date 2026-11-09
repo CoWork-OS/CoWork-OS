@@ -1740,6 +1740,39 @@ describe("ToolRegistry child task control tools", () => {
       process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
     });
 
+    // Live 2026-11-09: "Use a subagent to list three competitors" got a dispatch step that
+    // offers only orchestrate_agents, which refused anything under two tasks.
+    it("runs a single delegated task", async () => {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1)],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1)],
+        }),
+        waitForDelegatedNode: vi.fn(async (_root: string, handle: string) => ({
+          success: true,
+          status: "completed",
+          message: "Delegated work completed successfully",
+          resultSummary: `summary for ${handle}`,
+        })),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks: [tasks[0]] });
+
+      expect(result.success).toBe(true);
+      expect(result.completed).toBe(1);
+      await expect(registry.executeTool("orchestrate_agents", { tasks: [] })).rejects.toThrow(
+        "requires at least 1 task",
+      );
+    });
+
     it("queues tasks beyond the active child limit instead of rejecting them", async () => {
       const queued = node(4, { status: "ready", publicHandle: undefined });
       const daemon = {

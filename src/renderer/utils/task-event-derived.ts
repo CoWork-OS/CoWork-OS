@@ -755,6 +755,9 @@ export function deriveToolUsage(events: TaskEvent[]): ToolUsage[] {
   const toolMap = new Map<string, ToolUsage>();
   const seenCalls = new Set<string>();
   const pendingCommands = new Map<string, { taskId: string; command: string; cwd?: string }>();
+  // Other tools that log their own copy of a call (canvas tools, for one) do it without the
+  // executor's call id while that call is still open; pair the copy with it, as for commands.
+  const pendingToolCalls = new Map<string, { taskId: string; tool: string }>();
 
   for (const event of events) {
     const payload = asObject(event.payload);
@@ -764,12 +767,18 @@ export function deriveToolUsage(events: TaskEvent[]): ToolUsage[] {
     );
     const callKey = callId ? `${event.taskId}:${callId}` : undefined;
     if (type === "tool_result" || type === "tool_error") {
-      if (callKey) pendingCommands.delete(callKey);
+      if (callKey) {
+        pendingCommands.delete(callKey);
+        pendingToolCalls.delete(callKey);
+      }
       continue;
     }
     if (type === "task_completed" || type === "task_cancelled" || type === "error") {
       for (const [key, command] of pendingCommands) {
         if (command.taskId === event.taskId) pendingCommands.delete(key);
+      }
+      for (const [key, call] of pendingToolCalls) {
+        if (call.taskId === event.taskId) pendingToolCalls.delete(key);
       }
     }
     if (type !== "tool_call" || typeof payload.tool !== "string") {
@@ -780,6 +789,19 @@ export function deriveToolUsage(events: TaskEvent[]): ToolUsage[] {
       seenCalls.add(callKey);
     }
     const input = asObject(payload.input);
+    if (payload.tool !== "run_command") {
+      if (callKey) {
+        pendingToolCalls.set(callKey, { taskId: event.taskId, tool: payload.tool });
+      } else {
+        const pairedCall = [...pendingToolCalls].find(
+          ([, call]) => call.taskId === event.taskId && call.tool === payload.tool,
+        );
+        if (pairedCall) {
+          pendingToolCalls.delete(pairedCall[0]);
+          continue;
+        }
+      }
+    }
     if (payload.tool === "run_command") {
       if (callKey && typeof input.command === "string") {
         pendingCommands.set(callKey, {

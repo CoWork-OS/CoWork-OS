@@ -1,5 +1,6 @@
 import { ExecutionEnvironmentController } from "../environments/ExecutionEnvironmentController";
 import { buildApprovalReplyMessage } from "../../shared/approval-reply-message";
+import { describeToolApprovalRequest } from "./tool-approval-description";
 import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
   agentCompletionNoticeId,
@@ -8608,7 +8609,7 @@ export class AgentDaemon extends EventEmitter {
     return this.requestApproval(
       taskId,
       request.approvalType,
-      request.description || `Allow ${request.toolName} to access the requested resource?`,
+      request.description || describeToolApprovalRequest(request.toolName),
       details,
       {
         allowAutoApprove: request.allowAutoApprove,

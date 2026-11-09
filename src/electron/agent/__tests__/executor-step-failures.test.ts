@@ -3,6 +3,7 @@
  */
 
 import { GENERATED_HANDOFF_STEP_DESCRIPTION } from "../executor-verification-repair-utils";
+import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../../shared/generated-plan-steps";
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -2569,6 +2570,24 @@ relationship_memory:
       "Plan mode doesn't create or change files, so this step was not run: Build a newsletter signup page in index.html. Switch the mode under the message box to Do, then send your request again.",
     );
     expect((executor as Any).classifyFailure(failure)).toBe("contract_unmet_write_required");
+  });
+
+  // Live 2026-11-09: "Ask a helper agent ..." failed with "Task failed: 1 step(s) failed - Use
+  // orchestrate_agents to dispatch the explicitly requested independent scopes ...".
+  it("names a runtime-written step by its label when it fails", async () => {
+    executor = createExecutorWithStubs([textResponse("done")], {});
+    const step: Any = { id: "1", description: AGENT_DISPATCH_STEP_DESCRIPTION, status: "pending" };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+    (executor as Any).executeStep = vi.fn(async (target: Any) => {
+      target.status = "failed";
+      target.error = "No child agent was started.";
+      target.completedAt = Date.now();
+    });
+
+    const failure = await (executor as Any).executePlan().catch((error: Error) => error);
+    expect(failure.message).toBe(
+      "Task failed: 1 step(s) failed - Hand the separate parts to sub-agents",
+    );
   });
 
   it("fails executePlan when a verification-labeled step fails", async () => {

@@ -73,6 +73,44 @@ describe("applyTurnDisclosures", () => {
     eventRow("answer-2", 400, "assistant_message", { message: "Fixed." }),
   ];
 
+  // Live 2026-11-09: "Show a sales dashboard in the canvas" finished with only "The dashboard is
+  // in the canvas." The canvas card was folded behind "Worked for ..." with the tool rows.
+  it("keeps a folded turn's latest canvas in view", () => {
+    const canvasRow = (key: string, timestamp: number): TaskFeedRow =>
+      ({
+        kind: "timeline",
+        key,
+        estimatedHeight: 320,
+        timelineIndex: timestamp,
+        item: {
+          kind: "canvas",
+          session: { id: key } as never,
+          timestamp,
+          forceSnapshot: false,
+        },
+        revision: key,
+        visiblePerfEventId: null,
+      }) as TaskFeedRow;
+    const { rows } = applyTurnDisclosures(
+      [
+        blockRow("block-canvas", [
+          makeEvent("call-canvas", 110, "tool_call", { tool: "canvas_push" }),
+        ]),
+        canvasRow("canvas:old", 115),
+        canvasRow("canvas:new", 120),
+        eventRow("answer-canvas", 130, "assistant_message", {
+          message: "The dashboard is in the canvas.",
+        }),
+      ],
+      { isTaskWorking: false, taskStartedAt: 100, isTurnExpanded: () => false },
+    );
+    expect(keysOf(rows)).toEqual([
+      `turn-header:${INITIAL_TURN_ID}`,
+      "canvas:new",
+      "event:answer-canvas",
+    ]);
+  });
+
   // Live 2026-11-09: a run stopped after an approval led with "You chose: Allow once" as its
   // answer and read "Worked for 0s" although the command ran for seconds.
   it("does not take the echo of a card answer as the turn's answer", () => {

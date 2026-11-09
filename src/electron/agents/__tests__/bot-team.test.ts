@@ -39,6 +39,26 @@ describe("configured bot team guidance", () => {
     expect(hasBotTeamDelegationRequest(text, context)).toBe(true);
     expect(TaskStrategyService.hasExplicitDelegationRequest(text)).toBe(true);
   });
+  // Live 2026-11-09: "Ask a helper agent to ..." and "Use a subagent ..." never offered
+  // spawn_agent, so the model could not hand the work off.
+  it.each([
+    "Ask a helper agent to list three competitors",
+    "Use a subagent to research the market",
+    "Can you get a sub-agent to check the logs?",
+    "Please use subagents for each region.",
+  ])("offers delegation for plain helper-agent wording: %s", (text) => {
+    expect(TaskStrategyService.hasExplicitDelegationRequest(text)).toBe(true);
+  });
+
+  it.each([
+    "What does a subagent do?",
+    "Explain how to ask an agent for help.",
+    "Do not use subagents; read the files yourself.",
+    "Ask an unrelated bot to help",
+  ])("does not read helper-agent mentions as a request: %s", (text) => {
+    expect(TaskStrategyService.hasExplicitDelegationRequest(text)).toBe(false);
+  });
+
   it("uses configured stable selectors and replies to the actual requester without inventing a lead", () => {
     const prompt = buildBotTeamContextPrompt(context);
     expect(prompt).toContain('bot="user-bot-id"');

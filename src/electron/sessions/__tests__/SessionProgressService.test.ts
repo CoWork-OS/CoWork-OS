@@ -138,6 +138,20 @@ describeWithSqlite("SessionProgressService", () => {
     expect(service.rebuild(task.id)?.headline).toBe("Working on Build the page");
   });
 
+  it("heads a failed follow-up with the reply the person saw, not the raw error", () => {
+    const task = createTask("Long chat");
+    addEvent(task.id, "event-1", "timeline_error", {
+      legacyType: "follow_up_failed",
+      message: "Context capacity recovery exhausted after 1 recovery attempt.",
+      error: "Context capacity recovery exhausted after 1 recovery attempt.",
+      userMessage: "This conversation no longer fits in the model's context window.",
+    });
+
+    expect(service.rebuild(task.id)?.headline).toBe(
+      "This conversation no longer fits in the model's context window.",
+    );
+  });
+
   it("restores pending structured input and searches only the requested workspace", () => {
     const task = createTask("Quarterly planning");
     new InputRequestStore(db).create({

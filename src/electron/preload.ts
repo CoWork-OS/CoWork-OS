@@ -9883,6 +9883,7 @@ export interface ElectronAPI {
       policyBlocked?: boolean;
       policyRequired?: boolean;
       securityReport?: import("../shared/types").CapabilitySecurityReport;
+      removable?: boolean;
     }>
   >;
   getPluginPack: (name: string) => Promise<{

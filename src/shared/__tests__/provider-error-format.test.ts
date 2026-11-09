@@ -29,6 +29,22 @@ describe("formatProviderErrorForDisplay", () => {
     expect(formatProviderErrorForDisplay(msg)).toContain("try again");
   });
 
+  it("does not tell someone with their own key to add one", () => {
+    const msg = "OpenAI-Compatible API error: 429 Too Many Requests - Rate limit reached.";
+    expect(formatProviderErrorForDisplay(msg)).toBe(
+      "Rate limit exceeded. Wait a minute and try again, or switch to another model.",
+    );
+  });
+
+  it("says an exhausted quota is a billing problem, not a wait", () => {
+    const msg =
+      "OpenAI-Compatible API error: 429 Too Many Requests - You exceeded your current quota, please check your plan and billing details.";
+    const expected =
+      "The model provider says this account is out of quota or credits. Check your plan and billing with the provider, or switch to another model.";
+    expect(formatProviderErrorForDisplay(msg)).toBe(expected);
+    expect(formatProviderErrorForDisplay(msg, { task: { source: "cron" } as Task })).toBe(expected);
+  });
+
   it("passes through non-rate-limit errors", () => {
     const msg = "Invalid API key provided";
     expect(formatProviderErrorForDisplay(msg)).toBe(msg);

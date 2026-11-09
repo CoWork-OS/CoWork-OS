@@ -2603,6 +2603,21 @@ function MainContentComponent({
   const [messageFeedbackMap, setMessageFeedbackMap] = useState<
     Map<string, "accepted" | "rejected">
   >(new Map());
+  // Feedback is saved as a task event. Reading it back keeps a thumbs mark after the session is
+  // reopened or the app restarts; before, it vanished and the answer could be rated again.
+  const shownMessageFeedback = useMemo(() => {
+    const shown = new Map<string, "accepted" | "rejected">();
+    for (const event of rawEvents) {
+      if (getEffectiveTaskEventType(event) !== "user_feedback") continue;
+      const messageId = event.payload?.messageId;
+      const decision = event.payload?.decision;
+      if (typeof messageId === "string" && (decision === "accepted" || decision === "rejected")) {
+        shown.set(messageId, decision);
+      }
+    }
+    for (const [messageId, decision] of messageFeedbackMap) shown.set(messageId, decision);
+    return shown;
+  }, [rawEvents, messageFeedbackMap]);
   const [rejectMenuOpenFor, setRejectMenuOpenFor] = useState<string | null>(null);
   const rejectMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -8682,7 +8697,7 @@ function MainContentComponent({
         returnToDefaultTranscript={returnToDefaultTranscript}
         markdownComponents={markdownComponents}
         mainBodyRef={mainBodyRef}
-        messageFeedbackMap={messageFeedbackMap}
+        messageFeedbackMap={shownMessageFeedback}
         onOpenBrowserView={onOpenBrowserView}
         onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
         onOpenDocumentArtifact={openDocumentArtifact}

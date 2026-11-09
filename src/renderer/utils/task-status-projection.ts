@@ -552,9 +552,16 @@ export function deriveModelRetryLabel(events: TaskEvent[]): string | undefined {
     const payload = asObject(events[index].payload);
     const attempt = Number(payload.attempt);
     const max = Number(payload.maxRetries);
+    // A rate limit or an overloaded provider is answering, just not yet with a result.
+    const problem =
+      payload.providerReason === "rate_limited"
+        ? "Model provider is rate-limiting requests"
+        : payload.providerReason === "overloaded"
+          ? "Model provider is overloaded"
+          : "Model provider isn't responding";
     return attempt > 0 && max > 0
-      ? `Model provider isn't responding. Retrying (${attempt} of ${max})`
-      : "Model provider isn't responding. Retrying";
+      ? `${problem}. Retrying (${attempt} of ${max})`
+      : `${problem}. Retrying`;
   }
   return undefined;
 }

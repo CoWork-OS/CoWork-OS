@@ -1246,6 +1246,7 @@ describe("TaskExecutor entrypoint guards", () => {
       })),
       updateTaskStatus: vi.fn(),
     };
+    executor.emitEvent = vi.fn();
 
     (TaskExecutor as Any).prototype.restoreFollowUpStatusAfterFailure.call(executor, "completed");
 
@@ -1253,6 +1254,37 @@ describe("TaskExecutor entrypoint guards", () => {
       "task-follow-up-unblocked",
       "completed",
     );
+    // The window only stops showing "Working" when it hears the new status.
+    expect(executor.emitEvent).toHaveBeenCalledWith("task_status", { status: "completed" });
+  });
+
+  it("explains provider refusals of a follow-up instead of calling them internal errors", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-follow-up-provider" };
+    const build = (error: Any) =>
+      (TaskExecutor as Any).prototype.buildFollowUpFailureMessage.call(executor, error);
+    const providerError = (status: number, message: string) =>
+      Object.assign(new Error(`OpenAI-Compatible API error: ${status} - ${message}`), { status });
+
+    expect(build(providerError(401, "Incorrect API key provided."))).toBe(
+      "The model provider turned down the request (OpenAI-Compatible API error: 401 - Incorrect API key provided.). Check the API key in Settings, then send your message again.",
+    );
+    expect(build(providerError(429, "Rate limit reached."))).toBe(
+      "Rate limit exceeded. Wait a minute and try again, or switch to another model.",
+    );
+    expect(build(providerError(429, "You exceeded your current quota."))).toContain(
+      "out of quota or credits",
+    );
+    expect(
+      build(
+        Object.assign(new Error("Context capacity recovery exhausted after 1 recovery attempt."), {
+          code: "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED",
+        }),
+      ),
+    ).toBe(
+      "This conversation no longer fits in the model's context window, even after compacting it. Switch to a model with a larger context window, or start a new session.",
+    );
+    expect(build(new Error("Disk full"))).toContain("I hit an internal error");
   });
 
   it("finalizeFollowUpFailure syncs task row and emits a terminal failed status", () => {

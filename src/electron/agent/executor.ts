@@ -2205,6 +2205,9 @@ export class TaskExecutor {
     const safeRestoreStatus =
       previousStatus && previousStatus !== "executing" ? previousStatus : "completed";
     this.daemon.updateTaskStatus(this.task.id, safeRestoreStatus as Any);
+    // The window learns a status change only from an event. Without one, a session whose
+    // follow-up failed kept "Working", Stop and "Running 1" until its next refresh.
+    this.emitEvent("task_status", { status: safeRestoreStatus });
   }
 
   private getLatestAssistantConversationText(): string {
@@ -10022,6 +10025,9 @@ ${transcript}
     let skipRetryDelayOnce = false;
     let deferredPrimaryOutageFailover = false;
     let providerRetryAfterMs: number | undefined;
+    // Why the last attempt failed, so the window can say "rate-limiting" rather than
+    // "isn't responding" while it waits.
+    let providerRetryReason: string | undefined;
     let timeoutReplays = 0;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -10053,6 +10059,7 @@ ${transcript}
               attempt,
               maxRetries: maxAttempts - 1,
               delayMs: delay,
+              ...(providerRetryReason ? { providerReason: providerRetryReason } : {}),
             });
             await sleep(delay);
           }
@@ -10128,6 +10135,7 @@ ${transcript}
           legacyRetrySemantics: !this.providerRetryV2Enabled,
         });
         providerRetryAfterMs = classification.retryAfterMs;
+        providerRetryReason = classification.reason;
         const errorText = String(error?.message || "").toLowerCase();
         // Replaying a timed-out request repeats the same wait without reducing the
         // cause, so it is replayed at most once (never for a local Ollama model,
@@ -41496,6 +41504,26 @@ Return ONLY a JSON object:
     }
 
     const compact = raw.length > 220 ? `${raw.slice(0, 220)}...` : raw;
+
+    // Provider refusals are not internal errors, and saying so sent people looking for a bug
+    // instead of at their key, quota or model.
+    const providerReason = classifyProviderError(error).reason;
+    if (this.isContextCapacityExhaustedError(error) || providerReason === "context_overflow") {
+      return (
+        "This conversation no longer fits in the model's context window, even after compacting it. " +
+        "Switch to a model with a larger context window, or start a new session."
+      );
+    }
+    if (providerReason === "authentication") {
+      return (
+        `The model provider turned down the request (${compact}). ` +
+        "Check the API key in Settings, then send your message again."
+      );
+    }
+    if (providerReason === "quota_exhausted" || providerReason === "rate_limited") {
+      return formatProviderErrorForDisplay(raw, { task: this.task });
+    }
+
     return (
       "I hit an internal error while processing your follow-up: " +
       compact +

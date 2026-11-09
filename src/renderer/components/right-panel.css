@@ -264,6 +264,15 @@
   cursor: pointer;
 }
 
+/* A long headline shrinks and ends in an ellipsis instead of pushing the phase off the card. */
+.session-dashboard-header > div {
+  min-width: 0;
+}
+
+.session-dashboard-header > .session-dashboard-phase {
+  flex-shrink: 0;
+}
+
 .session-dashboard-header strong {
   display: block;
   max-width: 250px;

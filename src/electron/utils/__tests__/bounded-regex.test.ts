@@ -39,10 +39,16 @@ describe("matchesPatternEach", () => {
   });
 
   it("does not drop a fast text that was running when a shared turn ran out", () => {
-    // Each text takes a few ms (\d+\d+x is cubic in the digit run) before y$ matches, so 30 of
-    // them cross several 50 ms turns. Every one must still match.
-    const texts = Array.from({ length: 30 }, () => `${"1".repeat(300)}y`);
-    expect(matchesPatternEach("\\d+\\d+x|y$", texts)).toEqual(texts.map(() => true));
+    // Each text takes about a millisecond (\d+\d+x is cubic in the digit run) before y$ matches:
+    // far below the 50 ms limit even on a slow CI runner, while 250 of them still cross several
+    // 50 ms turns. Every one must still match.
+    const texts = Array.from({ length: 250 }, () => `${"1".repeat(150)}y`);
+    let results: boolean[] = [];
+    const ms = elapsed(() => {
+      results = matchesPatternEach("\\d+\\d+x|y$", texts);
+    });
+    expect(ms).toBeGreaterThan(MATCH_TIME_LIMIT_MS);
+    expect(results).toEqual(texts.map(() => true));
   });
 
   it("throws once a shared budget is spent and stays within it", () => {

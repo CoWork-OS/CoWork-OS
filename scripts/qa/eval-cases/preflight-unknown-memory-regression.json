@@ -1,0 +1,18 @@
+{
+  "id": "preflight-unknown-memory-2026-11-07",
+  "title": "Unavailable memory cannot become an unsupported no-prior-agreement assumption",
+  "source": {
+    "audit": "free-openrouter-preflight-assumption-validation-2026-11-07"
+  },
+  "prompt": "Frame an Atlas verification task while saved memory is withheld, empty, or unavailable. A recorded model reply incorrectly assumes that no prior agreed command or review requirement exists.",
+  "assertions": {
+    "requiredBehavior": "When the prompt has no referenced memory evidence, render application-owned unknown-context framing without a model call. Keep current-request details authoritative. Do not infer an agreement's absence or request withheld memory. Folder guidance and database headings without evidence refs do not count as facts. Preserve model-based framing when repository or database-backed evidence is available.",
+    "failureBehavior": "Retrieval failures without remaining evidence use the same unknown-context framing. Cancellation during retrieval emits no framing. Policy-resolution errors retain the existing fail-soft behavior."
+  },
+  "executableTests": [
+    "src/electron/agent/__tests__/executor-preflight-memory.test.ts",
+    "src/electron/agent/__tests__/executor-memory-prompt-surfaces.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/__tests__/executor-preflight-memory.test.ts src/electron/agent/__tests__/executor-memory-prompt-surfaces.test.ts",
+  "notes": "Traceability specification for deterministic behavior, not a probabilistic model-quality score. Live acceptance must verify emitted text and zero model requests for no-evidence cases, plus a free-model control with retrieved evidence."
+}

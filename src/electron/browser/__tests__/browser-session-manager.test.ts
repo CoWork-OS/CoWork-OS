@@ -12,6 +12,22 @@ import {
 import { el, FakePage } from "./fake-page";
 
 describe("BrowserSessionManager helpers", () => {
+  it("isolates agent preview grants by task and session and revokes them on policy changes", () => {
+    const manager = new BrowserSessionManager();
+    const policy = { networkEnabled: false };
+    const url = "http://127.0.0.1:4173";
+    manager.setAccessPolicy("a", policy, "one");
+    manager.setAccessPolicy("b", policy, "one");
+    manager.allowLocalPreviewUrl(url, "a", "one");
+    expect(() => manager.assertUrlAllowed("a", url, "one")).not.toThrow();
+    expect(() => manager.assertUrlAllowed("b", url, "one")).toThrow();
+    expect(() => manager.assertUrlAllowed("a", url, "two")).toThrow();
+    manager.setAccessPolicy("a", { networkEnabled: false, accessNetworkMode: "disabled" }, "one");
+    expect(() => manager.assertUrlAllowed("a", url, "one")).toThrow();
+    manager.allowLocalPreviewUrl(url, "a", "one");
+    manager.clearAccessPolicy("a", "one");
+    expect(() => manager.assertUrlAllowed("a", url, "one")).toThrow();
+  });
   it("normalizes bare localhost and domain URLs", () => {
     expect(normalizeBrowserUrl("localhost:5173/app")).toBe("http://localhost:5173/app");
     expect(normalizeBrowserUrl("example.com")).toBe("https://example.com");
@@ -55,7 +71,8 @@ describe("BrowserSessionManager helpers", () => {
 
   it("enforces disabled profile networking at the visible request boundary", () => {
     const manager = new BrowserSessionManager();
-    const isAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+    const rawIsAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+    const isAllowed = (policy: Any, url: string) => rawIsAllowed(policy, url, "owner:default");
 
     expect(
       isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, "https://example.com"),
@@ -64,13 +81,14 @@ describe("BrowserSessionManager helpers", () => {
 
   it("allows a registered loopback preview without widening remote networking", () => {
     const manager = new BrowserSessionManager();
-    const isAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+    const rawIsAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+    const isAllowed = (policy: Any, url: string) => rawIsAllowed(policy, url, "owner:default");
     const previewUrl = "http://127.0.0.1:4173";
 
     expect(isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, previewUrl)).toBe(
       false,
     );
-    manager.allowLocalPreviewUrl(previewUrl);
+    manager.allowLocalPreviewUrl(previewUrl, "owner");
     expect(isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, previewUrl)).toBe(
       true,
     );
@@ -88,11 +106,12 @@ describe("BrowserSessionManager helpers", () => {
       fs.writeFileSync(outsidePath, "<p>secret</p>");
       const pageUrl = pathToFileURL(pagePath).href;
       const manager = new BrowserSessionManager();
-      const isAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+      const rawIsAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+      const isAllowed = (policy: Any, url: string) => rawIsAllowed(policy, url, "owner:default");
       const policy = { networkEnabled: false };
 
       expect(isAllowed(policy, pageUrl)).toBe(false);
-      manager.allowLocalPreviewUrl(pageUrl);
+      manager.allowLocalPreviewUrl(pageUrl, "owner");
       expect(isAllowed(policy, pageUrl)).toBe(true);
       expect(isAllowed(policy, pathToFileURL(outsidePath).href)).toBe(false);
 

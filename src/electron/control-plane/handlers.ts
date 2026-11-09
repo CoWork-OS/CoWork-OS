@@ -56,7 +56,6 @@ import type {
   ManagedDeviceAlert,
   ManagedDeviceAttentionState,
   ManagedDeviceSummary,
-  NodeInfo,
   RemoteGatewayConfig,
   RemoteGatewayStatus,
   SSHTunnelConfig,
@@ -525,73 +524,39 @@ function findManagedDeviceById(deviceId?: string | null): ManagedDevice | null {
   return listStoredManagedDevices().find((device) => device.id === deviceId) || null;
 }
 
-async function getManagedRemoteNodeInfo(device: ManagedDevice): Promise<NodeInfo | null> {
-  const fleetManager = getFleetConnectionManager();
-  const client = fleetManager?.getClient(device.id);
-  const status = fleetManager?.getStatus(device.id);
-  if (!client || status?.state !== "connected") {
-    return null;
-  }
-
-  let configSnapshot: Any = null;
-  try {
-    configSnapshot = await client.request(Methods.CONFIG_GET, undefined, 5000);
-  } catch {
-    configSnapshot = null;
-  }
-
-  const runtime = configSnapshot?.runtime || {};
-  const hostname = getHostnameFromUrl(device.config?.url) || device.modelIdentifier;
-  return {
-    id: device.taskNodeId || `remote-gateway:${device.id}`,
-    displayName: device.name || "Remote Device",
-    platform: toNodePlatform(runtime.platform || device.platform),
-    version:
-      typeof runtime.coworkVersion === "string"
-        ? runtime.coworkVersion
-        : device.version || "unknown",
-    deviceId: status.clientId,
-    modelIdentifier: hostname,
-    connectedAt: status.connectedAt || Date.now(),
-    lastActivityAt: status.lastActivityAt || status.connectedAt || Date.now(),
-  };
-}
-
-async function getManagedRemoteNodeAliases(
-  device: ManagedDevice,
-  nodeId?: string,
-): Promise<string[]> {
+async function getManagedRemoteNodeAliases(device: ManagedDevice): Promise<string[]> {
   const aliases = new Set<string>();
-  if (typeof nodeId === "string" && nodeId.trim()) {
-    aliases.add(nodeId.trim());
-  }
+  aliases.add(device.id);
   aliases.add(device.taskNodeId || `remote-gateway:${device.id}`);
   const legacyRemoteNodeId = getLegacyRemoteNodeId(device.config?.url);
   if (legacyRemoteNodeId) aliases.add(legacyRemoteNodeId);
   if (device.clientId) aliases.add(device.clientId);
 
-  const remoteNode = await getManagedRemoteNodeInfo(device);
-  if (remoteNode) {
-    aliases.add(remoteNode.id);
-    if (remoteNode.deviceId) aliases.add(remoteNode.deviceId);
-  }
+  // Identity lookup must not contact unrelated remotes or add the requested ID
+  // to each candidate's aliases. A connected client's identity is local state.
+  const status = getFleetConnectionManager()?.getStatus(device.id);
+  if (status?.clientId) aliases.add(status.clientId);
 
   return Array.from(aliases);
 }
 
-async function findManagedRemoteDeviceByNodeId(nodeId: string): Promise<ManagedDevice | null> {
+export async function findManagedRemoteDeviceByNodeId(
+  nodeId: string,
+): Promise<ManagedDevice | null> {
   const normalized = nodeId.trim();
   if (!normalized || isLocalManagedDeviceIdentifier(normalized)) {
     return null;
   }
   const remoteDevices = listStoredManagedDevices();
+  let match: ManagedDevice | null = null;
   for (const device of remoteDevices) {
-    const aliases = await getManagedRemoteNodeAliases(device, normalized);
+    const aliases = await getManagedRemoteNodeAliases(device);
     if (aliases.includes(normalized)) {
-      return device;
+      if (match) throw new Error("Remote device identity is ambiguous");
+      match = device;
     }
   }
-  return null;
+  return match;
 }
 
 async function getDefaultLocalWorkspaceId(db: Any): Promise<string | undefined> {
@@ -848,7 +813,7 @@ async function syncRemoteShadowTasksForNode(nodeId: string): Promise<void> {
       : [];
     const repo = new TaskRepository(db);
     const targetNodeId = remoteDevice.taskNodeId || `remote-gateway:${remoteDevice.id}`;
-    const targetNodeAliases = await getManagedRemoteNodeAliases(remoteDevice, nodeId);
+    const targetNodeAliases = await getManagedRemoteNodeAliases(remoteDevice);
     const remoteTaskIds: string[] = [];
     let oldestFetchedCreatedAt: number | undefined;
     for (const remoteTask of remoteTasks) {
@@ -901,7 +866,7 @@ async function listTasksForNode(nodeId: string): Promise<Task[]> {
   await syncRemoteShadowTasksForNode(nodeId);
   const remoteDevice = await findManagedRemoteDeviceByNodeId(nodeId);
   if (!remoteDevice) return [];
-  const aliases = await getManagedRemoteNodeAliases(remoteDevice, nodeId);
+  const aliases = await getManagedRemoteNodeAliases(remoteDevice);
   return taskRepo.findByTargetNodeIds(aliases, 50);
 }
 
@@ -1134,7 +1099,7 @@ async function buildRemoteManagedDeviceSummary(
   const connected = status.state === "connected";
   const db = controlPlaneDeps?.dbManager?.getDatabase() || null;
   const taskRepo = db ? new TaskRepository(db) : null;
-  const aliases = await getManagedRemoteNodeAliases(device, device.taskNodeId || device.id);
+  const aliases = await getManagedRemoteNodeAliases(device);
   const fallbackTasks = taskRepo ? await taskRepo.findByTargetNodeIds(aliases, 12) : [];
 
   let configSnapshot: Any = null;

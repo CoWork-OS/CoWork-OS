@@ -438,6 +438,12 @@ export class MemoryService {
     return this.initialized ? this.sql : undefined;
   }
 
+  /** Resolve current workspace authority through the existing async repository. */
+  static async getWorkspace(workspaceId: string) {
+    if (!this.initialized || !this.workspaceRepo) return null;
+    return (await this.workspaceRepo.findById(workspaceId)) ?? null;
+  }
+
   static initFtsWorker(worker: import("../database/FtsWorkerClient").FtsWorkerClient): void {
     this.ftsWorker = worker;
     // The worker ranks with its own embedding cache (DB4); every persisted change

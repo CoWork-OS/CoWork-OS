@@ -6,7 +6,8 @@ import {
   WORKSPACE_KIT_CONTRACTS,
   WORKSPACE_PROMPT_ORDER,
 } from "./kit-contracts";
-import { type ParsedKitDoc, parseKitDocument } from "./kit-parser";
+import { type ParsedKitDoc, parseKitDocument, parseKitDocumentFromString } from "./kit-parser";
+import { readConfinedFileSync } from "../utils/confined-file";
 
 export interface InjectionContext {
   workspacePath: string;
@@ -101,13 +102,23 @@ export function buildRoleKitSection(
   workspacePath: string,
   roleDir: string,
   file: (typeof ROLE_KIT_FILES)[number],
+  readGuard?: (candidatePath: string) => boolean,
 ): RenderedKitSection | null {
   const contract = WORKSPACE_KIT_CONTRACTS[file];
   if (!contract) return null;
 
   const relPath = path.join(".cowork", "agents", roleDir, file).replace(/\\/g, "/");
   const absPath = path.join(workspacePath, ".cowork", "agents", roleDir, file);
-  const parsed = parseKitDocument(absPath, contract, relPath);
+  let parsed: ParsedKitDoc | null;
+  try {
+    if (roleDir === "." || roleDir === ".." || /[\\/]/.test(roleDir)) return null;
+    if (readGuard && !readGuard(absPath)) return null;
+    const raw = readConfinedFileSync(workspacePath, absPath);
+    if (readGuard && !readGuard(absPath)) return null;
+    parsed = parseKitDocumentFromString(raw, contract, file, relPath);
+  } catch {
+    return null;
+  }
   if (!parsed) return null;
 
   return {

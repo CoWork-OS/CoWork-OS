@@ -75,6 +75,39 @@ describe("MacOSSandbox", () => {
     spawnMock.mockImplementation(() => makeChildProcess());
   });
 
+  it.each(["file", "directory"])(
+    "does not rewrite exposed npmrc after scratch %s replacement",
+    async (kind) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-npmrc-reuse-"));
+      const source = path.join(root, "source-npmrc");
+      const outside = path.join(root, "outside");
+      fs.mkdirSync(outside);
+      const victim = path.join(outside, "npmrc");
+      fs.writeFileSync(victim, "preserve");
+      fs.writeFileSync(source, "fund=false\n");
+      vi.stubEnv("NPM_CONFIG_USERCONFIG", source);
+      const sandbox = new MacOSSandbox(makeWorkspace({ path: root }));
+      try {
+        await sandbox.execute("/bin/true", [], { cwd: root });
+        const config = spawnMock.mock.calls.at(-1)![2].env.NPM_CONFIG_USERCONFIG as string;
+        expect(fs.readFileSync(config, "utf8")).toBe("fund=false\n");
+        if (kind === "file") {
+          fs.unlinkSync(config);
+          fs.symlinkSync(victim, config);
+        } else {
+          fs.rmSync(path.dirname(config), { recursive: true });
+          fs.symlinkSync(outside, path.dirname(config));
+        }
+        await sandbox.execute("/bin/true", [], { cwd: root });
+        expect(fs.readFileSync(victim, "utf8")).toBe("preserve");
+      } finally {
+        sandbox.cleanup();
+        vi.unstubAllEnvs();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("passes multiline shell commands as a single -c argument to sandbox-exec", async () => {
     const sandbox = new MacOSSandbox(makeWorkspace());
     const command = "mkdir -p out && cat > out/viewer.html <<'EOF'\n<html></html>\nEOF";
@@ -256,15 +289,16 @@ describe("MacOSSandbox", () => {
       return profile;
     }
 
-    it("keeps listening denied unless the caller opts in", () => {
+    it("keeps listening denied by default", () => {
       const profile = profileFor({});
       for (const rule of LISTEN_RULES) expect(profile).not.toContain(rule);
       expect(profile).toContain("(deny network*)");
     });
 
-    it("allows TCP listening, keeps egress loopback-only and leaves UDP binds denied", () => {
+    it("ignores the legacy listener opt-in while keeping outbound loopback usable", () => {
       const profile = profileFor({ allowLoopbackListen: true });
-      for (const rule of LISTEN_RULES) expect(profile).toContain(rule);
+      for (const rule of LISTEN_RULES) expect(profile).not.toContain(rule);
+      expect(profile).not.toMatch(/\(allow network-(?:bind|inbound)/);
       expect(profile).toContain("(deny network*)");
       expect(profile).toContain('(allow network-outbound\n  (remote tcp "localhost:*")');
       expect(profile).not.toContain("(allow network*)");

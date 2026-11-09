@@ -391,6 +391,15 @@ run arbitrary shell/code networking unless a domain-aware proxy exists; the
 request fails closed. Full-profile shell egress also depends on the coarse
 administrator shell-network gate.
 
+On macOS, subprocess TCP listeners also require enabled network access and
+administrator permission. A network-disabled command cannot start a dev or test
+server, even on `127.0.0.1` or `::1`. Outbound connections to existing loopback
+services remain available. The kernel denies listening in child processes too,
+including children that detach into a different process group. Playwright QA
+reports a policy error before starting a macOS server without this authority.
+Docker network isolation continues to permit servers inside its private
+container; they are not published to the host.
+
 In a network `on-request` profile, every `run_command` invocation requires
 explicit approval for the command and its potential network access, including
 background commands. Shell text cannot reliably identify networking inside

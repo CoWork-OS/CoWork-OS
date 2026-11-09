@@ -16,6 +16,7 @@ import {
   BROWSER_DOWNLOADS_DIR,
   BrowserService,
   paginatePageText,
+  validateBrowserScrollInput,
   type PageContentOptions,
 } from "../browser/browser-service";
 import {
@@ -564,12 +565,16 @@ export class BrowserTools {
    * sees the URL without the #fragment while navigation checks see it with
    * one, so both spellings are registered.
    */
-  private allowLocalPageInWorkbench(url: string): void {
-    this.browserWorkbenchService.allowLocalPreviewUrl(url);
+  private allowLocalPageInWorkbench(url: string, sessionId?: string): void {
+    this.browserWorkbenchService.allowLocalPreviewUrl(url, this.taskId, sessionId);
     const withoutFragment = new URL(url);
     withoutFragment.hash = "";
     if (withoutFragment.href !== url) {
-      this.browserWorkbenchService.allowLocalPreviewUrl(withoutFragment.href);
+      this.browserWorkbenchService.allowLocalPreviewUrl(
+        withoutFragment.href,
+        this.taskId,
+        sessionId,
+      );
     }
   }
 
@@ -2615,7 +2620,7 @@ export class BrowserTools {
         const localPage = navigationUrl.startsWith("file:");
         if (await this.shouldUseVisibleWorkbenchForNavigation(input)) {
           await beforeEffect();
-          if (localPage) this.allowLocalPageInWorkbench(navigationUrl);
+          if (localPage) this.allowLocalPageInWorkbench(navigationUrl, this.getSessionId(input));
           const visibleResult = await this.browserWorkbenchService.navigate({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -3098,8 +3103,9 @@ export class BrowserTools {
         await beforeEffect();
         // Same agent allowance as browser_navigate: a local dev server for the TTL,
         // or the approved local page.
-        if (url.startsWith("file:")) this.allowLocalPageInWorkbench(url);
-        else if (url) this.browserWorkbenchService.allowLocalPreviewUrl(url);
+        if (url.startsWith("file:")) this.allowLocalPageInWorkbench(url, sessionId);
+        else if (url)
+          this.browserWorkbenchService.allowLocalPreviewUrl(url, this.taskId, sessionId);
         const background = input?.background === true;
         const tabId = await this.browserWorkbenchService.openTab({
           taskId: this.taskId,
@@ -3510,12 +3516,13 @@ export class BrowserTools {
       }
 
       case "browser_scroll": {
+        const scroll = validateBrowserScrollInput(input.direction, input.amount);
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
           await beforeEffect();
           const result = await this.browserWorkbenchService.scroll(
             this.taskId,
-            input.direction,
-            input.amount,
+            scroll.direction,
+            scroll.amount,
             this.getSessionId(input),
           );
           if (result) {
@@ -3528,7 +3535,7 @@ export class BrowserTools {
           }
         }
         await beforeEffect();
-        const result = await this.browserService.scroll(input.direction, input.amount);
+        const result = await this.browserService.scroll(scroll.direction, scroll.amount);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "scroll",
           direction: input.direction,

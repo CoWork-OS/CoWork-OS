@@ -173,6 +173,27 @@ describe("ShellTools auto-approval", () => {
     expect(logEvent.mock.calls.some(([, event]) => event === "approval_requested")).toBe(false);
   });
 
+  it("keeps TCP listener authority off for a network-disabled foreground command", async () => {
+    const workspace = {
+      ...mockWorkspace,
+      permissions: {
+        ...mockWorkspace.permissions,
+        network: false,
+        accessNetworkMode: "disabled",
+        accessSandboxMode: "workspace-write",
+      },
+    } as Workspace;
+    const tools = new ShellTools(workspace, mockDaemon, "task-offline-listener");
+    await expect(tools.runCommand(SAFE_CMD_2, { cwd: workspace.path })).resolves.toMatchObject({
+      success: true,
+    });
+    expect(sandboxMocks.sandbox.execute).toHaveBeenCalledWith(
+      SAFE_CMD_2,
+      [],
+      expect.objectContaining({ allowNetwork: false, allowLoopbackListen: false }),
+    );
+  });
+
   it("does not prompt when the typed broker denies a never-policy shell action", async () => {
     const requestApproval = vi.fn().mockResolvedValue(true);
     const authorizeToolAction = vi.fn().mockResolvedValue(false);

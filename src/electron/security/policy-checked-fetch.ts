@@ -55,6 +55,8 @@ export interface PolicyCheckedFetchOptions {
   onHop?: (url: string) => void;
   /** Refuse loopback destinations (by literal and by DNS answer) as well as private ones. */
   allowLoopback?: boolean;
+  /** Refuse transports (including environment proxies) that cannot pin the destination. */
+  requirePinnedDestination?: boolean;
   /** Headers computed for each hop's URL, applied over the caller's headers for that hop only. */
   hopHeaders?: (url: URL) => Record<string, string> | undefined;
 }
@@ -151,10 +153,17 @@ export async function fetchWithPolicyCheckedRedirects(
       : currentInit;
     const response =
       options.allowLoopback === false
-        ? await pinnedFetch(currentUrl, { ...hopInit, redirect: "manual" }, false, {
-            allowLoopback: false,
-          })
-        : await pinnedFetch(currentUrl, { ...hopInit, redirect: "manual" });
+        ? await pinnedFetch(
+            currentUrl,
+            { ...hopInit, redirect: "manual" },
+            options.requirePinnedDestination === true,
+            {
+              allowLoopback: false,
+            },
+          )
+        : options.requirePinnedDestination === true
+          ? await pinnedFetch(currentUrl, { ...hopInit, redirect: "manual" }, true)
+          : await pinnedFetch(currentUrl, { ...hopInit, redirect: "manual" });
 
     if (!followRedirects || !isRedirectStatus(response.status)) {
       return { response, finalUrl: currentUrl, chain };

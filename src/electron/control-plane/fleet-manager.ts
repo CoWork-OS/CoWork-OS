@@ -37,9 +37,11 @@ export interface FleetConnectionManagerCallbacks {
 
 interface FleetConnectionEntry {
   deviceId: string;
-  client: RemoteGatewayClient;
+  client: RemoteGatewayClient | null;
   tunnel?: SSHTunnelManager;
   observer: FleetObserverEntry[];
+  cancelled?: boolean;
+  error?: string;
 }
 
 function toLevelForState(state: RemoteGatewayConnectionState): FleetObserverEntry["level"] {
@@ -123,7 +125,10 @@ export class FleetConnectionManager {
       return { state: "disconnected" };
     }
     return {
-      ...entry.client.getStatus(),
+      ...(entry.client?.getStatus() ?? {
+        state: entry.cancelled ? "disconnected" : entry.error ? "error" : "connecting",
+        ...(entry.error ? { error: entry.error } : {}),
+      }),
       ...(entry.tunnel ? { sshTunnel: entry.tunnel.getStatus() } : {}),
     };
   }
@@ -139,14 +144,41 @@ export class FleetConnectionManager {
     const existing = this.connections.get(device.id);
     const observer = existing?.observer ?? [];
     if (existing) {
-      existing.client.disconnect();
+      existing.cancelled = true;
+      existing.client?.disconnect();
       existing.tunnel?.disconnect();
     }
 
     const effectiveConfig = { ...device.config };
     const entry: FleetConnectionEntry = {
       deviceId: device.id,
-      client: new RemoteGatewayClient({
+      client: null,
+      observer,
+    };
+    this.connections.set(device.id, entry);
+
+    try {
+      if (effectiveConfig.sshTunnel?.enabled) {
+        const tunnel = new SSHTunnelManager({ ...effectiveConfig.sshTunnel, enabled: true });
+        entry.tunnel = tunnel;
+        tunnel.on("stateChange", (_state: string, error?: string) => {
+          const status = tunnel.getStatus();
+          pushObserver(entry, {
+            title: `SSH tunnel ${status.state}`,
+            detail: error || status.error,
+            level: toLevelForTunnelState(status.state),
+          });
+          this.callbacks.onTunnelStateChange?.({ deviceId: device.id, status, error });
+        });
+        await tunnel.connect();
+        effectiveConfig.url = tunnel.getLocalUrl();
+      }
+      if (entry.cancelled || this.connections.get(device.id) !== entry) {
+        throw new Error("Remote device connection was cancelled");
+      }
+      // The client copies its configuration. Resolve the tunnel first so both
+      // initial authentication and automatic reconnect use only its listener.
+      entry.client = new RemoteGatewayClient({
         ...effectiveConfig,
         onStateChange: (state, error) => {
           pushObserver(entry, {
@@ -177,40 +209,12 @@ export class FleetConnectionManager {
             status: this.getStatus(device.id),
           });
         },
-      }),
-      observer,
-    };
-
-    this.connections.set(device.id, entry);
-
-    if (effectiveConfig.sshTunnel?.enabled) {
-      const tunnel = new SSHTunnelManager({
-        ...effectiveConfig.sshTunnel,
-        enabled: true,
       });
-      entry.tunnel = tunnel;
-      tunnel.on("stateChange", (_state: string, error?: string) => {
-        const status = tunnel.getStatus();
-        pushObserver(entry, {
-          title: `SSH tunnel ${status.state}`,
-          detail: error || status.error,
-          level: toLevelForTunnelState(status.state),
-        });
-        this.callbacks.onTunnelStateChange?.({
-          deviceId: device.id,
-          status,
-          error,
-        });
-      });
-      await tunnel.connect();
-      effectiveConfig.url = tunnel.getLocalUrl();
-    }
-
-    try {
       await entry.client.connect();
       return this.getStatus(device.id);
     } catch (error) {
-      entry.client.disconnect();
+      entry.error = error instanceof Error ? error.message : String(error);
+      entry.client?.disconnect();
       entry.tunnel?.disconnect();
       throw error;
     }
@@ -219,7 +223,8 @@ export class FleetConnectionManager {
   disconnectDevice(deviceId: string): void {
     const entry = this.connections.get(deviceId);
     if (!entry) return;
-    entry.client.disconnect();
+    entry.cancelled = true;
+    entry.client?.disconnect();
     entry.tunnel?.disconnect();
   }
 

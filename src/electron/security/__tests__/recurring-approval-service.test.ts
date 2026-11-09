@@ -1,8 +1,10 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   canonicalizeRecurringApprovalOperation,
   fingerprintRecurringApprovalOperation,
+  RecurringApprovalStore,
 } from "../recurring-approval-service";
 import { RecurringApprovalService } from "../recurring-approval-repository-facades";
 
@@ -41,6 +43,56 @@ const baseInput = {
 };
 
 describe("RecurringApprovalService", () => {
+  it.each([
+    ["long suffix", "x".repeat(4096) + "approved", "x".repeat(4096) + "different"],
+    ["whitespace", "approved", " approved "],
+    ["inline secret", "password=approved", "password=different"],
+    [
+      "URL secret",
+      "https://u:approved@example.com/?token=approved",
+      "https://u:different@example.com/?token=different",
+    ],
+  ])(
+    "binds the complete %s while keeping the stored preview redacted",
+    (_name, approved, changed) => {
+      const make = (body: string) => ({ ...baseInput, toolInput: { body, method: "POST" } });
+      expect(fingerprintRecurringApprovalOperation(make(approved))).not.toBe(
+        fingerprintRecurringApprovalOperation(make(changed)),
+      );
+      expect(
+        fingerprintRecurringApprovalOperation({ ...baseInput, toolInput: { b: 2, a: approved } }),
+      ).toBe(
+        fingerprintRecurringApprovalOperation({ ...baseInput, toolInput: { a: approved, b: 2 } }),
+      );
+    },
+  );
+
+  it("does not match a legacy lossy grant or a changed HTTP body", () => {
+    const db = createDb();
+    try {
+      const store = new RecurringApprovalStore(db);
+      const approved = { ...baseInput, toolInput: { body: "x".repeat(4096) + "approved" } };
+      const legacyInput = { ...approved, policyVersion: "permission-operation-v1" };
+      const legacyHash = createHash("sha256")
+        .update(canonicalizeRecurringApprovalOperation(legacyInput))
+        .digest("hex");
+      store.create({
+        ...legacyInput,
+        fingerprint: legacyHash,
+        effect: "allow",
+        scopePreview: "legacy",
+      });
+      expect(store.findActive(legacyInput)).toBeNull();
+      store.create({ ...approved, effect: "allow", scopePreview: "current" });
+      expect(store.findActive(approved)?.summary.effect).toBe("allow");
+      expect(
+        store.findActive({ ...approved, toolInput: { body: "x".repeat(4096) + "changed" } }),
+      ).toBeNull();
+      expect(store.findActive(approved)?.operationJson).not.toContain("approved");
+    } finally {
+      db.close();
+    }
+  });
   it("canonicalizes argument order and redacts sensitive values", () => {
     const first = canonicalizeRecurringApprovalOperation(baseInput);
     const second = canonicalizeRecurringApprovalOperation({
@@ -80,7 +132,7 @@ describe("RecurringApprovalService", () => {
     expect(
       fingerprintRecurringApprovalOperation({
         ...baseInput,
-        policyVersion: "permission-operation-v2",
+        policyVersion: "permission-operation-v3",
       }),
     ).not.toBe(original);
   });

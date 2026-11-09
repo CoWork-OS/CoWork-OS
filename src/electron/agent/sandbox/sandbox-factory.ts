@@ -39,9 +39,9 @@ export interface SandboxOptions {
   /** Allow network access */
   allowNetwork?: boolean;
   /**
-   * With network denied, still let the command accept TCP connections so local
-   * servers work. macOS seatbelt cannot limit this to loopback, so a caller
-   * that sets it must also watch the process group with LoopbackListenerGuard.
+   * @deprecated Ignored. TCP listeners on macOS require allowNetwork and the
+   * effective workspace/administrator network authority. A loopback exception
+   * cannot be safely enforced by macOS seatbelt or a process-group monitor.
    */
   allowLoopbackListen?: boolean;
   /** spawnProcess only: lead a new process group so the whole tree can be stopped. */

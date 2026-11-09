@@ -17,6 +17,7 @@ export class GroqProvider implements LLMProvider {
     const baseUrl = config.groqBaseUrl || GROQ_BASE_URL;
 
     this.client = new OpenAICompatibleProvider({
+      diagnosticFetch: config.diagnosticFetch,
       type: "groq",
       providerName: "Groq",
       apiKey,

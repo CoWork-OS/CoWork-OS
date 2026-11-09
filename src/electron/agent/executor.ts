@@ -9186,7 +9186,9 @@ ${transcript}
           lines.push(role.systemPrompt.trim());
         }
 
-        const rolePersona = buildRolePersonaPrompt(role, this.workspace.path);
+        const rolePersona = buildRolePersonaPrompt(role, this.workspace.path, {
+          readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
+        });
         if (rolePersona) {
           lines.push(rolePersona);
         }

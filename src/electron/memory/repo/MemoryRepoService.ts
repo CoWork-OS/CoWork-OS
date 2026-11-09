@@ -19,6 +19,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { writeConfinedFileSync } from "../../utils/confined-file";
 import type {
   MemoryRepoKeepTarget,
   MemoryRepoStatusReport,
@@ -1967,9 +1968,7 @@ export class MemoryRepoService {
     try {
       for (const [file, text] of files) {
         if (!isSafeRepoPath(file)) throw new Error(`unsafe memory path: ${file}`);
-        const absolute = path.join(worktree, file);
-        await fs.mkdir(path.dirname(absolute), { recursive: true });
-        await fs.writeFile(absolute, text.endsWith("\n") ? text : `${text}\n`, { mode: 0o600 });
+        writeConfinedFileSync(worktree, file, text.endsWith("\n") ? text : `${text}\n`);
       }
       await this.git(worktree, ["add", "-A", "--", ...files.keys()]);
       await this.git(worktree, [

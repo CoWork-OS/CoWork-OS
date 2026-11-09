@@ -232,7 +232,6 @@ describe("macOS toolchain access", () => {
         "registry=https://npm.example.com/",
         "@corp:registry=https://npm.example.com/",
         "ignore-scripts=true",
-        "; comment",
       ].join("\n"),
     );
     fs.writeFileSync(path.join(home, ".npmrc"), "//r/:_authToken=abc\nfund=false\n");
@@ -247,5 +246,36 @@ describe("macOS toolchain access", () => {
     expect(stripUrlCredentials("http://h:1")).toBe("http://h:1");
     expect(stripUrlCredentials("a:b@h:1")).toBeUndefined();
     expect(stripUrlCredentials("h:1")).toBe("h:1");
+  });
+
+  it("copies only safe npmrc fields and removes credential-bearing URL representations", () => {
+    const clean = sanitizeNpmrc(
+      [
+        'proxy="http://alice:p%40ss@proxy.example.com:3128"',
+        "@corp:registry='https://token@npm.example.com/path?token=hidden&region=eu#secret'",
+        "https-proxy=https://proxy.example.com:8443",
+        "registry=https://${NPM_TOKEN}@npm.example.com/",
+        "userconfig=/private/credentials",
+        "unknown-token=hidden",
+        "ignore-scripts=true",
+        "fund=false",
+      ].join("\n"),
+    );
+    expect(clean).toContain("proxy=http://proxy.example.com:3128/");
+    expect(clean).toContain("@corp:registry=https://npm.example.com/path?region=eu");
+    expect(clean).toContain("ignore-scripts=true");
+    expect(clean).not.toMatch(/alice|p%40ss|token@|hidden|secret|userconfig|NPM_TOKEN/);
+  });
+
+  it.each(["symlink", "hardlink"])("never overwrites an existing npmrc %s", (kind) => {
+    fs.writeFileSync(path.join(home, ".npmrc"), "fund=false\n");
+    const victim = path.join(base, "outside-canary");
+    fs.writeFileSync(victim, "preserve");
+    const scratch = path.join(base, "scratch");
+    fs.mkdirSync(scratch);
+    if (kind === "symlink") fs.symlinkSync(victim, path.join(scratch, "npmrc"));
+    else fs.linkSync(victim, path.join(scratch, "npmrc"));
+    expect(() => writeSanitizedNpmrc(home, {}, scratch)).toThrow();
+    expect(fs.readFileSync(victim, "utf8")).toBe("preserve");
   });
 });

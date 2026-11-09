@@ -23,6 +23,33 @@ afterEach(() => {
 });
 
 describe("workspace-permission-manifest", () => {
+  it.each(["leaf", "ancestor"])("refuses a %s link when mirroring approvals", (kind) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "permission-links-"));
+    tempDirs.push(root);
+    const workspacePath = path.join(root, "workspace");
+    const outside = path.join(root, "outside");
+    fs.mkdirSync(workspacePath);
+    fs.mkdirSync(outside);
+    const rule = {
+      effect: "allow",
+      source: "workspace_manifest",
+      scope: { kind: "command_prefix", prefix: "git status" },
+    } as PermissionRule;
+    const sentinel = JSON.stringify({ version: 1, rules: [rule] });
+    fs.writeFileSync(path.join(outside, "permissions.json"), sentinel);
+    fs.mkdirSync(path.join(workspacePath, ".cowork"));
+    if (kind === "ancestor") fs.symlinkSync(outside, path.join(workspacePath, ".cowork/policy"));
+    else {
+      fs.mkdirSync(path.join(workspacePath, ".cowork/policy"));
+      fs.symlinkSync(
+        path.join(outside, "permissions.json"),
+        getWorkspacePermissionManifestPath(workspacePath),
+      );
+    }
+    expect(appendWorkspacePermissionManifestRule(workspacePath, rule).success).toBe(false);
+    expect(removeWorkspacePermissionManifestRule(workspacePath, rule).success).toBe(false);
+    expect(fs.readFileSync(path.join(outside, "permissions.json"), "utf8")).toBe(sentinel);
+  });
   it("round-trips workspace rules and avoids duplicates", () => {
     const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-permissions-"));
     tempDirs.push(workspacePath);

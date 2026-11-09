@@ -16,6 +16,7 @@ export type DispatchParentTask = {
 export type DispatchPromptOptions = {
   planSummary?: string;
   workspacePath?: string | null;
+  readGuard?: (candidatePath: string) => boolean;
   includeRoleProfile?: boolean;
   /**
    * When false, omit role description/systemPrompt from the dispatch prompt.
@@ -40,6 +41,7 @@ export const buildAgentDispatchPrompt = (
   if (includeRoleProfile) {
     const rolePersona = buildRolePersonaPrompt(role, options?.workspacePath, {
       includeDbFallback: true,
+      readGuard: options?.readGuard,
     });
     if (rolePersona) {
       lines.push(rolePersona);

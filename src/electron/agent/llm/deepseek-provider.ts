@@ -13,6 +13,7 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
     }
 
     super({
+      diagnosticFetch: config.diagnosticFetch,
       type: "deepseek",
       providerName: "DeepSeek",
       apiKey: config.deepseekApiKey,

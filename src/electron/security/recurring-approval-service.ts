@@ -8,7 +8,7 @@ import type {
 } from "../../shared/types";
 import { redactAgentSecurityRecord } from "./numbat/NumbatRedaction";
 
-export const RECURRING_APPROVAL_POLICY_VERSION = "permission-operation-v1";
+export const RECURRING_APPROVAL_POLICY_VERSION = "permission-operation-v2";
 export const DEFAULT_RECURRING_APPROVAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const SENSITIVE_KEY =
@@ -28,7 +28,11 @@ function safeCanonicalize(value: unknown, key?: string, hashSensitiveValues = fa
     typeof value === "number" ||
     typeof value === "boolean"
   ) {
-    return typeof value === "string" ? redactAgentSecurityRecord(value.trim()) : value;
+    // Display redaction is deliberately lossy. Authorization identity must keep
+    // every byte, including whitespace, URL credentials and long body suffixes.
+    return typeof value === "string" && !hashSensitiveValues
+      ? redactAgentSecurityRecord(value.trim())
+      : value;
   }
   if (Array.isArray(value)) {
     return value.map((item) => safeCanonicalize(item, undefined, hashSensitiveValues));
@@ -98,27 +102,32 @@ export function canonicalizeRecurringApprovalOperation(
 export function fingerprintRecurringApprovalOperation(
   input: RecurringApprovalFingerprintInput,
 ): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify(
-        safeCanonicalize(
-          {
-            approvalType: input.approvalType || null,
-            command: input.command || null,
-            path: input.path || null,
-            scope: input.scope,
-            serverName: input.serverName || null,
-            toolInput: input.toolInput ?? null,
-            toolName: input.toolName.trim(),
-            workspaceId: input.workspaceId.trim(),
-            policyVersion: input.policyVersion || RECURRING_APPROVAL_POLICY_VERSION,
-          },
-          undefined,
-          true,
+  return (
+    createHash("sha256")
+      // Domain separation invalidates old lossy hashes even when a caller supplies
+      // its own policyVersion. Existing standing grants require a new decision.
+      .update(`${RECURRING_APPROVAL_POLICY_VERSION}\0`)
+      .update(
+        JSON.stringify(
+          safeCanonicalize(
+            {
+              approvalType: input.approvalType || null,
+              command: input.command || null,
+              path: input.path || null,
+              scope: input.scope,
+              serverName: input.serverName || null,
+              toolInput: input.toolInput ?? null,
+              toolName: input.toolName.trim(),
+              workspaceId: input.workspaceId.trim(),
+              policyVersion: input.policyVersion || RECURRING_APPROVAL_POLICY_VERSION,
+            },
+            undefined,
+            true,
+          ),
         ),
-      ),
-    )
-    .digest("hex");
+      )
+      .digest("hex")
+  );
 }
 
 /**

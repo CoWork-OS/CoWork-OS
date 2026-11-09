@@ -896,6 +896,38 @@ describe("WebApplication host core", () => {
     expect(response.headers["set-cookie"]?.[0]).toContain("Secure");
   });
 
+  it("redeems valid codes behind a shared proxy without resetting its invalid-attempt throttle", async () => {
+    const host = await createHost({
+      deployment: {
+        mode: "https-proxy",
+        publicOrigin: "https://browser.example",
+        trustedProxyAddresses: ["127.0.0.1"],
+      },
+    });
+    const first = host.app.createPairingCode("test-browser");
+    const second = host.app.createPairingCode("test-browser");
+    const attempt = (code: string, client: string) =>
+      request(host, {
+        path: `${WEB_API_PATH}/session/pair`,
+        method: "POST",
+        headers: {
+          Host: "browser.example",
+          Origin: "https://browser.example",
+          "X-Forwarded-Proto": "https",
+          "X-Forwarded-For": client,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code }),
+      });
+    for (let i = 0; i < 5; i++)
+      expect((await attempt("invalid", `198.51.100.${i + 1}`)).status).toBe(401);
+    expect((await attempt("invalid", "203.0.113.1")).status).toBe(429);
+    expect((await attempt(first.code, "198.51.100.100")).status).toBe(200);
+    expect((await attempt("invalid", "203.0.113.2")).status).toBe(429);
+    expect((await attempt(second.code, "198.51.100.101")).status).toBe(200);
+    expect((await attempt(first.code, "198.51.100.100")).status).toBe(429);
+  });
+
   it("uses a one-use WebSocket ticket in the subprotocol and dispatches only registered RPC methods", async () => {
     const host = await createHost();
     const session = await pair(host);

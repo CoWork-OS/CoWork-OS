@@ -298,17 +298,41 @@ export function stripUrlCredentials(value: string): string | undefined {
  */
 const NPMRC_CREDENTIAL_KEY =
   /(^|:)(_authtoken|_auth|_password|password|username|email|certfile|keyfile|cert|key|token)$/i;
+const NPMRC_SAFE_KEY =
+  /^(?:registry|@[^\s:=]+:registry|(?:https?-)?proxy|noproxy|prefix|cache|ignore-scripts|fund|audit|progress|loglevel|strict-ssl|cafile|always-auth|legacy-peer-deps|save-exact|package-lock|fetch-(?:retries|retry-factor|retry-mintimeout|retry-maxtimeout|timeout))$/i;
+const NPMRC_URL_KEY = /^(?:registry|@[^\s:=]+:registry|(?:https?-)?proxy)$/i;
 
 /** Return the npmrc text without credential lines. */
 export function sanitizeNpmrc(content: string): string {
   return content
     .split(/\r?\n/)
-    .filter((line) => {
+    .flatMap((line): string[] => {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) return true;
+      if (!trimmed) return [""];
+      if (trimmed.startsWith("#") || trimmed.startsWith(";")) return [];
       const separator = trimmed.indexOf("=");
       const key = (separator === -1 ? trimmed : trimmed.slice(0, separator)).trim();
-      return !NPMRC_CREDENTIAL_KEY.test(key);
+      if (separator === -1 || NPMRC_CREDENTIAL_KEY.test(key) || !NPMRC_SAFE_KEY.test(key))
+        return [];
+      if (!NPMRC_URL_KEY.test(key)) return [line];
+      const raw = trimmed.slice(separator + 1).trim();
+      const value = /^(?:".*"|'.*')$/.test(raw) ? raw.slice(1, -1) : raw;
+      // Do not expand host environment substitutions into a child-readable URL.
+      if (value.includes("${")) return [];
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return [];
+        url.username = "";
+        url.password = "";
+        for (const name of Array.from(url.searchParams.keys())) {
+          if (/token|auth|password|secret|api[-_]?key|credential/i.test(name))
+            url.searchParams.delete(name);
+        }
+        url.hash = "";
+        return [`${key}=${url.toString()}`];
+      } catch {
+        return [];
+      }
     })
     .join("\n");
 }
@@ -333,7 +357,9 @@ export function writeSanitizedNpmrc(
     return undefined;
   }
   const target = path.join(targetDir, "npmrc");
-  fs.writeFileSync(target, sanitizeNpmrc(content), { mode: 0o600 });
+  // Called only while preparing fresh, not-yet-exposed sandbox scratch. Never
+  // reopen a file a previous child could replace with a symlink or hard link.
+  fs.writeFileSync(target, sanitizeNpmrc(content), { mode: 0o600, flag: "wx" });
   return target;
 }
 

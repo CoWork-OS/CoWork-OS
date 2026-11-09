@@ -36,7 +36,7 @@ describe("QA server subprocess policy", () => {
   let effectiveWorkspace: Workspace;
   let policies: AdminPolicies;
   let sandbox: {
-    type: "macos" | "none";
+    type: "macos" | "docker" | "none";
     spawnProcess: ReturnType<typeof vi.fn>;
     cleanup: ReturnType<typeof vi.fn>;
   };
@@ -130,13 +130,10 @@ describe("QA server subprocess policy", () => {
 
   it("keeps administrator-denied networking off after command approval", async () => {
     policies.runtime.network.allowShellNetwork = false;
-    await launch();
+    await expect(launch()).rejects.toThrow(/TCP listeners are denied/);
     expect(approve).toHaveBeenCalledOnce();
-    expect(sandbox.spawnProcess).toHaveBeenCalledWith(
-      "node",
-      ["server.js"],
-      expect.objectContaining({ allowNetwork: false }),
-    );
+    expect(sandbox.spawnProcess).not.toHaveBeenCalled();
+    expect(sandbox.cleanup).toHaveBeenCalledOnce();
   });
 
   it("refuses NoSandbox when networking is disabled despite full filesystem access", async () => {
@@ -153,12 +150,9 @@ describe("QA server subprocess policy", () => {
     { blockedDomains: ["example.com"] },
   ])("keeps administrator network restrictions effective: %j", async (network) => {
     Object.assign(policies.runtime.network, network);
-    await launch();
-    expect(sandbox.spawnProcess).toHaveBeenCalledWith(
-      "node",
-      ["server.js"],
-      expect.objectContaining({ allowNetwork: false }),
-    );
+    await expect(launch()).rejects.toThrow(/TCP listeners are denied/);
+    expect(sandbox.spawnProcess).not.toHaveBeenCalled();
+    expect(sandbox.cleanup).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -247,23 +241,41 @@ describe("QA server subprocess policy", () => {
     expect(sandbox.spawnProcess).toHaveBeenCalledWith(
       "node",
       ["server.js"],
-      expect.objectContaining({ allowNetwork: true }),
+      expect.objectContaining({ allowNetwork: true, allowLoopbackListen: false }),
     );
   });
 
-  it("retains offline sandboxed servers for bounded on-request profiles", async () => {
+  it.each([{ network: false }, { accessNetworkMode: "disabled" }])(
+    "does not start a macOS listener without network authority: %j",
+    async (permissions) => {
+      Object.assign(workspace.permissions, permissions);
+      await expect(launch()).rejects.toThrow(/TCP listeners are denied/);
+      expect(sandbox.spawnProcess).not.toHaveBeenCalled();
+      expect(sandbox.cleanup).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("preserves offline servers inside Docker's private network", async () => {
+    sandbox.type = "docker";
+    workspace.permissions.network = false;
+    await launch();
+    expect(sandbox.spawnProcess).toHaveBeenCalledWith(
+      "node",
+      ["server.js"],
+      expect.objectContaining({ allowNetwork: false, allowLoopbackListen: false }),
+    );
+  });
+
+  it("refuses macOS server startup for bounded on-request profiles", async () => {
     Object.assign(workspace.permissions, {
       accessSandboxMode: "workspace-write",
       accessApprovalPolicy: "on-request",
       accessNetworkMode: "on-request",
       unrestrictedFileAccess: false,
     });
-    await launch();
-    expect(sandbox.spawnProcess).toHaveBeenCalledWith(
-      "node",
-      ["server.js"],
-      expect.objectContaining({ allowNetwork: false }),
-    );
+    await expect(launch()).rejects.toThrow(/TCP listeners are denied/);
+    expect(sandbox.spawnProcess).not.toHaveBeenCalled();
+    expect(sandbox.cleanup).toHaveBeenCalledOnce();
   });
 
   it("retains approved NoSandbox servers only under unrestricted workspace and admin authority", async () => {

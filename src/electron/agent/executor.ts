@@ -789,6 +789,8 @@ const CHAT_REPLY_MAX_OUTPUT_TOKENS = 4_096;
 const PREFLIGHT_MAX_OUTPUT_TOKENS = 4_096;
 const PREFLIGHT_RETRY_MAX_OUTPUT_TOKENS = 8_192;
 const PREFLIGHT_TIMEOUT_MS = 60_000;
+/** Start of the failure a user-locked Plan mode gives when a step needs file changes. */
+const PLAN_MODE_BLOCKED_CHANGES_PREFIX = "Plan mode doesn't create or change files";
 const EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW = 16;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT = 24;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_TOKENS = 12_000;
@@ -1419,6 +1421,8 @@ export class TaskExecutor {
   private readonly shouldPauseForQuestions: boolean;
   private readonly shouldPauseForRequiredDecision: boolean;
   private lastAwaitingUserInputReasonCode: string | null = null;
+  /** The waiting-for-input pause a follow-up started from; restored if the follow-up ends paused. */
+  private followUpPriorInputPause: { reasonCode?: string } | null = null;
   private lastRequiredDecisionPrompt: string | null = null;
   private addressedRequiredDecisionPrompts: Set<string> = new Set();
   private lastRetryReason: string | null = null;
@@ -1950,7 +1954,20 @@ export class TaskExecutor {
           : "Follow-up completed (iterations exhausted)",
       );
     } else if (previousStatus && previousStatus !== "executing") {
-      this.daemon.updateTaskStatus(this.task.id, previousStatus);
+      const priorInputPause = previousStatus === "paused" ? this.followUpPriorInputPause : null;
+      if (priorInputPause) {
+        // Still waiting on the person (a reply to a denied approval does not resume the plan).
+        // A bare "paused" read as resumable: the dashboard offered Resume, which re-ran the step.
+        this.daemon.updateTask(this.task.id, {
+          status: "paused",
+          terminalStatus: "needs_user_action",
+          ...(priorInputPause.reasonCode
+            ? { awaitingUserInputReasonCode: priorInputPause.reasonCode }
+            : {}),
+        });
+      } else {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus);
+      }
       this.emitEvent("task_status", { status: previousStatus });
     } else {
       await this.finalizeFollowUpCompletion("Follow-up completed (status safety net)");
@@ -11301,7 +11318,8 @@ ${transcript}
     if (
       /contract_unmet_write_required|artifact_write_checkpoint_failed|required artifact mutation|mutation-required contract unmet/i.test(
         message,
-      )
+      ) ||
+      message.startsWith(PLAN_MODE_BLOCKED_CHANGES_PREFIX)
     )
       return "contract_unmet_write_required";
     if (
@@ -19209,7 +19227,10 @@ ${transcript}
       "canvas_push",
     ]);
 
-    return Array.from(probes.values()).map((toolName) => canonicalizeToolNameUtil(toolName));
+    // generate_* and create_* share a canonical name; list each tool once.
+    return Array.from(
+      new Set(Array.from(probes.values()).map((toolName) => canonicalizeToolNameUtil(toolName))),
+    );
   }
 
   private alignExecutionModeForMutationContract(
@@ -34647,6 +34668,18 @@ Return ONLY a JSON object:
             "Execution failed: one or more mutation-required steps failed unrecovered and cannot be auto-waived.",
           hasFailures: true,
         });
+        // A user-chosen Plan or Ask mode blocks the step's file changes on purpose; say so
+        // in words, with the way out, instead of the contract name.
+        if (
+          unrecoveredMutationFailedSteps.every((failedStep) =>
+            String(failedStep.error || "").startsWith("Plan contract conflict:"),
+          )
+        ) {
+          throw new Error(
+            `${PLAN_MODE_BLOCKED_CHANGES_PREFIX}, so this step was not run: ${failedMutationDescriptions}. ` +
+              `Switch the mode under the message box to Do, then send your request again.`,
+          );
+        }
         throw new Error(
           `Task failed: mutation-required contract unmet - ${failedMutationDescriptions}`,
         );
@@ -42625,6 +42658,12 @@ Return ONLY a JSON object:
     this.refreshProviderIfSettingsChanged();
     this.ensureProviderFailoverSelectionsContext(this.hasImageAttachments(images));
     const previousStatus = persistedTask?.status || this.task.status;
+    this.followUpPriorInputPause =
+      previousStatus === "paused" && persistedTask?.terminalStatus === "needs_user_action"
+        ? persistedTask.awaitingUserInputReasonCode
+          ? { reasonCode: persistedTask.awaitingUserInputReasonCode }
+          : {}
+        : null;
     const pendingSkillParameterCollection = this.getPendingSkillParameterCollection();
     const hasPendingSkillParameterCollection = pendingSkillParameterCollection !== null;
     let handledPendingSkillReply = false;

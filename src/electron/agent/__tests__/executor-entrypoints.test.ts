@@ -1258,6 +1258,31 @@ describe("TaskExecutor entrypoint guards", () => {
     expect(executor.emitEvent).toHaveBeenCalledWith("task_status", { status: "completed" });
   });
 
+  // Live 2026-11-09: a "Reply instead" on a denied approval left the session a bare "paused",
+  // so the dashboard offered Resume (re-running the refused step) instead of waiting for input.
+  it("keeps a follow-up's waiting-for-input pause when it returns the session to paused", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-input-pause" };
+    executor.daemon = { updateTask: vi.fn(), updateTaskStatus: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.followUpPriorInputPause = { reasonCode: "user_action_required_tool" };
+
+    await (TaskExecutor as Any).prototype.finalizeSuccessfulFollowUp.call(executor, "paused");
+
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith("task-input-pause", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      awaitingUserInputReasonCode: "user_action_required_tool",
+    });
+    expect(executor.daemon.updateTaskStatus).not.toHaveBeenCalled();
+    expect(executor.emitEvent).toHaveBeenCalledWith("task_status", { status: "paused" });
+
+    // A pause the person chose (no pending input) stays a plain, resumable pause.
+    executor.followUpPriorInputPause = null;
+    await (TaskExecutor as Any).prototype.finalizeSuccessfulFollowUp.call(executor, "paused");
+    expect(executor.daemon.updateTaskStatus).toHaveBeenCalledWith("task-input-pause", "paused");
+  });
+
   it("explains provider refusals of a follow-up instead of calling them internal errors", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { id: "task-follow-up-provider" };

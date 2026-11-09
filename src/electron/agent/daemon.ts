@@ -1,4 +1,5 @@
 import { ExecutionEnvironmentController } from "../environments/ExecutionEnvironmentController";
+import { buildApprovalReplyMessage } from "../../shared/approval-reply-message";
 import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
   agentCompletionNoticeId,
@@ -9097,7 +9098,7 @@ export class AgentDaemon extends EventEmitter {
     if (!reply || typeof (this as Any).sendMessage !== "function") return;
     void this.sendMessage(
       taskId,
-      `Reply to your permission request (the operation was not run): ${reply}`,
+      buildApprovalReplyMessage(reply),
       undefined,
       undefined,
       // The person answering this task's approval card typed the reply.

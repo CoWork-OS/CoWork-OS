@@ -1010,6 +1010,34 @@ describe("TaskExecutor executeStep failure handling", () => {
     }
   });
 
+  // Live 2026-11-09: "Count the lines in notes.txt" in a folder without the file made the
+  // only step "mutation_required" with write_file on notes.txt, so the model created it.
+  it("does not require a write to count what a file holds", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ws-"));
+    (executor as Any).workspace.path = workspaceDir;
+    (executor as Any).task.title = "Count the lines in notes.txt";
+    (executor as Any).task.prompt = "Count the lines in notes.txt";
+    const count: Any = { id: "1", status: "pending", description: "Count the lines in notes.txt" };
+    (executor as Any).plan = { description: "Execute task", steps: [count] };
+
+    try {
+      const contract = (executor as Any).resolveStepExecutionContract(count);
+      expect(contract.mode).not.toBe("mutation_required");
+      expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+
+      const write: Any = {
+        id: "1",
+        status: "pending",
+        description: "Count the lines in notes.txt and write the total to count.md",
+      };
+      (executor as Any).plan = { description: "Execute task", steps: [write] };
+      expect((executor as Any).resolveStepExecutionContract(write).mode).toBe("mutation_required");
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("never bootstraps a stub for a write target outside the workspace", async () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ws-"));
@@ -2517,6 +2545,30 @@ relationship_memory:
     expect(progressMessages.some((message: string) => message.includes("Completed step"))).toBe(
       false,
     );
+  });
+
+  // Live 2026-11-09: Plan mode + "Build a newsletter signup page in index.html" failed with
+  // "Task failed: mutation-required contract unmet - ..." and no hint to switch to Do.
+  it("says Plan mode does not change files when a user-locked plan blocks a write step", async () => {
+    executor = createExecutorWithStubs([textResponse("done")], {});
+    const step: Any = {
+      id: "1",
+      description: "Build a newsletter signup page in index.html",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+    (executor as Any).executeStep = vi.fn(async (target: Any) => {
+      target.status = "failed";
+      target.error =
+        'Plan contract conflict: step "1" requires mutation, but execution mode "plan" is user-locked and blocks required tools (write_file). Switch to execute mode and retry.';
+      target.completedAt = Date.now();
+    });
+
+    const failure = await (executor as Any).executePlan().catch((error: Error) => error);
+    expect(failure.message).toBe(
+      "Plan mode doesn't create or change files, so this step was not run: Build a newsletter signup page in index.html. Switch the mode under the message box to Do, then send your request again.",
+    );
+    expect((executor as Any).classifyFailure(failure)).toBe("contract_unmet_write_required");
   });
 
   it("fails executePlan when a verification-labeled step fails", async () => {

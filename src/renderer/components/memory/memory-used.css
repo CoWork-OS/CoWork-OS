@@ -1,6 +1,8 @@
 /* Per-reply "Memory used (N)" affordance (MemoryUsedAffordance.tsx). */
+/* The transcript area defaults to the mono font; this row reads as UI text like its neighbours. */
 .memory-used {
   margin-top: 4px;
+  font-family: var(--font-ui);
   font-size: 12px;
 }
 
@@ -9,6 +11,7 @@
   border: none;
   padding: 2px 0;
   color: var(--color-text-muted);
+  font-family: inherit;
   font-size: 12px;
   cursor: pointer;
 }

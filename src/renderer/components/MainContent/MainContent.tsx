@@ -1534,6 +1534,14 @@ function MainContentComponent({
     displayedInteractionMode.mode === "chat"
       ? "chat"
       : (displayedInteractionMode.executionOverride ?? "execute");
+  // A session's composer leaves out the Do/Ask/Plan picker to stay quiet, but an Ask or Plan
+  // session keeps it: without it, "go ahead and build it" stayed in Plan mode with no way out.
+  const savedSessionMode = getInteractionModeSelection(task?.agentConfig);
+  const showSessionModePicker =
+    Boolean(selectedTaskId) &&
+    (savedSessionMode?.mode === "chat" ||
+      savedSessionMode?.executionOverride === "plan" ||
+      Boolean(modeDrafts[modeDraftKey]));
   const setInteractionMode = (selection: InteractionModeSelection) => {
     setModeDrafts((previous) => ({ ...previous, [modeDraftKey]: selection }));
     recordDraftMutation(onDraftPatch?.({ interactionMode: selection }));
@@ -10203,6 +10211,22 @@ function MainContentComponent({
             </button>
           </div>
           <div className="input-status-right">
+            {showSessionModePicker && (
+              <div className="input-status-mode-wrap" ref={modeDropdownRef}>
+                <InteractionModePicker
+                  selection={displayedInteractionMode}
+                  open={showModeDropdown}
+                  onToggle={() => {
+                    setShowDomainDropdown(false);
+                    setShowModeDropdown((value) => !value);
+                  }}
+                  onChange={(selection) => {
+                    setInteractionMode(selection);
+                    setShowModeDropdown(false);
+                  }}
+                />
+              </div>
+            )}
             <div className="input-status-domain-wrap" ref={domainDropdownRef}>
               <button
                 type="button"

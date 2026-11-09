@@ -21,6 +21,7 @@ import {
   Workspace,
 } from "../../../shared/types";
 import { parseCodeBlockRunMessage } from "../../../shared/terminal-output-text";
+import { approvalReplyDisplayText } from "../../../shared/approval-reply-message";
 import { type CodeBlockRunTarget } from "../../utils/code-block-runs";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
 import { parseUserMessageAttachmentMetadata } from "../../../shared/user-message-attachments";
@@ -2544,7 +2545,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 const rawMessage = event.payload?.message || "User message";
                 const messageText =
                   typeof rawMessage === "string"
-                    ? normalizeInitialPromptText(rawMessage)
+                    ? normalizeInitialPromptText(approvalReplyDisplayText(rawMessage))
                     : "User message";
                 const messageIntegrationMentions = Array.isArray(event.payload?.integrationMentions)
                   ? (event.payload.integrationMentions as IntegrationMentionSelection[])

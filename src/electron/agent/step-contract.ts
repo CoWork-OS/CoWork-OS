@@ -477,8 +477,9 @@ export function isReadOnlyConstraintOnlyStep(text: string): boolean {
   );
 }
 
+// "Count the lines in notes.txt" reads the file: counting never produces it.
 const READ_ONLY_VERB_REGEX =
-  /\b(read|search|fetch|retrieve|browse|visit|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look)\b/;
+  /\b(read|search|fetch|retrieve|browse|visit|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look|count|tally)\b/;
 
 export function descriptionHasReadOnlyIntent(text: string): boolean {
   const desc = String(text || "").toLowerCase();

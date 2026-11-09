@@ -1,6 +1,7 @@
 import React from "react";
 import type { Components } from "react-markdown";
 import { buildApprovalCommandPreview } from "../../../shared/approval-command-preview";
+import { approvalReplyDisplayText } from "../../../shared/approval-reply-message";
 import { isVerificationStepDescription } from "../../../shared/plan-utils";
 import { formatProviderErrorForDisplay } from "../../../shared/provider-error-format";
 import {
@@ -559,7 +560,7 @@ export function getAgentLifecycleRecapLine(event: TaskEvent): string | null {
   }
 
   const recipient = getAgentRecipientLabel(event);
-  const message = readPayloadText(payload, "message");
+  const message = approvalReplyDisplayText(readPayloadText(payload, "message"));
   const error = readPayloadText(payload, "error");
 
   if (effectiveType === "agent_message") {
@@ -772,7 +773,9 @@ export function renderEventTitle(
           ? `Follow-up: terminal output of ${command}`
           : `Follow-up: terminal output of \`${command}\``;
       }
-      return followUpMessage ? `Follow-up: ${followUpMessage}` : "Follow-up received";
+      return followUpMessage
+        ? `Follow-up: ${approvalReplyDisplayText(followUpMessage)}`
+        : "Follow-up received";
     }
     case "plan_created":
       return getMessage("planCreated", msgCtx);

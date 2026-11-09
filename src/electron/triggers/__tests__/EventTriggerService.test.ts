@@ -1002,7 +1002,7 @@ describe("EventTriggerService", () => {
       workspaceId: "ws-1",
     };
     await expect(service.addTrigger(input)).rejects.toThrow(
-      '"(a+)+$" can take too long on some messages',
+      '"(a+)+$" can take too long on some text',
     );
     await expect(
       service.addTrigger({
@@ -1020,7 +1020,7 @@ describe("EventTriggerService", () => {
       service.updateTrigger(saved.id, {
         conditions: [{ field: "text", operator: "matches", value: "(\\w+\\s?)+$" }],
       }),
-    ).rejects.toThrow("can take too long on some messages");
+    ).rejects.toThrow("can take too long on some text");
     expect(service.listTriggers()[0].conditions[0].value).toBe("urgent|asap");
   });
 

@@ -3,6 +3,11 @@ import type {
   WorkflowReference,
   WorkflowTemplateValue,
 } from "../../../shared/routine-workflow";
+import {
+  matchesPattern,
+  matchesPatternEach,
+  type MatchTimeBudget,
+} from "../../utils/bounded-regex";
 
 export interface WorkflowVariableContext {
   trigger: Record<string, unknown>;
@@ -90,10 +95,36 @@ function isTemplate(value: WorkflowInputValue): value is WorkflowTemplateValue {
   );
 }
 
+/**
+ * `evaluateWorkflowComparison` for each value in `lefts`. A "matches" comparison checks the whole
+ * list in one bounded pass instead of one guarded check per value.
+ */
+export function evaluateWorkflowComparisonEach(
+  lefts: readonly unknown[],
+  operator: string,
+  right?: unknown,
+  matchBudget?: MatchTimeBudget,
+): boolean[] {
+  if (operator === "matches") {
+    return matchesPatternEach(
+      String(right ?? ""),
+      lefts.map((left) => String(left ?? "")),
+      matchBudget,
+    );
+  }
+  return lefts.map((left) => evaluateWorkflowComparison(left, operator, right));
+}
+
+/**
+ * A "matches" comparison runs under the time and length limits in `bounded-regex`: both the text
+ * and the pattern can come from run data. `matchBudget` caps the total time of all "matches"
+ * checks in a run; once it is spent the check throws instead of answering.
+ */
 export function evaluateWorkflowComparison(
   left: unknown,
   operator: string,
   right?: unknown,
+  matchBudget?: MatchTimeBudget,
 ): boolean {
   const leftText = normalizeComparableText(left);
   const rightText = normalizeComparableText(right);
@@ -111,11 +142,7 @@ export function evaluateWorkflowComparison(
         ? !left.some((item) => deepEqual(item, right))
         : !leftText.includes(rightText);
     case "matches":
-      try {
-        return new RegExp(String(right ?? ""), "i").test(String(left ?? ""));
-      } catch {
-        return false;
-      }
+      return matchesPattern(String(right ?? ""), String(left ?? ""), matchBudget);
     case "gt":
       return Number(left) > Number(right);
     case "gte":

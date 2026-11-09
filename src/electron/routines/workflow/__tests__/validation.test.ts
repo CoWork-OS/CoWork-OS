@@ -122,6 +122,77 @@ describe("validateRoutineWorkflow", () => {
     );
   });
 
+  it("refuses literal matches patterns that do not compile or could hang", () => {
+    const withPatterns = (right: unknown, filterValue: unknown) =>
+      workflow({
+        nodes: [
+          {
+            id: "starter",
+            kind: "starter",
+            operation: "starter.manual",
+            name: "Manual",
+            config: {},
+          },
+          {
+            id: "check",
+            kind: "condition",
+            operation: "control.condition",
+            name: "Check",
+            config: { left: { $ref: "trigger.subject" }, operator: "matches", right },
+          } as RoutineWorkflowDefinition["nodes"][number],
+          {
+            id: "loop",
+            kind: "foreach",
+            operation: "control.foreach",
+            name: "Loop",
+            config: { items: { $ref: "trigger.items" } },
+            children: [
+              {
+                id: "keep",
+                kind: "filter",
+                operation: "control.filter",
+                name: "Keep",
+                config: { items: { $ref: "item.lines" }, operator: "matches", value: filterValue },
+              } as RoutineWorkflowDefinition["nodes"][number],
+            ],
+          },
+        ],
+        edges: [
+          { id: "starter:check", sourceNodeId: "starter", targetNodeId: "check" },
+          { id: "check:loop", sourceNodeId: "check", targetNodeId: "loop", sourcePort: "true" },
+        ],
+      });
+    const patternIssues = (definition: RoutineWorkflowDefinition, skipPatternChecks = false) =>
+      validateRoutineWorkflow(definition, {
+        allowIncomplete: true,
+        skipPatternChecks,
+      }).issues.filter((issue) => issue.code === "unsafe_pattern");
+
+    const bad = withPatterns("(a+)+$", "urgent(");
+    expect(patternIssues(bad)).toEqual([
+      expect.objectContaining({
+        nodeId: "check",
+        path: "nodes.1.config.right",
+        severity: "error",
+        message: expect.stringContaining("can take too long on some text"),
+      }),
+      expect.objectContaining({
+        nodeId: "keep",
+        path: "nodes.2.children.0.config.value",
+        severity: "error",
+        message: '"urgent(" is not a valid regular expression.',
+      }),
+    ]);
+    // A run of an already-saved workflow is not refused; the run-time limits cover it.
+    expect(patternIssues(bad, true)).toEqual([]);
+
+    expect(patternIssues(withPatterns("^inv-\\d+$", "(?<=#)\\d+"))).toEqual([]);
+    // A pattern built from run data can only be checked at run time.
+    expect(
+      patternIssues(withPatterns({ $ref: "trigger.pattern" }, { $template: "{{x}}+" })),
+    ).toEqual([]);
+  });
+
   it("rejects workflow limits above the runtime safety bounds", () => {
     const result = validateRoutineWorkflow(
       workflow({ settings: { maxStepCount: 10_000, maxForEachItems: 10_000 } }),

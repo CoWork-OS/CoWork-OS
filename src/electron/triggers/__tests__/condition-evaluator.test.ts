@@ -4,7 +4,11 @@ import {
   evaluateConditions,
   substituteEventVariables,
 } from "../condition-evaluator";
-import { findUnsafePattern, MATCH_TIME_LIMIT_MS, MAX_MATCH_FIELD_CHARS } from "../trigger-regex";
+import {
+  findUnsafePattern,
+  MATCH_TIME_LIMIT_MS,
+  MAX_MATCH_FIELD_CHARS,
+} from "../../utils/bounded-regex";
 import { TriggerCondition, TriggerEvent } from "../types";
 
 function makeEvent(fields: Record<string, string | number | boolean>): TriggerEvent {
@@ -239,7 +243,7 @@ describe("assertValidConditionPatterns", () => {
   it("refuses patterns with repeats inside repeats", () => {
     for (const value of ["(a+)+$", "(\\w+\\s?)+$", "(.*a){12}", "(?<=x)(a*)*b"]) {
       expect(() => assertValidConditionPatterns(matches(value)), value).toThrow(
-        "can take too long on some messages",
+        "can take too long on some text",
       );
     }
   });

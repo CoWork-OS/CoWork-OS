@@ -12705,6 +12705,8 @@ button.collab-timeline-thought-agent:hover {
   border-radius: 18px;
   padding: 13px 19px;
   max-height: 264px;
+  /* The bubble clips its overflow, so a long URL, path or token was cut off unread. */
+  overflow-wrap: anywhere;
 }
 
 .theme-light .chat-bubble.user-bubble {

@@ -82,6 +82,28 @@ describe("text-to-image intent", () => {
     expect(executor.isSimpleImageGenerationTask()).toBe(false);
   });
 
+  it.each([
+    "Render this markdown table as HTML",
+    "draw a conclusion from these sales numbers",
+    "Sketch a plan for the product launch",
+    "render overflow probe test",
+    "render the report summary",
+  ])("does not route text work to the image path: %s", (prompt) => {
+    // The prompt also sits in rawPrompt and the title; copies must not complete each other.
+    const executor = createExecutor(prompt, prompt);
+    expect(executor.isSimpleImageGenerationTask()).toBe(false);
+  });
+
+  it.each([
+    "draw a cat sitting in the snow",
+    "Render a 3D image of a vintage car",
+    "sketch a logo for my bakery",
+    "paint a watercolor of the harbor at dawn",
+  ])("still routes picture requests to the image path: %s", (prompt) => {
+    const executor = createExecutor(prompt, prompt);
+    expect(executor.isSimpleImageGenerationTask()).toBe(true);
+  });
+
   it("routes the launch banner prompt to the simple image path", () => {
     const executor = createExecutor(BANNER_PROMPT, "Launch banner");
     expect(executor.isSimpleImageGenerationTask()).toBe(true);

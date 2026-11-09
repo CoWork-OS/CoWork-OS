@@ -5,16 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const workspaceLookup = vi.hoisted(() => ({ value: null as Any }));
-vi.mock("../../database/repository-facades", async () => ({
-  ...(await vi.importActual<typeof import("../../database/repository-facades")>(
-    "../../database/repository-facades",
-  )),
-  WorkspaceRepository: class {
-    async findById() {
-      return workspaceLookup.value;
-    }
-  },
-}));
 import { MemoryService } from "../MemoryService";
 import { MEMORY_SOURCE_UNITS, ensureMemorySourcesSchema } from "../memory-source-sql";
 import {
@@ -77,7 +67,7 @@ describeWithSqlite("MemorySourceRecheckService", () => {
       permissions: { read: true, write: true, delete: true, shell: false, network: false },
     };
     const settings = { enabled: true, privacyMode: "normal" };
-    vi.spyOn(MemoryService, "getDatabase").mockReturnValue(db);
+    vi.spyOn(MemoryService, "getWorkspace").mockImplementation(async () => workspaceLookup.value);
     vi.spyOn(MemoryService, "getSettings").mockImplementation(async () => settings as Any);
     vi.spyOn(MemoryService, "getStatements").mockReturnValue({
       unit: async (name: string, args: unknown[]) => {

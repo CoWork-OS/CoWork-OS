@@ -78,6 +78,7 @@ import {
 } from "../utils/email-html-layout";
 import { normalizeEmailExternalWebUrl, sanitizeEmailHtml } from "../utils/email-html-sanitize";
 import { ipcErrorMessage } from "../utils/ipc-error-message";
+import { promptForText } from "./TextPromptDialog";
 import "./inbox-agent.css";
 
 type QueueMode = "cleanup" | "follow_up" | null;
@@ -2169,10 +2170,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       return;
     }
 
-    const targetEmail = window.prompt(
-      "Forward matching Gmail messages to which email address?",
-      "",
-    );
+    const targetEmail = await promptForText({
+      title: "Forward matching Gmail messages to which email address?",
+      placeholder: "name@example.com",
+      confirmLabel: "Next",
+    });
     if (targetEmail === null) return;
     const normalizedTarget = targetEmail.trim();
     if (!normalizedTarget) {
@@ -2188,10 +2190,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           .filter((value): value is string => Boolean(value)),
       ),
     );
-    const senderCsv = window.prompt(
-      "Allowed sender emails (comma-separated). Leave blank to use sender domains instead.",
-      suggestedSenders.join(", "),
-    );
+    const senderCsv = await promptForText({
+      title: "Allowed sender emails",
+      message: "Comma-separated. Leave blank to use sender domains instead.",
+      defaultValue: suggestedSenders.join(", "),
+      confirmLabel: "Next",
+    });
     if (senderCsv === null) return;
     const allowedSenders = senderCsv
       .split(",")
@@ -2212,10 +2216,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       return;
     }
 
-    const subjectKeywordsRaw = window.prompt(
-      "Optional subject keywords (comma-separated). Leave blank to match any PDF from the allowed sender(s).",
-      "",
-    );
+    const subjectKeywordsRaw = await promptForText({
+      title: "Subject keywords (optional)",
+      message: "Comma-separated. Leave blank to match any PDF from the allowed sender(s).",
+      confirmLabel: "Next",
+    });
     if (subjectKeywordsRaw === null) return;
     const subjectKeywords = subjectKeywordsRaw
       .split(",")

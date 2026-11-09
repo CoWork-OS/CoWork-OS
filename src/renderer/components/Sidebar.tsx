@@ -6,6 +6,10 @@ import {
 import { SidebarNotices } from "./sidebar/SidebarNotices";
 import { SidebarArchivedSessions } from "./sidebar/SidebarArchivedSessions";
 import {
+  SESSION_ARCHIVED_EVENT,
+  type SessionArchivedDetail,
+} from "../utils/session-archive-events";
+import {
   useState,
   useRef,
   useEffect,
@@ -47,6 +51,10 @@ import {
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, isTempWorkspaceId } from "../../shared/types";
+import { isActiveTaskStatus, isIdleFork } from "../../shared/task-status";
+import { formatCount } from "../utils/plural";
+import { ipcErrorMessage } from "../utils/ipc-error-message";
+import { promptForText } from "./TextPromptDialog";
 import { isAutomatedTaskLike, isSpeculativeTask } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
@@ -200,6 +208,7 @@ const ACTIVE_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "interrupted",
 ]);
 const AWAITING_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
+const ARCHIVE_RUNNING_HINT = "Stop this session or let it finish before archiving it.";
 
 export function isActiveSessionStatus(status: Task["status"]): boolean {
   return ACTIVE_SESSION_STATUSES.has(status);
@@ -1265,18 +1274,21 @@ function SidebarComponent({
   );
 
   const handleEditWorkspace = useCallback(
-    (candidate: Workspace) => {
+    async (candidate: Workspace) => {
+      setWorkspaceMenuOpenId(null);
       const currentLabel = getWorkspaceLabel(candidate);
-      const nextLabel = window.prompt("Rename project", currentLabel)?.trim();
-      if (!nextLabel || nextLabel === currentLabel) {
-        setWorkspaceMenuOpenId(null);
-        return;
-      }
+      const nextLabel = (
+        await promptForText({
+          title: "Rename project",
+          defaultValue: currentLabel,
+          confirmLabel: "Rename",
+        })
+      )?.trim();
+      if (!nextLabel || nextLabel === currentLabel) return;
       updateWorkspaceNavSettings((current) => ({
         ...current,
         labels: { ...current.labels, [candidate.id]: nextLabel },
       }));
-      setWorkspaceMenuOpenId(null);
     },
     [getWorkspaceLabel, updateWorkspaceNavSettings],
   );
@@ -1301,7 +1313,13 @@ function SidebarComponent({
       // whole project in the main process when it can.
       if (window.electronAPI?.archiveWorkspaceSessions) {
         try {
-          await window.electronAPI.archiveWorkspaceSessions(workspaceId);
+          const result = await window.electronAPI.archiveWorkspaceSessions(workspaceId);
+          const skipped = result?.skippedRunning ?? 0;
+          if (skipped > 0) {
+            setWorkspaceActionError(
+              `${formatCount(skipped, "running session")} stayed in the list. Archive ${skipped === 1 ? "it" : "them"} when finished.`,
+            );
+          }
         } catch (error) {
           console.error("Failed to archive project sessions:", error);
           setWorkspaceActionError("Project sessions could not be archived.");
@@ -2177,6 +2195,31 @@ function SidebarComponent({
     }
   };
 
+  const showArchiveUndo = useCallback(
+    (taskId: string, wasSelected: boolean) => {
+      if (!canShowArchivedSessions) return;
+      setArchiveUndo({ taskId, wasSelected });
+      if (archiveUndoTimeoutRef.current !== null) {
+        window.clearTimeout(archiveUndoTimeoutRef.current);
+      }
+      archiveUndoTimeoutRef.current = window.setTimeout(() => {
+        archiveUndoTimeoutRef.current = null;
+        setArchiveUndo(null);
+      }, ARCHIVE_UNDO_MS);
+    },
+    [canShowArchivedSessions],
+  );
+
+  // Archiving from the task header's actions menu gets the same notice and Undo.
+  useEffect(() => {
+    const onArchived = (event: Event) => {
+      const detail = (event as CustomEvent<SessionArchivedDetail>).detail;
+      if (detail?.taskId) showArchiveUndo(detail.taskId, detail.wasSelected === true);
+    };
+    window.addEventListener(SESSION_ARCHIVED_EVENT, onArchived);
+    return () => window.removeEventListener(SESSION_ARCHIVED_EVENT, onArchived);
+  }, [showArchiveUndo]);
+
   const handleArchiveClick = async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
     e.preventDefault();
@@ -2189,19 +2232,12 @@ function SidebarComponent({
         onSelectTask(null);
       }
       onTasksChanged();
-      if (canShowArchivedSessions) {
-        setArchiveUndo({ taskId, wasSelected });
-        if (archiveUndoTimeoutRef.current !== null) {
-          window.clearTimeout(archiveUndoTimeoutRef.current);
-        }
-        archiveUndoTimeoutRef.current = window.setTimeout(() => {
-          archiveUndoTimeoutRef.current = null;
-          setArchiveUndo(null);
-        }, ARCHIVE_UNDO_MS);
-      }
+      showArchiveUndo(taskId, wasSelected);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unable to archive session. Please try again.";
+        error instanceof Error
+          ? ipcErrorMessage(error)
+          : "Unable to archive session. Please try again.";
       console.error("Failed to archive task:", error);
       setArchiveActionError(message);
       if (pinActionErrorTimeoutRef.current !== null) {
@@ -2501,6 +2537,9 @@ function SidebarComponent({
         : activity?.category === "running"
           ? "executing"
           : task.status;
+    // The main process refuses to archive a session with running work (it would keep going unseen).
+    const archiveBlockedByRunningWork =
+      (isActiveTaskStatus(task.status) && !isIdleFork(task)) || activity?.category === "running";
     const isAutomatedTask = isAutomatedSession(task);
     const sessionTitle = getSidebarSessionTitle(node);
     const sessionActions = !node.synthetic ? (
@@ -2588,7 +2627,8 @@ function SidebarComponent({
                 className="sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
                 role="menuitem"
                 data-menu-option="archive"
-                disabled={!hasHostMethod("archiveTask")}
+                disabled={!hasHostMethod("archiveTask") || archiveBlockedByRunningWork}
+                title={archiveBlockedByRunningWork ? ARCHIVE_RUNNING_HINT : undefined}
                 onMouseDown={(e) => {
                   if (e.button === 0) {
                     e.preventDefault();
@@ -2828,7 +2868,7 @@ function SidebarComponent({
           className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="edit"
-          onClick={() => handleEditWorkspace(candidate)}
+          onClick={() => void handleEditWorkspace(candidate)}
         >
           <Pencil size={16} />
           <span>Edit</span>

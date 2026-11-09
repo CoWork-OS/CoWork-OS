@@ -6,7 +6,6 @@ import { redactSensitiveMarkdownContent } from "./markdown-index-sql";
 import { MemoryService } from "./MemoryService";
 import type { MemorySourceKind, MemorySourceRow } from "./memory-source-sql";
 import { confinedFilePath } from "../utils/confined-file";
-import { WorkspaceRepository } from "../database/repository-facades";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 
 /**
@@ -179,9 +178,7 @@ export class MemorySourceRecheckService {
         return (sql.unit as (unit: string, unitArgs: unknown[]) => Promise<unknown>)(name, args);
       },
       resolveSourceRoot: async (workspaceId, filePath) => {
-        const db = MemoryService.getDatabase();
-        if (!db) return null;
-        const workspace = await new WorkspaceRepository(db).findById(workspaceId);
+        const workspace = await MemoryService.getWorkspace(workspaceId);
         if (!workspace) return null;
         const settings = await MemoryService.getSettings(workspaceId);
         if (

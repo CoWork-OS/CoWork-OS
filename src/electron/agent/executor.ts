@@ -15717,25 +15717,31 @@ ${transcript}
 
   private getImageGenerationTaskText(): string {
     const task = this.task || {};
-    return [task.rawPrompt, task.userPrompt, task.title, task.prompt]
+    // rawPrompt, userPrompt and prompt are usually the same text; one copy is enough.
+    const parts = [task.rawPrompt, task.userPrompt, task.title, task.prompt]
       .map((value) =>
         typeof value === "string" ? normalizePromptForContractsUtil(value).trim() : "",
       )
-      .filter((value) => value.length > 0)
-      .join("\n")
-      .toLowerCase();
+      .filter((value) => value.length > 0);
+    return [...new Set(parts)].join("\n").toLowerCase();
   }
 
   private hasTextToImageGenerationIntent(taskText: string): boolean {
+    // "Draw a conclusion", "sketch a plan", "render the markdown table": the verb is not about
+    // a picture, and an image plan would fail the task when no image is made.
+    const nonPictureObject =
+      /\b(?:draw|paint|illustrate|render|sketch)[^\S\n]+(?:(?:a|an|the|this|that|these|those|my|our|your|its|me|us|up|out)[^\S\n]+){0,2}(?:conclusions?|comparisons?|plans?|outlines?|roadmaps?|strateg(?:y|ies)|markdown|tables?|templates?|html|json|xml|latex|reports?|summar(?:y|ies)|text|output|pages?|components?|lists?|line|distinctions?|parallels?|attention|inspiration|lessons?|data)\b/;
     return (
-      /\b(draw|paint|illustrate|render|sketch)\b.*\b(in|of|with|a|an|the)\b/.test(taskText) ||
+      (/\b(draw|paint|illustrate|render|sketch)\b.*\b(in|of|with|a|an|the)\b/.test(taskText) &&
+        !nonPictureObject.test(taskText)) ||
       /\b(create|generate|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|with|about|for|on|explaining?)\b/.test(
         taskText,
       ) ||
       /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/.test(
         taskText,
       ) ||
-      /\b(create|generate|make|produce|design|render)\s+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)\s+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)["“'‘]?(?:\d[\w:.×%/-]*|[\w-]+)["”'’]?,?\s+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
+      // One line at a time: the task text joins the prompt and title with newlines.
+      /\b(create|generate|make|produce|design|render)[^\S\n]+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)[^\S\n]+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)["“'‘]?(?:\d[\w:.×%/-]*|[\w-]+)["”'’]?,?[^\S\n]+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
         taskText,
       )
     );
@@ -39411,8 +39417,8 @@ Return ONLY a JSON object:
           // The command text stays out of the reason: failure classifiers scan
           // it for words like "login" or "auth" and would treat it as a user
           // blocker. The commands go to the event log instead.
-          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map(
-            (kind) => (kind === "test" ? "test" : "build/check"),
+          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map((kind) =>
+            kind === "test" ? "test" : "build/check",
           );
           lastFailureReason =
             `run_command failed: the last ${failedKinds.join(" and ")} run did not pass, ` +

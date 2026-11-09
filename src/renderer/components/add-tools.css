@@ -39,24 +39,26 @@
   white-space: nowrap;
 }
 
+/* The input is the field and the icon sits in its left padding. A bordered wrapper around a
+   bare input drew two boxes, because Settings' field rule (settings.css) re-borders the input. */
 .add-tools-search {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 13px;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-surface);
+}
+
+.add-tools-search > svg {
+  position: absolute;
+  left: 13px;
+  color: var(--color-text-muted);
+  pointer-events: none;
 }
 
 .add-tools-search input {
   flex: 1;
+  width: 100%;
   min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+  padding: 0 13px 0 40px;
 }
 
 .add-tools-paths,

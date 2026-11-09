@@ -173,6 +173,11 @@ import {
 } from "../../utils/renderer-perf";
 import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-completion-ux";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
+import { buildTaskTranscriptMarkdown } from "./task-transcript-markdown";
+import { announceSessionArchived } from "../../utils/session-archive-events";
+import { promptForText } from "../TextPromptDialog";
+import { isActiveTaskStatus, isIdleFork } from "../../../shared/task-status";
+import { ipcErrorMessage } from "../../utils/ipc-error-message";
 import {
   deriveSharedTaskEventUiState,
   reconcileBotConversationSharedTaskEventUi,
@@ -6666,13 +6671,21 @@ function MainContentComponent({
       `- Link: ${botDeeplink}`,
       task.semanticSummary ? `- Summary: ${task.semanticSummary}` : null,
       "",
-      "## Prompt",
+      "## Conversation",
       "",
-      promptText.trim() || "_No prompt available._",
+      buildTaskTranscriptMarkdown(events, promptText, agentContext.agentName || "CoWork") ||
+        "_No messages yet._",
     ]
       .filter((line): line is string => line !== null)
       .join("\n");
-  }, [botDeeplink, cleanedDisplayPrompt, task, taskWorkingDirectory]);
+  }, [
+    agentContext.agentName,
+    botDeeplink,
+    cleanedDisplayPrompt,
+    events,
+    task,
+    taskWorkingDirectory,
+  ]);
   const botMascotForSender = useMemo(() => buildBotMascotLookup(agentRoles), [agentRoles]);
   const botConversationFirstMessageAt = useMemo(() => {
     if (!isBotConversation) return null;
@@ -6837,7 +6850,13 @@ function MainContentComponent({
     )
       return;
     closeTaskHeaderMenu();
-    const nextTitle = window.prompt(actionLabels.rename, task.title)?.trim();
+    const nextTitle = (
+      await promptForText({
+        title: actionLabels.rename,
+        defaultValue: task.title,
+        confirmLabel: "Rename",
+      })
+    )?.trim();
     if (!nextTitle || nextTitle === task.title) return;
     try {
       await window.electronAPI.renameTask(task.id, nextTitle);
@@ -6855,6 +6874,11 @@ function MainContentComponent({
     workspace?.permissions.write,
   ]);
 
+  // The main process refuses to archive a session with running work (it would keep going unseen).
+  const taskHeaderArchiveBlockedByRunningWork = Boolean(
+    task && isActiveTaskStatus(task.status) && !isIdleFork(task),
+  );
+
   const handleTaskHeaderArchive = useCallback(async () => {
     if (
       !task ||
@@ -6868,9 +6892,14 @@ function MainContentComponent({
       await window.electronAPI.archiveTask(task.id);
       onSelectTask?.(null);
       await onTasksChanged?.();
+      announceSessionArchived({ taskId: task.id, wasSelected: true });
     } catch (error) {
       console.error("Failed to archive task from header:", error);
-      setHeaderActionError("Could not archive. Please try again.");
+      setHeaderActionError(
+        error instanceof Error && ipcErrorMessage(error)
+          ? `Could not archive: ${ipcErrorMessage(error)}`
+          : "Could not archive. Please try again.",
+      );
     }
   }, [
     closeTaskHeaderMenu,
@@ -8917,13 +8946,16 @@ function MainContentComponent({
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                            !hasHostMethod("archiveTask")
+                            !hasHostMethod("archiveTask") ||
+                            taskHeaderArchiveBlockedByRunningWork
                           }
                           title={
                             taskHeaderTaskMutationUnavailableReason ??
                             (!hasHostMethod("archiveTask")
                               ? "Archiving is not available on this browser host."
-                              : undefined)
+                              : taskHeaderArchiveBlockedByRunningWork
+                                ? "Stop this session or let it finish before archiving it."
+                                : undefined)
                           }
                           onClick={handleTaskHeaderArchive}
                         >
@@ -8987,13 +9019,16 @@ function MainContentComponent({
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                            !hasHostMethod("archiveTask")
+                            !hasHostMethod("archiveTask") ||
+                            taskHeaderArchiveBlockedByRunningWork
                           }
                           title={
                             taskHeaderTaskMutationUnavailableReason ??
                             (!hasHostMethod("archiveTask")
                               ? "Archiving is not available on this browser host."
-                              : undefined)
+                              : taskHeaderArchiveBlockedByRunningWork
+                                ? "Stop this session or let it finish before archiving it."
+                                : undefined)
                           }
                           onClick={handleTaskHeaderArchive}
                         >

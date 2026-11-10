@@ -11,7 +11,6 @@ import {
   MemoryObservationSearchRequestSchema,
   MemoryRecentRequestSchema,
   MemorySaveSettingsRequestSchema,
-  MemorySearchRequestSchema,
   MemoryTimelineRequestSchema,
   MemoryWriteApproveRequestSchema,
   MemoryWriteRejectRequestSchema,
@@ -36,8 +35,7 @@ afterEach(() => {
 });
 
 describe("memory IPC schemas (SEC-11)", () => {
-  it("requires a workspace for memory search, timeline and details", () => {
-    expect(() => validateInput(MemorySearchRequestSchema, { query: "x" })).toThrow();
+  it("requires a workspace for memory timeline and details", () => {
     expect(() => validateInput(MemoryTimelineRequestSchema, { memoryId: "m1" })).toThrow();
     expect(() => validateInput(MemoryDetailsRequestSchema, ["m1"])).toThrow();
     expect(validateInput(MemoryDetailsRequestSchema, { workspaceId: WS, ids: ["m1"] })).toEqual({
@@ -46,20 +44,13 @@ describe("memory IPC schemas (SEC-11)", () => {
     });
   });
 
-  it("bounds query length, id counts and limits", () => {
-    expect(() =>
-      validateInput(MemorySearchRequestSchema, { workspaceId: WS, query: "q".repeat(1_001) }),
-    ).toThrow();
+  it("bounds id counts and limits", () => {
     expect(() =>
       validateInput(MemoryDetailsRequestSchema, {
         workspaceId: WS,
         ids: Array.from({ length: 51 }, (_, i) => `m${i}`),
       }),
     ).toThrow();
-    expect(
-      validateInput(MemorySearchRequestSchema, { workspaceId: WS, query: "x", limit: 10_000 })
-        .limit,
-    ).toBe(100);
     expect(validateInput(MemoryRecentRequestSchema, { workspaceId: WS, limit: 1e9 }).limit).toBe(
       200,
     );

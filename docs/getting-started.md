@@ -583,8 +583,8 @@ Don't use system folders like `/System` or `/Applications`.
 ### Learn More
 
 - [Full README](../README.md) - Complete documentation
-- [Implementation Summary](../IMPLEMENTATION_SUMMARY.md) - Technical details
-- [Project Status](../PROJECT_STATUS.md) - Feature status
+- [Architecture](architecture.md) - Technical details
+- [Features](features.md) - What the app can do
 
 ## Getting Help
 

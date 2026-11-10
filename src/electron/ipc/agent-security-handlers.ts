@@ -88,14 +88,6 @@ export function setupAgentSecurityHandlers(): void {
       return service().updateFindingStatus(findingId.trim(), status as AgentSecurityFindingStatus);
     },
   );
-  ipcMain.handle(
-    IPC_CHANNELS.AGENT_SECURITY_DECISIONS_LIST,
-    async (_, taskId?: unknown, limit?: unknown) =>
-      service().listDecisions(
-        typeof taskId === "string" && taskId.trim() ? taskId.trim() : undefined,
-        boundedLimit(limit),
-      ),
-  );
   ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_DIAGNOSTICS_LIST, async (_, limit?: unknown) =>
     service().listDiagnostics(boundedLimit(limit)),
   );
@@ -105,9 +97,6 @@ export function setupAgentSecurityHandlers(): void {
   );
   ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_SCAN, async () => service().runScan());
   ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_RULES_CHECK, async () => service().checkRules());
-  ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_HOOK_STATUS, async (_, agent: unknown) =>
-    service().hookStatus(validateAgentName(agent)),
-  );
   ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_HOOK_INSTALL, async (event, agent: unknown) => {
     const validatedAgent = validateAgentName(agent);
     await confirmSecurityMutation(event, "install", validatedAgent);
@@ -117,17 +106,5 @@ export function setupAgentSecurityHandlers(): void {
     const validatedAgent = validateAgentName(agent);
     await confirmSecurityMutation(event, "uninstall", validatedAgent);
     return service().uninstallHook(validatedAgent);
-  });
-  ipcMain.handle(
-    IPC_CHANNELS.AGENT_SECURITY_CASE_BUILD,
-    async (_, caseId: unknown, taskId: unknown) =>
-      service().buildCase(validateAgentName(caseId), validateAgentName(taskId)),
-  );
-  ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_CASE_VERIFY, async (_, bundleName: unknown) =>
-    service().verifyCase(validateAgentName(bundleName)),
-  );
-  ipcMain.handle(IPC_CHANNELS.AGENT_SECURITY_PRUNE, async (event) => {
-    await confirmSecurityMutation(event, "prune");
-    return service().prune();
   });
 }

@@ -297,30 +297,6 @@ export interface MemoryLayerPreviewPayload {
   layers: MemoryLayerPreview[];
 }
 
-export type VerbatimQuoteSourceType =
-  | "transcript_span"
-  | "task_message"
-  | "memory"
-  | "workspace_markdown";
-
-export interface VerbatimQuoteSearchResult {
-  id: string;
-  sourceType: VerbatimQuoteSourceType;
-  objectId: string;
-  taskId?: string;
-  timestamp: number;
-  path?: string;
-  excerpt: string;
-  relevanceScore: number;
-  sourcePriority: number;
-  rankingReason: string;
-  eventId?: string;
-  seq?: number;
-  startLine?: number;
-  endLine?: number;
-  memoryType?: string;
-}
-
 export type CuratedMemoryTarget = "user" | "workspace";
 
 export type CuratedMemoryKind =
@@ -585,8 +561,6 @@ export type VerificationEvidenceMode = "agent_observable" | "user_observable" | 
 export const TASK_ERROR_CODES = {
   TURN_LIMIT_EXCEEDED: "TURN_LIMIT_EXCEEDED",
 } as const;
-
-export type TaskErrorCode = (typeof TASK_ERROR_CODES)[keyof typeof TASK_ERROR_CODES];
 
 /**
  * Reason for command termination - used to signal the agent why a command ended
@@ -3254,401 +3228,6 @@ export interface SpeculativeRunListQuery {
 
 // ============ Self-Improvement Types ============
 
-export type ImprovementCandidateSource =
-  | "task_failure"
-  | "verification_failure"
-  | "user_feedback"
-  | "dev_log";
-
-export type ImprovementCandidateStatus =
-  | "open"
-  | "running"
-  | "review"
-  | "parked"
-  | "resolved"
-  | "dismissed";
-
-export type ImprovementCandidateReadiness =
-  | "ready"
-  | "cooling_down"
-  | "parked"
-  | "blocked_provider"
-  | "needs_more_evidence"
-  | "unknown";
-
-export type ImprovementRunStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
-
-export type ImprovementReviewStatus = "pending" | "accepted" | "dismissed";
-export type ImprovementPromotionMode = "merge" | "github_pr";
-export type ImprovementPromotionStatus =
-  | "idle"
-  | "promoting"
-  | "applied" // legacy-only
-  | "merged" // legacy/manual-only
-  | "pr_opened"
-  | "promotion_failed";
-
-export type ImprovementFailureClass =
-  | "provider_tool_protocol_error"
-  | "provider_rate_limited"
-  | "provider_model_missing"
-  | "provider_network_failure"
-  | "provider_config_error"
-  | "provider_unknown"
-  | "plan_timeout"
-  | "task_timeout"
-  | "mutation_contract_unmet"
-  | "artifact_contract_unmet"
-  | "verification_failed"
-  | "missing_resumable_state"
-  | "non_promotable_result"
-  | "preflight_failed"
-  | "unknown";
-
-export interface ImprovementEvidence {
-  type: ImprovementCandidateSource;
-  taskId?: string;
-  eventType?: string;
-  eventId?: string;
-  summary: string;
-  details?: string;
-  createdAt: number;
-  metadata?: Record<string, unknown>;
-}
-
-export interface ImprovementCandidate {
-  id: string;
-  workspaceId: string;
-  fingerprint: string;
-  source: ImprovementCandidateSource;
-  status: ImprovementCandidateStatus;
-  readiness?: ImprovementCandidateReadiness;
-  readinessReason?: string;
-  title: string;
-  summary: string;
-  severity: number;
-  recurrenceCount: number;
-  fixabilityScore: number;
-  priorityScore: number;
-  evidence: ImprovementEvidence[];
-  lastTaskId?: string;
-  lastEventType?: string;
-  firstSeenAt: number;
-  lastSeenAt: number;
-  lastExperimentAt?: number;
-  failureStreak?: number;
-  cooldownUntil?: number;
-  parkReason?: string;
-  parkedAt?: number;
-  lastSkipReason?: string;
-  lastSkipAt?: number;
-  lastAttemptFingerprint?: string;
-  lastFailureClass?: ImprovementFailureClass;
-  resolvedAt?: number;
-}
-
-export type ImprovementCampaignStage =
-  | "queued"
-  | "preflight"
-  | "reproducing"
-  | "implementing"
-  | "verifying"
-  | "completed";
-
-export interface ImprovementLoopSettings {
-  enabled: boolean;
-  autoRun: boolean;
-  includeDevLogs: boolean;
-  intervalMinutes: number;
-  variantsPerCampaign: number;
-  maxConcurrentCampaigns: number;
-  maxConcurrentImprovementExecutors: number;
-  maxQueuedImprovementCampaigns: number;
-  maxOpenCandidatesPerWorkspace: number;
-  requireWorktree: boolean;
-  requireRepoChecks: boolean;
-  enforcePatchScope: boolean;
-  maxPatchFiles: number;
-  reviewRequired: boolean;
-  judgeRequired: boolean;
-  promotionMode: ImprovementPromotionMode;
-  evalWindowDays: number;
-  replaySetSize: number;
-  campaignTimeoutMinutes: number;
-  campaignTokenBudget: number;
-  campaignCostBudget: number;
-  improvementProgramPath?: string;
-}
-
-export interface ImprovementEligibility {
-  eligible: boolean;
-  reason: string;
-  enrolled: boolean;
-  repoPath?: string;
-  machineFingerprint?: string;
-  ownerEnrollmentChallenge?: string;
-  checks: {
-    unpackagedApp: boolean;
-    canonicalRepo: boolean;
-    ownerEnrollment: boolean;
-    ownerProofPresent: boolean;
-  };
-}
-
-export interface ImprovementHistoryResetResult {
-  resetAt: number;
-  deleted: {
-    candidates: number;
-    campaigns: number;
-    variantRuns: number;
-    judgeVerdicts: number;
-    legacyRuns: number;
-  };
-  cancelledTaskIds: string[];
-}
-
-export const DEFAULT_IMPROVEMENT_LOOP_SETTINGS: ImprovementLoopSettings = {
-  enabled: false,
-  autoRun: true,
-  includeDevLogs: true,
-  intervalMinutes: 24 * 60,
-  variantsPerCampaign: 1,
-  maxConcurrentCampaigns: 1,
-  maxConcurrentImprovementExecutors: 1,
-  maxQueuedImprovementCampaigns: 1,
-  maxOpenCandidatesPerWorkspace: 25,
-  requireWorktree: true,
-  requireRepoChecks: true,
-  enforcePatchScope: true,
-  maxPatchFiles: 8,
-  reviewRequired: false,
-  judgeRequired: false,
-  promotionMode: "github_pr",
-  evalWindowDays: 14,
-  replaySetSize: 3,
-  campaignTimeoutMinutes: 30,
-  campaignTokenBudget: 60000,
-  campaignCostBudget: 15,
-};
-
-export interface ImprovementExperimentConfig {
-  workspaceId: string;
-  candidateId: string;
-  settingsSnapshot: ImprovementLoopSettings;
-}
-
-export interface ImprovementRun {
-  id: string;
-  candidateId: string;
-  workspaceId: string;
-  executionWorkspaceId?: string;
-  status: ImprovementRunStatus;
-  reviewStatus: ImprovementReviewStatus;
-  promotionStatus?: ImprovementPromotionStatus;
-  taskId?: string;
-  branchName?: string;
-  mergeResult?: MergeResult;
-  pullRequest?: PullRequestResult;
-  promotionError?: string;
-  baselineMetrics?: EvalBaselineMetrics;
-  outcomeMetrics?: EvalBaselineMetrics;
-  verdictSummary?: string;
-  evaluationNotes?: string;
-  createdAt: number;
-  startedAt?: number;
-  completedAt?: number;
-  promotedAt?: number;
-}
-
-export interface ImprovementRunEvaluation {
-  runId: string;
-  passed: boolean;
-  summary: string;
-  notes: string[];
-  targetedVerificationPassed: boolean;
-  verificationPassed: boolean;
-  baselineMetrics: EvalBaselineMetrics;
-  outcomeMetrics: EvalBaselineMetrics;
-}
-
-export type ImprovementVariantLane =
-  | "minimal_patch"
-  | "test_first"
-  | "root_cause"
-  | "guardrail_hardening";
-
-export type ImprovementCampaignStatus =
-  | "queued"
-  | "preflight"
-  | "reproducing"
-  | "implementing"
-  | "verifying"
-  | "pr_opened"
-  | "parked"
-  | "planning"
-  | "running_variants"
-  | "judging"
-  | "ready_for_review"
-  | "promoted"
-  | "failed";
-
-export type ImprovementVariantStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
-
-export interface ImprovementReplayCase {
-  id: string;
-  candidateId: string;
-  source: ImprovementCandidateSource;
-  summary: string;
-  details?: string;
-  createdAt: number;
-  taskId?: string;
-  eventType?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface ImprovementProgramConfig {
-  path?: string;
-  instructions: string;
-  mutablePaths: string[];
-  forbiddenChanges: string[];
-  scoringPriorities: string[];
-}
-
-export interface ImprovementVariantArtifactSummary {
-  reproductionMethod?: string;
-  changedFiles: string[];
-  verificationCommands: string[];
-  prReadiness: "ready" | "not_ready" | "unknown";
-  rootCauseSummary?: string;
-  missingEvidence: string[];
-}
-
-export interface ImprovementVariantObservability {
-  stage?: string;
-  executionMode?: "analyze" | "verified";
-  artifactSummary?: ImprovementVariantArtifactSummary;
-  evaluation?: {
-    targetedVerificationPassed: boolean;
-    verificationPassed: boolean;
-    promotable: boolean;
-    reproductionEvidenceFound: boolean;
-    verificationEvidenceFound: boolean;
-    prReadinessEvidenceFound: boolean;
-    replayPassRate: number;
-    diffSizePenalty: number;
-    regressionSignals: string[];
-    safetySignals: string[];
-  };
-}
-
-export interface ImprovementCampaignObservability {
-  selectedAt?: number;
-  candidateSelectionReason?: string;
-  candidateSelectionScore?: number;
-  variantCount?: number;
-  verificationCommands?: string[];
-  stageTransitions?: Array<{
-    stage: string;
-    at: number;
-    detail?: string;
-  }>;
-  promotionAttempts?: number;
-  lastPromotionError?: string;
-}
-
-export interface ImprovementVariantEvaluation {
-  variantId: string;
-  lane: ImprovementVariantLane;
-  score: number;
-  targetedVerificationPassed: boolean;
-  verificationPassed: boolean;
-  promotable: boolean;
-  reproductionEvidenceFound: boolean;
-  verificationEvidenceFound: boolean;
-  prReadinessEvidenceFound: boolean;
-  regressionSignals: string[];
-  safetySignals: string[];
-  failureClassResolved: boolean;
-  replayPassRate: number;
-  diffSizePenalty: number;
-  artifactSummary: ImprovementVariantArtifactSummary;
-  summary: string;
-  notes: string[];
-}
-
-export interface ImprovementJudgeVerdict {
-  id: string;
-  campaignId: string;
-  winnerVariantId?: string;
-  status: "pending" | "passed" | "failed";
-  summary: string;
-  notes: string[];
-  comparedAt: number;
-  variantRankings: Array<{
-    variantId: string;
-    score: number;
-    lane: ImprovementVariantLane;
-  }>;
-  replayCases: ImprovementReplayCase[];
-}
-
-export interface ImprovementVariantRun {
-  id: string;
-  campaignId: string;
-  candidateId: string;
-  workspaceId: string;
-  executionWorkspaceId?: string;
-  lane: ImprovementVariantLane;
-  status: ImprovementVariantStatus;
-  taskId?: string;
-  branchName?: string;
-  baselineMetrics?: EvalBaselineMetrics;
-  outcomeMetrics?: EvalBaselineMetrics;
-  verdictSummary?: string;
-  evaluationNotes?: string;
-  observability?: ImprovementVariantObservability;
-  createdAt: number;
-  startedAt?: number;
-  completedAt?: number;
-}
-
-export interface ImprovementCampaign {
-  id: string;
-  candidateId: string;
-  workspaceId: string;
-  executionWorkspaceId?: string;
-  rootTaskId?: string;
-  status: ImprovementCampaignStatus;
-  stage?: ImprovementCampaignStage;
-  reviewStatus: ImprovementReviewStatus;
-  promotionStatus?: ImprovementPromotionStatus;
-  stopReason?: string;
-  providerHealthSnapshot?: Record<string, unknown>;
-  stageBudget?: Record<string, unknown>;
-  verificationCommands?: string[];
-  observability?: ImprovementCampaignObservability;
-  prRequired?: boolean;
-  winnerVariantId?: string;
-  promotedTaskId?: string;
-  promotedBranchName?: string;
-  mergeResult?: MergeResult;
-  pullRequest?: PullRequestResult;
-  promotionError?: string;
-  baselineMetrics?: EvalBaselineMetrics;
-  outcomeMetrics?: EvalBaselineMetrics;
-  verdictSummary?: string;
-  evaluationNotes?: string;
-  trainingEvidence: ImprovementEvidence[];
-  holdoutEvidence: ImprovementEvidence[];
-  replayCases: ImprovementReplayCase[];
-  variants: ImprovementVariantRun[];
-  judgeVerdict?: ImprovementJudgeVerdict;
-  createdAt: number;
-  startedAt?: number;
-  completedAt?: number;
-  promotedAt?: number;
-}
-
 export type VisualAttachmentMimeType =
   | "image/jpeg"
   | "image/png"
@@ -4411,11 +3990,6 @@ export interface SessionProgressState {
   updatedAt: number;
 }
 
-export interface SessionSearchResult {
-  task: Task;
-  progress: SessionProgressState;
-}
-
 export interface TaskTimelineEventV2 extends TaskEvent {
   schemaVersion: 2;
   type: TimelineEventType;
@@ -4872,13 +4446,6 @@ export interface TerminalTabRunResult {
   terminationReason?: CommandTerminationReason;
 }
 
-export interface TerminalTabCompletionResult {
-  line: string;
-  cursor: number;
-  matches: string[];
-  completed: boolean;
-}
-
 export interface TerminalTabOutputEvent {
   tabId: string;
   workspaceId: string;
@@ -4944,45 +4511,6 @@ export type AgentTerminalEvent =
   | { kind: "status"; taskId: string; tab: AgentTerminalTab }
   | { kind: "removed"; taskId: string; tabId: string };
 
-export type GithubReviewThreadState = "open" | "resolved" | "outdated" | "unknown";
-
-export interface GithubPullRequestReviewComment {
-  id: string;
-  author: string;
-  body: string;
-  url: string;
-  createdAt: number;
-  updatedAt?: number;
-}
-
-export interface GithubPullRequestReviewThread {
-  id: string;
-  prNumber: number;
-  repository: string;
-  url: string;
-  path?: string;
-  line?: number;
-  originalLine?: number;
-  diffHunk?: string;
-  author: string;
-  body: string;
-  comments: GithubPullRequestReviewComment[];
-  state: GithubReviewThreadState;
-  createdAt: number;
-  updatedAt?: number;
-}
-
-export interface GithubPullRequestReviewSummary {
-  repository: string;
-  repoRoot: string;
-  branch: string;
-  prNumber?: number;
-  prUrl?: string;
-  baseRefName?: string;
-  headRefName?: string;
-  threads: GithubPullRequestReviewThread[];
-}
-
 export type LLMRoutingReason =
   | "manual_override"
   | "profile_routing"
@@ -5037,12 +4565,6 @@ export interface TaskUsageTotals {
   updatedAt?: number;
 }
 
-export interface TaskFileChanges {
-  created: string[];
-  modified: string[];
-  deleted: string[];
-}
-
 export interface EvalBaselineMetrics {
   generatedAt: number;
   windowDays: number;
@@ -5060,43 +4582,6 @@ export interface EvalBaselineMetrics {
     failures: number;
     failureRate: number;
   }>;
-}
-
-export interface TaskExportQuery {
-  workspaceId?: string;
-  taskIds?: string[];
-  limit?: number;
-  offset?: number;
-}
-
-export interface TaskExportItem {
-  taskId: string;
-  title: string;
-  pinned?: boolean;
-  status: TaskStatus;
-  workspaceId: string;
-  workspaceName?: string;
-  parentTaskId?: string;
-  agentType?: AgentType;
-  sessionId?: string;
-  branchFromTaskId?: string;
-  branchLabel?: string;
-  depth?: number;
-  createdAt: number;
-  updatedAt: number;
-  completedAt?: number;
-  durationMs?: number;
-  usage?: TaskUsageTotals;
-  files?: TaskFileChanges;
-  resultSummary?: string;
-  error?: string | null;
-}
-
-export interface TaskExportJson {
-  schemaVersion: 1;
-  exportedAt: number;
-  query: TaskExportQuery;
-  tasks: TaskExportItem[];
 }
 
 export type BotWorkView = "needs_you" | "working" | "scheduled" | "results";
@@ -5636,20 +5121,6 @@ export interface SessionChecklistToolItemInput {
 
 export type StepFeedbackAction = "retry" | "skip" | "stop" | "drift";
 
-export interface StepFeedbackPayload {
-  taskId: string;
-  stepId: string;
-  action: StepFeedbackAction;
-  message?: string;
-}
-
-export interface ToolCall {
-  id: string;
-  tool: ToolType;
-  parameters: Any;
-  timestamp: number;
-}
-
 export interface ToolResult {
   callId: string;
   success: boolean;
@@ -6086,12 +5557,6 @@ export interface ListCoreTracesRequest {
   limit?: number;
 }
 
-export interface GetCoreTraceResult {
-  trace: CoreTrace;
-  events: CoreTraceEvent[];
-  candidates: CoreMemoryCandidate[];
-}
-
 export interface ListCoreMemoryCandidatesRequest {
   profileId?: string;
   workspaceId?: string;
@@ -6270,23 +5735,12 @@ export interface ListCoreFailureClustersRequest {
   limit?: number;
 }
 
-export interface ReviewCoreFailureClusterRequest {
-  id: string;
-  status: Extract<CoreFailureClusterStatus, "stable" | "resolved" | "dismissed">;
-  rootCauseSummary?: string;
-}
-
 export interface ListCoreEvalCasesRequest {
   profileId?: string;
   workspaceId?: string;
   clusterId?: string;
   status?: CoreEvalCaseStatus;
   limit?: number;
-}
-
-export interface ReviewCoreEvalCaseRequest {
-  id: string;
-  status: Extract<CoreEvalCaseStatus, "active" | "archived" | "failing">;
 }
 
 export interface ListCoreExperimentsRequest {
@@ -7277,8 +6731,6 @@ export type ManagedAgentToolFamily =
   | "search"
   | "communication";
 
-export type ManagedAgentRuntimeToolSurface = "chatgpt" | "slack";
-
 export type ManagedAgentRuntimeToolApprovalBehavior =
   | "no_approval"
   | "auto_approve"
@@ -7559,15 +7011,6 @@ export interface AgentTemplate {
   teamRoleNames?: string[];
   environmentConfig?: Partial<ManagedEnvironmentConfig>;
   studio?: Partial<ManagedAgentStudioConfig>;
-}
-
-export interface AudioSummaryResult {
-  sessionId: string;
-  artifact: Artifact;
-  style: AudioSummaryConfig["style"];
-  title: string;
-  script: string;
-  playbackUrl?: string;
 }
 
 // ============ Collaborative Thoughts (Team Multi-Agent Thinking) ============
@@ -8043,11 +7486,6 @@ export interface HeartbeatConfig {
   maxDispatchesPerDay?: number;
   heartbeatProfile?: HeartbeatProfile;
   activeHours?: HeartbeatActiveHours | null;
-}
-
-export interface AutomationProfileRunQuery {
-  profileId: string;
-  limit?: number;
 }
 
 /**
@@ -8554,15 +7992,12 @@ export const IPC_CHANNELS = {
   WORK_SESSION_LEASES_LIST: "workSession:leasesList",
   WORK_SESSION_PROJECTION_GET: "workSession:projectionGet",
   WORK_SESSION_REPLAY_EVALUATE: "workSession:replayEvaluate",
-  SESSION_SEARCH: "session:search",
-  TASK_EXPORT_JSON: "task:exportJSON",
   TASK_PIN: "task:pin",
   TASK_CANCEL: "task:cancel",
   TASK_DISCARD_INTERRUPTED: "task:discardInterrupted",
   TASK_WRAP_UP: "task:wrapUp",
   TASK_PAUSE: "task:pause",
   TASK_RESUME: "task:resume",
-  TASK_CONTINUE: "task:continue",
   TASK_FORK_SESSION: "task:forkSession",
   // Suggested tasks the agent proposed (task-proposals.ts)
   TASK_PROPOSAL_LIST: "taskProposal:list",
@@ -8580,7 +8015,6 @@ export const IPC_CHANNELS = {
   WINDOW_MINIMIZE: "window:minimize",
   WINDOW_MAXIMIZE: "window:maximize",
   WINDOW_CLOSE: "window:close",
-  WINDOW_IS_MAXIMIZED: "window:isMaximized",
   RENDERER_PERF_LOG: "renderer:perfLog",
   FILE_OPEN: "file:open",
   FILE_OPEN_WITH_APP: "file:openWithApp",
@@ -8588,14 +8022,11 @@ export const IPC_CHANNELS = {
   FILE_READ_FOR_VIEWER: "file:readForViewer",
   FILE_UPDATE_SPREADSHEET: "file:updateSpreadsheet",
   FILE_UPDATE_DOCUMENT: "file:updateDocument",
-  GITHUB_REVIEW_LIST: "githubReview:list",
-  GITHUB_REVIEW_BUILD_TASK_PROMPT: "githubReview:buildTaskPrompt",
   TERMINAL_TAB_LIST: "terminalTab:list",
   TERMINAL_TAB_CREATE: "terminalTab:create",
   TERMINAL_TAB_RUN: "terminalTab:run",
   TERMINAL_TAB_WRITE: "terminalTab:write",
   TERMINAL_TAB_RESIZE: "terminalTab:resize",
-  TERMINAL_TAB_COMPLETE: "terminalTab:complete",
   TERMINAL_TAB_STOP: "terminalTab:stop",
   TERMINAL_TAB_CLOSE: "terminalTab:close",
   TERMINAL_TAB_OUTPUT: "terminalTab:output",
@@ -8608,7 +8039,6 @@ export const IPC_CHANNELS = {
   AGENT_TERMINAL_CLOSE: "agentTerminal:close",
   AGENT_TERMINAL_EVENT: "agentTerminal:event",
   SPREADSHEET_OPEN_WORKBOOK: "spreadsheet:openWorkbook",
-  SPREADSHEET_GET_VIEWPORT: "spreadsheet:getViewport",
   SPREADSHEET_APPLY_PATCHES: "spreadsheet:applyPatches",
   SPREADSHEET_SAVE_WORKBOOK: "spreadsheet:saveWorkbook",
   SPREADSHEET_CLOSE_WORKBOOK: "spreadsheet:closeWorkbook",
@@ -8689,15 +8119,11 @@ export const IPC_CHANNELS = {
   ANNOTATION_RESOLVE: "annotation:resolve",
   ANNOTATION_DISMISS: "annotation:dismiss",
   ANNOTATION_UNDO: "annotation:undo",
-  YOUTUBE_INGEST_VIDEO: "youtube:ingestVideo",
   YOUTUBE_ASK_VIDEO: "youtube:askVideo",
-  YOUTUBE_SEARCH_SEGMENTS: "youtube:searchSegments",
-  YOUTUBE_LIST_VIDEOS: "youtube:listVideos",
   LLM_WIKI_GET_VAULT_SUMMARY: "llmWiki:getVaultSummary",
   FILE_IMPORT_TO_WORKSPACE: "file:importToWorkspace",
   FILE_IMPORT_DATA_TO_WORKSPACE: "file:importDataToWorkspace",
   DOCUMENT_OPEN_EDITOR_SESSION: "document:openEditorSession",
-  DOCUMENT_LIST_VERSIONS: "document:listVersions",
   DOCUMENT_START_EDIT_TASK: "document:startEditTask",
   SHELL_OPEN_EXTERNAL: "shell:openExternal",
   MAILBOX_GET_SYNC_STATUS: "mailbox:getSyncStatus",
@@ -8707,7 +8133,6 @@ export const IPC_CHANNELS = {
   MAILBOX_GET_THREAD: "mailbox:getThread",
   MAILBOX_LIST_EVENTS: "mailbox:listEvents",
   MAILBOX_GET_DIGEST: "mailbox:getDigest",
-  MAILBOX_TODAY_DIGEST: "mailbox:todayDigest",
   MAILBOX_SENDER_CLEANUP_DIGEST: "mailbox:senderCleanupDigest",
   MAILBOX_ASK: "mailbox:ask",
   MAILBOX_ASK_EVENT: "mailbox:askEvent",
@@ -8715,16 +8140,11 @@ export const IPC_CHANNELS = {
   MAILBOX_GET_DRAFT: "mailbox:getDraft",
   MAILBOX_CREATE_DRAFT: "mailbox:createDraft",
   MAILBOX_UPDATE_DRAFT: "mailbox:updateDraft",
-  MAILBOX_ADD_DRAFT_ATTACHMENT: "mailbox:addDraftAttachment",
-  MAILBOX_REMOVE_DRAFT_ATTACHMENT: "mailbox:removeDraftAttachment",
   MAILBOX_SEND_DRAFT: "mailbox:sendDraft",
-  MAILBOX_SCHEDULE_SEND: "mailbox:scheduleSend",
-  MAILBOX_UPDATE_CLIENT_SETTINGS: "mailbox:updateClientSettings",
   MAILBOX_RETRY_ACTION: "mailbox:retryAction",
   MAILBOX_RESOLVE_SEND_OUTCOME: "mailbox:resolveSendOutcome",
   MAILBOX_DISCARD_COMPOSE_DRAFT: "mailbox:discardComposeDraft",
   MAILBOX_CANCEL_SEND: "mailbox:cancelSend",
-  MAILBOX_UNDO_ACTION: "mailbox:undoAction",
   MAILBOX_SUMMARIZE_THREAD: "mailbox:summarizeThread",
   MAILBOX_GENERATE_DRAFT: "mailbox:generateDraft",
   MAILBOX_EXTRACT_COMMITMENTS: "mailbox:extractCommitments",
@@ -8747,18 +8167,13 @@ export const IPC_CHANNELS = {
   MAILBOX_SAVED_VIEW_DELETE: "mailbox:savedViewDelete",
   MAILBOX_SAVED_VIEW_PREVIEW_SIMILAR: "mailbox:savedViewPreviewSimilar",
   MAILBOX_QUICK_REPLY_SUGGESTIONS: "mailbox:quickReplySuggestions",
-  MAILBOX_SAVED_VIEW_REVIEW_SCHEDULE: "mailbox:savedViewReviewSchedule",
-  MAILBOX_IDENTITY_RESOLVE: "mailbox:identityResolve",
-  MAILBOX_IDENTITY_GET: "mailbox:identityGet",
   MAILBOX_IDENTITY_LIST: "mailbox:identityList",
   MAILBOX_IDENTITY_SEARCH: "mailbox:identitySearch",
   MAILBOX_IDENTITY_LINK: "mailbox:identityLink",
-  MAILBOX_IDENTITY_TIMELINE: "mailbox:identityTimeline",
   MAILBOX_IDENTITY_CANDIDATES: "mailbox:identityCandidates",
   MAILBOX_IDENTITY_CONFIRM: "mailbox:identityConfirm",
   MAILBOX_IDENTITY_REJECT: "mailbox:identityReject",
   MAILBOX_IDENTITY_UNLINK: "mailbox:identityUnlink",
-  MAILBOX_IDENTITY_PREFERENCE: "mailbox:identityPreference",
   MAILBOX_IDENTITY_COVERAGE: "mailbox:identityCoverage",
   MAILBOX_REPLY_VIA_CHANNEL: "mailbox:replyViaChannel",
   MAILBOX_EVENT: "mailbox:event",
@@ -8774,9 +8189,6 @@ export const IPC_CHANNELS = {
   AGENT_ROLE_UPDATE: "agentRole:update",
   AGENT_ROLE_DELETE: "agentRole:delete",
   AGENT_ROLE_ASSIGN_TO_TASK: "agentRole:assignToTask",
-  AGENT_ROLE_GET_DEFAULTS: "agentRole:getDefaults",
-  AGENT_ROLE_SEED_DEFAULTS: "agentRole:seedDefaults",
-  AGENT_ROLE_SYNC_DEFAULTS: "agentRole:syncDefaults",
   BOT_NOTIFICATION_GET: "bot:notificationGet",
   BOT_NOTIFICATION_UPDATE: "bot:notificationUpdate",
 
@@ -8798,53 +8210,21 @@ export const IPC_CHANNELS = {
   MENTION_EVENT: "mention:event",
 
   // Mission Control - Heartbeat System
-  HEARTBEAT_GET_CONFIG: "heartbeat:getConfig",
-  HEARTBEAT_UPDATE_CONFIG: "heartbeat:updateConfig",
   HEARTBEAT_TRIGGER: "heartbeat:trigger",
-  HEARTBEAT_GET_STATUS: "heartbeat:getStatus",
   HEARTBEAT_GET_ALL_STATUS: "heartbeat:getAllStatus",
   HEARTBEAT_EVENT: "heartbeat:event",
   AUTOMATION_PROFILE_LIST: "automationProfile:list",
-  AUTOMATION_PROFILE_GET: "automationProfile:get",
-  AUTOMATION_PROFILE_CREATE: "automationProfile:create",
-  AUTOMATION_PROFILE_UPDATE: "automationProfile:update",
-  AUTOMATION_PROFILE_DELETE: "automationProfile:delete",
-  AUTOMATION_PROFILE_ATTACH: "automationProfile:attach",
-  AUTOMATION_PROFILE_DETACH: "automationProfile:detach",
-  AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS: "automationProfile:listHeartbeatRuns",
-  AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS: "automationProfile:listSubconsciousRuns",
-  CORE_TRACE_LIST: "coreTrace:list",
-  CORE_TRACE_GET: "coreTrace:get",
-  CORE_TRACE_LIST_BY_PROFILE: "coreTrace:listByProfile",
   CORE_FAILURE_LIST: "coreFailure:list",
   CORE_FAILURE_CLUSTER_LIST: "coreFailure:listClusters",
-  CORE_FAILURE_CLUSTER_REVIEW: "coreFailure:reviewCluster",
   CORE_EVAL_CASE_LIST: "coreEval:listCases",
-  CORE_EVAL_CASE_REVIEW: "coreEval:reviewCase",
   CORE_EXPERIMENT_LIST: "coreExperiment:list",
-  CORE_EXPERIMENT_RUN: "coreExperiment:run",
-  CORE_EXPERIMENT_REVIEW: "coreExperiment:review",
   CORE_LEARNINGS_LIST: "coreLearnings:list",
-  CORE_MEMORY_LIST_CANDIDATES: "coreMemory:listCandidates",
-  CORE_MEMORY_REVIEW_CANDIDATE: "coreMemory:reviewCandidate",
-  CORE_MEMORY_LIST_DISTILL_RUNS: "coreMemory:listDistillRuns",
-  CORE_MEMORY_RUN_DISTILL_NOW: "coreMemory:runDistillNow",
-  MISSION_CONTROL_GET_BRIEF: "missionControl:getBrief",
   MISSION_CONTROL_LIST_ITEMS: "missionControl:listItems",
   MISSION_CONTROL_GET_ITEM_EVIDENCE: "missionControl:getItemEvidence",
   MISSION_CONTROL_REFRESH: "missionControl:refresh",
 
-  // Mission Control - Task Subscriptions
-  SUBSCRIPTION_LIST: "subscription:list",
-  SUBSCRIPTION_ADD: "subscription:add",
-  SUBSCRIPTION_REMOVE: "subscription:remove",
-  SUBSCRIPTION_GET_SUBSCRIBERS: "subscription:getSubscribers",
-  SUBSCRIPTION_GET_FOR_AGENT: "subscription:getForAgent",
-  SUBSCRIPTION_EVENT: "subscription:event",
-
   // Mission Control - Company Ops / Planner
   MC_COMPANY_LIST: "missionControl:companyList",
-  MC_COMPANY_GET: "missionControl:companyGet",
   MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
   // Lifecycle hygiene (WP9): list candidates, retire, keep, and edit owner/dependencies/evidence
   LIFECYCLE_HYGIENE_REPORT: "lifecycle:hygieneReport",
@@ -8852,17 +8232,9 @@ export const IPC_CHANNELS = {
   LIFECYCLE_KEEP: "lifecycle:keep",
   LIFECYCLE_SET_META: "lifecycle:setMeta",
   MC_GOAL_LIST: "missionControl:goalList",
-  MC_GOAL_GET: "missionControl:goalGet",
-  MC_GOAL_CREATE: "missionControl:goalCreate",
-  MC_GOAL_UPDATE: "missionControl:goalUpdate",
   MC_PROJECT_LIST: "missionControl:projectList",
-  MC_PROJECT_GET: "missionControl:projectGet",
   MC_PROJECT_CREATE: "missionControl:projectCreate",
-  MC_PROJECT_UPDATE: "missionControl:projectUpdate",
   MC_ISSUE_LIST: "missionControl:issueList",
-  MC_ISSUE_GET: "missionControl:issueGet",
-  MC_ISSUE_CREATE: "missionControl:issueCreate",
-  MC_ISSUE_UPDATE: "missionControl:issueUpdate",
   MC_ISSUE_COMMENT_LIST: "missionControl:issueCommentList",
   MC_RUN_LIST: "missionControl:runList",
   MC_RUN_EVENT_LIST: "missionControl:runEventList",
@@ -8876,7 +8248,6 @@ export const IPC_CHANNELS = {
 
   // Mission Control - Agent Teams
   TEAM_LIST: "team:list",
-  TEAM_GET: "team:get",
   TEAM_CREATE: "team:create",
   TEAM_UPDATE: "team:update",
   TEAM_DELETE: "team:delete",
@@ -8886,7 +8257,6 @@ export const IPC_CHANNELS = {
   TEAM_MEMBER_REMOVE: "teamMember:remove",
   TEAM_MEMBER_REORDER: "teamMember:reorder",
   TEAM_RUN_CREATE: "teamRun:create",
-  TEAM_RUN_GET: "teamRun:get",
   TEAM_RUN_LIST: "teamRun:list",
   TEAM_RUN_CANCEL: "teamRun:cancel",
   TEAM_RUN_WRAP_UP: "teamRun:wrapUp",
@@ -8908,7 +8278,6 @@ export const IPC_CHANNELS = {
 
   // Plugin Packs (Customize panel)
   PLUGIN_PACK_LIST: "pluginPack:list",
-  PLUGIN_PACK_GET: "pluginPack:get",
   PLUGIN_PACK_TOGGLE: "pluginPack:toggle",
   PLUGIN_PACK_GET_CONTEXT: "pluginPack:getContext",
   PLUGIN_PACK_TOGGLE_SKILL: "pluginPack:toggleSkill",
@@ -8920,33 +8289,25 @@ export const IPC_CHANNELS = {
   PLUGIN_PACK_INSTALL_URL: "pluginPack:installUrl",
   PLUGIN_PACK_UNINSTALL: "pluginPack:uninstall",
   PLUGIN_PACK_REGISTRY_SEARCH: "pluginPack:registrySearch",
-  PLUGIN_PACK_REGISTRY_DETAILS: "pluginPack:registryDetails",
   PLUGIN_PACK_REGISTRY_CATEGORIES: "pluginPack:registryCategories",
   PLUGIN_PACK_CHECK_UPDATES: "pluginPack:checkUpdates",
   IMPORT_SECURITY_LIST_QUARANTINED: "importSecurity:listQuarantined",
-  IMPORT_SECURITY_GET_REPORT: "importSecurity:getReport",
   IMPORT_SECURITY_RETRY_QUARANTINED: "importSecurity:retryQuarantined",
   IMPORT_SECURITY_REMOVE_QUARANTINED: "importSecurity:removeQuarantined",
 
   // Admin Policies
   ADMIN_POLICIES_GET: "admin:policiesGet",
   ADMIN_POLICIES_UPDATE: "admin:policiesUpdate",
-  ADMIN_POLICIES_CHECK_PACK: "admin:checkPack",
   AGENT_SECURITY_STATUS: "agentSecurity:status",
   AGENT_SECURITY_FINDINGS_LIST: "agentSecurity:findingsList",
   AGENT_SECURITY_FINDING_UPDATE: "agentSecurity:findingUpdate",
-  AGENT_SECURITY_DECISIONS_LIST: "agentSecurity:decisionsList",
   AGENT_SECURITY_DIAGNOSTICS_LIST: "agentSecurity:diagnosticsList",
   AGENT_SECURITY_INVENTORY_LIST: "agentSecurity:inventoryList",
   AGENT_SECURITY_INVENTORY_REFRESH: "agentSecurity:inventoryRefresh",
   AGENT_SECURITY_SCAN: "agentSecurity:scan",
   AGENT_SECURITY_RULES_CHECK: "agentSecurity:rulesCheck",
-  AGENT_SECURITY_HOOK_STATUS: "agentSecurity:hookStatus",
   AGENT_SECURITY_HOOK_INSTALL: "agentSecurity:hookInstall",
   AGENT_SECURITY_HOOK_UNINSTALL: "agentSecurity:hookUninstall",
-  AGENT_SECURITY_CASE_BUILD: "agentSecurity:caseBuild",
-  AGENT_SECURITY_CASE_VERIFY: "agentSecurity:caseVerify",
-  AGENT_SECURITY_PRUNE: "agentSecurity:prune",
 
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",
@@ -8968,37 +8329,18 @@ export const IPC_CHANNELS = {
 
   // Task Labels
   TASK_LABEL_LIST: "taskLabel:list",
-  TASK_LABEL_CREATE: "taskLabel:create",
-  TASK_LABEL_UPDATE: "taskLabel:update",
-  TASK_LABEL_DELETE: "taskLabel:delete",
-
-  // Agent Working State
-  WORKING_STATE_GET: "workingState:get",
-  WORKING_STATE_GET_CURRENT: "workingState:getCurrent",
-  WORKING_STATE_UPDATE: "workingState:update",
-  WORKING_STATE_HISTORY: "workingState:history",
-  WORKING_STATE_RESTORE: "workingState:restore",
-  WORKING_STATE_DELETE: "workingState:delete",
-  WORKING_STATE_LIST_FOR_TASK: "workingState:listForTask",
 
   // Context Policy (per-context security DM vs group)
-  CONTEXT_POLICY_GET: "contextPolicy:get",
-  CONTEXT_POLICY_GET_FOR_CHAT: "contextPolicy:getForChat",
   CONTEXT_POLICY_LIST: "contextPolicy:list",
   CONTEXT_POLICY_UPDATE: "contextPolicy:update",
-  CONTEXT_POLICY_DELETE: "contextPolicy:delete",
-  CONTEXT_POLICY_CREATE_DEFAULTS: "contextPolicy:createDefaults",
-  CONTEXT_POLICY_IS_TOOL_ALLOWED: "contextPolicy:isToolAllowed",
   CHANNEL_SPECIALIZATION_LIST: "channelSpecialization:list",
   CHANNEL_SPECIALIZATION_CREATE: "channelSpecialization:create",
   CHANNEL_SPECIALIZATION_UPDATE: "channelSpecialization:update",
   CHANNEL_SPECIALIZATION_DELETE: "channelSpecialization:delete",
-  CHANNEL_SPECIALIZATION_RESOLVE: "channelSpecialization:resolve",
 
   // Task events (streaming and history)
   TASK_EVENT: "task:event",
   TASK_EVENTS: "task:events",
-  TASK_SEMANTIC_TIMELINE: "task:semanticTimeline",
   TASK_TRACE_LIST: "taskTrace:list",
   TASK_TRACE_GET: "taskTrace:get",
   TASK_LEARNING_PROGRESS: "task:learningProgress",
@@ -9011,11 +8353,6 @@ export const IPC_CHANNELS = {
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
   TASK_UPDATE_WORKSPACE: "task:updateWorkspace",
   TASK_SET_MODEL: "task:setModel",
-  SHELL_SESSION_EVENT: "shell:sessionEvent",
-  SHELL_SESSION_GET: "shell:sessionGet",
-  SHELL_SESSION_LIST: "shell:sessionList",
-  SHELL_SESSION_RESET: "shell:sessionReset",
-  SHELL_SESSION_CLOSE: "shell:sessionClose",
   UNIFIED_RECALL_QUERY: "recall:query",
   LLM_ROUTING_STATUS: "llm:routingStatus",
   LLM_ROUTING_EVENT: "llm:routingEvent",
@@ -9027,7 +8364,6 @@ export const IPC_CHANNELS = {
   WORKSPACE_UPDATE_PERMISSIONS: "workspace:updatePermissions",
   WORKSPACE_TOUCH: "workspace:touch",
   WORKSPACE_GET_TEMP: "workspace:getTemp", // Get or create temp workspace
-  WORKSPACE_PRUNE_TEMP: "workspace:pruneTemp", // Check or delete unused temp workspaces
   WORKSPACE_REMOVE: "workspace:remove", // Remove a workspace from CoWork (sessions, memory); files stay
 
   // Approval operations
@@ -9057,8 +8393,6 @@ export const IPC_CHANNELS = {
   // Custom User Skills
   CUSTOM_SKILL_LIST: "customSkill:list",
   CUSTOM_SKILL_LIST_TASKS: "customSkill:listTasks", // List only task skills (for dropdown)
-  CUSTOM_SKILL_LIST_GUIDELINES: "customSkill:listGuidelines", // List only guideline skills (for settings)
-  CUSTOM_SKILL_GET: "customSkill:get",
   CUSTOM_SKILL_CREATE: "customSkill:create",
   CUSTOM_SKILL_UPDATE: "customSkill:update",
   CUSTOM_SKILL_DELETE: "customSkill:delete",
@@ -9071,18 +8405,12 @@ export const IPC_CHANNELS = {
   // Skill Registry (SkillHub)
   SKILL_REGISTRY_SEARCH: "skillRegistry:search",
   SKILL_REGISTRY_CLAWHUB_SEARCH: "skillRegistry:clawhubSearch",
-  SKILL_REGISTRY_GET_DETAILS: "skillRegistry:getDetails",
   SKILL_REGISTRY_INSTALL: "skillRegistry:install",
   SKILL_REGISTRY_INSTALL_CLAWHUB: "skillRegistry:installClawHub",
   SKILL_REGISTRY_INSTALL_URL: "skillRegistry:installUrl",
   SKILL_REGISTRY_INSTALL_GIT: "skillRegistry:installGit",
-  SKILL_REGISTRY_UPDATE: "skillRegistry:update",
-  SKILL_REGISTRY_UPDATE_ALL: "skillRegistry:updateAll",
   SKILL_REGISTRY_UNINSTALL: "skillRegistry:uninstall",
-  SKILL_REGISTRY_LIST_MANAGED: "skillRegistry:listManaged",
-  SKILL_REGISTRY_CHECK_UPDATES: "skillRegistry:checkUpdates",
   SKILL_REGISTRY_GET_STATUS: "skillRegistry:getStatus",
-  SKILL_REGISTRY_GET_ELIGIBLE: "skillRegistry:getEligible",
 
   // LLM Settings
   LLM_GET_SETTINGS: "llm:getSettings",
@@ -9151,7 +8479,6 @@ export const IPC_CHANNELS = {
   GATEWAY_GRANT_ACCESS: "gateway:grantAccess",
   GATEWAY_REVOKE_ACCESS: "gateway:revokeAccess",
   GATEWAY_GENERATE_PAIRING: "gateway:generatePairing",
-  GATEWAY_MESSAGE: "gateway:message",
   GATEWAY_USERS_UPDATED: "gateway:users-updated",
 
   // Search Settings
@@ -9235,7 +8562,6 @@ export const IPC_CHANNELS = {
   APP_DOWNLOAD_UPDATE: "app:downloadUpdate",
   APP_INSTALL_UPDATE: "app:installUpdate",
   APP_GET_VERSION: "app:getVersion",
-  APP_UPDATE_AVAILABLE: "app:updateAvailable",
   APP_UPDATE_PROGRESS: "app:updateProgress",
   APP_UPDATE_DOWNLOADED: "app:updateDownloaded",
   APP_UPDATE_ERROR: "app:updateError",
@@ -9272,12 +8598,8 @@ export const IPC_CHANNELS = {
   // Agent Personality
   PERSONALITY_GET_SETTINGS: "personality:getSettings",
   PERSONALITY_SAVE_SETTINGS: "personality:saveSettings",
-  PERSONALITY_GET_DEFINITIONS: "personality:getDefinitions",
   PERSONALITY_GET_PERSONAS: "personality:getPersonas",
   PERSONALITY_GET_RELATIONSHIP_STATS: "personality:getRelationshipStats",
-  PERSONALITY_SET_ACTIVE: "personality:setActive",
-  PERSONALITY_SET_PERSONA: "personality:setPersona",
-  PERSONALITY_RESET: "personality:reset",
   PERSONALITY_SETTINGS_CHANGED: "personality:settingsChanged", // Event sent to UI when settings change
   PERSONALITY_EXPORT: "personality:export",
   PERSONALITY_IMPORT: "personality:import",
@@ -9290,7 +8612,6 @@ export const IPC_CHANNELS = {
   QUEUE_GET_STATUS: "queue:getStatus",
   QUEUE_GET_SETTINGS: "queue:getSettings",
   QUEUE_SAVE_SETTINGS: "queue:saveSettings",
-  QUEUE_CLEAR: "queue:clear",
   QUEUE_UPDATE: "queue:update",
 
   // Watchdog control loop
@@ -9300,7 +8621,6 @@ export const IPC_CHANNELS = {
   // MCP (Model Context Protocol)
   MCP_GET_SETTINGS: "mcp:getSettings",
   MCP_SAVE_SETTINGS: "mcp:saveSettings",
-  MCP_GET_SERVERS: "mcp:getServers",
   MCP_ADD_SERVER: "mcp:addServer",
   MCP_UPDATE_SERVER: "mcp:updateServer",
   MCP_REMOVE_SERVER: "mcp:removeServer",
@@ -9336,11 +8656,6 @@ export const IPC_CHANNELS = {
   WORKDAY_AGENT_SEARCH: "workdayAgent:search",
   WORKDAY_AGENT_SAVE: "workdayAgent:save",
 
-  // MCP Host
-  MCP_HOST_START: "mcp:hostStart",
-  MCP_HOST_STOP: "mcp:hostStop",
-  MCP_HOST_GET_STATUS: "mcp:hostGetStatus",
-
   // Secure MCP Tunnels
   SECURE_MCP_TUNNELS_GET_SETTINGS: "secureMcpTunnels:getSettings",
   SECURE_MCP_TUNNELS_CREATE: "secureMcpTunnels:create",
@@ -9355,18 +8670,6 @@ export const IPC_CHANNELS = {
   // MCP Events
   MCP_SERVER_STATUS_CHANGE: "mcp:serverStatusChange",
 
-  // Scraping (Scrapling integration)
-  SCRAPING_GET_SETTINGS: "scraping:getSettings",
-  SCRAPING_SAVE_SETTINGS: "scraping:saveSettings",
-  SCRAPING_GET_STATUS: "scraping:getStatus",
-  SCRAPING_RESET: "scraping:reset",
-
-  // Artifact Reputation
-  REPUTATION_GET_SETTINGS: "reputation:getSettings",
-  REPUTATION_SAVE_SETTINGS: "reputation:saveSettings",
-  REPUTATION_LIST_MCP: "reputation:listMcp",
-  REPUTATION_RESCAN_MCP: "reputation:rescanMcp",
-
   // Built-in Tools Settings
   BUILTIN_TOOLS_GET_SETTINGS: "builtinTools:getSettings",
   BUILTIN_TOOLS_SAVE_SETTINGS: "builtinTools:saveSettings",
@@ -9376,7 +8679,6 @@ export const IPC_CHANNELS = {
   CHRONICLE_GET_SETTINGS: "chronicle:getSettings",
   CHRONICLE_SAVE_SETTINGS: "chronicle:saveSettings",
   CHRONICLE_GET_STATUS: "chronicle:getStatus",
-  CHRONICLE_QUERY_RECENT_CONTEXT: "chronicle:queryRecentContext",
   CHRONICLE_LIST_OBSERVATIONS: "chronicle:listObservations",
   CHRONICLE_DELETE_OBSERVATION: "chronicle:deleteObservation",
   CHRONICLE_CLEAR_OBSERVATIONS: "chronicle:clearObservations",
@@ -9413,8 +8715,6 @@ export const IPC_CHANNELS = {
   TRAY_SELECT_WORKSPACE: "tray:selectWorkspace",
   TRAY_OPEN_SETTINGS: "tray:openSettings",
   TRAY_OPEN_ABOUT: "tray:openAbout",
-  TRAY_CHECK_UPDATES: "tray:checkUpdates",
-  TRAY_QUICK_TASK: "tray:quick-task",
   QUICK_INPUT_SUBMIT: "quick-input:submit",
   QUICK_INPUT_CLOSE: "quick-input:close",
 
@@ -9424,7 +8724,6 @@ export const IPC_CHANNELS = {
   CRON_GET_JOB: "cron:getJob",
   CRON_GET_RUN_HISTORY: "cron:getRunHistory",
   CRON_CLEAR_RUN_HISTORY: "cron:clearRunHistory",
-  CRON_GET_WEBHOOK_STATUS: "cron:getWebhookStatus",
   CRON_ADD_JOB: "cron:addJob",
   CRON_UPDATE_JOB: "cron:updateJob",
   CRON_REMOVE_JOB: "cron:removeJob",
@@ -9450,13 +8749,10 @@ export const IPC_CHANNELS = {
   HOOKS_DISABLE: "hooks:disable",
   HOOKS_REGENERATE_TOKEN: "hooks:regenerateToken",
   HOOKS_GET_STATUS: "hooks:getStatus",
-  HOOKS_ADD_MAPPING: "hooks:addMapping",
-  HOOKS_REMOVE_MAPPING: "hooks:removeMapping",
   HOOKS_CONFIGURE_GMAIL: "hooks:configureGmail",
   HOOKS_GET_GMAIL_STATUS: "hooks:getGmailStatus",
   HOOKS_START_GMAIL_WATCHER: "hooks:startGmailWatcher",
   HOOKS_STOP_GMAIL_WATCHER: "hooks:stopGmailWatcher",
-  HOOKS_EVENT: "hooks:event",
 
   // Control Plane (WebSocket Gateway)
   CONTROL_PLANE_GET_SETTINGS: "controlPlane:getSettings",
@@ -9468,7 +8764,6 @@ export const IPC_CHANNELS = {
   CONTROL_PLANE_GET_STATUS: "controlPlane:getStatus",
   CONTROL_PLANE_GET_TOKEN: "controlPlane:getToken",
   CONTROL_PLANE_REGENERATE_TOKEN: "controlPlane:regenerateToken",
-  CONTROL_PLANE_EVENT: "controlPlane:event",
 
   // Agents Hub
   MANAGED_AGENT_LIST_IPC: "managedAgent:listIpc",
@@ -9491,7 +8786,6 @@ export const IPC_CHANNELS = {
   MANAGED_AGENT_CONVERT_ROLE_IPC: "managedAgent:convertRoleIpc",
   MANAGED_AGENT_CONVERT_AUTOMATION_IPC: "managedAgent:convertAutomationIpc",
   MANAGED_ENVIRONMENT_LIST_IPC: "managedEnvironment:listIpc",
-  MANAGED_ENVIRONMENT_GET_IPC: "managedEnvironment:getIpc",
   MANAGED_ENVIRONMENT_CREATE_IPC: "managedEnvironment:createIpc",
   MANAGED_ENVIRONMENT_UPDATE_IPC: "managedEnvironment:updateIpc",
   MANAGED_ENVIRONMENT_ARCHIVE_IPC: "managedEnvironment:archiveIpc",
@@ -9504,13 +8798,7 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_CANCEL_IPC: "managedSession:cancelIpc",
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",
   MANAGED_SESSION_WORKPAPER_GET_IPC: "managedSession:workpaperGetIpc",
-  MANAGED_SESSION_GENERATE_AUDIO_SUMMARY: "managedSession:generateAudioSummary",
   SESSION_HANDOFF_EXPORT_IPC: "sessionHandoff:exportIpc",
-  WORK_CONTEXT_LIST_IPC: "workContext:listIpc",
-  WORK_CONTEXT_GET_IPC: "workContext:getIpc",
-  WORK_CONTEXT_CREATE_IPC: "workContext:createIpc",
-  WORK_CONTEXT_UPDATE_IPC: "workContext:updateIpc",
-  WORK_CONTEXT_MEMBER_ADD_IPC: "workContext:memberAddIpc",
   SESSION_MEMBERS_GET_IPC: "session:membersGetIpc",
   SESSION_INVITE_CREATE_IPC: "session:inviteCreateIpc",
   SESSION_INVITE_ACCEPT_IPC: "session:inviteAcceptIpc",
@@ -9523,8 +8811,6 @@ export const IPC_CHANNELS = {
   LOCAL_PREVIEW_LIST: "localPreview:list",
   LOCAL_PREVIEW_HEALTH: "localPreview:health",
   LOCAL_PREVIEW_OPEN: "localPreview:open",
-  AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC: "agentWorkspaceMembership:listIpc",
-  AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC: "agentWorkspaceMembership:updateIpc",
   AGENT_WORKSPACE_PERMISSION_SNAPSHOT_IPC: "agentWorkspacePermission:snapshotIpc",
   AGENT_TEMPLATE_LIST: "agentTemplate:list",
   IMAGE_GEN_PROFILE_LIST: "imageGenProfile:list",
@@ -9533,7 +8819,6 @@ export const IPC_CHANNELS = {
   IMAGE_GEN_PROFILE_DELETE: "imageGenProfile:delete",
 
   // Tailscale Integration
-  TAILSCALE_GET_STATUS: "tailscale:getStatus",
   TAILSCALE_CHECK_AVAILABILITY: "tailscale:checkAvailability",
   TAILSCALE_SET_MODE: "tailscale:setMode",
 
@@ -9549,32 +8834,19 @@ export const IPC_CHANNELS = {
   SSH_TUNNEL_CONNECT: "sshTunnel:connect",
   SSH_TUNNEL_DISCONNECT: "sshTunnel:disconnect",
   SSH_TUNNEL_GET_STATUS: "sshTunnel:getStatus",
-  SSH_TUNNEL_SAVE_CONFIG: "sshTunnel:saveConfig",
   SSH_TUNNEL_TEST_CONNECTION: "sshTunnel:testConnection",
-  SSH_TUNNEL_EVENT: "sshTunnel:event",
 
   // Live Canvas (Agent-driven visual workspace)
-  CANVAS_CREATE: "canvas:create",
   CANVAS_GET_SESSION: "canvas:getSession",
   CANVAS_LIST_SESSIONS: "canvas:listSessions",
   CANVAS_SHOW: "canvas:show",
-  CANVAS_HIDE: "canvas:hide",
   CANVAS_CLOSE: "canvas:close",
-  CANVAS_PUSH: "canvas:push",
-  CANVAS_EVAL: "canvas:eval",
   CANVAS_SNAPSHOT: "canvas:snapshot",
-  CANVAS_A2UI_ACTION: "canvas:a2uiAction",
   CANVAS_EVENT: "canvas:event",
   CANVAS_EXPORT_HTML: "canvas:exportHTML",
   CANVAS_EXPORT_TO_FOLDER: "canvas:exportToFolder",
   CANVAS_OPEN_IN_BROWSER: "canvas:openInBrowser",
-  CANVAS_OPEN_URL: "canvas:openUrl",
   CANVAS_GET_SESSION_DIR: "canvas:getSessionDir",
-  CANVAS_CHECKPOINT_SAVE: "canvas:checkpointSave",
-  CANVAS_CHECKPOINT_LIST: "canvas:checkpointList",
-  CANVAS_CHECKPOINT_RESTORE: "canvas:checkpointRestore",
-  CANVAS_CHECKPOINT_DELETE: "canvas:checkpointDelete",
-  CANVAS_GET_CONTENT: "canvas:getContent",
   CANVAS_A2UI_ACTION_FROM_WINDOW: "canvas:a2ui-action-from-window",
   CANVAS_GET_SESSION_FROM_WINDOW: "canvas:get-session-from-window",
   CANVAS_AGENT_UPDATE: "canvas:agent-update",
@@ -9591,13 +8863,10 @@ export const IPC_CHANNELS = {
   DEVICE_LIST_FILES: "device:listFiles",
   DEVICE_LIST_REMOTE_WORKSPACES: "device:listRemoteWorkspaces",
   DEVICE_ASSIGN_TASK: "device:assignTask",
-  DEVICE_GET_PROFILES: "device:getProfiles",
-  DEVICE_UPDATE_PROFILE: "device:updateProfile",
 
   // Memory System (Cross-Session Context)
   MEMORY_GET_SETTINGS: "memory:getSettings",
   MEMORY_SAVE_SETTINGS: "memory:saveSettings",
-  MEMORY_SEARCH: "memory:search",
   MEMORY_GET_TIMELINE: "memory:getTimeline",
   MEMORY_GET_DETAILS: "memory:getDetails",
   MEMORY_GET_RECENT: "memory:getRecent",
@@ -9731,8 +9000,6 @@ export const IPC_CHANNELS = {
   AWARENESS_UPDATE_BELIEF: "awareness:updateBelief",
   AWARENESS_DELETE_BELIEF: "awareness:deleteBelief",
   AWARENESS_GET_SUMMARY: "awareness:getSummary",
-  AWARENESS_GET_SNAPSHOT: "awareness:getSnapshot",
-  AWARENESS_LIST_EVENTS: "awareness:listEvents",
 
   // Memory Features (Global Toggles)
   MEMORY_FEATURES_GET_SETTINGS: "memoryFeatures:getSettings",
@@ -9754,22 +9021,17 @@ export const IPC_CHANNELS = {
   EXTENSIONS_ENABLE: "extensions:enable",
   EXTENSIONS_DISABLE: "extensions:disable",
   EXTENSIONS_RELOAD: "extensions:reload",
-  EXTENSIONS_GET_CONFIG: "extensions:getConfig",
-  EXTENSIONS_SET_CONFIG: "extensions:setConfig",
   EXTENSIONS_DISCOVER: "extensions:discover",
 
   // Webhook Tunnel
   TUNNEL_GET_STATUS: "tunnel:getStatus",
   TUNNEL_START: "tunnel:start",
   TUNNEL_STOP: "tunnel:stop",
-  TUNNEL_GET_CONFIG: "tunnel:getConfig",
-  TUNNEL_SET_CONFIG: "tunnel:setConfig",
 
   // Voice Mode (TTS/STT)
   VOICE_GET_SETTINGS: "voice:getSettings",
   VOICE_GET_CAPABILITIES: "voice:getCapabilities",
   VOICE_SAVE_SETTINGS: "voice:saveSettings",
-  VOICE_GET_STATE: "voice:getState",
   VOICE_SPEAK: "voice:speak",
   VOICE_STOP_SPEAKING: "voice:stopSpeaking",
   VOICE_TRANSCRIBE: "voice:transcribe",
@@ -9780,12 +9042,9 @@ export const IPC_CHANNELS = {
   VOICE_EVENT: "voice:event",
 
   // Git Worktree operations
-  WORKTREE_GET_INFO: "worktree:getInfo",
   WORKTREE_WORKSPACE_INFO: "worktree:workspaceInfo",
-  WORKTREE_LIST: "worktree:list",
   WORKTREE_MERGE: "worktree:merge",
   WORKTREE_CLEANUP: "worktree:cleanup",
-  WORKTREE_GET_DIFF: "worktree:getDiff",
   WORKTREE_RESOLVE_BASE_COMMIT: "worktree:resolveBaseCommit",
   WORKTREE_MERGE_REVIEW: "worktree:mergeReview",
   WORKTREE_GET_SETTINGS: "worktree:getSettings",
@@ -9822,32 +9081,14 @@ export const IPC_CHANNELS = {
   ATTENTION_LIST: "attention:list",
   ATTENTION_CHANGED: "attention:changed",
 
-  // Self-improvement loop
-  IMPROVEMENT_GET_SETTINGS: "improvement:getSettings",
-  IMPROVEMENT_GET_ELIGIBILITY: "improvement:getEligibility",
-  IMPROVEMENT_SAVE_OWNER_ENROLLMENT: "improvement:saveOwnerEnrollment",
-  IMPROVEMENT_CLEAR_OWNER_ENROLLMENT: "improvement:clearOwnerEnrollment",
-  IMPROVEMENT_SAVE_SETTINGS: "improvement:saveSettings",
-  IMPROVEMENT_LIST_CANDIDATES: "improvement:listCandidates",
-  IMPROVEMENT_LIST_RUNS: "improvement:listRuns",
-  IMPROVEMENT_REFRESH: "improvement:refresh",
-  IMPROVEMENT_RUN_NEXT: "improvement:runNext",
-  IMPROVEMENT_RETRY_RUN: "improvement:retryRun",
-  IMPROVEMENT_DISMISS_CANDIDATE: "improvement:dismissCandidate",
-  IMPROVEMENT_REVIEW_RUN: "improvement:reviewRun",
-  IMPROVEMENT_RESET_HISTORY: "improvement:resetHistory",
-
   // Subconscious loop
   SUBCONSCIOUS_GET_SETTINGS: "subconscious:getSettings",
   SUBCONSCIOUS_SAVE_SETTINGS: "subconscious:saveSettings",
   SUBCONSCIOUS_GET_BRAIN: "subconscious:getBrain",
   SUBCONSCIOUS_LIST_TARGETS: "subconscious:listTargets",
-  SUBCONSCIOUS_LIST_RUNS: "subconscious:listRuns",
   SUBCONSCIOUS_GET_TARGET_DETAIL: "subconscious:getTargetDetail",
   SUBCONSCIOUS_REFRESH: "subconscious:refresh",
   SUBCONSCIOUS_RUN_NOW: "subconscious:runNow",
-  SUBCONSCIOUS_RETRY_RUN: "subconscious:retryRun",
-  SUBCONSCIOUS_REVIEW_RUN: "subconscious:reviewRun",
   SUBCONSCIOUS_DISMISS_TARGET: "subconscious:dismissTarget",
   SUBCONSCIOUS_RESET_HISTORY: "subconscious:resetHistory",
   WHATSAPP_GET_INFO: "whatsapp:get-info",
@@ -9891,19 +9132,14 @@ export const IPC_CHANNELS = {
   ROUTINE_WORKFLOW_TEST: "routine:workflowTest",
   ROUTINE_WORKFLOW_LIST_RUNS: "routine:workflowListRuns",
   ROUTINE_WORKFLOW_LIST_STEPS: "routine:workflowListSteps",
-  ROUTINE_WORKFLOW_LIST_EVENTS: "routine:workflowListEvents",
-  ROUTINE_WORKFLOW_LIST_EVENT_SAMPLES: "routine:workflowListEventSamples",
   ROUTINE_WORKFLOW_RESPOND_APPROVAL: "routine:workflowRespondApproval",
-  ROUTINE_WORKFLOW_RETRY: "routine:workflowRetry",
   ROUTINE_WORKFLOW_CANCEL: "routine:workflowCancel",
-  ROUTINE_WORKFLOW_ENQUEUE_EVENT: "routine:workflowEnqueueEvent",
   ROUTINE_WORKFLOW_LIST_SECRETS: "routine:workflowListSecrets",
   ROUTINE_WORKFLOW_UPSERT_SECRET: "routine:workflowUpsertSecret",
   ROUTINE_WORKFLOW_REMOVE_SECRET: "routine:workflowRemoveSecret",
 
   // Mailbox Automations
   MAILBOX_AUTOMATION_LIST: "mailboxAutomation:list",
-  MAILBOX_AUTOMATION_LIST_THREAD: "mailboxAutomation:listThread",
   MAILBOX_AUTOMATION_CREATE_RULE: "mailboxAutomation:createRule",
   MAILBOX_AUTOMATION_UPDATE_RULE: "mailboxAutomation:updateRule",
   MAILBOX_AUTOMATION_DELETE_RULE: "mailboxAutomation:deleteRule",
@@ -9917,8 +9153,6 @@ export const IPC_CHANNELS = {
 
   // Daily Briefing (extended)
   BRIEFING_GET_LATEST: "briefing:getLatest",
-  BRIEFING_GET_CONFIG: "briefing:getConfig",
-  BRIEFING_SAVE_CONFIG: "briefing:saveConfig",
 
   // File Hub
   FILEHUB_LIST: "filehub:list",
@@ -9935,13 +9169,6 @@ export const IPC_CHANNELS = {
   WEBACCESS_CREATE_SIGN_IN_LINK: "webaccess:createSignInLink",
   WEBACCESS_OPEN_BROWSER_APP: "webaccess:openBrowserApp",
   WEBACCESS_SIGN_OUT_BROWSERS: "webaccess:signOutBrowsers",
-
-  // Playwright QA (Automated Visual Testing)
-  QA_GET_RUNS: "qa:getRuns",
-  QA_GET_RUN: "qa:getRun",
-  QA_START_RUN: "qa:startRun",
-  QA_STOP_RUN: "qa:stopRun",
-  QA_EVENT: "qa:event",
 } as const;
 
 // LLM Provider types
@@ -10054,11 +9281,6 @@ export interface CustomProviderConfig {
   automatedTaskModelKey?: string;
   preferStrongForVerification?: boolean;
   reasoningEffort?: LLMReasoningEffort;
-}
-
-export interface ProviderFailoverSettings {
-  fallbackProviders?: LLMProviderFallbackConfig[];
-  failoverPrimaryRetryCooldownSeconds?: number;
 }
 
 export interface ProviderRoutingSettings {
@@ -10425,15 +9647,6 @@ export interface LLMModelInfo {
   displayName: string;
   description: string;
   reasoningEfforts?: LLMReasoningEffort[];
-}
-
-export interface LLMConfigStatus {
-  currentProvider: LLMProviderType;
-  currentModel: string;
-  currentReasoningEffort?: LLMReasoningEffort;
-  providers: LLMProviderInfo[];
-  models: LLMModelInfo[];
-  routing?: LLMRoutingRuntimeState;
 }
 
 // Gateway / Channel types
@@ -10831,12 +10044,6 @@ export interface UpdateChannelRequest {
   };
 }
 
-export interface TestChannelResult {
-  success: boolean;
-  error?: string;
-  botUsername?: string;
-}
-
 // Extension / Plugin types
 export type ExtensionType = "channel" | "tool" | "provider" | "integration";
 export type ExtensionState = "loading" | "loaded" | "registered" | "active" | "error" | "disabled";
@@ -10866,10 +10073,6 @@ export interface ExtensionData {
   error?: string;
   capabilities?: ExtensionCapabilities;
   configSchema?: Record<string, unknown>;
-}
-
-export interface ExtensionConfig {
-  [key: string]: unknown;
 }
 
 // Webhook Tunnel types
@@ -10970,31 +10173,6 @@ export type SearchProviderType =
   | "duckduckgo";
 export type SearchType = "web" | "news" | "images";
 export type WebSearchMode = "disabled" | "cached" | "live";
-
-export interface SearchSettingsData {
-  primaryProvider: SearchProviderType | null;
-  fallbackProvider: SearchProviderType | null;
-  tavily?: {
-    apiKey?: string;
-  };
-  exa?: {
-    apiKey?: string;
-  };
-  brave?: {
-    apiKey?: string;
-  };
-  serpapi?: {
-    apiKey?: string;
-  };
-  google?: {
-    apiKey?: string;
-    searchEngineId?: string;
-  };
-  searxng?: {
-    baseUrl?: string;
-    allowPrivate?: boolean;
-  };
-}
 
 // Notion integration settings
 export interface NotionSettingsData {
@@ -11500,91 +10678,6 @@ export const DEFAULT_BLOCKED_COMMAND_PATTERNS: string[] = DEFAULT_BLOCKED_COMMAN
 );
 
 // ============ Artifact Reputation Types ============
-
-export type ReputationProvider = "virustotal";
-
-export type ReputationVerdict = "clean" | "unknown" | "suspicious" | "malicious" | "error";
-
-export type ReputationAction = "allow" | "warn" | "block";
-
-export interface ReputationPolicy {
-  clean: ReputationAction;
-  unknown: ReputationAction;
-  suspicious: ReputationAction;
-  malicious: ReputationAction;
-  error: ReputationAction;
-}
-
-export interface ReputationSettingsData {
-  enabled: boolean;
-  provider: ReputationProvider;
-  /** Stored encrypted at rest. */
-  apiKey?: string;
-  /** When true, unknown hashes may be uploaded for analysis (may leak the artifact). */
-  allowUpload: boolean;
-  /** Minimum time between rescans for the same artifact (hours). */
-  rescanIntervalHours: number;
-  /** If enabled, MCP server connects are gated on the current policy outcome. */
-  enforceOnMCPConnect: boolean;
-  /** If a connect is blocked, also disable the server in settings to prevent auto-retries. */
-  disableMCPServerOnBlock: boolean;
-  policy: ReputationPolicy;
-}
-
-export const DEFAULT_REPUTATION_SETTINGS: ReputationSettingsData = {
-  enabled: false,
-  provider: "virustotal",
-  apiKey: "",
-  allowUpload: false,
-  rescanIntervalHours: 24 * 7, // weekly
-  enforceOnMCPConnect: true,
-  disableMCPServerOnBlock: true,
-  policy: {
-    clean: "allow",
-    unknown: "warn",
-    suspicious: "warn",
-    malicious: "block",
-    error: "warn",
-  },
-};
-
-export type ArtifactReputationKind = "npm_package_tarball";
-
-export type ReputationAnalysisStats = Record<string, number>;
-
-export interface ArtifactReputationEntry {
-  id: string;
-  kind: ArtifactReputationKind;
-  ref: string;
-  provider: ReputationProvider;
-  sha256?: string;
-  verdict: ReputationVerdict;
-  stats?: ReputationAnalysisStats;
-  permalink?: string;
-  error?: string;
-  firstSeenAt: number;
-  lastScannedAt?: number;
-  nextScanAt?: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface MCPArtifactReputationStatus {
-  serverId: string;
-  serverName: string;
-  packageName?: string;
-  version?: string;
-  ref?: string;
-  provider?: ReputationProvider;
-  verdict?: ReputationVerdict;
-  action?: ReputationAction;
-  sha256?: string;
-  stats?: ReputationAnalysisStats;
-  permalink?: string;
-  error?: string;
-  lastScannedAt?: number;
-  nextScanAt?: number;
-}
 
 // App Update types
 export type UpdateMode = "git" | "npm" | "electron-updater";
@@ -12370,50 +11463,9 @@ export interface TailscaleAvailability {
 }
 
 /**
- * Control Plane server event for monitoring
- */
-export interface ControlPlaneEvent {
-  action:
-    | "started"
-    | "stopped"
-    | "client_connected"
-    | "client_disconnected"
-    | "client_authenticated"
-    | "request"
-    | "error";
-  timestamp: number;
-  clientId?: string;
-  method?: string;
-  error?: string;
-  details?: unknown;
-}
-
-/**
  * Platform of a managed device
  */
 export type NodePlatform = "ios" | "android" | "macos" | "linux" | "windows";
-
-/**
- * Summary of a connected managed remote device, used as a task target
- */
-export interface NodeInfo {
-  /** Task node ID for the device */
-  id: string;
-  /** Display name for the device */
-  displayName: string;
-  /** Platform type */
-  platform: NodePlatform;
-  /** CoWork version running on the device */
-  version: string;
-  /** Control-plane client ID for the current connection */
-  deviceId?: string;
-  /** Hostname or model identifier */
-  modelIdentifier?: string;
-  /** Connection timestamp */
-  connectedAt: number;
-  /** Last activity timestamp */
-  lastActivityAt: number;
-}
 
 // ============ SSH Tunnel Types ============
 
@@ -12763,28 +11815,6 @@ export interface CanvasEvent {
   checkpoint?: { id: string; label: string };
   /** Timestamp */
   timestamp: number;
-}
-
-/**
- * Canvas content push request
- */
-export interface CanvasPushContent {
-  /** Session ID */
-  sessionId: string;
-  /** Content to push (HTML, CSS, JS, etc.) */
-  content: string;
-  /** Filename to save (default: index.html) */
-  filename?: string;
-}
-
-/**
- * Canvas eval script request
- */
-export interface CanvasEvalScript {
-  /** Session ID */
-  sessionId: string;
-  /** JavaScript code to execute in the canvas context */
-  script: string;
 }
 
 /**
@@ -13982,14 +13012,6 @@ export type VoiceEventType =
   | "voice:audio-level";
 
 /**
- * Voice event payload
- */
-export interface VoiceEvent {
-  type: VoiceEventType;
-  data: VoiceState | string | number | Error;
-}
-
-/**
  * Default voice settings
  */
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
@@ -14097,14 +13119,6 @@ export interface GoalUpdate {
   targetDate?: number | null;
 }
 
-export interface GoalCreateInput {
-  companyId?: string;
-  title: string;
-  description?: string;
-  status?: Goal["status"];
-  targetDate?: number | null;
-}
-
 export interface Project {
   id: string;
   companyId: string;
@@ -14194,26 +13208,6 @@ export interface IssueUpdate {
   priority?: number;
   assigneeAgentRoleId?: string | null;
   reporterAgentRoleId?: string | null;
-  requestDepth?: number | null;
-  billingCode?: string;
-  metadata?: Record<string, unknown> | null;
-  completedAt?: number | null;
-}
-
-export interface IssueCreateInput {
-  companyId?: string;
-  goalId?: string;
-  projectId?: string;
-  parentIssueId?: string;
-  workspaceId?: string;
-  taskId?: string;
-  activeRunId?: string;
-  title: string;
-  description?: string;
-  status?: Issue["status"];
-  priority?: number;
-  assigneeAgentRoleId?: string;
-  reporterAgentRoleId?: string;
   requestDepth?: number | null;
   billingCode?: string;
   metadata?: Record<string, unknown> | null;

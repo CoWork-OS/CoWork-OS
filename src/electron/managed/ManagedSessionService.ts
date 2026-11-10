@@ -18,7 +18,6 @@ import {
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import { ArtifactRepository, InputRequestRepository } from "../database/repository-facades";
 import { createHash, randomUUID } from "crypto";
-import * as fs from "fs/promises";
 import * as path from "path";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../../shared/access-profiles";
 import type {
@@ -35,8 +34,6 @@ import type {
   ConvertAutomationProfileToManagedAgentRequest,
   CreateAgentRoleRequest,
   CreateManagedAgentRoutineRequest,
-  AudioSummaryConfig,
-  AudioSummaryResult,
   GatewayContextType,
   UpdateManagedAgentRoutineRequest,
   ManagedAgentAuditEntry,
@@ -113,7 +110,6 @@ import { createMediaPlaybackUrl } from "../media";
 import { MCPSettingsManager } from "../mcp/settings";
 import { getBuiltinRegistryServer } from "../mcp/registry/MCPRegistryManager";
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
-import { getVoiceService } from "../voice/VoiceService";
 import { ImageGenProfileService } from "./ImageGenProfileService";
 import type { WorkContextService } from "../workspaces/workspaces-repository-facades";
 import {
@@ -2657,88 +2653,6 @@ export class ManagedSessionService {
     return this.refreshSession(sessionId);
   }
 
-  async generateAudioSummary(
-    sessionId: string,
-    input?: Partial<AudioSummaryConfig>,
-  ): Promise<AudioSummaryResult> {
-    const session = await this.refreshSession(sessionId);
-    if (!session?.backingTaskId) {
-      throw new Error(`Managed session not found: ${sessionId}`);
-    }
-    const task = await this.taskRepo.findById(session.backingTaskId);
-    if (!task) {
-      throw new Error(`Backing task not found for managed session: ${sessionId}`);
-    }
-    const workspace = await this.workspaceRepo.findById(session.workspaceId);
-    if (!workspace) {
-      throw new Error(`Workspace not found: ${session.workspaceId}`);
-    }
-    const { currentVersion } = (await this.getAgent(session.agentId)) || {};
-    const studio = currentVersion ? getStudioConfig(currentVersion) : undefined;
-    const style = input?.style || studio?.audioSummaryConfig?.style || "executive-briefing";
-    const title =
-      input?.title || studio?.audioSummaryConfig?.title || `${session.title} audio summary`;
-    const script = await this.buildAudioSummaryScript(session, style);
-    const audioBuffer = await getVoiceService().speak(script);
-    if (!audioBuffer) {
-      throw new Error("Audio summary generation returned no audio");
-    }
-    const outputDir = path.join(workspace.path, "output", "agents", "audio-summaries");
-    await fs.mkdir(outputDir, { recursive: true });
-    const safeTitle = slugifyName(title);
-    const outputPath = path.join(outputDir, `${safeTitle}-${Date.now()}.mp3`);
-    await fs.writeFile(outputPath, audioBuffer);
-    const artifact = await this.artifactRepo.create({
-      taskId: session.backingTaskId,
-      path: outputPath,
-      mimeType: "audio/mpeg",
-      sha256: createHash("sha256").update(audioBuffer).digest("hex"),
-      size: audioBuffer.length,
-      createdAt: Date.now(),
-    });
-    await this.managedSessionEventRepo.create({
-      sessionId,
-      timestamp: Date.now(),
-      type: "tool.result",
-      payload: {
-        toolName: "generate_audio_summary",
-        style,
-        artifactId: artifact.id,
-        path: outputPath,
-        title,
-      },
-    });
-    if (currentVersion && studio) {
-      const nextStudio: ManagedAgentStudioConfig = {
-        ...studio,
-        audioSummaryConfig: {
-          enabled: true,
-          style,
-          title,
-          voice: input?.voice || studio.audioSummaryConfig?.voice,
-          lastArtifactId: artifact.id,
-        },
-      };
-      await this.managedAgentVersionRepo.updateMetadata(
-        currentVersion.agentId,
-        currentVersion.version,
-        setStudioConfigMetadata(currentVersion.metadata, nextStudio),
-      );
-    }
-    return {
-      sessionId,
-      artifact,
-      style,
-      title,
-      script,
-      playbackUrl: createMediaPlaybackUrl({
-        resolvedPath: outputPath,
-        workspaceRoot: workspace.path,
-        mimeType: "audio/mpeg",
-      }),
-    };
-  }
-
   async getAgentInsights(agentId: string): Promise<ManagedAgentInsights> {
     const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
     if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canViewAgents");
@@ -3835,51 +3749,5 @@ export class ManagedSessionService {
     };
     visit(payload);
     return Array.from(seen);
-  }
-
-  private async buildAudioSummaryScript(
-    session: ManagedSession,
-    style: AudioSummaryConfig["style"],
-  ): Promise<string> {
-    const events = await this.managedSessionEventRepo.listBySessionId(session.id, 80);
-    const assistantHighlights = events
-      .filter((event) => event.type === "assistant.message")
-      .map((event) => String(event.payload?.message || event.payload?.content || "").trim())
-      .filter(Boolean)
-      .slice(-4);
-    const latestSummary = session.latestSummary?.trim() || "";
-
-    switch (style) {
-      case "public-radio":
-        return [
-          `This is your public-radio style recap for ${session.title}.`,
-          latestSummary || "Here is the latest update from the run.",
-          ...assistantHighlights,
-          "That concludes the recap.",
-        ]
-          .filter(Boolean)
-          .join("\n\n");
-      case "study-guide":
-        return [
-          `Study guide for ${session.title}.`,
-          "Key takeaway:",
-          latestSummary || "No final summary was recorded yet.",
-          ...(assistantHighlights.length > 0 ? ["Supporting points:", ...assistantHighlights] : []),
-        ]
-          .filter(Boolean)
-          .join("\n\n");
-      case "executive-briefing":
-      default:
-        return [
-          `Executive briefing for ${session.title}.`,
-          latestSummary || "No final summary was recorded yet.",
-          ...(assistantHighlights.length > 0
-            ? ["Key supporting details:", ...assistantHighlights]
-            : []),
-          "Next recommended action: review the agent run and decide whether to continue, publish, or adjust the configuration.",
-        ]
-          .filter(Boolean)
-          .join("\n\n");
-    }
   }
 }

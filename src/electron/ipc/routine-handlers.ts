@@ -4,7 +4,6 @@ import { RoutineService } from "../routines/service";
 import type {
   RoutineWorkflowApprovalRequest,
   RoutineWorkflowDefinition,
-  RoutineWorkflowEventEnvelope,
   RoutineWorkflowTestRequest,
 } from "../../shared/routine-workflow";
 
@@ -99,40 +98,15 @@ export function setupRoutineHandlers(routineService: RoutineService): void {
   });
 
   ipcMain.handle(
-    IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_EVENTS,
-    async (_, payload?: { routineId?: string; limit?: number }) => {
-      return routineService.listWorkflowEvents(payload?.routineId, payload?.limit);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_EVENT_SAMPLES,
-    async (_, payload?: { source?: string; limit?: number }) => {
-      return routineService.listWorkflowEventSamples(payload?.source, payload?.limit);
-    },
-  );
-
-  ipcMain.handle(
     IPC_CHANNELS.ROUTINE_WORKFLOW_RESPOND_APPROVAL,
     async (_, request: RoutineWorkflowApprovalRequest) => {
       return routineService.respondToWorkflowApproval(request);
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.ROUTINE_WORKFLOW_RETRY, async (_, runId: string) => {
-    return routineService.retryWorkflowRun(runId);
-  });
-
   ipcMain.handle(IPC_CHANNELS.ROUTINE_WORKFLOW_CANCEL, async (_, runId: string) => {
     return routineService.cancelWorkflowRun(runId);
   });
-
-  ipcMain.handle(
-    IPC_CHANNELS.ROUTINE_WORKFLOW_ENQUEUE_EVENT,
-    async (_, envelope: RoutineWorkflowEventEnvelope) => {
-      return routineService.enqueueWorkflowEvent(envelope);
-    },
-  );
 
   ipcMain.handle(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_SECRETS, async () => {
     return routineService.listWorkflowSecrets();

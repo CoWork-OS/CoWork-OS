@@ -431,15 +431,6 @@ export interface ScreenshotResult {
   height: number;
 }
 
-export interface ElementInfo {
-  tag: string;
-  text: string;
-  href?: string;
-  src?: string;
-  value?: string;
-  placeholder?: string;
-}
-
 export interface PageContentOptions {
   /** Character offset into the page text (use nextOffset from a truncated read) */
   offset?: number;

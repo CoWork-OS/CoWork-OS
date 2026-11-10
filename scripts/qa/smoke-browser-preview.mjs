@@ -2332,10 +2332,6 @@ async function main() {
     assert(awarenessBelief, "Task feedback must promote a real host awareness belief");
     await desktop("updateAwarenessBelief", [awarenessBelief.id, { confidence: 0.8 }], "awareness-belief-edit");
     assert.equal((await desktop("listAwarenessBeliefs", [selected.id])).find((belief) => belief.id === awarenessBelief.id).confidence, 0.8);
-    const awarenessEvents = await desktop("listAwarenessEvents", [{ workspaceId: selected.id, limit: 20 }]);
-    assert(awarenessEvents.some((event) => event.source === "feedback"));
-    assert(awarenessEvents.every((event) => !("payload" in event)));
-    assert((await desktop("getAwarenessSnapshot", [selected.id])).beliefs.some((belief) => belief.id === awarenessBelief.id));
     const awarenessPolicyDb = new Database(path.join(profile, "cowork-os.db"));
     const originalAwarenessPermissions = awarenessPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(selected.id).permissions;
     try {

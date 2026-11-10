@@ -50,18 +50,6 @@ export function readWorkspacePriorities(workspacePath?: string): string | null {
   return readText(path.join(root, KIT_DIRNAME, "PRIORITIES.md"));
 }
 
-export function readWorkspaceCompanyProfile(workspacePath?: string): string | null {
-  const root = typeof workspacePath === "string" ? workspacePath.trim() : "";
-  if (!root) return null;
-  return readText(path.join(root, KIT_DIRNAME, "COMPANY.md"));
-}
-
-export function readWorkspaceKpis(workspacePath?: string): string | null {
-  const root = typeof workspacePath === "string" ? workspacePath.trim() : "";
-  if (!root) return null;
-  return readText(path.join(root, KIT_DIRNAME, "KPIS.md"));
-}
-
 export function readWorkspaceOpenLoops(workspacePath?: string, now = new Date()): string[] {
   const root = typeof workspacePath === "string" ? workspacePath.trim() : "";
   if (!root) return [];

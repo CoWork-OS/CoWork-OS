@@ -1,34 +1,5 @@
 // Knowledge Graph types shared between main and renderer processes
 
-export type KGBuiltinEntityType =
-  | "person"
-  | "organization"
-  | "project"
-  | "technology"
-  | "concept"
-  | "file"
-  | "service"
-  | "api_endpoint"
-  | "database_table"
-  | "environment";
-
-export type KGBuiltinEdgeType =
-  | "uses"
-  | "depends_on"
-  | "part_of"
-  | "created_by"
-  | "maintained_by"
-  | "deployed_to"
-  | "connects_to"
-  | "extends"
-  | "implements"
-  | "references"
-  | "owns"
-  | "belongs_to"
-  | "related_to"
-  | "blocked_by"
-  | "replaced_by";
-
 export interface KGEntityType {
   id: string;
   workspaceId: string;

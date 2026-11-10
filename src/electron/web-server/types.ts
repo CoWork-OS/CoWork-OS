@@ -27,13 +27,6 @@ export const DEFAULT_WEB_ACCESS_CONFIG: WebAccessConfig = {
   publicOrigin: "",
 };
 
-export interface WebAccessRoute {
-  method: "GET" | "POST" | "PUT" | "DELETE";
-  path: string;
-  ipcChannel: string;
-  extractParams?: (req: Any) => Any;
-}
-
 export interface WebAccessStatus {
   running: boolean;
   browserApplication: boolean;

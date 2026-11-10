@@ -135,7 +135,7 @@ Checkpoint history is held in memory for the running app session. Phase advancem
 - `src/electron/canvas/canvas-manager.ts` — Checkpoint storage and file restoration
 - `resources/skills/build-mode.json` — Skill definition with phase prompts and parameters
 
-`src/electron/canvas/build-mode-orchestrator.ts` is a retained phase-coordination prototype with no production caller. The skill uses the Canvas tools directly.
+The skill uses the Canvas tools directly; there is no separate phase orchestrator.
 
 ---
 

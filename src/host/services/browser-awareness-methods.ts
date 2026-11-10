@@ -101,16 +101,6 @@ export function createBrowserAwarenessDefinitions(options: {
       options.service.listBeliefs(workspaceId).slice(0, 200),
     ),
     getAwarenessSummary: scoped((workspaceId) => options.service.getSummary(workspaceId)),
-    getAwarenessSnapshot: scoped((workspaceId) => options.service.getSnapshot(workspaceId)),
-    listAwarenessEvents: definition(
-      z.object({ workspaceId: id, limit: z.number().int().min(1).max(200).optional() }).strict(),
-      async (value) => {
-        await authorize(value.workspaceId);
-        return options.service
-          .listEvents({ workspaceId: value.workspaceId, limit: value.limit ?? 50 })
-          .map(({ payload: _payload, ...event }) => event);
-      },
-    ),
     updateAwarenessBelief: {
       capability: "memory.manage",
       mutation: true,

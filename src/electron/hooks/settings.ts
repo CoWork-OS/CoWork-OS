@@ -361,16 +361,6 @@ export class HooksSettingsManager {
   }
 
   /**
-   * Add a custom mapping
-   */
-  static addMapping(mapping: HookMappingConfig): HooksConfig {
-    const settings = this.loadSettings();
-    settings.mappings.push(mapping);
-    this.saveSettings(settings);
-    return settings;
-  }
-
-  /**
    * Update a mapping by ID
    */
   static updateMapping(id: string, updates: Partial<HookMappingConfig>): HooksConfig | null {
@@ -379,16 +369,6 @@ export class HooksSettingsManager {
     if (index === -1) return null;
 
     settings.mappings[index] = { ...settings.mappings[index], ...updates };
-    this.saveSettings(settings);
-    return settings;
-  }
-
-  /**
-   * Remove a mapping by ID
-   */
-  static removeMapping(id: string): HooksConfig {
-    const settings = this.loadSettings();
-    settings.mappings = settings.mappings.filter((m) => m.id !== id);
     this.saveSettings(settings);
     return settings;
   }

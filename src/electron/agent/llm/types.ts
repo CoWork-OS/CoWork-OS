@@ -620,8 +620,6 @@ export const GEMINI_MODELS = {
   },
 } as const;
 
-export type GeminiModelKey = keyof typeof GEMINI_MODELS;
-
 /**
  * Popular OpenRouter models
  * OpenRouter provides access to many models from different providers
@@ -683,8 +681,6 @@ export const OPENROUTER_MODELS = {
     description: "DeepSeek's conversational model",
   },
 } as const;
-
-export type OpenRouterModelKey = keyof typeof OPENROUTER_MODELS;
 
 /**
  * Available OpenAI models
@@ -748,8 +744,6 @@ export const OPENAI_MODELS = {
   },
 } as const;
 
-export type OpenAIModelKey = keyof typeof OPENAI_MODELS;
-
 /**
  * Popular Groq models
  */
@@ -765,8 +759,6 @@ export const GROQ_MODELS = {
     description: "Higher capability Groq model",
   },
 } as const;
-
-export type GroqModelKey = keyof typeof GROQ_MODELS;
 
 /**
  * Popular xAI (Grok) models
@@ -794,8 +786,6 @@ export const XAI_MODELS = {
   },
 } as const;
 
-export type XAIModelKey = keyof typeof XAI_MODELS;
-
 /**
  * Kimi (Moonshot) models
  */
@@ -822,8 +812,6 @@ export const KIMI_MODELS = {
   },
 } as const;
 
-export type KimiModelKey = keyof typeof KIMI_MODELS;
-
 export const DEEPSEEK_MODELS = {
   "deepseek-chat": {
     id: "deepseek-chat",
@@ -831,8 +819,6 @@ export const DEEPSEEK_MODELS = {
     description: "DeepSeek's OpenAI-compatible non-thinking chat model",
   },
 } as const;
-
-export type DeepSeekModelKey = keyof typeof DEEPSEEK_MODELS;
 
 /**
  * Pi provider backends
@@ -878,8 +864,6 @@ export const OLLAMA_MODELS = {
   phi3: { displayName: "Phi-3", size: "3.8B" },
   gemma2: { displayName: "Gemma 2", size: "9B" },
 } as const;
-
-export type OllamaModelKey = keyof typeof OLLAMA_MODELS;
 
 export type ModelKey = keyof typeof MODELS;
 

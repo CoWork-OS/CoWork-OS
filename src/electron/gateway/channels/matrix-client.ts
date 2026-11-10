@@ -97,16 +97,6 @@ export interface MatrixUser {
   avatar_url?: string;
 }
 
-export interface MatrixRoom {
-  room_id: string;
-  name?: string;
-  canonical_alias?: string;
-  topic?: string;
-  num_joined_members?: number;
-  world_readable?: boolean;
-  guest_can_join?: boolean;
-}
-
 export interface MatrixUploadResponse {
   content_uri: string;
 }
@@ -127,17 +117,6 @@ export interface MatrixClientOptions {
   roomIds?: string[];
   /** Enable verbose logging */
   verbose?: boolean;
-}
-
-/**
- * Matrix client events
- */
-export interface MatrixClientEvents {
-  message: (event: MatrixRoomEvent) => void;
-  invite: (roomId: string, inviter: string) => void;
-  error: (error: Error) => void;
-  connected: () => void;
-  disconnected: () => void;
 }
 
 /**

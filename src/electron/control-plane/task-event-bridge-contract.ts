@@ -23,5 +23,3 @@ export const TASK_EVENT_BRIDGE_ALLOWLIST = [
   "pact_receipt_verified",
   "pact_evidence_issue",
 ] as const;
-
-export type TaskEventBridgeAllowlistEvent = (typeof TASK_EVENT_BRIDGE_ALLOWLIST)[number];

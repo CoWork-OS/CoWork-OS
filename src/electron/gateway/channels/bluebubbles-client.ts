@@ -138,17 +138,6 @@ export interface BlueBubblesClientOptions {
 }
 
 /**
- * BlueBubbles client events
- */
-export interface BlueBubblesClientEvents {
-  message: (message: BlueBubblesMessage) => void;
-  messageUpdated: (message: BlueBubblesMessage) => void;
-  error: (error: Error) => void;
-  connected: () => void;
-  disconnected: () => void;
-}
-
-/**
  * BlueBubbles REST API Client
  */
 export class BlueBubblesClient extends EventEmitter {

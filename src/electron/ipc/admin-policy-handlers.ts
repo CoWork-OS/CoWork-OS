@@ -1,14 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
-import {
-  loadPolicies,
-  loadPoliciesStrict,
-  savePolicies,
-  watchPolicies,
-  validatePolicies,
-  isPackAllowed,
-  isPackRequired,
-} from "../admin/policies";
+import { loadPolicies, savePolicies, watchPolicies, validatePolicies } from "../admin/policies";
 import type { AdminPolicies } from "../admin/policies";
 import { describePolicyRelaxations } from "../admin/policy-relaxations";
 
@@ -172,24 +164,4 @@ export function setupAdminPolicyHandlers(): void {
       return merged;
     },
   );
-
-  // Check if a specific pack is allowed/required
-  ipcMain.handle(IPC_CHANNELS.ADMIN_POLICIES_CHECK_PACK, async (_, packId: string) => {
-    if (!packId || typeof packId !== "string") {
-      throw new Error("Pack ID is required");
-    }
-    const policies = loadPoliciesStrict();
-    if (!policies) {
-      return {
-        packId,
-        allowed: false,
-        required: false,
-      };
-    }
-    return {
-      packId,
-      allowed: isPackAllowed(packId, policies),
-      required: isPackRequired(packId, policies),
-    };
-  });
 }

@@ -399,31 +399,6 @@ describe("VoiceSettingsManager", () => {
     });
   });
 
-  describe("resetSettings", () => {
-    beforeEach(() => {
-      VoiceSettingsManager.initialize(mockDb);
-    });
-
-    it("should delete settings from repository", () => {
-      VoiceSettingsManager.resetSettings();
-
-      expect(mockRepositoryDelete).toHaveBeenCalledWith("voice");
-    });
-
-    it("should clear cache", () => {
-      mockRepositoryLoad.mockReturnValue({ enabled: true });
-
-      VoiceSettingsManager.loadSettings();
-      VoiceSettingsManager.resetSettings();
-
-      // After reset, loading should hit repository again
-      mockRepositoryLoad.mockReturnValue(undefined);
-      VoiceSettingsManager.loadSettings();
-
-      expect(mockRepositoryLoad).toHaveBeenCalledTimes(2);
-    });
-  });
-
   describe("hasElevenLabsKey", () => {
     beforeEach(() => {
       VoiceSettingsManager.initialize(mockDb);

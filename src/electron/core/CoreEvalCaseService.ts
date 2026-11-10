@@ -3,7 +3,6 @@ import type {
   CoreEvalCase,
   CoreFailureCluster,
   ListCoreEvalCasesRequest,
-  ReviewCoreEvalCaseRequest,
 } from "../../shared/types";
 
 export class CoreEvalCaseService {
@@ -64,13 +63,6 @@ export class CoreEvalCaseService {
 
   listEvalCases(request: ListCoreEvalCasesRequest = {}) {
     return this.evalRepo.list(request);
-  }
-
-  reviewEvalCase(request: ReviewCoreEvalCaseRequest) {
-    return this.evalRepo.update(request.id, {
-      status: request.status,
-      updatedAt: Date.now(),
-    });
   }
 
   shouldPromoteToEval(cluster: CoreFailureCluster): boolean {

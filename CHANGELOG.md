@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **English README on npm**: the npm and GitHub Packages pages for 0.5.61 and 0.5.62 showed the Simplified Chinese README, because npm packs every README at the package root and picked that one. The Chinese README moved to `i18n/README.zh-CN.md`, and the release now stops if a package ships any README besides `README.md`.
 
+### Removed
+
+- **App calls no screen used**: 183 calls from the app window to the main process that no screen made, with their handlers, went away, along with 6 handlers the window had no way to reach; 197 channel names went with them (1,228 down to 1,031). Nothing you can click or configure changes. Calls that manage things the app still creates, such as uninstalling a personal Feature Pack or deleting an image profile, stay.
+- **Dead code and a lint setup nobody ran**: modules, helpers and types with no caller, a channel message-queue service that was never started, and a second ESLint configuration that reported over 10,000 problems and was not part of any check. `.npmignore` is gone too: the `files` list in `package.json` already decides what the npm package holds, and the published file list is unchanged.
+- **Leftovers from that cleanup**: 27 service methods nothing called (with the unused stdio transport of the MCP host), the browser host's copies of 14 of the removed calls, and 77 type definitions that `preload.ts` repeated from shared code and now imports instead.
+- **Root-level documents that duplicated `docs/`**: `GETTING_STARTED.md`, `IMPLEMENTATION_SUMMARY.md`, `PROJECT_STATUS.md`, `MIGRATION.md`, `SECURITY_COMPARISON.md`, `SECURITY_GUIDE.md` and `PRIORITIES.md`. The maintained guides are [Getting Started](docs/getting-started.md), [Security Guide](docs/security-guide.md) and [Migration](docs/migration.md); `SECURITY.md` now points there.
+
 ## [0.5.62] - 2026-10-30
 
 See [Release Notes 0.5.62](docs/release-notes-0.5.62.md) for the complete candidate scope, upgrade notes and qualification limits.

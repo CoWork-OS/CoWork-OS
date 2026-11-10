@@ -1,4 +1,3 @@
-import path from "path";
 import { TEMP_WORKSPACE_ID_PREFIX, isTempWorkspaceId } from "../../shared/types";
 
 export type TempWorkspaceScope = "ui" | "gateway" | "hooks" | "tray";
@@ -26,17 +25,6 @@ export function createScopedTempWorkspaceIdentity(
     slug,
     workspaceId: `${TEMP_WORKSPACE_ID_PREFIX}${slug}`,
   };
-}
-
-export function getScopedTempWorkspacePath(
-  tempWorkspaceRoot: string,
-  scope: TempWorkspaceScope,
-  key: string,
-): string {
-  return path.join(
-    path.resolve(tempWorkspaceRoot),
-    createScopedTempWorkspaceIdentity(scope, key).slug,
-  );
 }
 
 export function parseTempWorkspaceScope(

@@ -5,11 +5,6 @@ export const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
   en: "English",
 };
 
-export function applyPersistedLanguage(_lang?: string): void {
-  // Language packs are present for tests/documentation, but the runtime no
-  // longer depends on i18next in this package state.
-}
-
 export async function changeLanguage(lang: SupportedLanguage): Promise<void> {
   try {
     if (typeof window !== "undefined" && window.electronAPI?.saveAppearanceSettings) {

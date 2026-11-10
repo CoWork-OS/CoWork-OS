@@ -210,52 +210,6 @@ export function setupPluginPackHandlers(): void {
     });
   });
 
-  // Get a single plugin pack by name
-  ipcMain.handle(IPC_CHANNELS.PLUGIN_PACK_GET, async (_, name: string) => {
-    await ensureRegistryInitialized();
-    if (!name || typeof name !== "string") {
-      throw new Error("Pack name is required");
-    }
-    const plugin = registry.getPlugin(name);
-    if (!plugin || plugin.manifest.type !== "pack") {
-      return null;
-    }
-    const policies = loadPoliciesStrict();
-    const m = plugin.manifest;
-    const blocked = !policies || !isPackAllowed(m.name, policies);
-    const required = !!policies && isPackRequired(m.name, policies);
-    return {
-      name: m.name,
-      displayName: m.displayName,
-      version: m.version,
-      description: m.description,
-      icon: m.icon,
-      category: m.category,
-      scope: m.scope,
-      personaTemplateId: m.personaTemplateId,
-      recommendedConnectors: m.recommendedConnectors,
-      tryAsking: m.tryAsking,
-      skills: listManifestSkills(m),
-      slashCommands: (m.slashCommands || []).map((c) => ({
-        name: c.name,
-        description: c.description,
-        skillId: c.skillId,
-      })),
-      agentRoles: (m.agentRoles || []).map((r) => ({
-        name: r.name,
-        displayName: r.displayName,
-        description: r.description,
-        icon: r.icon,
-        color: r.color,
-      })),
-      state: blocked ? "disabled" : plugin.state,
-      enabled: !blocked && (plugin.state === "registered" || plugin.state === "active"),
-      policyBlocked: blocked,
-      policyRequired: required,
-      securityReport: plugin.securityReport,
-    } satisfies PluginPackData;
-  });
-
   // Toggle a plugin pack on/off
   ipcMain.handle(IPC_CHANNELS.PLUGIN_PACK_TOGGLE, async (_, name: string, enabled: boolean) => {
     return packToggleService.setPackEnabled(name, enabled);

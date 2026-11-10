@@ -190,18 +190,6 @@ export interface SignalClientOptions {
 }
 
 /**
- * Signal client events
- */
-export interface SignalClientEvents {
-  message: (message: SignalMessage) => void;
-  receipt: (receipt: SignalReceiptMessage, source: string) => void;
-  typing: (typing: SignalTypingMessage, source: string) => void;
-  error: (error: Error) => void;
-  connected: () => void;
-  disconnected: () => void;
-}
-
-/**
  * Signal CLI Client
  */
 export class SignalClient extends EventEmitter {

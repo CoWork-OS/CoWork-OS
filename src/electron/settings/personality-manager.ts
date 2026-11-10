@@ -23,7 +23,6 @@ import {
   ResponseStylePreferences,
   PersonalityQuirks,
   RelationshipData,
-  PERSONALITY_DEFINITIONS,
   PERSONA_DEFINITIONS,
   ANALOGY_DOMAINS,
   DEFAULT_RESPONSE_STYLE,
@@ -975,13 +974,6 @@ ${companionMindset}`;
     return this.loadConfigV2().relationship?.userName;
   }
 
-  /**
-   * Get all available personality definitions
-   */
-  static getDefinitions(): PersonalityDefinition[] {
-    return PERSONALITY_DEFINITIONS;
-  }
-
   private static sanitizeRelationshipData(
     relationship: RelationshipData | undefined,
   ): RelationshipData {
@@ -1424,38 +1416,6 @@ ${companionMindset}`;
    */
   static getDefaults(): PersonalitySettings {
     return { ...DEFAULT_SETTINGS };
-  }
-
-  /**
-   * Reset all settings to defaults
-   * This clears everything except relationship data (to preserve task history)
-   */
-  static resetToDefaults(preserveRelationship = true): void {
-    this.ensureInitialized();
-
-    let newConfig: PersonalityConfigV2 = {
-      ...this.getDefaultConfigV2(),
-      activePersonality: "professional",
-    };
-
-    if (preserveRelationship) {
-      const current = this.loadConfigV2();
-      if (current.relationship) {
-        newConfig = { ...newConfig, relationship: { ...current.relationship } };
-      }
-    }
-
-    if (SecureSettingsRepository.isInitialized()) {
-      const repository = SecureSettingsRepository.getInstance();
-      repository.save("personality", newConfig);
-    }
-    this.cachedConfigV2 = newConfig;
-    this.cachedSettings = this.configV2ToSettings(newConfig);
-    console.log(
-      "[PersonalityManager] Settings reset to defaults",
-      preserveRelationship ? "(preserved relationship)" : "",
-    );
-    this.emitSettingsChanged();
   }
 
   /**

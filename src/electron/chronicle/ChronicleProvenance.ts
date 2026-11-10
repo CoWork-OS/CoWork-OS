@@ -1,7 +1,5 @@
 import type { ChroniclePersistedObservation, ChronicleResolvedContext } from "./types";
 
-export const CHRONICLE_PROVENANCE = "untrusted_screen_text" as const;
-
 function truncate(value: string, max = 320): string {
   const normalized = String(value || "")
     .replace(/\s+/g, " ")

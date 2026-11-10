@@ -22,10 +22,6 @@ import {
   CoreFailureCategory,
   CoreFailureClusterStatus,
   CoreFailureRecordStatus,
-  CoreMemoryCandidateStatus,
-  CoreMemoryScopeKind,
-  CoreTraceKind,
-  CoreTraceStatus,
   LLM_PROVIDER_TYPES,
   MESSAGE_SURFACE_ORIGINS,
   isTempWorkspaceId,
@@ -708,8 +704,6 @@ export const DocumentEditorOpenSessionSchema = z.object({
     .max(MAX_PATH_LENGTH * 4)
     .optional(),
 });
-
-export const DocumentEditorListVersionsSchema = DocumentEditorOpenSessionSchema;
 
 export const DocumentEditRequestSchema = z.object({
   sessionId: z.string().uuid(),
@@ -2195,12 +2189,6 @@ export const ChannelSpecializationUpdateSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-export const ChannelSpecializationResolveSchema = z.object({
-  channelId: z.string().uuid(),
-  chatId: z.string().trim().min(1).max(200).optional(),
-  threadId: z.string().trim().min(1).max(200).optional(),
-});
-
 export const GrantAccessSchema = z.object({
   channelId: z.string().uuid(),
   userId: z.string().min(1).max(100),
@@ -2226,192 +2214,8 @@ export const GeneratePairingSchema = z.object({
 export const UUIDSchema = z.string().uuid();
 export const StringIdSchema = z.string().min(1).max(100);
 export const TargetKeySchema = z.string().trim().min(1).max(1024);
-/** Workflow Intelligence run review decision from the renderer. */
-export const SubconsciousReviewStatusSchema = z.enum(["accepted", "dismissed"]);
 export const ProviderApiKeySchema = z.string().max(4000).optional();
 export const ProviderBaseUrlSchema = z.string().url().max(500).optional();
-const HEARTBEAT_PROFILE_VALUES = ["observer", "operator", "dispatcher"] as const;
-const CHANNEL_TYPE_VALUES = [
-  "telegram",
-  "discord",
-  "slack",
-  "whatsapp",
-  "imessage",
-  "signal",
-  "mattermost",
-  "matrix",
-  "line",
-  "bluebubbles",
-  "email",
-  "teams",
-  "googlechat",
-  "feishu",
-  "wecom",
-  "whatsapp_cloud",
-  "twilio_sms",
-] as const;
-export const HeartbeatProfileSchema = z.enum(HEARTBEAT_PROFILE_VALUES);
-export const ChannelTypeSchema = z.enum(CHANNEL_TYPE_VALUES);
-export const HeartbeatActiveHoursSchema = z
-  .object({
-    timezone: z.string().trim().min(1).max(100).optional(),
-    startHour: z.number().int().min(0).max(23),
-    endHour: z.number().int().min(0).max(23),
-    weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.weekdays) {
-      const unique = new Set(value.weekdays);
-      if (unique.size !== value.weekdays.length) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["weekdays"],
-          message: "weekdays must not contain duplicates",
-        });
-      }
-    }
-  });
-export const HeartbeatConfigSchema = z
-  .object({
-    heartbeatEnabled: z.boolean().optional(),
-    heartbeatIntervalMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    heartbeatStaggerOffset: z
-      .number()
-      .int()
-      .min(0)
-      .max(7 * 24 * 60)
-      .optional(),
-    pulseEveryMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    dispatchCooldownMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    maxDispatchesPerDay: z.number().int().min(1).max(96).optional(),
-    heartbeatProfile: HeartbeatProfileSchema.optional(),
-    activeHours: HeartbeatActiveHoursSchema.nullable().optional(),
-  })
-  .strict();
-export const AutomationProfileCreateRequestSchema = z
-  .object({
-    agentRoleId: UUIDSchema,
-    enabled: z.boolean().optional(),
-    cadenceMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    staggerOffsetMinutes: z
-      .number()
-      .int()
-      .min(0)
-      .max(7 * 24 * 60)
-      .optional(),
-    dispatchCooldownMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    maxDispatchesPerDay: z.number().int().min(1).max(96).optional(),
-    profile: HeartbeatProfileSchema.optional(),
-    activeHours: HeartbeatActiveHoursSchema.nullable().optional(),
-  })
-  .strict();
-export const AutomationProfileUpdateRequestSchema = z
-  .object({
-    id: UUIDSchema,
-    enabled: z.boolean().optional(),
-    cadenceMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    staggerOffsetMinutes: z
-      .number()
-      .int()
-      .min(0)
-      .max(7 * 24 * 60)
-      .optional(),
-    dispatchCooldownMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    maxDispatchesPerDay: z.number().int().min(1).max(96).optional(),
-    profile: HeartbeatProfileSchema.optional(),
-    activeHours: HeartbeatActiveHoursSchema.nullable().optional(),
-  })
-  .strict();
-export const AutomationProfileAttachRequestSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    cadenceMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    staggerOffsetMinutes: z
-      .number()
-      .int()
-      .min(0)
-      .max(7 * 24 * 60)
-      .optional(),
-    dispatchCooldownMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .optional(),
-    maxDispatchesPerDay: z.number().int().min(1).max(96).optional(),
-    profile: HeartbeatProfileSchema.optional(),
-    activeHours: HeartbeatActiveHoursSchema.nullable().optional(),
-  })
-  .strict();
-export const CoreTraceKindSchema = z.enum([
-  "pulse_cycle",
-  "subconscious_cycle",
-  "memory_update",
-  "dream_distill",
-] as const satisfies readonly CoreTraceKind[]);
-export const CoreTraceStatusSchema = z.enum([
-  "running",
-  "completed",
-  "failed",
-  "skipped",
-] as const satisfies readonly CoreTraceStatus[]);
-export const CoreMemoryScopeKindSchema = z.enum([
-  "global",
-  "workspace",
-  "automation_profile",
-  "code_workspace",
-  "pull_request",
-] as const satisfies readonly CoreMemoryScopeKind[]);
-export const CoreMemoryCandidateStatusSchema = z.enum([
-  "proposed",
-  "accepted",
-  "rejected",
-  "merged",
-  "applied",
-  "skipped",
-  "dismissed",
-] as const satisfies readonly CoreMemoryCandidateStatus[]);
 export const CoreFailureCategorySchema = z.enum([
   "wake_timing",
   "dispatch_overreach",
@@ -2453,16 +2257,6 @@ export const CoreExperimentStatusSchema = z.enum([
   "promoted",
   "rejected",
 ] as const satisfies readonly CoreExperimentStatus[]);
-export const CoreTraceListRequestSchema = z
-  .object({
-    profileId: UUIDSchema.optional(),
-    workspaceId: UUIDSchema.optional(),
-    targetKey: TargetKeySchema.optional(),
-    traceKind: CoreTraceKindSchema.optional(),
-    status: CoreTraceStatusSchema.optional(),
-    limit: z.number().int().min(1).max(500).optional(),
-  })
-  .strict();
 const TaskStatusSchema = z.enum([
   "pending",
   "queued",
@@ -2484,29 +2278,6 @@ export const TaskTraceListRequestSchema = z
   })
   .strict();
 export const TaskTraceGetRequestSchema = UUIDSchema;
-export const CoreMemoryCandidateListRequestSchema = z
-  .object({
-    profileId: UUIDSchema.optional(),
-    workspaceId: UUIDSchema.optional(),
-    traceId: StringIdSchema.optional(),
-    scopeKind: CoreMemoryScopeKindSchema.optional(),
-    status: CoreMemoryCandidateStatusSchema.optional(),
-    limit: z.number().int().min(1).max(500).optional(),
-  })
-  .strict();
-export const CoreMemoryCandidateReviewSchema = z
-  .object({
-    id: StringIdSchema,
-    status: z.enum(["accepted", "rejected", "merged"]),
-    resolution: z.string().max(4000).optional(),
-  })
-  .strict();
-export const CoreMemoryDistillRunNowSchema = z
-  .object({
-    profileId: UUIDSchema,
-    workspaceId: UUIDSchema.optional(),
-  })
-  .strict();
 export const CoreFailureRecordListRequestSchema = z
   .object({
     profileId: UUIDSchema.optional(),
@@ -2526,13 +2297,6 @@ export const CoreFailureClusterListRequestSchema = z
     limit: z.number().int().min(1).max(500).optional(),
   })
   .strict();
-export const CoreFailureClusterReviewSchema = z
-  .object({
-    id: StringIdSchema,
-    status: z.enum(["stable", "resolved", "dismissed"]),
-    rootCauseSummary: z.string().max(4000).optional(),
-  })
-  .strict();
 export const CoreEvalCaseListRequestSchema = z
   .object({
     profileId: UUIDSchema.optional(),
@@ -2542,12 +2306,6 @@ export const CoreEvalCaseListRequestSchema = z
     limit: z.number().int().min(1).max(500).optional(),
   })
   .strict();
-export const CoreEvalCaseReviewSchema = z
-  .object({
-    id: StringIdSchema,
-    status: z.enum(["active", "archived", "failing"]),
-  })
-  .strict();
 export const CoreExperimentListRequestSchema = z
   .object({
     profileId: UUIDSchema.optional(),
@@ -2555,24 +2313,6 @@ export const CoreExperimentListRequestSchema = z
     clusterId: StringIdSchema.optional(),
     status: CoreExperimentStatusSchema.optional(),
     limit: z.number().int().min(1).max(500).optional(),
-  })
-  .strict();
-export const CoreExperimentRunSchema = z
-  .object({
-    experimentId: StringIdSchema.optional(),
-    clusterId: StringIdSchema.optional(),
-    profileId: UUIDSchema.optional(),
-    workspaceId: UUIDSchema.optional(),
-    autoPromote: z.boolean().optional(),
-  })
-  .strict()
-  .refine((value) => Boolean(value.experimentId || value.clusterId), {
-    message: "experimentId or clusterId is required",
-  });
-export const CoreExperimentReviewSchema = z
-  .object({
-    id: StringIdSchema,
-    action: z.enum(["promote", "reject"]),
   })
   .strict();
 export const CoreLearningsListRequestSchema = z
@@ -2667,40 +2407,6 @@ export const SubconsciousSettingsSchema = z
           .strict(),
       })
       .strict(),
-  })
-  .strict();
-export const ImprovementLoopSettingsSchema = z
-  .object({
-    enabled: z.boolean(),
-    autoRun: z.boolean(),
-    includeDevLogs: z.boolean(),
-    intervalMinutes: z
-      .number()
-      .int()
-      .min(15)
-      .max(7 * 24 * 60),
-    variantsPerCampaign: z.number().int().min(1).max(10),
-    maxConcurrentCampaigns: z.number().int().min(1).max(20),
-    maxConcurrentImprovementExecutors: z.number().int().min(1).max(20),
-    maxQueuedImprovementCampaigns: z.number().int().min(1).max(100),
-    maxOpenCandidatesPerWorkspace: z.number().int().min(1).max(500),
-    requireWorktree: z.boolean(),
-    requireRepoChecks: z.boolean(),
-    enforcePatchScope: z.boolean(),
-    maxPatchFiles: z.number().int().min(1).max(500),
-    reviewRequired: z.boolean(),
-    judgeRequired: z.boolean(),
-    promotionMode: z.enum(["merge", "github_pr"]),
-    evalWindowDays: z.number().int().min(1).max(365),
-    replaySetSize: z.number().int().min(1).max(100),
-    campaignTimeoutMinutes: z
-      .number()
-      .int()
-      .min(1)
-      .max(24 * 60),
-    campaignTokenBudget: z.number().int().min(1).max(5_000_000),
-    campaignCostBudget: z.number().min(0).max(10_000),
-    improvementProgramPath: z.string().max(MAX_PATH_LENGTH).optional(),
   })
   .strict();
 
@@ -2912,40 +2618,6 @@ export const MCPSettingsSchema = z.object({
 
 // ============ Artifact Reputation Schemas ============
 
-const ReputationActionSchema = z.enum(["allow", "warn", "block"]);
-
-export const ReputationPolicySchema = z
-  .object({
-    clean: ReputationActionSchema.default("allow"),
-    unknown: ReputationActionSchema.default("warn"),
-    suspicious: ReputationActionSchema.default("warn"),
-    malicious: ReputationActionSchema.default("block"),
-    error: ReputationActionSchema.default("warn"),
-  })
-  .default({
-    clean: "allow",
-    unknown: "warn",
-    suspicious: "warn",
-    malicious: "block",
-    error: "warn",
-  });
-
-export const ReputationSettingsSchema = z.object({
-  enabled: z.boolean().default(false),
-  provider: z.enum(["virustotal"]).default("virustotal"),
-  apiKey: z.string().max(500).optional(),
-  allowUpload: z.boolean().default(false),
-  rescanIntervalHours: z
-    .number()
-    .int()
-    .min(1)
-    .max(24 * 30)
-    .default(24 * 7),
-  enforceOnMCPConnect: z.boolean().default(true),
-  disableMCPServerOnBlock: z.boolean().default(true),
-  policy: ReputationPolicySchema,
-});
-
 // MCP Registry schemas
 export const MCPRegistrySearchSchema = z.object({
   query: z.string().max(200).optional(),
@@ -3014,22 +2686,6 @@ export const AwarenessConfigSchema = z.object({
     .max(60 * 24 * 7)
     .optional(),
   sources: z.record(AwarenessSourceSchema, AwarenessSourcePolicySchema).optional(),
-});
-
-export const QAStartRunSchema = z.object({
-  taskId: z.string().min(1).max(200),
-  workspaceId: WorkspaceIdSchema,
-  config: z
-    .object({
-      targetUrl: z.string().url().max(500).optional(),
-      serverCommand: z.string().max(500).optional(),
-      serverCwd: z.string().max(MAX_PATH_LENGTH).optional(),
-      serverPort: z.number().int().min(1).max(65535).optional(),
-      headless: z.boolean().optional(),
-      autoFix: z.boolean().optional(),
-      enabledChecks: z.array(z.string().max(50)).max(20).optional(),
-    })
-    .optional(),
 });
 
 // ============ Personality V2 Schemas ============
@@ -3220,33 +2876,6 @@ export const AwarenessUpdateBeliefSchema = z.object({
 });
 
 // ============ Hooks (Webhooks) Schemas ============
-
-export const HookMappingChannelSchema = z.enum([...CHANNEL_TYPE_VALUES, "last"]);
-
-export const HookMappingSchema = z.object({
-  id: z.string().max(100).optional(),
-  match: z
-    .object({
-      path: z.string().max(500).optional(),
-      source: z.string().max(100).optional(),
-      type: z.string().max(100).optional(),
-    })
-    .optional(),
-  token: z.string().max(200).optional(),
-  action: z.enum(["wake", "agent"]).optional(),
-  wakeMode: z.enum(["now", "next-heartbeat"]).optional(),
-  name: z.string().max(200).optional(),
-  sessionKey: z.string().max(100).optional(),
-  messageTemplate: z.string().max(10000).optional(),
-  textTemplate: z.string().max(10000).optional(),
-  deliver: z.boolean().optional(),
-  channel: HookMappingChannelSchema.optional(),
-  to: z.string().max(100).optional(),
-  workspaceId: z.string().max(200).optional(),
-  model: z.string().max(100).optional(),
-  thinking: z.string().max(50).optional(),
-  timeoutSeconds: z.number().int().min(1).max(3600).optional(),
-});
 
 // ============ Cron (Scheduled Tasks) Schemas ============
 

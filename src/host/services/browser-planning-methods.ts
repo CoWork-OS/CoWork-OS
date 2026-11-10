@@ -104,9 +104,6 @@ export function createBrowserPlanningDefinitions(options: {
     ([companyId, issueId, limit]) => core.listRuns({ companyId, issueId, limit }),
   );
   add("listRunEvents", z.tuple([id]), ([runId]) => core.getRunEvents(runId));
-  add("getMissionControlBrief", optionalArgs([scope.optional()]), async ([request]) =>
-    intelligence.getBrief(await checkScope(request)),
-  );
   add(
     "listMissionControlItems",
     optionalArgs([

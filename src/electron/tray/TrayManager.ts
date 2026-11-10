@@ -515,13 +515,9 @@ export class TrayManager {
    */
   private async handleQuickTaskSubmit(prompt: string, workspaceId?: string): Promise<void> {
     if (!this.taskRepo || !this.workspaceRepo || !this.agentDaemon) {
-      // Fall back to sending to main window
-      console.log("[TrayManager] Agent daemon not available, falling back to main window");
+      // The task cannot be started here; bring the main window forward instead.
+      console.log("[TrayManager] Agent daemon not available, showing the main window");
       this.showMainWindow();
-      this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_QUICK_TASK, {
-        task: prompt,
-        workspaceId,
-      });
       return;
     }
 

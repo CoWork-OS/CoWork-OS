@@ -256,47 +256,6 @@ describe("PersonalityManager", () => {
     });
   });
 
-  describe("getDefinitions", () => {
-    it("should return all personality definitions", () => {
-      const definitions = PersonalityManager.getDefinitions();
-
-      expect(definitions).toHaveLength(7);
-      expect(definitions.map((d) => d.id)).toContain("professional");
-      expect(definitions.map((d) => d.id)).toContain("friendly");
-      expect(definitions.map((d) => d.id)).toContain("concise");
-      expect(definitions.map((d) => d.id)).toContain("creative");
-      expect(definitions.map((d) => d.id)).toContain("technical");
-      expect(definitions.map((d) => d.id)).toContain("casual");
-      expect(definitions.map((d) => d.id)).toContain("custom");
-    });
-
-    it("should include icons for each personality", () => {
-      const definitions = PersonalityManager.getDefinitions();
-
-      definitions.forEach((def) => {
-        expect(def.icon).toBeDefined();
-        expect(def.icon.length).toBeGreaterThan(0);
-      });
-    });
-
-    it("should include traits for built-in personalities", () => {
-      const definitions = PersonalityManager.getDefinitions();
-      const builtIn = definitions.filter((d) => d.id !== "custom");
-
-      builtIn.forEach((def) => {
-        expect(def.traits).toBeDefined();
-        expect(def.traits.length).toBeGreaterThan(0);
-      });
-    });
-
-    it("should have empty traits for custom personality", () => {
-      const definitions = PersonalityManager.getDefinitions();
-      const custom = definitions.find((d) => d.id === "custom");
-
-      expect(custom?.traits).toEqual([]);
-    });
-  });
-
   describe("clearCache", () => {
     it("should clear the cached settings", () => {
       mockStoredSettings = { activePersonality: "creative" };
@@ -871,12 +830,10 @@ describe("PersonalityManager - response style", () => {
       expect(mockStoredSettings).not.toHaveProperty("responseStyleExplicit");
     });
 
-    it("is read from storage before the cache is warm and cleared by a reset", () => {
+    it("is read from storage before the cache is warm", () => {
       mockStoredSettings = { ...MINIMAL_V2, responseStyleExplicit: true };
       PersonalityManager.clearCache();
       expect(PersonalityManager.isResponseStyleExplicit()).toBe(true);
-      PersonalityManager.resetToDefaults(true);
-      expect(PersonalityManager.isResponseStyleExplicit()).toBe(false);
     });
   });
 
@@ -1344,135 +1301,6 @@ describe("PersonalityManager - load settings with new fields", () => {
   });
 });
 
-describe("PersonalityManager - resetToDefaults", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockStoredSettings = {};
-    writeCount = 0;
-    PersonalityManager.removeAllListeners();
-    PersonalityManager.clearCache();
-    PersonalityManager.initialize();
-  });
-
-  it("should reset all settings to defaults", () => {
-    // Set up V2 config (avoids migration on load)
-    mockStoredSettings = {
-      version: 2,
-      agentName: "Jarvis",
-      activePersona: "jarvis",
-      traits: [],
-      rules: [],
-      style: {},
-      expertise: [],
-      examples: [],
-      customInstructions: {},
-      contextOverrides: [],
-      quirks: { catchphrase: "At your service.", signOff: "Will there be anything else?" },
-      relationship: {},
-    };
-    PersonalityManager.clearCache();
-
-    PersonalityManager.resetToDefaults(false);
-
-    expect(mockStoredSettings.activePersonality).toBe("professional");
-    expect(mockStoredSettings.agentName).toBe("CoWork");
-    expect(mockStoredSettings.activePersona).toBe("companion");
-  });
-
-  it("should preserve relationship data when preserveRelationship is true", () => {
-    mockStoredSettings = {
-      version: 2,
-      agentName: "Jarvis",
-      activePersonality: "creative",
-      traits: [],
-      rules: [],
-      style: {},
-      expertise: [],
-      examples: [],
-      customInstructions: {},
-      contextOverrides: [],
-      quirks: {},
-      relationship: {
-        userName: "Alice",
-        tasksCompleted: 100,
-        projectsWorkedOn: ["project-a", "project-b"],
-      },
-    };
-    PersonalityManager.clearCache();
-
-    PersonalityManager.resetToDefaults(true);
-
-    expect(mockStoredSettings.activePersonality).toBe("professional");
-    expect((mockStoredSettings.relationship as Any)?.userName).toBe("Alice");
-    expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(100);
-  });
-
-  it("should not preserve relationship data when preserveRelationship is false", () => {
-    mockStoredSettings = {
-      version: 2,
-      agentName: "CoWork",
-      traits: [],
-      rules: [],
-      style: {},
-      expertise: [],
-      examples: [],
-      customInstructions: {},
-      contextOverrides: [],
-      quirks: {},
-      relationship: { userName: "Alice", tasksCompleted: 100 },
-    };
-    PersonalityManager.clearCache();
-
-    PersonalityManager.resetToDefaults(false);
-
-    expect((mockStoredSettings.relationship as Any)?.userName).toBeFalsy();
-    expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(0);
-  });
-
-  it("should default to preserving relationship", () => {
-    mockStoredSettings = {
-      version: 2,
-      agentName: "CoWork",
-      traits: [],
-      rules: [],
-      style: {},
-      expertise: [],
-      examples: [],
-      customInstructions: {},
-      contextOverrides: [],
-      quirks: {},
-      relationship: { userName: "Bob", tasksCompleted: 50 },
-    };
-    PersonalityManager.clearCache();
-
-    PersonalityManager.resetToDefaults();
-
-    expect((mockStoredSettings.relationship as Any)?.userName).toBe("Bob");
-    expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(50);
-  });
-
-  it("should increment write count", () => {
-    mockStoredSettings = {
-      version: 2,
-      agentName: "CoWork",
-      traits: [],
-      rules: [],
-      style: {},
-      expertise: [],
-      examples: [],
-      customInstructions: {},
-      contextOverrides: [],
-      quirks: {},
-      relationship: {},
-    };
-    PersonalityManager.clearCache();
-
-    PersonalityManager.resetToDefaults();
-
-    expect(writeCount).toBeGreaterThanOrEqual(1);
-  });
-});
-
 describe("PersonalityManager - event emission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1529,17 +1357,6 @@ describe("PersonalityManager - event emission", () => {
         activePersona: "jarvis",
       }),
     );
-
-    unsubscribe();
-  });
-
-  it("should emit event when reset to defaults", () => {
-    const callback = vi.fn();
-    const unsubscribe = PersonalityManager.onSettingsChanged(callback);
-
-    PersonalityManager.resetToDefaults();
-
-    expect(callback).toHaveBeenCalled();
 
     unsubscribe();
   });

@@ -38,7 +38,6 @@ const OPENROUTER_AUTH_ERROR_MESSAGE =
 
 export const OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_MODEL_ID;
 export const OPENROUTER_PARETO_CODE_MODEL = "openrouter/pareto-code";
-export const OPENROUTER_PARETO_CODE_NITRO_MODEL = `${OPENROUTER_PARETO_CODE_MODEL}:nitro`;
 
 function normalizeOpenRouterApiKey(value?: string): string | undefined {
   let normalized = value?.trim() || "";

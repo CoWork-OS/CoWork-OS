@@ -607,11 +607,6 @@ export function createBrowserMemoryDefinitions(options: {
     getRecentMemories: workspaceAction(page, "read", (value) =>
       MemoryService.getRecent(value.workspaceId, value.limit ?? 20),
     ),
-    searchMemories: workspaceAction(
-      page.extend({ query: z.string().trim().min(1).max(4000) }).strict(),
-      "read",
-      (value) => MemoryService.searchAsync(value.workspaceId, value.query, value.limit ?? 30),
-    ),
     // Accepts the desktop shape `{ workspaceId, ids }` (SEC-11) and the older bare id list.
     getMemoryDetails: action(
       z.union([ids, z.object({ workspaceId: id, ids }).strict()]),

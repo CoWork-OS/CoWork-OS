@@ -112,16 +112,6 @@ export interface MattermostClientOptions {
 }
 
 /**
- * Mattermost client events
- */
-export interface MattermostClientEvents {
-  post: (post: MattermostPost, channelType: string) => void;
-  error: (error: Error) => void;
-  connected: () => void;
-  disconnected: () => void;
-}
-
-/**
  * Mattermost Client
  */
 export class MattermostClient extends EventEmitter {

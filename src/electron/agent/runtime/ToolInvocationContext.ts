@@ -1,12 +1,5 @@
 import type { ToolPolicyContext } from "../tool-policy-engine";
 
-export interface ToolBatchCorrelationMetaLite {
-  toolUseId: string;
-  toolCallIndex: number;
-  phase: "step" | "follow_up";
-  groupId?: string;
-}
-
 export interface ToolInvocationContext {
   /** Added only by the host's application gateway, never by model tool arguments. */
   applicationAttempt?: {

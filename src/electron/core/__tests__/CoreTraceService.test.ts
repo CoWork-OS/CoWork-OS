@@ -18,10 +18,7 @@ describe("CoreTraceService", () => {
       findOpenTrace: vi.fn(() => existingTrace),
       create: vi.fn(),
     };
-    const candidateRepo = {
-      listForTrace: vi.fn(),
-    };
-    const service = new CoreTraceService(traceRepo as never, candidateRepo as never);
+    const service = new CoreTraceService(traceRepo as never);
 
     const result = await service.startTrace({
       profileId: "profile-1",
@@ -42,42 +39,5 @@ describe("CoreTraceService", () => {
       subconsciousRunId: undefined,
     });
     expect(traceRepo.create).not.toHaveBeenCalled();
-  });
-
-  it("returns trace details with events and memory candidates", async () => {
-    const trace = {
-      id: "trace-2",
-      profileId: "profile-2",
-      sourceSurface: "subconscious",
-      traceKind: "memory_distill",
-      status: "completed",
-      startedAt: 200,
-      createdAt: 200,
-    };
-    const events = [
-      {
-        id: "event-1",
-        traceId: "trace-2",
-        phase: "collect",
-        eventType: "started",
-        summary: "Started",
-        createdAt: 200,
-      },
-    ];
-    const candidates = [{ id: "candidate-1", traceId: "trace-2", profileId: "profile-2" }];
-    const traceRepo = {
-      findById: vi.fn(() => trace),
-      listEvents: vi.fn(() => events),
-    };
-    const candidateRepo = {
-      listForTrace: vi.fn(() => candidates),
-    };
-    const service = new CoreTraceService(traceRepo as never, candidateRepo as never);
-
-    expect(await service.getTrace("trace-2")).toEqual({
-      trace,
-      events,
-      candidates,
-    });
   });
 });

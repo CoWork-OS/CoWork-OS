@@ -1781,11 +1781,6 @@ export function createBrowserSettingsDefinitions(
         },
       },
     ),
-    getPersonalityDefinitions: define(() => PersonalityManager.getDefinitions(), {
-      capability: "agents.manage",
-      minArgs: 0,
-      maxArgs: 0,
-    }),
     getPersonaDefinitions: define(() => PersonalityManager.getPersonaDefinitions(), {
       capability: "agents.manage",
       minArgs: 0,
@@ -1796,60 +1791,6 @@ export function createBrowserSettingsDefinitions(
       minArgs: 0,
       maxArgs: 0,
     }),
-    setActivePersonality: define(
-      (args) => {
-        PersonalityManager.setActivePersonality(args[0] as never);
-        return { success: true };
-      },
-      {
-        capability: "agents.manage",
-        mutation: true,
-        minArgs: 1,
-        maxArgs: 1,
-        validate: (args) =>
-          parseArgs(
-            z.enum([
-              "professional",
-              "friendly",
-              "concise",
-              "creative",
-              "technical",
-              "casual",
-              "custom",
-            ]),
-            args,
-          ),
-      },
-    ),
-    setActivePersona: define(
-      (args) => {
-        PersonalityManager.setActivePersona(args[0] as never);
-        return { success: true };
-      },
-      {
-        capability: "agents.manage",
-        mutation: true,
-        minArgs: 1,
-        maxArgs: 1,
-        validate: (args) =>
-          parseArgs(
-            z.enum([
-              "none",
-              "jarvis",
-              "friday",
-              "hal",
-              "computer",
-              "alfred",
-              "intern",
-              "sensei",
-              "pirate",
-              "noir",
-              "companion",
-            ]),
-            args,
-          ),
-      },
-    ),
   };
 
   return definitions;

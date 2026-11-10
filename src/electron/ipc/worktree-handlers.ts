@@ -28,12 +28,9 @@ function checkRateLimit(channel: string): void {
  * Register IPC handlers for Git Worktree features.
  */
 export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
-  rateLimiter.configure(IPC_CHANNELS.WORKTREE_GET_INFO, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_WORKSPACE_INFO, RATE_LIMIT_CONFIGS.standard);
-  rateLimiter.configure(IPC_CHANNELS.WORKTREE_LIST, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_MERGE, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_CLEANUP, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.WORKTREE_GET_DIFF, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_RESOLVE_BASE_COMMIT, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_MERGE_REVIEW, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_GET_SETTINGS, RATE_LIMIT_CONFIGS.frequent);
@@ -73,18 +70,6 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
       return { workspaceId: id, available: true, currentBranch, branches };
     },
   );
-
-  ipcMain.handle(IPC_CHANNELS.WORKTREE_GET_INFO, async (_, taskId: unknown) => {
-    checkRateLimit(IPC_CHANNELS.WORKTREE_GET_INFO);
-    const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-    return (await worktreeManager.getWorktreeInfo(validatedTaskId)) ?? null;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.WORKTREE_LIST, async (_, workspaceId: unknown) => {
-    checkRateLimit(IPC_CHANNELS.WORKTREE_LIST);
-    const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
-    return worktreeManager.listForWorkspace(validatedWorkspaceId);
-  });
 
   ipcMain.handle(IPC_CHANNELS.WORKTREE_MERGE, async (_, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.WORKTREE_MERGE);
@@ -145,12 +130,6 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
       console.error(`[Worktree] Cleanup failed for task ${validatedTaskId}:`, error);
       return { success: false, error: error.message || "Cleanup failed" };
     }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.WORKTREE_GET_DIFF, async (_, taskId: unknown) => {
-    checkRateLimit(IPC_CHANNELS.WORKTREE_GET_DIFF);
-    const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-    return await worktreeManager.getDiffStats(validatedTaskId);
   });
 
   // Build Compare: resolve the starting branch to one commit, so every variant starts from it.

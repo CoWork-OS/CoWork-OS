@@ -6,8 +6,8 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1653,
-    "getDatabase": 128,
+    "prepare": 1652,
+    "getDatabase": 126,
     "runtimeImport": 49
   },
   "files": {
@@ -105,7 +105,7 @@
       "runtimeImport": 1
     },
     "src/electron/agents/WorkingStateRepository.ts": {
-      "prepare": 14,
+      "prepare": 13,
       "runtimeImport": 1
     },
     "src/electron/automation/AutomationRunOutcomeRepository.ts": {
@@ -121,7 +121,7 @@
       "prepare": 71
     },
     "src/electron/control-plane/handlers.ts": {
-      "getDatabase": 14
+      "getDatabase": 12
     },
     "src/electron/core/CoreEvalCaseRepository.ts": {
       "prepare": 6,

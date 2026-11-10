@@ -278,17 +278,6 @@ describe("HooksSettingsManager", () => {
   });
 
   describe("mappings", () => {
-    it("should add a mapping", () => {
-      const settings = HooksSettingsManager.addMapping({
-        id: "test",
-        match: { path: "test" },
-        action: "agent",
-      });
-
-      expect(settings.mappings).toHaveLength(1);
-      expect(settings.mappings[0].id).toBe("test");
-    });
-
     it("should update a mapping by id", () => {
       mockStoredSettings = {
         mappings: [{ id: "test", action: "agent" }],
@@ -308,21 +297,6 @@ describe("HooksSettingsManager", () => {
       });
 
       expect(settings).toBeNull();
-    });
-
-    it("should remove a mapping by id", () => {
-      mockStoredSettings = {
-        mappings: [
-          { id: "test1", action: "agent" },
-          { id: "test2", action: "wake" },
-        ],
-      };
-      HooksSettingsManager.clearCache();
-
-      const settings = HooksSettingsManager.removeMapping("test1");
-
-      expect(settings.mappings).toHaveLength(1);
-      expect(settings.mappings[0].id).toBe("test2");
     });
   });
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-09T11:26:57.411Z",
-  "generatedDay": "2026-11-09",
+  "generatedAt": "2026-11-10T11:07:02.520Z",
+  "generatedDay": "2026-11-10",
   "privacy": {
     "source": "Public GitHub/npm APIs plus owner-only GitHub traffic APIs when available.",
     "appTelemetry": false,
@@ -13,13 +13,13 @@
       "fullName": "CoWork-OS/CoWork-OS",
       "htmlUrl": "https://github.com/CoWork-OS/CoWork-OS",
       "defaultBranch": "main",
-      "stars": 540,
+      "stars": 542,
       "forks": 100,
       "watchers": 3,
-      "openIssues": 18,
+      "openIssues": 21,
       "archived": false,
-      "pushedAt": "2026-11-09T08:22:57Z",
-      "updatedAt": "2026-11-09T08:12:16Z"
+      "pushedAt": "2026-11-10T09:49:48Z",
+      "updatedAt": "2026-11-10T09:42:35Z"
     },
     "releases": {
       "releaseCount": 60,
@@ -29,13 +29,13 @@
         "publishedAt": "2026-10-31T09:45:57Z",
         "htmlUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.62"
       },
-      "totalAssetDownloadCount": 5792,
-      "totalInstallAssetDownloadCount": 3047,
-      "metadataAssetDownloadCount": 2745,
+      "totalAssetDownloadCount": 5882,
+      "totalInstallAssetDownloadCount": 3101,
+      "metadataAssetDownloadCount": 2781,
       "platformTotals": {
-        "macos": 1628,
-        "server": 152,
-        "windows": 1267
+        "macos": 1668,
+        "server": 155,
+        "windows": 1278
       },
       "assets": [
         {
@@ -57,10 +57,10 @@
           "assetName": "CoWork-OS-0.5.62-arm64-mac.zip",
           "platform": "macos",
           "sizeBytes": 369928331,
-          "downloadCount": 334,
+          "downloadCount": 368,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/CoWork-OS-0.5.62-arm64-mac.zip",
-          "previousDownloadCount": 306,
-          "deltaSincePreviousSnapshot": 28
+          "previousDownloadCount": 334,
+          "deltaSincePreviousSnapshot": 34
         },
         {
           "releaseTag": "v0.5.62",
@@ -81,10 +81,10 @@
           "assetName": "CoWork-OS-0.5.62-arm64.dmg",
           "platform": "macos",
           "sizeBytes": 383863031,
-          "downloadCount": 64,
+          "downloadCount": 70,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/CoWork-OS-0.5.62-arm64.dmg",
-          "previousDownloadCount": 55,
-          "deltaSincePreviousSnapshot": 9
+          "previousDownloadCount": 64,
+          "deltaSincePreviousSnapshot": 6
         },
         {
           "releaseTag": "v0.5.62",
@@ -105,10 +105,10 @@
           "assetName": "cowork-os-server-linux-x64-v0.5.62.tar.gz",
           "platform": "server",
           "sizeBytes": 322602601,
-          "downloadCount": 7,
+          "downloadCount": 8,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/cowork-os-server-linux-x64-v0.5.62.tar.gz",
           "previousDownloadCount": 7,
-          "deltaSincePreviousSnapshot": 0
+          "deltaSincePreviousSnapshot": 1
         },
         {
           "releaseTag": "v0.5.62",
@@ -129,10 +129,10 @@
           "assetName": "CoWork-OS-Setup-0.5.62.exe",
           "platform": "windows",
           "sizeBytes": 319290099,
-          "downloadCount": 179,
+          "downloadCount": 190,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/CoWork-OS-Setup-0.5.62.exe",
-          "previousDownloadCount": 160,
-          "deltaSincePreviousSnapshot": 19
+          "previousDownloadCount": 179,
+          "deltaSincePreviousSnapshot": 11
         },
         {
           "releaseTag": "v0.5.62",
@@ -141,10 +141,10 @@
           "assetName": "CoWork-OS-Setup-0.5.62.exe.blockmap",
           "platform": "metadata",
           "sizeBytes": 334367,
-          "downloadCount": 17,
+          "downloadCount": 20,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/CoWork-OS-Setup-0.5.62.exe.blockmap",
-          "previousDownloadCount": 16,
-          "deltaSincePreviousSnapshot": 1
+          "previousDownloadCount": 17,
+          "deltaSincePreviousSnapshot": 3
         },
         {
           "releaseTag": "v0.5.62",
@@ -153,10 +153,10 @@
           "assetName": "latest-mac.yml",
           "platform": "metadata",
           "sizeBytes": 544,
-          "downloadCount": 398,
+          "downloadCount": 424,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/latest-mac.yml",
-          "previousDownloadCount": 367,
-          "deltaSincePreviousSnapshot": 31
+          "previousDownloadCount": 398,
+          "deltaSincePreviousSnapshot": 26
         },
         {
           "releaseTag": "v0.5.62",
@@ -165,10 +165,10 @@
           "assetName": "latest.yml",
           "platform": "metadata",
           "sizeBytes": 350,
-          "downloadCount": 67,
+          "downloadCount": 72,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/latest.yml",
-          "previousDownloadCount": 61,
-          "deltaSincePreviousSnapshot": 6
+          "previousDownloadCount": 67,
+          "deltaSincePreviousSnapshot": 5
         },
         {
           "releaseTag": "v0.5.62",
@@ -177,10 +177,10 @@
           "assetName": "registry-packages-0.5.62-6f5d21dd5b8bbc20c625d31463ac289fec8692bb.tar.gz",
           "platform": "server",
           "sizeBytes": 110774528,
-          "downloadCount": 2,
+          "downloadCount": 3,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.62/registry-packages-0.5.62-6f5d21dd5b8bbc20c625d31463ac289fec8692bb.tar.gz",
           "previousDownloadCount": 2,
-          "deltaSincePreviousSnapshot": 0
+          "deltaSincePreviousSnapshot": 1
         },
         {
           "releaseTag": "v0.5.61",
@@ -285,10 +285,10 @@
           "assetName": "CoWork-OS-Setup-0.5.61.exe.blockmap",
           "platform": "metadata",
           "sizeBytes": 310585,
-          "downloadCount": 27,
+          "downloadCount": 29,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.61/CoWork-OS-Setup-0.5.61.exe.blockmap",
           "previousDownloadCount": 27,
-          "deltaSincePreviousSnapshot": 0
+          "deltaSincePreviousSnapshot": 2
         },
         {
           "releaseTag": "v0.5.61",
@@ -321,10 +321,10 @@
           "assetName": "registry-packages-0.5.61-b753cb10d1c74a755d2efed3e8643ee78833f0bf.tar.gz",
           "platform": "server",
           "sizeBytes": 133903496,
-          "downloadCount": 16,
+          "downloadCount": 17,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.61/registry-packages-0.5.61-b753cb10d1c74a755d2efed3e8643ee78833f0bf.tar.gz",
           "previousDownloadCount": 16,
-          "deltaSincePreviousSnapshot": 0
+          "deltaSincePreviousSnapshot": 1
         },
         {
           "releaseTag": "v0.5.60",
@@ -3477,14 +3477,9 @@
       "views": {
         "status": "available",
         "data": {
-          "count": 1940,
-          "uniques": 1068,
+          "count": 1943,
+          "uniques": 1063,
           "views": [
-            {
-              "timestamp": "2026-10-26T00:00:00Z",
-              "count": 78,
-              "uniques": 57
-            },
             {
               "timestamp": "2026-10-27T00:00:00Z",
               "count": 111,
@@ -3549,6 +3544,11 @@
               "timestamp": "2026-11-08T00:00:00Z",
               "count": 100,
               "uniques": 64
+            },
+            {
+              "timestamp": "2026-11-09T00:00:00Z",
+              "count": 81,
+              "uniques": 59
             }
           ]
         }
@@ -3556,14 +3556,9 @@
       "clones": {
         "status": "available",
         "data": {
-          "count": 8061,
-          "uniques": 875,
+          "count": 7673,
+          "uniques": 890,
           "clones": [
-            {
-              "timestamp": "2026-10-26T00:00:00Z",
-              "count": 770,
-              "uniques": 95
-            },
             {
               "timestamp": "2026-10-27T00:00:00Z",
               "count": 475,
@@ -3628,6 +3623,11 @@
               "timestamp": "2026-11-08T00:00:00Z",
               "count": 265,
               "uniques": 74
+            },
+            {
+              "timestamp": "2026-11-09T00:00:00Z",
+              "count": 382,
+              "uniques": 85
             }
           ]
         }
@@ -3638,12 +3638,12 @@
           {
             "referrer": "Google",
             "count": 294,
-            "uniques": 247
+            "uniques": 245
           },
           {
             "referrer": "github.com",
-            "count": 205,
-            "uniques": 143
+            "count": 207,
+            "uniques": 146
           },
           {
             "referrer": "aocr.org",
@@ -3652,8 +3652,8 @@
           },
           {
             "referrer": "Bing",
-            "count": 23,
-            "uniques": 21
+            "count": 20,
+            "uniques": 19
           },
           {
             "referrer": "Baidu",
@@ -3662,8 +3662,8 @@
           },
           {
             "referrer": "t.co",
-            "count": 9,
-            "uniques": 8
+            "count": 7,
+            "uniques": 7
           },
           {
             "referrer": "yandex.ru",
@@ -3682,8 +3682,8 @@
           },
           {
             "referrer": "DuckDuckGo",
-            "count": 3,
-            "uniques": 3
+            "count": 2,
+            "uniques": 2
           }
         ]
       },
@@ -3693,62 +3693,62 @@
           {
             "path": "/CoWork-OS/CoWork-OS",
             "title": "Overview",
-            "count": 452,
-            "uniques": 326
+            "count": 442,
+            "uniques": 321
           },
           {
             "path": "/cowork-os/cowork-os",
             "title": "Overview",
-            "count": 311,
+            "count": 316,
             "uniques": 275
           },
           {
             "path": "/CoWork-OS/CoWork-OS/blob/main/i18n/README.zh-CN.md",
             "title": "/blob/main/i18n/README.zh-CN.md",
-            "count": 86,
-            "uniques": 60
+            "count": 90,
+            "uniques": 63
           },
           {
             "path": "/CoWork-OS/CoWork-OS/releases",
             "title": "/releases",
-            "count": 46,
-            "uniques": 27
+            "count": 47,
+            "uniques": 28
           },
           {
             "path": "/CoWork-OS/CoWork-OS/blob/main/resources/branding/images/readme-today.webp",
             "title": "/blob/main/resources/branding/images/readme-today.webp",
-            "count": 44,
-            "uniques": 34
+            "count": 43,
+            "uniques": 33
           },
           {
             "path": "/CoWork-OS/CoWork-OS/issues",
             "title": "/issues",
-            "count": 36,
-            "uniques": 27
+            "count": 35,
+            "uniques": 26
           },
           {
             "path": "/CoWork-OS/CoWork-OS/releases/tag/v0.5.62",
             "title": "/releases/tag/v0.5.62",
-            "count": 26,
-            "uniques": 24
+            "count": 29,
+            "uniques": 27
           },
           {
             "path": "/CoWork-OS/CoWork-OS/tree/main",
             "title": "/tree/main",
-            "count": 24,
-            "uniques": 18
+            "count": 25,
+            "uniques": 19
+          },
+          {
+            "path": "/CoWork-OS/CoWork-OS/discussions",
+            "title": "/discussions",
+            "count": 23,
+            "uniques": 8
           },
           {
             "path": "/CoWork-OS/CoWork-OS/releases/tag/v0.5.61",
             "title": "/releases/tag/v0.5.61",
-            "count": 23,
-            "uniques": 21
-          },
-          {
-            "path": "/CoWork-OS/CoWork-OS/blob/main/docs/windows-installation.md",
-            "title": "/blob/main/docs/windows-installation.md",
-            "count": 23,
-            "uniques": 14
+            "count": 22,
+            "uniques": 20
           }
         ]
       }
@@ -3761,27 +3761,27 @@
     "downloads": {
       "lastDay": {
         "period": "last-day",
-        "downloads": 9,
-        "start": "2026-11-08",
-        "end": "2026-11-08"
+        "downloads": 16,
+        "start": "2026-11-09",
+        "end": "2026-11-09"
       },
       "lastWeek": {
         "period": "last-week",
-        "downloads": 111,
-        "start": "2026-11-02",
-        "end": "2026-11-08"
+        "downloads": 97,
+        "start": "2026-11-03",
+        "end": "2026-11-09"
       },
       "lastMonth": {
         "period": "last-month",
-        "downloads": 928,
-        "start": "2026-10-10",
-        "end": "2026-11-08"
+        "downloads": 951,
+        "start": "2026-10-11",
+        "end": "2026-11-09"
       },
       "allTime": {
         "period": "all-time",
-        "downloads": 10624,
-        "start": "2025-05-09",
-        "end": "2026-11-09",
+        "downloads": 10665,
+        "start": "2025-05-10",
+        "end": "2026-11-10",
         "packageFirstPublished": "2026-02-01",
         "coverage": "complete"
       }
@@ -3789,13 +3789,13 @@
   },
   "deltas": {
     "releaseDownloads": {
-      "totalDeltaSincePreviousSnapshot": 56,
+      "totalDeltaSincePreviousSnapshot": 54,
       "platformDeltasSincePreviousSnapshot": {
-        "macos": 37,
-        "server": 0,
-        "windows": 19
+        "macos": 40,
+        "server": 3,
+        "windows": 11
       }
     },
-    "previousSnapshotGeneratedAt": "2026-11-08T10:16:26.055Z"
+    "previousSnapshotGeneratedAt": "2026-11-09T11:26:57.411Z"
   }
 }

@@ -1,0 +1,240 @@
+/* Agents hub (Bots page) in dark mode for the Modern and Terminal themes.
+   The hub's inline stylesheet ships a light-only palette and hard-codes white
+   surfaces and ink-black buttons. Calm maps them onto its own tokens in
+   calm-theme.css; this does the same for every other theme, using the shared
+   --color-* tokens so the page follows the platform's dark surfaces. */
+html:not(.theme-light):not(.visual-calm) .agents-panel,
+html:not(.theme-light):not(.visual-calm) .agents-studio {
+  --agents-bg: var(--color-bg-primary);
+  --agents-surface: var(--color-bg-glass);
+  --agents-surface-strong: var(--color-bg-elevated);
+  --agents-border: var(--color-border);
+  --agents-border-strong: var(--color-border-light);
+  --agents-text: var(--color-text-primary);
+  --agents-muted: var(--color-text-secondary);
+  --agents-subtle: var(--color-text-muted);
+  --agents-accent: var(--color-accent);
+  --agents-accent-soft: var(--color-accent-subtle);
+  --agents-shadow: var(--shadow-lg);
+  --agents-ink: var(--color-text-primary);
+  --agents-ink-contrast: #141518;
+  background: transparent;
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-create-screen,
+html:not(.theme-light):not(.visual-calm) .agents-agent-detail-screen {
+  background: transparent;
+}
+
+/* Card buttons (workspace agent cards and others) set no colour, so they fell
+   back to the browser's black button text. Zero-specificity so any explicit
+   colour in the hub still wins. */
+:where(html:not(.theme-light):not(.visual-calm))
+  :where(.agents-panel, .agents-studio)
+  :where(button, input, textarea, select) {
+  color: inherit;
+}
+
+/* Raised cards and rows that were solid or near-solid white. */
+html:not(.theme-light):not(.visual-calm) .agents-agent-action-button,
+html:not(.theme-light):not(.visual-calm) .agents-agent-add,
+html:not(.theme-light):not(.visual-calm) .agents-agent-channel-card,
+html:not(.theme-light):not(.visual-calm) .agents-agent-connect-row,
+html:not(.theme-light):not(.visual-calm) .agents-agent-pill,
+html:not(.theme-light):not(.visual-calm) .agents-agent-starter-card,
+html:not(.theme-light):not(.visual-calm) .agents-builder-choice-options button,
+html:not(.theme-light):not(.visual-calm) .agents-builder-connect-row,
+html:not(.theme-light):not(.visual-calm) .agents-builder-plan-card,
+html:not(.theme-light):not(.visual-calm) .agents-builder-progress-card,
+html:not(.theme-light):not(.visual-calm) .agents-builder-starters button,
+html:not(.theme-light):not(.visual-calm) .agents-create-bar,
+html:not(.theme-light):not(.visual-calm) .agents-create-screen-input,
+html:not(.theme-light):not(.visual-calm) .agents-hero-card,
+html:not(.theme-light):not(.visual-calm) .agents-library-card,
+html:not(.theme-light):not(.visual-calm) .agents-link-card,
+html:not(.theme-light):not(.visual-calm) .agents-secondary-btn,
+html:not(.theme-light):not(.visual-calm) .agents-section-card,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-bubble,
+html:not(.theme-light):not(.visual-calm) .agents-tab.active {
+  background: var(--agents-surface-strong);
+  border-color: var(--agents-border);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-secondary-btn,
+html:not(.theme-light):not(.visual-calm) .agents-link-card {
+  color: var(--agents-text);
+  box-shadow: inset 0 0 0 1px var(--agents-border);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-tab.active {
+  border-color: var(--agents-border-strong);
+}
+
+/* Translucent white washes: quieter fills on dark. */
+html:not(.theme-light):not(.visual-calm) .agents-agent-instruction-list li,
+html:not(.theme-light):not(.visual-calm) .agents-approval-preview-card,
+html:not(.theme-light):not(.visual-calm) .agents-builder-plan-icon,
+html:not(.theme-light):not(.visual-calm) .agents-builder-plan-pills span,
+html:not(.theme-light):not(.visual-calm) .agents-chip,
+html:not(.theme-light):not(.visual-calm) .agents-detail-meta div,
+html:not(.theme-light):not(.visual-calm) .agents-empty-state,
+html:not(.theme-light):not(.visual-calm) .agents-governance-strip .agents-governance-item,
+html:not(.theme-light):not(.visual-calm) .agents-library-card-status,
+html:not(.theme-light):not(.visual-calm) .agents-metric-pill,
+html:not(.theme-light):not(.visual-calm) .agents-note-card,
+html:not(.theme-light):not(.visual-calm) .agents-preset-chip,
+html:not(.theme-light):not(.visual-calm) .agents-routine-card,
+html:not(.theme-light):not(.visual-calm) .agents-runtime-pill,
+html:not(.theme-light):not(.visual-calm) .agents-runtime-surface-card,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-bubble.system,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-summary-card,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-transcript,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-workpaper,
+html:not(.theme-light):not(.visual-calm) .agents-surface-preview-card,
+html:not(.theme-light):not(.visual-calm) .agents-tab.subtle,
+html:not(.theme-light):not(.visual-calm) .agents-template-meta span {
+  background: var(--agents-surface);
+  border-color: var(--agents-border);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-preset-chip:hover,
+html:not(.theme-light):not(.visual-calm) .agents-create-screen-row:hover {
+  background: var(--color-bg-glass-hover);
+}
+
+/* State variants the rules above would otherwise flatten. */
+html:not(.theme-light):not(.visual-calm) .agents-preset-chip:hover,
+html:not(.theme-light):not(.visual-calm) .agents-chip.active,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-bubble.user {
+  border-color: color-mix(in srgb, var(--agents-accent) 35%, transparent);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-chip.active,
+html:not(.theme-light):not(.visual-calm) .agents-studio-test-bubble.user {
+  background: var(--agents-accent-soft);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-agent-pill.muted {
+  border-color: transparent;
+  background: transparent;
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-builder-choice-options button.active {
+  border-color: color-mix(in srgb, var(--color-purple) 60%, transparent);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-runtime-pill.safe {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-runtime-pill.danger {
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: var(--color-warning);
+}
+
+/* Section dividers. */
+html:not(.theme-light):not(.visual-calm) .agents-agent-action-strip,
+html:not(.theme-light):not(.visual-calm) .agents-agent-section,
+html:not(.theme-light):not(.visual-calm) .agents-agent-resource-list,
+html:not(.theme-light):not(.visual-calm) .agents-agent-instructions {
+  border-top-color: var(--agents-border);
+}
+
+/* Glassy icon tiles and avatars. */
+html:not(.theme-light):not(.visual-calm) .agents-agent-avatar,
+html:not(.theme-light):not(.visual-calm) .agents-create-badge,
+html:not(.theme-light):not(.visual-calm) .agents-create-screen-icon,
+html:not(.theme-light):not(.visual-calm) .agents-library-card-icon,
+html:not(.theme-light):not(.visual-calm) .agents-template-icon {
+  background: var(--color-bg-secondary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-agent-editor-bar {
+  background: var(--color-bg-primary);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-agent-action-menu {
+  border-color: var(--agents-border);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-template-card {
+  background:
+    radial-gradient(
+      circle at top left,
+      color-mix(in srgb, var(--template-accent), transparent 82%),
+      transparent 42%
+    ),
+    var(--agents-surface-strong);
+}
+
+/* Form controls. */
+html:not(.theme-light):not(.visual-calm) .agents-section-card input,
+html:not(.theme-light):not(.visual-calm) .agents-section-card textarea,
+html:not(.theme-light):not(.visual-calm) .agents-section-card select,
+html:not(.theme-light):not(.visual-calm) .agents-approval-preview-card select {
+  background: var(--color-bg-input);
+  border-color: var(--agents-border-strong);
+  color: var(--agents-text);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-approval-runtime-code {
+  background: var(--color-bg-input);
+  border-color: var(--agents-border);
+}
+
+/* Ink buttons: near-black on white becomes near-white on dark. */
+html:not(.theme-light):not(.visual-calm) .agents-primary-btn,
+html:not(.theme-light):not(.visual-calm) .agents-create-submit,
+html:not(.theme-light):not(.visual-calm) .agents-create-screen-submit,
+html:not(.theme-light):not(.visual-calm) .agents-agent-action-button.primary,
+html:not(.theme-light):not(.visual-calm) .agents-agent-connect-row button,
+html:not(.theme-light):not(.visual-calm) .agents-builder-connect-row button,
+html:not(.theme-light):not(.visual-calm) .agents-agent-instruction-list li::before {
+  border-color: transparent;
+  background: var(--agents-ink);
+  color: var(--agents-ink-contrast);
+  box-shadow: none;
+}
+
+/* Purple "choose one" group. */
+html:not(.theme-light):not(.visual-calm) .agents-builder-choice-group {
+  border-color: color-mix(in srgb, var(--color-purple) 30%, transparent);
+  background: color-mix(in srgb, var(--color-purple) 8%, transparent);
+}
+
+/* Status colours tuned for light backgrounds. */
+html:not(.theme-light):not(.visual-calm) .agents-agent-action-error,
+html:not(.theme-light):not(.visual-calm) .agents-error-banner {
+  border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-create-screen-error {
+  color: var(--color-error);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-approval-behavior-pill.safe {
+  color: var(--color-success);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-approval-behavior-pill.danger {
+  color: var(--color-warning);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-library-card-status.mission-control {
+  background: color-mix(in srgb, var(--color-info) 16%, transparent);
+  color: var(--color-info);
+}
+
+html:not(.theme-light):not(.visual-calm) .agents-template-meta .agents-template-warning {
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: var(--color-warning);
+}

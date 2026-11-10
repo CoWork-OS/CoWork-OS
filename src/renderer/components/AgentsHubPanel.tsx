@@ -77,6 +77,7 @@ import {
 import { resolveBotMascot } from "../../shared/bot-mascots";
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import { scrollBehavior } from "../utils/motion";
+import "./agents-hub-dark.css";
 
 type SkillLite = {
   id: string;

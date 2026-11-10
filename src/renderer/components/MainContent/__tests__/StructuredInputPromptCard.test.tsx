@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   keyEventFromModalDialog,
+  replyFieldEnterAction,
   responsibilityActionReviewDecisionAllowed,
   responsibilityActionReviewOptionDisabled,
   splitApprovalQuestion,
@@ -173,5 +174,18 @@ describe("StructuredInputPromptCard compact approval", () => {
     );
     expect(html).toContain('<div class="input-request-approval-title">Export the report.</div>');
     expect(html).toContain("It goes to api.example.com.");
+  });
+});
+
+describe("replyFieldEnterAction", () => {
+  // Live 2026-11-09: Enter in the "Reply instead" box did nothing although the card says ↵ submit.
+  it("sends a typed answer on Enter and keeps Shift+Enter and IME input as newlines", () => {
+    const enter = { key: "Enter", shiftKey: false };
+    expect(replyFieldEnterAction(enter, true, true)).toBe("submit");
+    expect(replyFieldEnterAction(enter, false, true)).toBe("next");
+    expect(replyFieldEnterAction(enter, true, false)).toBe("ignore");
+    expect(replyFieldEnterAction({ ...enter, shiftKey: true }, true, true)).toBeNull();
+    expect(replyFieldEnterAction({ ...enter, isComposing: true }, true, true)).toBeNull();
+    expect(replyFieldEnterAction({ key: "a", shiftKey: false }, true, true)).toBeNull();
   });
 });

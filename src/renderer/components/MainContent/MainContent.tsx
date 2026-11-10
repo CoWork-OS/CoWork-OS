@@ -1534,6 +1534,14 @@ function MainContentComponent({
     displayedInteractionMode.mode === "chat"
       ? "chat"
       : (displayedInteractionMode.executionOverride ?? "execute");
+  // A session's composer leaves out the Do/Ask/Plan picker to stay quiet, but an Ask or Plan
+  // session keeps it: without it, "go ahead and build it" stayed in Plan mode with no way out.
+  const savedSessionMode = getInteractionModeSelection(task?.agentConfig);
+  const showSessionModePicker =
+    Boolean(selectedTaskId) &&
+    (savedSessionMode?.mode === "chat" ||
+      savedSessionMode?.executionOverride === "plan" ||
+      Boolean(modeDrafts[modeDraftKey]));
   const setInteractionMode = (selection: InteractionModeSelection) => {
     setModeDrafts((previous) => ({ ...previous, [modeDraftKey]: selection }));
     recordDraftMutation(onDraftPatch?.({ interactionMode: selection }));
@@ -2603,6 +2611,21 @@ function MainContentComponent({
   const [messageFeedbackMap, setMessageFeedbackMap] = useState<
     Map<string, "accepted" | "rejected">
   >(new Map());
+  // Feedback is saved as a task event. Reading it back keeps a thumbs mark after the session is
+  // reopened or the app restarts; before, it vanished and the answer could be rated again.
+  const shownMessageFeedback = useMemo(() => {
+    const shown = new Map<string, "accepted" | "rejected">();
+    for (const event of rawEvents) {
+      if (getEffectiveTaskEventType(event) !== "user_feedback") continue;
+      const messageId = event.payload?.messageId;
+      const decision = event.payload?.decision;
+      if (typeof messageId === "string" && (decision === "accepted" || decision === "rejected")) {
+        shown.set(messageId, decision);
+      }
+    }
+    for (const [messageId, decision] of messageFeedbackMap) shown.set(messageId, decision);
+    return shown;
+  }, [rawEvents, messageFeedbackMap]);
   const [rejectMenuOpenFor, setRejectMenuOpenFor] = useState<string | null>(null);
   const rejectMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -8682,7 +8705,7 @@ function MainContentComponent({
         returnToDefaultTranscript={returnToDefaultTranscript}
         markdownComponents={markdownComponents}
         mainBodyRef={mainBodyRef}
-        messageFeedbackMap={messageFeedbackMap}
+        messageFeedbackMap={shownMessageFeedback}
         onOpenBrowserView={onOpenBrowserView}
         onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
         onOpenDocumentArtifact={openDocumentArtifact}
@@ -10188,6 +10211,22 @@ function MainContentComponent({
             </button>
           </div>
           <div className="input-status-right">
+            {showSessionModePicker && (
+              <div className="input-status-mode-wrap" ref={modeDropdownRef}>
+                <InteractionModePicker
+                  selection={displayedInteractionMode}
+                  open={showModeDropdown}
+                  onToggle={() => {
+                    setShowDomainDropdown(false);
+                    setShowModeDropdown((value) => !value);
+                  }}
+                  onChange={(selection) => {
+                    setInteractionMode(selection);
+                    setShowModeDropdown(false);
+                  }}
+                />
+              </div>
+            )}
             <div className="input-status-domain-wrap" ref={domainDropdownRef}>
               <button
                 type="button"

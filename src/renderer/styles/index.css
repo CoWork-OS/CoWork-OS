@@ -4549,7 +4549,13 @@ a,
   color: var(--color-text-muted);
 }
 
+/* A row of buttons (About, CoWork Pulse, Import). Adjacent JSX buttons have no space
+   between them, so the row needs its own gap or they touch. */
 .update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-top: 16px;
 }
 
@@ -21495,9 +21501,11 @@ a,
   background: transparent !important;
 }
 
+/* Third column: the hover "More" button. Without it the button wrapped to a second row and
+   every file card doubled in height. */
 .right-panel .cli-file-item {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   gap: 8px;
   min-height: 34px;
   padding: 0 10px !important;

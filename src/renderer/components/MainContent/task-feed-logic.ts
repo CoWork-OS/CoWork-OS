@@ -849,6 +849,39 @@ function getTaskFeedRowTimestamp(row: TaskFeedRow): number | null {
   return null;
 }
 
+const TURN_RUN_END_EVENT_TYPES = new Set([
+  "task_cancelled",
+  "task_failed",
+  "task_interrupted",
+  "follow_up_failed",
+]);
+
+function isRunEndEvent(event: TaskEvent): boolean {
+  const type = getEffectiveTaskEventType(event);
+  if (TURN_RUN_END_EVENT_TYPES.has(type)) return true;
+  const legacyType = event.payload?.legacyType;
+  return type === "timeline_error" && typeof legacyType === "string"
+    ? TURN_RUN_END_EVENT_TYPES.has(legacyType)
+    : false;
+}
+
+/** When a stopped, failed or interrupted run ended, from a row or a grouped activity block. */
+function getTurnRunEndTimestamp(row: TaskFeedRow): number | null {
+  if (row.kind !== "timeline") return null;
+  const events =
+    row.item.kind === "event"
+      ? [row.item.event as TaskEvent]
+      : row.item.kind === "action_block"
+        ? (row.item.events as TaskEvent[])
+        : [];
+  let latest: number | null = null;
+  for (const event of events) {
+    if (!isRunEndEvent(event) || typeof event.timestamp !== "number") continue;
+    latest = Math.max(latest ?? event.timestamp, event.timestamp);
+  }
+  return latest;
+}
+
 function isTurnAnswerRow(row: TaskFeedRow): boolean {
   const type = getTaskFeedRowEventType(row);
   const event = getTaskFeedRowEvent(row);
@@ -859,6 +892,9 @@ function isTurnAnswerRow(row: TaskFeedRow): boolean {
     return getCompletionSummaryText(event).length > 0;
   }
   if (type !== "assistant_message") return false;
+  // "You chose: ..." echoes the person's answer to a question or approval card; it is not the
+  // agent's answer. Taken as one, a stopped run led with it and timed the turn to it ("0s").
+  if (event.payload?.source === "structured_input_selection") return false;
   return event.payload?.internal !== true;
 }
 
@@ -906,8 +942,13 @@ export function applyTurnDisclosures(
     let answerIndex = -1;
     if (!isRunning) {
       let commentaryIndex = -1;
+      let cardAnswered = false;
       for (let index = segment.body.length - 1; index >= 0; index -= 1) {
         const row = segment.body[index];
+        const source = getTaskFeedRowEvent(row)?.payload?.source;
+        if (source === "structured_input_selection") cardAnswered = true;
+        // "Choose Deny or Allow once below" stays the answer only while the card is open.
+        if (cardAnswered && source === "assistant_approval_request") continue;
         if (!isTurnAnswerRow(row)) continue;
         if (getTaskFeedRowEvent(row)?.payload?.phase !== "commentary") {
           answerIndex = index;
@@ -924,10 +965,20 @@ export function applyTurnDisclosures(
       .map(getTaskFeedRowTimestamp)
       .filter((timestamp): timestamp is number => timestamp !== null);
     const startedAt = userTimestamp ?? options.taskStartedAt;
+    // A turn stopped or failed after its last message ran until that end, not the message.
+    const answerTimestamp =
+      answerIndex >= 0 ? getTaskFeedRowTimestamp(segment.body[answerIndex]) : null;
+    let runEndTimestamp: number | null = null;
+    for (const row of delivered) {
+      const timestamp = getTurnRunEndTimestamp(row);
+      if (timestamp !== null) runEndTimestamp = Math.max(runEndTimestamp ?? timestamp, timestamp);
+    }
     const endedAt = isRunning
       ? null
       : answerIndex >= 0
-        ? (getTaskFeedRowTimestamp(segment.body[answerIndex]) ?? null)
+        ? answerTimestamp === null
+          ? null
+          : Math.max(answerTimestamp, runEndTimestamp ?? answerTimestamp)
         : (bodyTimestamps[bodyTimestamps.length - 1] ?? null);
     const collapsible = !isRunning && answerIndex >= 0 && work.length > 0;
     const turn: TaskTurnSummary = {
@@ -959,7 +1010,15 @@ export function applyTurnDisclosures(
       rows.push(...work);
     } else {
       // Folded work still surfaces what needs attention: failures and requests for action.
+      // The turn's live canvas is what it made, so its latest card stays in view too.
+      const lastCanvasRow = [...work]
+        .reverse()
+        .find((row) => row.kind === "timeline" && row.item.kind === "canvas");
       for (const row of work) {
+        if (row === lastCanvasRow) {
+          rows.push(row);
+          continue;
+        }
         const isActivityBlock = row.kind === "timeline" && row.item.kind === "action_block";
         for (const { event, eventIndex, eventOrder } of getTaskFeedRowEvents(row)) {
           if (!isDeliveryCriticalEvent(event)) continue;

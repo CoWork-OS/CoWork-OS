@@ -118,6 +118,11 @@ function extractEventHeadline(event: TaskEvent): string | undefined {
   if (type === "step_started" && step) return `Working on ${step.description}`;
   if (type === "step_completed" && step) return `Completed ${step.description}`;
   if (type === "step_failed" && step) return `Blocked on ${step.description}`;
+  // The timeline copies the raw provider error into `message`; the reply shown in the
+  // conversation is `userMessage`.
+  if (type === "follow_up_failed" && typeof payload.userMessage === "string") {
+    return boundedText(payload.userMessage);
+  }
   if (type === "approval_requested") {
     return boundedText(payload.description || payload.message, MAX_HEADLINE_LENGTH);
   }

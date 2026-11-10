@@ -153,6 +153,11 @@ vi.mock("../mention-tools", () => {
 });
 
 import { ToolRegistry } from "../registry";
+import { buildCompletionContract } from "../../executor-completion-utils";
+import {
+  promptRequestsDecision,
+  promptRequiresDirectAnswer,
+} from "../../executor-prompt-heuristics-utils";
 
 describe("ToolRegistry child task control tools", () => {
   let workspace: Workspace;
@@ -1592,6 +1597,80 @@ describe("ToolRegistry child task control tools", () => {
     expect(inferredCall.prompt).toContain("Resolved worker role: Researcher");
   });
 
+  // The brief's own words ("Known findings or evidence", "implementation",
+  // "verification") and the parent's prompt used to feed the helper's
+  // completion check, so a helper asked only to list things failed with
+  // "Task missing verification evidence".
+  it("derives a helper's completion contract from its delegated request, not the brief", async () => {
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue({
+        id: "parent-task",
+        title: "Parent task",
+        prompt: "Ask a helper agent to review our pricing and verify the totals?",
+        status: "executing",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        depth: 0,
+      }),
+      getTaskEvents: vi.fn().mockReturnValue([
+        {
+          type: "assistant_message",
+          payload: { message: "Should we check the build evidence before shipping?" },
+        },
+      ]),
+      getChildTasks: vi.fn().mockResolvedValue([]),
+      createChildTask: vi.fn().mockResolvedValue({
+        id: "child-helper",
+        title: "List competitors",
+        prompt: "x",
+        status: "pending",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "parent-task");
+    await registry.executeTool("spawn_agent", {
+      title: "List competitors",
+      prompt: "List three competitors of Acme as short bullets.",
+      worker_role: "implementer",
+    });
+    await registry.executeTool("spawn_agent", {
+      title: "Check totals",
+      prompt: "Review the pricing table in prices.md and verify the totals add up.",
+      worker_role: "implementer",
+    });
+
+    const contractFor = (call: { title: string; prompt: string }) =>
+      buildCompletionContract({
+        taskTitle: call.title,
+        taskPrompt: call.prompt,
+        requiresDirectAnswer: promptRequiresDirectAnswer(call.title, call.prompt),
+        requiresDecisionSignal: promptRequestsDecision(call.title, call.prompt),
+        isWatchSkipRecommendationTask: false,
+      });
+    const listCall = daemon.createChildTask.mock.calls[0][0];
+    expect(listCall.prompt).toContain("STRUCTURED DELEGATION BRIEF");
+    expect(listCall.prompt).toContain("Known findings or evidence:");
+    expect(listCall.prompt).not.toContain("verification commands");
+    const listContract = contractFor(listCall);
+    expect(listContract.requiresExecutionEvidence).toBe(false);
+    expect(listContract.requiresVerificationEvidence).toBe(false);
+    expect(listContract.requiresArtifactEvidence).toBe(false);
+    expect(listContract.requiresDirectAnswer).toBe(false);
+    expect(listContract.requiresDecisionSignal).toBe(false);
+
+    // A delegated request that asks for a review still owes one.
+    const reviewContract = contractFor(daemon.createChildTask.mock.calls[1][0]);
+    expect(reviewContract.requiresVerificationEvidence).toBe(true);
+  });
+
   describe("spawn_agent model and turn defaults", () => {
     // Sub-agents used to default to Haiku with 20 turns. A pinned modelKey also
     // drops the provider failover chain (resolveProviderFailoverChain returns
@@ -1738,6 +1817,39 @@ describe("ToolRegistry child task control tools", () => {
     afterEach(() => {
       process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
       process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    });
+
+    // Live 2026-11-09: "Use a subagent to list three competitors" got a dispatch step that
+    // offers only orchestrate_agents, which refused anything under two tasks.
+    it("runs a single delegated task", async () => {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1)],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1)],
+        }),
+        waitForDelegatedNode: vi.fn(async (_root: string, handle: string) => ({
+          success: true,
+          status: "completed",
+          message: "Delegated work completed successfully",
+          resultSummary: `summary for ${handle}`,
+        })),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks: [tasks[0]] });
+
+      expect(result.success).toBe(true);
+      expect(result.completed).toBe(1);
+      await expect(registry.executeTool("orchestrate_agents", { tasks: [] })).rejects.toThrow(
+        "requires at least 1 task",
+      );
     });
 
     it("queues tasks beyond the active child limit instead of rejecting them", async () => {

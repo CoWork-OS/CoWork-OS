@@ -1857,7 +1857,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     const actionLabel = type === "archive" ? "archive" : "trash";
     const targetLabel = threadCount === 1 ? "this email thread" : `${threadCount} email threads`;
     const confirmed = window.confirm(
-      `This will ${actionLabel} ${targetLabel} on the mail server, not just inside Cowork.\n\nUse Apply cleanup to hide threads only in Cowork.\n\nContinue?`,
+      `This will ${actionLabel} ${targetLabel} on the mail server, not just inside CoWork.\n\nUse Apply cleanup to hide threads only in CoWork.\n\nContinue?`,
     );
     if (!confirmed) {
       return false;
@@ -3720,7 +3720,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   icon={<CheckSquare size={15} />}
                   title={
                     selectedThreadCanMarkDone
-                      ? "Mark done: clear Needs reply and close open commitments after you handled this outside Cowork"
+                      ? "Mark done: clear Needs reply and close open commitments after you handled this outside CoWork"
                       : "Nothing to mark done"
                   }
                   disabled={busy || !selectedThreadCanMarkDone}

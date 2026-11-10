@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { PlanStep, TaskEvent } from "../../../shared/types";
+import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../../shared/generated-plan-steps";
 import { TaskExecutor } from "../executor";
 import {
   buildTaskKickoffSummary,
@@ -163,5 +164,27 @@ describe("task kickoff summary", () => {
   it("includes the kickoff contract in the execution prompt", () => {
     expect(TASK_KICKOFF_PROMPT_RULES).toContain("before the first tool call");
     expect(TASK_KICKOFF_PROMPT_RULES).toContain("one or two sentences");
+  });
+});
+
+// Live 2026-11-09: "I'll start by using orchestrate_agents to dispatch the explicitly requested
+// independent scopes to actual child agents and collect their results. Assign publ, then ..."
+describe("kickoff wording for long or runtime-written steps", () => {
+  it("names a runtime-written step by its label", () => {
+    expect(
+      buildTaskKickoffSummary({ currentStepDescription: AGENT_DISPATCH_STEP_DESCRIPTION }),
+    ).toBe(
+      "I’ll start by handing the separate parts to sub-agents, then continue through the remaining work and verify the result.",
+    );
+  });
+
+  it("keeps whole words when a step is long", () => {
+    const summary = buildTaskKickoffSummary({
+      currentStepDescription:
+        "Review the quarterly revenue workbook, every regional tab and the board notes so the forecast matches the signed plan and the auditors' comments from last week. Then draft a summary.",
+    });
+    expect(summary).toMatch(/^I’ll start by reviewing the quarterly revenue workbook, /);
+    expect(summary).not.toMatch(/\b[a-z]{1,3}, then continue/);
+    expect(summary).toContain("auditors'");
   });
 });

@@ -1,3 +1,4 @@
+import * as path from "path";
 import { ipcMain } from "electron";
 import { CapabilitySecurityReport, IPC_CHANNELS } from "../../shared/types";
 import { PluginRegistry } from "../extensions/registry";
@@ -6,6 +7,15 @@ import { MCPSettingsManager } from "../mcp/settings";
 import { getCustomSkillLoader } from "../agent/custom-skill-loader";
 import { isPackAllowed, isPackRequired, loadPoliciesStrict } from "../admin/policies";
 import { getPluginPackToggleService } from "../extensions/plugin-pack-toggle-service";
+import { getUserDataDir } from "../utils/user-data-dir";
+
+// Packs created in the Plugin Store or installed from a URL live in the user's extensions
+// folder; bundled and organization packs do not, and cannot be uninstalled.
+function isUserInstalledPackPath(packPath: string | undefined): boolean {
+  if (!packPath) return false;
+  const relative = path.relative(path.join(getUserDataDir(), "extensions"), packPath);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
 
 /**
  * Serializable pack data sent to the renderer
@@ -40,6 +50,8 @@ export interface PluginPackData {
   policyRequired: boolean;
   /** Security report for managed or unmanaged-local imported packs */
   securityReport?: CapabilitySecurityReport;
+  /** Created or installed by the user (in the extensions folder), so it can be uninstalled */
+  removable?: boolean;
 }
 
 /**
@@ -206,6 +218,7 @@ export function setupPluginPackHandlers(): void {
         policyBlocked: blocked,
         policyRequired: required,
         securityReport: p.securityReport,
+        removable: isUserInstalledPackPath(p.path),
       };
     });
   });

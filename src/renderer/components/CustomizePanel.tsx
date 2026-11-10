@@ -5,6 +5,7 @@ import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { MESSAGE_SHORTCUTS_UPDATED_EVENT } from "../utils/message-slash-options";
 import { hasHostMethod } from "../host/browser-capabilities";
 import { PluginStore } from "./PluginStore";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { AddToolsSelection } from "./AddToolsPanel";
 
 interface PluginPackData {
@@ -34,6 +35,7 @@ interface PluginPackData {
   policyBlocked?: boolean;
   policyRequired?: boolean;
   securityReport?: CapabilitySecurityReport;
+  removable?: boolean;
 }
 
 type DetailTab = "commands" | "skills" | "agents";
@@ -66,6 +68,12 @@ export function CustomizePanel({
   const focusedSelection = useRef<string | null>(null);
   const canTogglePack = hasHostMethod("togglePluginPack");
   const canTogglePackSkill = hasHostMethod("togglePluginPackSkill");
+  const canUninstallPack = hasHostMethod("uninstallPluginPack");
+  const [uninstallTarget, setUninstallTarget] = useState<PluginPackData | null>(null);
+  const [packActionError, setPackActionError] = useState<{
+    packName: string;
+    message: string;
+  } | null>(null);
   const canRetryQuarantinedImport = hasHostMethod("retryQuarantinedImport");
   const canRemoveQuarantinedImport = hasHostMethod("removeQuarantinedImport");
   const canNavigateToConnectors =
@@ -177,6 +185,30 @@ export function CustomizePanel({
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update plugin pack");
+    }
+  };
+
+  // Packs from Create Pack or Install from URL had no way out of the list except a toggle.
+  const handleUninstall = async (pack: PluginPackData) => {
+    setUninstallTarget(null);
+    try {
+      const result = await window.electronAPI.uninstallPluginPack(pack.name);
+      if (!result?.success) {
+        setPackActionError({
+          packName: pack.name,
+          message: result?.error || `Could not uninstall ${pack.displayName}.`,
+        });
+        return;
+      }
+      setPackActionError(null);
+      setSelectedPack(null);
+      setLoadKey((k) => k + 1);
+      window.dispatchEvent(new Event(MESSAGE_SHORTCUTS_UPDATED_EVENT));
+    } catch (err) {
+      setPackActionError({
+        packName: pack.name,
+        message: err instanceof Error ? err.message : `Could not uninstall ${pack.displayName}.`,
+      });
     }
   };
 
@@ -439,6 +471,15 @@ export function CustomizePanel({
               <div className="cp-detail-title-row">
                 <h2>{activePack.displayName}</h2>
                 <div className="cp-detail-actions">
+                  {activePack.removable && canUninstallPack && !activePack.policyRequired && (
+                    <button
+                      type="button"
+                      className="cp-uninstall-btn"
+                      onClick={() => setUninstallTarget(activePack)}
+                    >
+                      Uninstall
+                    </button>
+                  )}
                   <label className="cp-toggle">
                     <input
                       type="checkbox"
@@ -474,6 +515,9 @@ export function CustomizePanel({
                   <span className="settings-badge">Required by policy</span>
                 )}
               </div>
+              {packActionError?.packName === activePack.name && (
+                <p className="cp-pack-action-error">{packActionError.message}</p>
+              )}
               <p className="cp-detail-description">{activePack.description}</p>
               {getSecurityBadge(activePack.securityReport)}
               {activePack.securityReport?.verdict === "warning" && (
@@ -653,7 +697,7 @@ export function CustomizePanel({
             {/* Try asking section */}
             {activePack.tryAsking && activePack.tryAsking.length > 0 && (
               <div className="cp-try-asking">
-                <h4>Try asking ..</h4>
+                <h4>Try asking</h4>
                 <div className="cp-try-list">
                   {activePack.tryAsking.map((prompt, i) => (
                     <button key={i} className="cp-try-item" onClick={() => handleTryAsking(prompt)}>
@@ -737,6 +781,17 @@ export function CustomizePanel({
           </>
         )}
       </div>
+
+      {uninstallTarget && (
+        <ConfirmDialog
+          title={`Uninstall ${uninstallTarget.displayName}?`}
+          message="This removes the pack and its skills, commands and agents from this computer."
+          confirmLabel="Uninstall"
+          danger
+          onConfirm={() => void handleUninstall(uninstallTarget)}
+          onCancel={() => setUninstallTarget(null)}
+        />
+      )}
 
       {/* Plugin Store Modal */}
       {showStore && (
@@ -1056,6 +1111,29 @@ export function CustomizePanel({
           display: flex;
           align-items: center;
           gap: 8px;
+        }
+
+        .cp-uninstall-btn {
+          height: 28px;
+          padding: 0 12px;
+          border: 1px solid var(--color-border);
+          border-radius: 8px;
+          background: transparent;
+          color: var(--color-text-secondary);
+          font: inherit;
+          font-size: 12px;
+          cursor: pointer;
+        }
+
+        .cp-uninstall-btn:hover {
+          color: var(--color-error);
+          border-color: var(--color-error);
+        }
+
+        .cp-pack-action-error {
+          margin: 0 0 8px;
+          color: var(--color-error);
+          font-size: 12px;
         }
 
         /* Best-fit workflow badges */

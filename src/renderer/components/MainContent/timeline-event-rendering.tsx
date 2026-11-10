@@ -1,6 +1,7 @@
 import React from "react";
 import type { Components } from "react-markdown";
 import { buildApprovalCommandPreview } from "../../../shared/approval-command-preview";
+import { approvalReplyDisplayText } from "../../../shared/approval-reply-message";
 import { isVerificationStepDescription } from "../../../shared/plan-utils";
 import { formatProviderErrorForDisplay } from "../../../shared/provider-error-format";
 import {
@@ -559,7 +560,7 @@ export function getAgentLifecycleRecapLine(event: TaskEvent): string | null {
   }
 
   const recipient = getAgentRecipientLabel(event);
-  const message = readPayloadText(payload, "message");
+  const message = approvalReplyDisplayText(readPayloadText(payload, "message"));
   const error = readPayloadText(payload, "error");
 
   if (effectiveType === "agent_message") {
@@ -772,7 +773,9 @@ export function renderEventTitle(
           ? `Follow-up: terminal output of ${command}`
           : `Follow-up: terminal output of \`${command}\``;
       }
-      return followUpMessage ? `Follow-up: ${followUpMessage}` : "Follow-up received";
+      return followUpMessage
+        ? `Follow-up: ${approvalReplyDisplayText(followUpMessage)}`
+        : "Follow-up received";
     }
     case "plan_created":
       return getMessage("planCreated", msgCtx);
@@ -1052,12 +1055,13 @@ export function renderEventTitle(
       return "Verified business receipt";
     case "pact_evidence_issue":
       return `Business evidence needs review: ${String(event.payload?.issue ?? event.payload?.reason ?? event.payload?.verification ?? "issue").replace(/_/g, " ")}`;
+    // Question and approval cards; "structured input" is the internal name.
     case "input_request_created":
-      return "Structured input requested";
+      return "Asked for your input";
     case "input_request_resolved":
-      return "Structured input submitted";
+      return "You answered";
     case "input_request_dismissed":
-      return "Structured input dismissed";
+      return "You dismissed the question";
     case "log": {
       const logMsg = event.payload?.message;
       return typeof logMsg === "string" ? humanizeTimelineMessage(logMsg) : "Log";

@@ -155,7 +155,7 @@ export class RuntimeVisibilityService {
         status: input.memoryCaptured ? "done" : "skipped",
         title: "Memory captured",
         summary: input.memoryCaptured
-          ? "Cowork persisted the task outcome as reusable memory."
+          ? "CoWork persisted the task outcome as reusable memory."
           : "No new memory was captured for this task.",
         evidenceRefs: input.evidenceRefs || [],
         createdAt: now,

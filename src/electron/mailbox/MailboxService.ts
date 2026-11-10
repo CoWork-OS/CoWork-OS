@@ -5540,10 +5540,10 @@ export class MailboxService {
         type: "cleanup",
         title: `Queue cleanup for ${row.subject}`,
         reasoning:
-          "Hide this low-priority handled thread from the Cowork inbox. Use Archive or Trash for a server-side mailbox change.",
+          "Hide this low-priority handled thread from the CoWork inbox. Use Archive or Trash for a server-side mailbox change.",
         preview: {
           threadId: row.id,
-          suggestedAction: "hide from Cowork inbox",
+          suggestedAction: "hide from CoWork inbox",
         },
       });
     }
@@ -8128,7 +8128,7 @@ export class MailboxService {
         type: "cleanup",
         title: `Clean up ${thread.subject}`,
         reasoning:
-          "Hide this thread from the Cowork inbox. Use Archive or Trash if you want to change the server-side mailbox.",
+          "Hide this thread from the CoWork inbox. Use Archive or Trash if you want to change the server-side mailbox.",
       });
     }
     if (thread.staleFollowup) {

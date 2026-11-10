@@ -6,7 +6,10 @@ import {
 } from "./background-process-notifications";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
-import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
+import {
+  AGENT_DISPATCH_STEP_DESCRIPTION,
+  generatedPlanStepLabel,
+} from "../../shared/generated-plan-steps";
 import { BotDesktopTools } from "./tools/bot-desktop-tools";
 import { isUserActionRequiredFailure } from "./user-action-failure";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
@@ -789,6 +792,8 @@ const CHAT_REPLY_MAX_OUTPUT_TOKENS = 4_096;
 const PREFLIGHT_MAX_OUTPUT_TOKENS = 4_096;
 const PREFLIGHT_RETRY_MAX_OUTPUT_TOKENS = 8_192;
 const PREFLIGHT_TIMEOUT_MS = 60_000;
+/** Start of the failure a user-locked Plan mode gives when a step needs file changes. */
+const PLAN_MODE_BLOCKED_CHANGES_PREFIX = "Plan mode doesn't create or change files";
 // An empty or withheld memory view cannot establish the status of past agreements.
 // Keep that state application-owned instead of asking a model to invent assumptions.
 const PREFLIGHT_UNKNOWN_MEMORY_FRAMING = [
@@ -1427,6 +1432,8 @@ export class TaskExecutor {
   private readonly shouldPauseForQuestions: boolean;
   private readonly shouldPauseForRequiredDecision: boolean;
   private lastAwaitingUserInputReasonCode: string | null = null;
+  /** The waiting-for-input pause a follow-up started from; restored if the follow-up ends paused. */
+  private followUpPriorInputPause: { reasonCode?: string } | null = null;
   private lastRequiredDecisionPrompt: string | null = null;
   private addressedRequiredDecisionPrompts: Set<string> = new Set();
   private lastRetryReason: string | null = null;
@@ -1958,7 +1965,20 @@ export class TaskExecutor {
           : "Follow-up completed (iterations exhausted)",
       );
     } else if (previousStatus && previousStatus !== "executing") {
-      this.daemon.updateTaskStatus(this.task.id, previousStatus);
+      const priorInputPause = previousStatus === "paused" ? this.followUpPriorInputPause : null;
+      if (priorInputPause) {
+        // Still waiting on the person (a reply to a denied approval does not resume the plan).
+        // A bare "paused" read as resumable: the dashboard offered Resume, which re-ran the step.
+        this.daemon.updateTask(this.task.id, {
+          status: "paused",
+          terminalStatus: "needs_user_action",
+          ...(priorInputPause.reasonCode
+            ? { awaitingUserInputReasonCode: priorInputPause.reasonCode }
+            : {}),
+        });
+      } else {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus);
+      }
       this.emitEvent("task_status", { status: previousStatus });
     } else {
       await this.finalizeFollowUpCompletion("Follow-up completed (status safety net)");
@@ -2213,6 +2233,9 @@ export class TaskExecutor {
     const safeRestoreStatus =
       previousStatus && previousStatus !== "executing" ? previousStatus : "completed";
     this.daemon.updateTaskStatus(this.task.id, safeRestoreStatus as Any);
+    // The window learns a status change only from an event. Without one, a session whose
+    // follow-up failed kept "Working", Stop and "Running 1" until its next refresh.
+    this.emitEvent("task_status", { status: safeRestoreStatus });
   }
 
   private getLatestAssistantConversationText(): string {
@@ -10034,6 +10057,9 @@ ${transcript}
     let skipRetryDelayOnce = false;
     let deferredPrimaryOutageFailover = false;
     let providerRetryAfterMs: number | undefined;
+    // Why the last attempt failed, so the window can say "rate-limiting" rather than
+    // "isn't responding" while it waits.
+    let providerRetryReason: string | undefined;
     let timeoutReplays = 0;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -10065,6 +10091,7 @@ ${transcript}
               attempt,
               maxRetries: maxAttempts - 1,
               delayMs: delay,
+              ...(providerRetryReason ? { providerReason: providerRetryReason } : {}),
             });
             await sleep(delay);
           }
@@ -10140,6 +10167,7 @@ ${transcript}
           legacyRetrySemantics: !this.providerRetryV2Enabled,
         });
         providerRetryAfterMs = classification.retryAfterMs;
+        providerRetryReason = classification.reason;
         const errorText = String(error?.message || "").toLowerCase();
         // Replaying a timed-out request repeats the same wait without reducing the
         // cause, so it is replayed at most once (never for a local Ollama model,
@@ -11305,7 +11333,8 @@ ${transcript}
     if (
       /contract_unmet_write_required|artifact_write_checkpoint_failed|required artifact mutation|mutation-required contract unmet/i.test(
         message,
-      )
+      ) ||
+      message.startsWith(PLAN_MODE_BLOCKED_CHANGES_PREFIX)
     )
       return "contract_unmet_write_required";
     if (
@@ -19213,7 +19242,10 @@ ${transcript}
       "canvas_push",
     ]);
 
-    return Array.from(probes.values()).map((toolName) => canonicalizeToolNameUtil(toolName));
+    // generate_* and create_* share a canonical name; list each tool once.
+    return Array.from(
+      new Set(Array.from(probes.values()).map((toolName) => canonicalizeToolNameUtil(toolName))),
+    );
   }
 
   private alignExecutionModeForMutationContract(
@@ -34645,7 +34677,7 @@ Return ONLY a JSON object:
         const progress =
           totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
         const failedMutationDescriptions = unrecoveredMutationFailedSteps
-          .map((s) => s.description)
+          .map((s) => generatedPlanStepLabel(s.description) ?? s.description)
           .join("; ");
         this.emitEvent("progress_update", {
           phase: "execution",
@@ -34656,6 +34688,18 @@ Return ONLY a JSON object:
             "Execution failed: one or more mutation-required steps failed unrecovered and cannot be auto-waived.",
           hasFailures: true,
         });
+        // A user-chosen Plan or Ask mode blocks the step's file changes on purpose; say so
+        // in words, with the way out, instead of the contract name.
+        if (
+          unrecoveredMutationFailedSteps.every((failedStep) =>
+            String(failedStep.error || "").startsWith("Plan contract conflict:"),
+          )
+        ) {
+          throw new Error(
+            `${PLAN_MODE_BLOCKED_CHANGES_PREFIX}, so this step was not run: ${failedMutationDescriptions}. ` +
+              `Switch the mode under the message box to Do, then send your request again.`,
+          );
+        }
         throw new Error(
           `Task failed: mutation-required contract unmet - ${failedMutationDescriptions}`,
         );
@@ -34757,8 +34801,11 @@ Return ONLY a JSON object:
         const userFailedSteps = unrecoveredFailedSteps.filter((s) => s.kind !== "recovery");
         const listedFailedSteps =
           userFailedSteps.length > 0 ? userFailedSteps : unrecoveredFailedSteps;
+        // Steps the runtime wrote are instructions to the model; name them by their label.
         throw new Error(
-          `Task failed: ${listedFailedSteps.length} step(s) failed - ${listedFailedSteps.map((s) => s.description).join("; ")}`,
+          `Task failed: ${listedFailedSteps.length} step(s) failed - ${listedFailedSteps
+            .map((s) => generatedPlanStepLabel(s.description) ?? s.description)
+            .join("; ")}`,
         );
       }
     }
@@ -41513,6 +41560,26 @@ Return ONLY a JSON object:
     }
 
     const compact = raw.length > 220 ? `${raw.slice(0, 220)}...` : raw;
+
+    // Provider refusals are not internal errors, and saying so sent people looking for a bug
+    // instead of at their key, quota or model.
+    const providerReason = classifyProviderError(error).reason;
+    if (this.isContextCapacityExhaustedError(error) || providerReason === "context_overflow") {
+      return (
+        "This conversation no longer fits in the model's context window, even after compacting it. " +
+        "Switch to a model with a larger context window, or start a new session."
+      );
+    }
+    if (providerReason === "authentication") {
+      return (
+        `The model provider turned down the request (${compact}). ` +
+        "Check the API key in Settings, then send your message again."
+      );
+    }
+    if (providerReason === "quota_exhausted" || providerReason === "rate_limited") {
+      return formatProviderErrorForDisplay(raw, { task: this.task });
+    }
+
     return (
       "I hit an internal error while processing your follow-up: " +
       compact +
@@ -42614,6 +42681,12 @@ Return ONLY a JSON object:
     this.refreshProviderIfSettingsChanged();
     this.ensureProviderFailoverSelectionsContext(this.hasImageAttachments(images));
     const previousStatus = persistedTask?.status || this.task.status;
+    this.followUpPriorInputPause =
+      previousStatus === "paused" && persistedTask?.terminalStatus === "needs_user_action"
+        ? persistedTask.awaitingUserInputReasonCode
+          ? { reasonCode: persistedTask.awaitingUserInputReasonCode }
+          : {}
+        : null;
     const pendingSkillParameterCollection = this.getPendingSkillParameterCollection();
     const hasPendingSkillParameterCollection = pendingSkillParameterCollection !== null;
     let handledPendingSkillReply = false;

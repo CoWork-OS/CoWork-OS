@@ -1,4 +1,10 @@
 import { ExecutionEnvironmentController } from "../../environments/ExecutionEnvironmentController";
+import { describeToolApprovalRequest } from "../tool-approval-description";
+import {
+  DELEGATED_REQUEST_HEADER,
+  DELEGATION_BRIEF_COMPLETION_HEADER,
+  STRUCTURED_DELEGATION_BRIEF_HEADER,
+} from "../executor-prompt-heuristics-utils";
 import { isEnvironmentTool } from "../../../shared/execution-environment";
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import { trailingBackgroundCommand } from "./trailing-background-command";
@@ -3082,7 +3088,7 @@ export class ToolRegistry {
               ? "Allow CoWork OS to access your current location once?"
               : mcpApproval
                 ? mcpApproval.description
-                : `Allow ${context.request.name} to access the requested resource?`;
+                : describeToolApprovalRequest(context.request.name);
           // A local connector that can describe its write is asked what it would do, so the
           // approval shows the effect rather than raw arguments (WP13).
           const connectorPreview = mcpApproval
@@ -12629,7 +12635,7 @@ ${skillDescriptions}`;
       researcher:
         "A concise findings report with concrete file paths, commands, risks, and unresolved questions.",
       implementer:
-        "A completed implementation summary with exact changed files plus the verification commands or checks run.",
+        "The completed work, with any files changed and any tests, commands, or checks run.",
       verifier:
         "A verification report that starts with VERDICT: PASS, FAIL, or PARTIAL and then cites the supporting evidence.",
       synthesizer:
@@ -12640,7 +12646,7 @@ ${skillDescriptions}`;
       researcher:
         "Cite the files, commands, search results, or observations that support each material finding.",
       implementer:
-        "Report the concrete edits made and the tests, commands, or runtime checks that validate the change.",
+        "If you changed files, report the edits and the tests, commands, or runtime checks that validate them.",
       verifier:
         "Include the command/output/file evidence behind the verdict and at least one adversarial probe.",
       synthesizer:
@@ -12648,7 +12654,7 @@ ${skillDescriptions}`;
     };
 
     const lines = [
-      "STRUCTURED DELEGATION BRIEF",
+      STRUCTURED_DELEGATION_BRIEF_HEADER,
       "",
       "Objective:",
       params.originalPrompt.trim(),
@@ -12690,7 +12696,7 @@ ${skillDescriptions}`;
       "Evidence requirements:",
       `- ${evidenceRequirementsByRole[params.workerRole]}`,
       "",
-      "Completion contract:",
+      DELEGATION_BRIEF_COMPLETION_HEADER,
       `- ${spec.completionContract}`,
     ];
 
@@ -12818,7 +12824,7 @@ ${skillDescriptions}`;
       knownFindings,
       extractionMode,
     });
-    const contractedPrompt = `${structuredBrief}\n\nDelegated request:\n${delegatedPromptBody}`;
+    const contractedPrompt = `${structuredBrief}\n\n${DELEGATED_REQUEST_HEADER}\n${delegatedPromptBody}`;
 
     let dispatchTarget: "native_child_task" | "local_role" | "remote_acp" | "external_runtime" =
       externalRuntime ? "external_runtime" : "native_child_task";
@@ -13450,8 +13456,10 @@ ${skillDescriptions}`;
   }> {
     const { tasks, timeout_seconds = 300 } = input;
 
-    if (!Array.isArray(tasks) || tasks.length < 2) {
-      throw new Error("orchestrate_agents requires at least 2 tasks");
+    // One task is allowed: a request to hand one piece of work to a helper is dispatched
+    // through this tool, and a two-task minimum made that step impossible to complete.
+    if (!Array.isArray(tasks) || tasks.length < 1) {
+      throw new Error("orchestrate_agents requires at least 1 task");
     }
     if (tasks.length > 8) {
       throw new Error("orchestrate_agents supports at most 8 tasks");
@@ -15560,7 +15568,7 @@ ${skillDescriptions}`;
             tasks: {
               type: "array",
               description:
-                "Array of 2-8 independent sub-tasks. At most the active child-agent limit (3 by default) run at once; " +
+                "Array of 1-8 independent sub-tasks (one runs a single helper and waits for it). At most the active child-agent limit (3 by default) run at once; " +
                 "the rest are queued and start as earlier ones finish, so allow a longer timeout_seconds for large batches.",
               items: {
                 type: "object",
@@ -15606,7 +15614,7 @@ ${skillDescriptions}`;
                 },
                 required: ["prompt"],
               },
-              minItems: 2,
+              minItems: 1,
               maxItems: 8,
             },
             timeout_seconds: {

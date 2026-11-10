@@ -6,6 +6,7 @@ import {
   isLatexPdfRequest,
   isTestCommand,
   promptRequestsDecision,
+  promptRequiresDirectAnswer,
   stripEmbeddedAgentOutputs,
   teamSynthesisPromptHasMemberOutput,
 } from "../executor-prompt-heuristics-utils";
@@ -323,5 +324,49 @@ describe("isLatexPdfRequest", () => {
     expect(isLatexPdfRequest("Update main.tex with the new section")).toBe(true);
     expect(isLatexPdfRequest("Write a short paper and compile it into a PDF")).toBe(true);
     expect(isLatexPdfRequest("Draft the article, then compile the PDF")).toBe(true);
+  });
+});
+
+describe("sub-agent delegation briefs", () => {
+  const brief = [
+    "STRUCTURED DELEGATION BRIEF",
+    "",
+    "Objective:",
+    "List three competitors.",
+    "",
+    "Parent task and current-step context:",
+    "- Parent prompt: Should we review the build evidence?",
+    "",
+    "Known findings or evidence:",
+    "- None captured yet; gather evidence before concluding.",
+    "",
+    "Completion contract:",
+    "- Implement the requested scope and validate it.",
+    "",
+    "Delegated request:",
+    "List three competitors.",
+  ].join("\n");
+
+  it("keeps only the delegated request", () => {
+    expect(stripEmbeddedAgentOutputs(brief)).toBe("List three competitors.");
+    expect(stripEmbeddedAgentOutputs(brief.toLowerCase())).toBe("list three competitors.");
+    expect(promptRequiresDirectAnswer("List competitors", brief)).toBe(false);
+  });
+
+  it("keeps only the delegated request inside an orchestration node", () => {
+    const prompt = [
+      "You are executing a dependency-aware orchestration node.",
+      "",
+      "Dependency 1 (Research) output:\n---\nAcme, Globex.\n---",
+      "",
+      "Your task:",
+      brief,
+    ].join("\n");
+    expect(stripEmbeddedAgentOutputs(prompt)).toBe("List three competitors.");
+  });
+
+  it("leaves a prompt that only mentions the header alone", () => {
+    const prompt = "Explain what a STRUCTURED DELEGATION BRIEF is.";
+    expect(stripEmbeddedAgentOutputs(prompt)).toBe(prompt);
   });
 });

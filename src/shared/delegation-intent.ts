@@ -13,10 +13,15 @@ export function affirmativeDelegationText(text: string): string {
 export const DELEGATION_REQUEST_LEAD =
   "(?:^|[.!?;:\\n]\\s*|\\b(?:please|then|also|but|instead|and|let['’]?s|(?:can|could|would|will)\\s+you|i\\s+(?:want|need)\\s+you\\s+to)\\s+)(?:please\\s+)?";
 
+// "subagent" has no word boundary before "agent", so it is spelled out.
+const DELEGATE_NOUN = String.raw`(?:teammates?|bots?|(?:sub-?)?agents?|bot team)`;
+
 export function hasAffirmativeDelegationAction(text: string): boolean {
   const affirmative = affirmativeDelegationText(text);
   return new RegExp(
-    `${DELEGATION_REQUEST_LEAD}(?:delegate|spawn|orchestrate)\\b|${DELEGATION_REQUEST_LEAD}(?:use|call|invoke)\\s+(?:the\\s+)?send_agent_message\\b|${DELEGATION_REQUEST_LEAD}(?:use|assign|involve|have)\\b[^.!?;]{0,60}\\b(?:teammates?|bots?|agents?|bot team)\\b`,
+    `${DELEGATION_REQUEST_LEAD}(?:delegate|spawn|orchestrate)\\b|${DELEGATION_REQUEST_LEAD}(?:use|call|invoke)\\s+(?:the\\s+)?send_agent_message\\b|${DELEGATION_REQUEST_LEAD}(?:use|assign|involve|have)\\b[^.!?;]{0,60}\\b${DELEGATE_NOUN}\\b|` +
+      // "Ask a helper agent to ...": an agent, not a bot (asking a bot names a configured peer).
+      `${DELEGATION_REQUEST_LEAD}(?:ask|get)\\b[^.!?;]{0,40}\\b(?:sub-?)?agents?\\b`,
     "i",
   ).test(affirmative);
 }

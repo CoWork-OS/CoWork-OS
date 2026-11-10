@@ -384,6 +384,23 @@ describe("model provider retries", () => {
     expect(model.phaseLabel).toBe("Model provider isn't responding. Retrying (2 of 5)");
   });
 
+  it("names a rate limit or overload instead of saying the provider isn't responding", () => {
+    expect(
+      deriveModelRetryLabel([
+        event("retry", 1, "llm_retry", {
+          attempt: 1,
+          maxRetries: 5,
+          providerReason: "rate_limited",
+        }),
+      ]),
+    ).toBe("Model provider is rate-limiting requests. Retrying (1 of 5)");
+    expect(
+      deriveModelRetryLabel([
+        event("retry", 1, "llm_retry", { attempt: 3, maxRetries: 5, providerReason: "overloaded" }),
+      ]),
+    ).toBe("Model provider is overloaded. Retrying (3 of 5)");
+  });
+
   it("drops the retry note once the model answers", () => {
     const events = [
       event("retry", 1, "llm_retry", { attempt: 1, maxRetries: 5 }),

@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { messageFeedbackReasonLabel } from "../../shared/message-feedback-reasons";
 import type { Workspace } from "../../shared/types";
 import { formatUsageCount } from "./usageInsightsFormatting";
 import { UsageInsightsLlmSection } from "./UsageInsightsLlmSection";
@@ -866,7 +867,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                     {feedbackMetrics.topRejectionReasons.map((item) => (
                       <div key={item.reason} className="insights-bar-row">
                         <span className="insights-bar-label" style={{ minWidth: 140 }}>
-                          {item.reason}
+                          {messageFeedbackReasonLabel(item.reason)}
                         </span>
                         <MiniBar
                           value={item.count}

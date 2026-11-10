@@ -1,4 +1,6 @@
 import { ExecutionEnvironmentController } from "../environments/ExecutionEnvironmentController";
+import { buildApprovalReplyMessage } from "../../shared/approval-reply-message";
+import { describeToolApprovalRequest } from "./tool-approval-description";
 import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
   agentCompletionNoticeId,
@@ -8550,7 +8552,7 @@ export class AgentDaemon extends EventEmitter {
     return this.requestApproval(
       taskId,
       request.approvalType,
-      request.description || `Allow ${request.toolName} to access the requested resource?`,
+      request.description || describeToolApprovalRequest(request.toolName),
       details,
       {
         allowAutoApprove: request.allowAutoApprove,
@@ -9040,7 +9042,7 @@ export class AgentDaemon extends EventEmitter {
     if (!reply || typeof (this as Any).sendMessage !== "function") return;
     void this.sendMessage(
       taskId,
-      `Reply to your permission request (the operation was not run): ${reply}`,
+      buildApprovalReplyMessage(reply),
       undefined,
       undefined,
       // The person answering this task's approval card typed the reply.
@@ -13515,7 +13517,7 @@ export class AgentDaemon extends EventEmitter {
           agentRoleId,
           actorType,
           activityType: "info",
-          title: "What Cowork learned",
+          title: "What CoWork learned",
           description: payload?.summary || task.title,
           metadata: {
             ...payload,
@@ -20995,6 +20997,17 @@ export class AgentDaemon extends EventEmitter {
         cached.executor.saveConversationSnapshot();
       } catch (err) {
         console.error(`[AgentDaemon] Failed to save snapshot for task ${taskId} on shutdown:`, err);
+      }
+
+      // A session paused for the person's reply is not running: its run ended when it asked.
+      // Marked interrupted, it resumed on the next launch and re-ran the step without the
+      // answer (e.g. a refused command). It stays paused; the reply continues it.
+      if (
+        currentTask?.status === "paused" &&
+        cached.executor.isRunning === false &&
+        !cached.executor.hasPendingFollowUps
+      ) {
+        return;
       }
 
       // Mark as "interrupted" instead of "cancelled" so we can resume on restart

@@ -61,6 +61,20 @@ export function splitApprovalQuestion(question: string): ApprovalQuestionParts {
     : { title: text || question, detail: "", scope };
 }
 
+/**
+ * Enter in a typed answer does what the card's "↵ submit / next" hint says, like the message
+ * box; Shift+Enter (or an IME composition) keeps the newline. null leaves the key alone.
+ */
+export function replyFieldEnterAction(
+  event: { key: string; shiftKey: boolean; isComposing?: boolean },
+  isLastQuestion: boolean,
+  answered: boolean,
+): "submit" | "next" | "ignore" | null {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return null;
+  if (!answered) return "ignore";
+  return isLastQuestion ? "submit" : "next";
+}
+
 /** Renders quoted parts of a scope ("commands starting with "wc -l"") as inline code. */
 function renderApprovalScope(scope: string) {
   return scope
@@ -387,6 +401,17 @@ export function StructuredInputPromptCard({
           [activeQuestion.id]: event.target.value,
         }))
       }
+      onKeyDown={(event) => {
+        const action = replyFieldEnterAction(
+          { key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing },
+          isLastQuestion,
+          currentQuestionAnswered,
+        );
+        if (!action) return;
+        event.preventDefault();
+        if (action === "next") goToNextQuestion();
+        else if (action === "submit") submitIfAllowed();
+      }}
     />
   ) : null;
 
@@ -411,11 +436,7 @@ export function StructuredInputPromptCard({
     const submitOption = (optionIndex: number) =>
       onSubmit({ [activeQuestion.id]: { optionLabel: activeOptions[optionIndex]?.label } });
     return (
-      <div
-        className="input-request-composer-shell"
-        role="region"
-        aria-label="Structured input required"
-      >
+      <div className="input-request-composer-shell" role="region" aria-label="Your input needed">
         <div className="input-request-card input-request-card-inline input-request-card-approval">
           <InlineApprovalDraftReview
             request={request}
@@ -515,11 +536,7 @@ export function StructuredInputPromptCard({
   }
 
   return (
-    <div
-      className="input-request-composer-shell"
-      role="region"
-      aria-label="Structured input required"
-    >
+    <div className="input-request-composer-shell" role="region" aria-label="Your input needed">
       <div className="input-request-card input-request-card-inline">
         <div className="input-request-progress">
           <span className="input-request-header">{activeQuestion.header || "Question"}</span>

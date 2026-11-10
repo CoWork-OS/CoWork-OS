@@ -454,7 +454,7 @@ const MESSAGES: Record<PersonalityId, Record<MessageKey, string>> = {
     verifyPassed: "Verification passed.",
     verifyFailed: "Verification failed.",
     retrying: "Retrying (attempt {n}).",
-    disclaimer: "Cowork OS can make mistakes. Please verify important information.",
+    disclaimer: "CoWork OS can make mistakes. Please verify important information.",
   },
   friendly: {
     welcome: "Hey{userGreeting}! {agentName} here.",
@@ -580,7 +580,7 @@ const MESSAGES: Record<PersonalityId, Record<MessageKey, string>> = {
     verifyPassed: "Passed.",
     verifyFailed: "Failed.",
     retrying: "Retrying ({n}).",
-    disclaimer: "Cowork OS can make mistakes. Please verify important information.",
+    disclaimer: "CoWork OS can make mistakes. Please verify important information.",
   },
 };
 

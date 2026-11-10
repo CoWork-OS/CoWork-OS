@@ -1,5 +1,9 @@
 import * as path from "path";
-import type { PermissionRule, PermissionRuleScope } from "../../shared/types";
+import type {
+  PermissionEffectClass,
+  PermissionRule,
+  PermissionRuleScope,
+} from "../../shared/types";
 
 export function normalizePermissionPath(input: string): string {
   const trimmed = String(input || "").trim();
@@ -105,13 +109,28 @@ export function permissionRuleFingerprint(rule: Pick<PermissionRule, "effect" | 
   return `${rule.effect}:${permissionScopeFingerprint(rule.scope)}`;
 }
 
+// The approval card and "stop asking" option show this summary, so the effect class reads
+// as words. "ordinary" adds nothing a person needs to know.
+const EFFECT_CLASS_LABELS: Record<PermissionEffectClass, string> = {
+  ordinary: "",
+  network_read: "reads from the network",
+  data_export: "sends data out",
+  protected_credential: "uses a protected credential",
+};
+
 export function summarizePermissionScope(scope: PermissionRuleScope): string {
   const target = summarizePermissionScopeTarget(scope);
   if (!scope.effectClass) return target;
-  const context = scope.http
-    ? `, ${scope.http.method}${scope.http.hasBody ? " with body" : " without body"}${scope.http.hasCustomHeaders ? ", custom headers" : ""}${scope.http.credentialId ? `, credential ${scope.http.credentialId}` : ""}`
-    : "";
-  return `${target} (${scope.effectClass}${context})`;
+  const details = [EFFECT_CLASS_LABELS[scope.effectClass] ?? scope.effectClass];
+  if (scope.http) {
+    details.push(
+      `${scope.http.method}${scope.http.hasBody ? " with body" : " without body"}`,
+      scope.http.hasCustomHeaders ? "custom headers" : "",
+      scope.http.credentialId ? `credential ${scope.http.credentialId}` : "",
+    );
+  }
+  const context = details.filter(Boolean).join(", ");
+  return context ? `${target} (${context})` : target;
 }
 
 function summarizePermissionScopeTarget(scope: PermissionRuleScope): string {

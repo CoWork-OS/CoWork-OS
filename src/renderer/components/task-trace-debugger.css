@@ -148,10 +148,12 @@
   overflow: hidden;
 }
 
+/* The session header and metrics fill most of a short window; the pane scrolls so the feed
+   and inspector below them stay reachable instead of being squeezed to a sliver. */
 .task-trace-debugger-main {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: hidden auto;
 }
 
 .task-trace-pane-header {
@@ -523,8 +525,8 @@
 .task-trace-content {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
-  min-height: 0;
-  flex: 1 1 auto;
+  min-height: 200px;
+  flex: 1 1 0;
 }
 
 .task-trace-feed {
@@ -747,6 +749,9 @@
 @media (max-width: 1280px) {
   .task-trace-content {
     grid-template-columns: minmax(0, 1fr);
+    /* Stacked, the feed keeps a fixed scrolling height and the inspector follows it. */
+    grid-template-rows: 320px auto;
+    flex: 0 0 auto;
   }
 
   .task-trace-inspector {

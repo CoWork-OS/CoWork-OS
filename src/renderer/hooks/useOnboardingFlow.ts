@@ -1140,13 +1140,13 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
 
     switch (state) {
       case "ask_name":
-        setShowInput(false);
-        setShowPersonaOptions(false);
-        setShowVoiceOptions(false);
-        setShowIntroContinue(false);
-        setState("greeting");
-        setGreetingIndex(SCRIPT.greeting.length - 1);
-        setCurrentText(SCRIPT.greeting[SCRIPT.greeting.length - 1]);
+        // "Personalize first" on the task picker opens this step, so Back returns there. The
+        // greeting it used to show had never been seen and had no Back of its own.
+        firstResultModeRef.current = true;
+        setFirstResultMode(true);
+        resetViewState();
+        setState("first_result");
+        setCurrentText("");
         return;
 
       case "ask_assistant_traits":
@@ -1253,6 +1253,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     clearStyleCountdownInterval,
     data.assistantName,
     invalidateAsyncMutations,
+    resetViewState,
     state,
   ]);
 
@@ -1727,6 +1728,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         return;
       }
       stageLlmSettings(settings);
+      // The state stayed llm_setup until now, so the required-UI effect showed the picker again
+      // after the click hid it; hide it as the step leaves llm_setup or it stays over the recap.
+      setShowProviders(false);
       setState("llm_confirmed");
       setCurrentText(SCRIPT.llm_success);
     }, 1500);
@@ -1767,9 +1771,20 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
       settings.openaiCompatible =
         existingCompatible?.baseUrl === LM_STUDIO_BASE_URL
           ? { ...existingCompatible, model: modelName }
-          : // Another endpoint's key must not follow to LM Studio; "" clears the saved one.
-            { baseUrl: LM_STUDIO_BASE_URL, model: modelName, apiKey: "" };
+          : // Another endpoint's key must not follow to LM Studio; "" clears the saved one. Its
+            // routing model names (saving merges into the old entry) name models LM Studio
+            // doesn't have, so they point at the detected model or are cleared too.
+            {
+              baseUrl: LM_STUDIO_BASE_URL,
+              model: modelName,
+              apiKey: "",
+              strongModelKey: modelName,
+              cheapModelKey: modelName,
+              automatedTaskModelKey: "",
+            };
       stageLlmSettings(settings);
+      // See acceptOllamaDetection: hide the picker again as the step leaves llm_setup.
+      setShowProviders(false);
       setState("llm_confirmed");
       setCurrentText(SCRIPT.llm_success);
     }, 1500);

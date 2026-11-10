@@ -151,6 +151,24 @@ export function canOfferAssistantAlwaysAllow(details: unknown): boolean {
   return prompt.suggestedActions.some((option) => option?.action === "allow_workspace");
 }
 
+/** "Continue this <noun> only once": the approval type in words, not its code. */
+const APPROVAL_OPERATION_NOUNS: Record<string, string> = {
+  delete_file: "deletion",
+  delete_multiple: "deletion",
+  bulk_rename: "rename",
+  workspace_write: "file change",
+  network_access: "network request",
+  external_file_access: "file access outside the workspace",
+  data_export: "data export",
+  external_service: "action",
+  location_access: "location request",
+  run_command: "command",
+  risk_gate: "step",
+  computer_use: "computer use",
+  browser: "browser action",
+  protected_credential: "use of a saved credential",
+};
+
 export function buildAssistantApprovalRequest(
   approvalType: string,
   description: string,
@@ -201,7 +219,9 @@ export function buildAssistantApprovalRequest(
   const permissionsText =
     reviewPermissions.length > 0 ? ` Permissions: ${reviewPermissions.join("; ")}.` : "";
   const preview = buildApprovalPreview(detailsRecord);
-  const operation = normalizeText(approvalType, 80) || "operation";
+  const operation =
+    APPROVAL_OPERATION_NOUNS[approvalType] ??
+    (normalizeText(approvalType, 80).replace(/_/g, " ") || "operation");
   // Deny is first so an accidental Enter/keyboard submission fails closed. The user
   // explicitly chooses an allow option; the one-time allow stays last as the primary action.
   const options = [

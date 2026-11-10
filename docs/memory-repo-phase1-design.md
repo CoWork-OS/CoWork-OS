@@ -75,7 +75,7 @@ CoWork Memory/
 `MEMORY.md` follows the spec: a title, a few entries every session needs, and an index.
 
 ```markdown
-# Memory: Mesut
+# Memory: Alex
 
 - Prefers concise answers with bullet points [by: user; added: 2026-10-05]
 - Answer in English unless asked otherwise [by: user; added: 2026-10-05]

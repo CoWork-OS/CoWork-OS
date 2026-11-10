@@ -53,7 +53,7 @@ function item(overrides: Partial<MemoryHubItem>): MemoryHubItem {
 }
 
 const ITEMS: MemoryHubItem[] = [
-  item({ id: "name", kind: "identity", content: "Preferred name: Mesut", pinned: true }),
+  item({ id: "name", kind: "identity", content: "Preferred name: Alex", pinned: true }),
   item({ id: "pref", kind: "preference", content: "Prefers concise answers" }),
   item({
     id: "rule",
@@ -167,7 +167,7 @@ describe("What CoWork knows view", () => {
   it("shows content, source badge, scope, confidence, last used and actions per item", () => {
     const markup = render();
     for (const text of [
-      "Preferred name: Mesut",
+      "Preferred name: Alex",
       "You said",
       "Curated",
       "Inferred",
@@ -377,7 +377,7 @@ const FOLDER: MemoryRepoEntriesReport = {
   files: [
     {
       path: "MEMORY.md",
-      title: "Memory: Mesut",
+      title: "Memory: Alex",
       role: "entry",
       entries: [
         folderEntry({ ref: "repo:MEMORY.md#L3", path: "MEMORY.md", text: "Answer in English" }),
@@ -466,7 +466,7 @@ describe("What CoWork knows over the memory folder", () => {
       folderView: folderView({ onOpenTask: () => {} }),
     });
     for (const text of [
-      "Memory: Mesut",
+      "Memory: Alex",
       "About me",
       "Billing",
       "Answer in English",

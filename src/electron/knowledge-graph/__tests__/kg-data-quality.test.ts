@@ -264,7 +264,7 @@ describe("mail domains", () => {
     ]) {
       expect(isFreeMailDomain(domain), domain).toBe(true);
     }
-    for (const domain of ["acme.com", "github.com", "amazon.co.uk", "nokia.com"]) {
+    for (const domain of ["acme.com", "github.com", "amazon.co.uk", "example.org"]) {
       expect(isFreeMailDomain(domain), domain).toBe(false);
     }
   });

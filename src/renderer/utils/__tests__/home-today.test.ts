@@ -647,7 +647,7 @@ describe("commitmentDueState", () => {
 
 describe("homeGreeting", () => {
   it("follows the time of day and adds the name when known", () => {
-    expect(homeGreeting(new Date(2026, 9, 12, 8), "Mesut")).toBe("Good morning, Mesut");
+    expect(homeGreeting(new Date(2026, 9, 12, 8), "Alex")).toBe("Good morning, Alex");
     expect(homeGreeting(new Date(2026, 9, 12, 14))).toBe("Good afternoon");
     expect(homeGreeting(new Date(2026, 9, 12, 23), " ")).toBe("Good evening");
   });

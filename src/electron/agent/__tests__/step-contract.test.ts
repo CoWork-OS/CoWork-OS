@@ -85,7 +85,7 @@ describe("step-contract path extraction", () => {
   // Live 2026-10-19: the tail "Support/cowork-os/..." became a workspace file.
   it("keeps an absolute path with spaces whole instead of a workspace-relative tail", () => {
     const pack =
-      "/Users/mesut/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md";
+      "/Users/alex/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md";
     expect(
       extractArtifactPathCandidates(
         `Read the skill instructions and ${pack}, check repository status.`,
@@ -234,7 +234,7 @@ describe("step-contract write intent", () => {
 describe("step-contract read-only inspection steps", () => {
   it.each([
     // Live 2026-10-19 (task e17e79b3): "implement" is a folder name inside the path.
-    "Read the skill instructions and /Users/mesut/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md, check repository status, and scan existing purchasing integrations to resolve the required implementation route before reading other references or changing files.",
+    "Read the skill instructions and /Users/alex/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md, check repository status, and scan existing purchasing integrations to resolve the required implementation route before reading other references or changing files.",
     // Live 2026-10-19 (task 34ca9a3e): "save" is a list noun; the overwrite is negated.
     "Inspect Git status, ProjectSettings/ProjectVersion.txt, Packages/manifest.json, and existing purchase, wallet, save, UI, and test code under Assets to identify the Unity version and integration points without overwriting uncommitted changes.",
     "Review scripts/update-version.sh and src/build/config.ts to understand the release flow.",

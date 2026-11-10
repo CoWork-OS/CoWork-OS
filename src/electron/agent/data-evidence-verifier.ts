@@ -178,9 +178,11 @@ function validateReportedCsvMetrics(
     orderIdIndex >= 0
       ? new Set(rows.map((row) => (row[orderIdIndex] || "").trim())).size
       : rows.length;
-  const orderCount = (report.match(
-    new RegExp(`\\b(?:total orders|order count|number of orders)\\b${CLAIMED_VALUE}`, "i"),
-  ) || [])[1];
+  const orderCount = (
+    report.match(
+      new RegExp(`\\b(?:total orders|order count|number of orders)\\b${CLAIMED_VALUE}`, "i"),
+    ) || []
+  )[1];
   if (orderCount && Number(orderCount.replace(/,/g, "")) !== expectedOrders) {
     issues.push(
       `The source has ${expectedOrders} orders, but the report claims ${orderCount}. Correct the total.`,
@@ -191,9 +193,11 @@ function validateReportedCsvMetrics(
     /^(?:amount|total_amount|order_amount|value|revenue|sales|income)$/.test(column),
   );
   const expectedAmount = amountIndex >= 0 ? sumColumn(rows, amountIndex) : null;
-  const reportedAmount = (report.match(
-    new RegExp(`\\b(?:(?:grand\\s+)?total|combined|overall)\\s+amount\\b${CLAIMED_VALUE}`, "i"),
-  ) || [])[1];
+  const reportedAmount = (
+    report.match(
+      new RegExp(`\\b(?:(?:grand\\s+)?total|combined|overall)\\s+amount\\b${CLAIMED_VALUE}`, "i"),
+    ) || []
+  )[1];
   if (
     reportedAmount &&
     expectedAmount !== null &&
@@ -209,9 +213,9 @@ function validateReportedCsvMetrics(
     /^(?:units?|quantity|qty|units_sold)$/.test(column),
   );
   const expectedUnits = unitsIndex >= 0 ? sumColumn(rows, unitsIndex) : null;
-  const reportedUnits = (report.match(
-    new RegExp(`\\btotal units(?: sold)?\\b${CLAIMED_VALUE}`, "i"),
-  ) || [])[1];
+  const reportedUnits = (
+    report.match(new RegExp(`\\btotal units(?: sold)?\\b${CLAIMED_VALUE}`, "i")) || []
+  )[1];
   if (
     reportedUnits &&
     expectedUnits !== null &&

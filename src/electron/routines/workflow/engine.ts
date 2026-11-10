@@ -14,10 +14,12 @@ import { DEFAULT_WORKFLOW_LIMITS, getWorkflowOperation } from "./catalog";
 import { validateRoutineWorkflow } from "./validation";
 import {
   evaluateWorkflowComparison,
+  evaluateWorkflowComparisonEach,
   lookupWorkflowPath,
   resolveWorkflowInputs,
   type WorkflowVariableContext,
 } from "./variables";
+import { createMatchTimeBudget, type MatchTimeBudget } from "../../utils/bounded-regex";
 
 export interface RoutineWorkflowActionExecutorParams {
   routine: Routine;
@@ -64,7 +66,16 @@ type ExecutionBudget = {
   deadline: number;
   remaining: number;
   context: StoredRunContext;
+  /** Shared by every "matches" check in this execution; see RUN_MATCH_TIME_BUDGET_MS. */
+  matchTime: MatchTimeBudget;
 };
+
+/**
+ * Total time all "matches" checks in one run execution may take. Each check already stops after
+ * 50 ms, but a Repeat-for-each runs its children back to back without yielding to the event loop,
+ * so 100 slow checks would otherwise hold the main process for 5 s. Ordinary runs use a few ms.
+ */
+const RUN_MATCH_TIME_BUDGET_MS = 500;
 
 const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "skipped", "cancelled"]);
 
@@ -86,6 +97,7 @@ export class RoutineWorkflowEngine {
   async start(input: StartWorkflowRunInput): Promise<RoutineWorkflowRunRecord> {
     const validation = validateRoutineWorkflow(input.workflow, {
       allowIncomplete: Boolean(input.dryRun),
+      skipPatternChecks: true,
     });
     if (!validation.valid) {
       throw new Error(
@@ -163,6 +175,7 @@ export class RoutineWorkflowEngine {
         deadline,
         remaining: Math.max(0, limits.maxStepCount - initialContext.executedOperationCount),
         context: initialContext,
+        matchTime: createMatchTimeBudget(RUN_MATCH_TIME_BUDGET_MS),
       };
 
       while (budget.remaining > 0) {
@@ -562,16 +575,23 @@ export class RoutineWorkflowEngine {
         input.left,
         String(input.operator || "equals"),
         input.right,
+        budget.matchTime,
       );
       return { result: value, __port: value ? "true" : "false" };
     }
     if (node.operation === "control.filter") {
       const items = Array.isArray(input.items) ? input.items : [];
       const path = String(input.path || "");
-      const filtered = items.filter((item) => {
-        const left = path ? lookupWorkflowPath(`item.${path}`, { ...variableContext, item }) : item;
-        return evaluateWorkflowComparison(left, String(input.operator || "equals"), input.value);
-      });
+      const lefts = items.map((item) =>
+        path ? lookupWorkflowPath(`item.${path}`, { ...variableContext, item }) : item,
+      );
+      const keep = evaluateWorkflowComparisonEach(
+        lefts,
+        String(input.operator || "equals"),
+        input.value,
+        budget.matchTime,
+      );
+      const filtered = items.filter((_item, index) => keep[index]);
       return { items: filtered, count: filtered.length };
     }
     if (node.operation === "control.foreach") {

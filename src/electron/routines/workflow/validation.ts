@@ -7,10 +7,23 @@ import type {
 } from "../../../shared/routine-workflow";
 import { ROUTINE_WORKFLOW_VERSION } from "../../../shared/routine-workflow";
 import { DEFAULT_WORKFLOW_LIMITS, getWorkflowOperation } from "./catalog";
+import { describePatternProblem } from "../../utils/bounded-regex";
 
 export interface WorkflowValidationOptions {
   allowIncomplete?: boolean;
+  /**
+   * Skip refusing "matches" patterns that do not compile or could backtrack catastrophically.
+   * Starting a run of an already-saved workflow skips it: a pattern saved before the check
+   * existed keeps running under the time limits in `bounded-regex` (a bad pattern = no match).
+   */
+  skipPatternChecks?: boolean;
 }
+
+/** Config key holding the "matches" pattern for operations that compare with one. */
+const PATTERN_CONFIG_KEYS: Record<string, string> = {
+  "control.condition": "right",
+  "control.filter": "value",
+};
 
 export function validateRoutineWorkflow(
   workflow: RoutineWorkflowDefinition,
@@ -223,6 +236,25 @@ function inspectNode(
         path: `${path}.config.${field.key}`,
         nodeId: node.id,
         severity: options.allowIncomplete ? "warning" : "error",
+      });
+    }
+  }
+  const patternKey = PATTERN_CONFIG_KEYS[node.operation];
+  const pattern = patternKey ? node.config[patternKey] : undefined;
+  // Only a literal pattern can be checked here; one built from run data is covered at run time.
+  if (
+    !options.skipPatternChecks &&
+    node.config.operator === "matches" &&
+    typeof pattern === "string"
+  ) {
+    const problem = describePatternProblem(pattern);
+    if (problem) {
+      issues.push({
+        code: "unsafe_pattern",
+        message: problem,
+        path: `${path}.config.${patternKey}`,
+        nodeId: node.id,
+        severity: "error",
       });
     }
   }

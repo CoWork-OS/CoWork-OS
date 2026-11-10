@@ -399,6 +399,90 @@ describeWithSqlite("RoutineWorkflowEngine", () => {
     expect(repository.getStep(step.id)?.status).toBe("waiting_for_approval");
   });
 
+  it("filters out an item a slow matches pattern cannot finish and keeps the rest", async () => {
+    const repository = new Repository(db);
+    const engine = new Engine(repository, { executeAction: vi.fn(async () => ({ ok: true })) });
+    const crafted = `${"a".repeat(40)}!`;
+    const definition: RoutineWorkflowDefinition = {
+      version: 1,
+      starterNodeId: "starter",
+      nodes: [
+        { id: "starter", kind: "starter", operation: "starter.manual", name: "Manual", config: {} },
+        {
+          id: "keep",
+          kind: "filter",
+          operation: "control.filter",
+          name: "Keep",
+          // Saved before patterns were checked; runs still accept it.
+          config: { items: { $ref: "trigger.lines" }, operator: "matches", value: "(a+)+$" },
+        },
+      ],
+      edges: [{ id: "edge", sourceNodeId: "starter", targetNodeId: "keep" }],
+    };
+
+    const started = performance.now();
+    const run = await engine.start({
+      routine,
+      workflow: definition,
+      workflowVersionId: "version-1",
+      trigger: { lines: ["aaa", crafted, "aaaa"] },
+    });
+
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(run.status).toBe("completed");
+    const step = repository.listSteps(run.id).find((candidate) => candidate.nodeId === "keep");
+    expect(step?.output).toMatchObject({ items: ["aaa", "aaaa"], count: 2 });
+  });
+
+  it("stops a run whose matches checks use up the run's time budget", async () => {
+    const repository = new Repository(db);
+    const engine = new Engine(repository, { executeAction: vi.fn(async () => ({ ok: true })) });
+    const crafted = `${"a".repeat(40)}!`;
+    const definition: RoutineWorkflowDefinition = {
+      version: 1,
+      starterNodeId: "starter",
+      nodes: [
+        { id: "starter", kind: "starter", operation: "starter.manual", name: "Manual", config: {} },
+        {
+          id: "loop",
+          kind: "foreach",
+          operation: "control.foreach",
+          name: "Loop",
+          config: { items: { $ref: "trigger.lines" } },
+          children: [
+            {
+              id: "check",
+              kind: "condition",
+              operation: "control.condition",
+              name: "Check",
+              // The pattern comes from run data, so no save-time check can see it.
+              config: {
+                left: { $ref: "item" },
+                operator: "matches",
+                right: { $ref: "trigger.pattern" },
+              },
+            },
+          ],
+        },
+      ],
+      edges: [{ id: "edge", sourceNodeId: "starter", targetNodeId: "loop" }],
+    };
+
+    const started = performance.now();
+    const run = await engine.start({
+      routine,
+      workflow: definition,
+      workflowVersionId: "version-1",
+      trigger: { lines: Array.from({ length: 60 }, () => crafted), pattern: "(a+)+$" },
+    });
+
+    // 60 slow checks at 50 ms each would hold the main process for 3 s.
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(run.status).toBe("failed");
+    const step = repository.listSteps(run.id).find((candidate) => candidate.nodeId === "loop");
+    expect(step?.error).toMatch(/"matches" checks took more than 500 ms in total/);
+  });
+
   it("counts nested loop actions against the total operation budget", async () => {
     const executeAction = vi.fn(async () => ({ ok: true }));
     const repository = new Repository(db);

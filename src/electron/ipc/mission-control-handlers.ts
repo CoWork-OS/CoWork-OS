@@ -1,15 +1,10 @@
-import { SubconsciousRunRepository } from "../subconscious/subconscious-repository-facades";
 import {
   CoreFailureClusterRepository,
   CoreFailureRecordRepository,
-  CoreMemoryCandidateRepository,
-  CoreMemoryDistillRunRepository,
-  CoreTraceRepository,
 } from "../core/core-repository-facades";
 import {
   AgentRoleRepository,
   AutomationProfileRepository,
-  HeartbeatRunRepository,
   TaskSubscriptionRepository,
 } from "../agents/agent-repository-facades";
 import { TaskRepository } from "../database/repository-facades";
@@ -22,9 +17,6 @@ import {
   CoreFailureRecord,
   CoreHarnessExperiment,
   CoreLearningsEntry,
-  CoreTrace,
-  CoreMemoryCandidate,
-  CoreMemoryDistillRun,
   CompanyCommandCenterSummary,
   CompanyEvidenceRef,
   CompanyExecutionMapItem,
@@ -38,9 +30,7 @@ import {
   MissionControlListRequest,
   MissionControlScopeRequest,
 } from "../../shared/types";
-import type { Issue } from "../../shared/types";
 
-import { SubscriptionReason } from "../agents/TaskSubscriptionRepository";
 import { ActivityRepository } from "../activity/activity-repository-facades";
 
 import { HeartbeatService } from "../agents/HeartbeatService";
@@ -63,36 +53,14 @@ import { MissionControlIntelligenceService } from "../mission-control/mission-co
 import { AutomationRunOutcomeRepository } from "../automation/automation-outcome-repository-facades";
 import { AutomationOutcomeService } from "../automation/AutomationOutcomeService";
 import {
-  AutomationProfileAttachRequestSchema,
-  AutomationProfileCreateRequestSchema,
-  AutomationProfileUpdateRequestSchema,
   CoreEvalCaseListRequestSchema,
-  CoreEvalCaseReviewSchema,
   CoreExperimentListRequestSchema,
-  CoreExperimentReviewSchema,
-  CoreExperimentRunSchema,
   CoreFailureClusterListRequestSchema,
-  CoreFailureClusterReviewSchema,
   CoreFailureRecordListRequestSchema,
-  HeartbeatConfigSchema,
   CoreLearningsListRequestSchema,
-  CoreMemoryCandidateListRequestSchema,
-  CoreMemoryCandidateReviewSchema,
-  CoreMemoryDistillRunNowSchema,
-  CoreTraceListRequestSchema,
-  StringIdSchema,
 } from "../utils/validation";
 
 const logger = createLogger("MissionControl");
-
-function hasInvalidCoreMemoryCandidateScope(request: unknown): boolean {
-  if (!request || typeof request !== "object") return false;
-  const candidate = request as { profileId?: unknown; workspaceId?: unknown };
-  return (
-    (candidate.profileId !== undefined && !UUIDSchema.safeParse(candidate.profileId).success) ||
-    (candidate.workspaceId !== undefined && !UUIDSchema.safeParse(candidate.workspaceId).success)
-  );
-}
 
 // Get main window for event broadcasting
 let mainWindowGetter: (() => BrowserWindow | null) | null = null;
@@ -240,16 +208,11 @@ export interface MissionControlDeps {
 export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   mainWindowGetter = deps.getMainWindow;
 
-  const { db, agentRoleRepo, taskSubscriptionRepo, heartbeatService } = deps;
+  const { db, agentRoleRepo, heartbeatService } = deps;
   const core = new ControlPlaneCoreService(db);
   const automationProfileRepo = new AutomationProfileRepository(db);
-  const heartbeatRunRepo = new HeartbeatRunRepository(db);
-  const subconsciousRunRepo = new SubconsciousRunRepository(db);
-  const coreTraceRepo = new CoreTraceRepository(db);
   const coreFailureRecordRepo = new CoreFailureRecordRepository(db);
   const coreFailureClusterRepo = new CoreFailureClusterRepository(db);
-  const coreMemoryCandidateRepo = new CoreMemoryCandidateRepository(db);
-  const coreMemoryDistillRunRepo = new CoreMemoryDistillRunRepository(db);
   const missionControlIntelligence = new MissionControlIntelligenceService(db);
   const automationOutcomeRepo = new AutomationRunOutcomeRepository(db);
   const taskRepo = new TaskRepository(db);
@@ -271,13 +234,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   });
 
   // ============ Mission Control Intelligence Handlers ============
-
-  ipcMain.handle(
-    IPC_CHANNELS.MISSION_CONTROL_GET_BRIEF,
-    async (_, request?: MissionControlScopeRequest): Promise<MissionControlBrief> => {
-      return missionControlIntelligence.getBrief(request || {});
-    },
-  );
 
   ipcMain.handle(
     IPC_CHANNELS.MISSION_CONTROL_LIST_ITEMS,
@@ -305,49 +261,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   // ============ Heartbeat Handlers ============
 
-  ipcMain.handle(IPC_CHANNELS.HEARTBEAT_GET_CONFIG, async (_, agentRoleId: string) => {
-    const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    const role = await agentRoleRepo.findById(validated);
-    if (!role) {
-      throw new Error("Agent role not found");
-    }
-    return {
-      heartbeatEnabled: role.heartbeatEnabled,
-      heartbeatIntervalMinutes: role.heartbeatIntervalMinutes,
-      heartbeatStaggerOffset: role.heartbeatStaggerOffset,
-      pulseEveryMinutes: role.pulseEveryMinutes,
-      dispatchCooldownMinutes: role.dispatchCooldownMinutes,
-      maxDispatchesPerDay: role.maxDispatchesPerDay,
-      heartbeatProfile: role.heartbeatProfile,
-      activeHours: role.activeHours,
-      lastHeartbeatAt: role.lastHeartbeatAt,
-      heartbeatStatus: role.heartbeatStatus,
-    };
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.HEARTBEAT_UPDATE_CONFIG,
-    async (_, agentRoleId: string, config: unknown) => {
-      checkRateLimit(IPC_CHANNELS.HEARTBEAT_UPDATE_CONFIG);
-      const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      const validatedConfig = validateInput(
-        HeartbeatConfigSchema,
-        config,
-        "heartbeat configuration",
-      );
-      const result = await agentRoleRepo.updateHeartbeatConfig(validated, validatedConfig);
-      if (result) {
-        await heartbeatService.updateAgentConfig(validated, validatedConfig);
-        getMainWindow()?.webContents.send(IPC_CHANNELS.HEARTBEAT_EVENT, {
-          type: "config_updated",
-          agentRoleId: validated,
-          config: validatedConfig,
-        });
-      }
-      return result;
-    },
-  );
-
   ipcMain.handle(IPC_CHANNELS.HEARTBEAT_TRIGGER, async (_, agentRoleId: string) => {
     checkRateLimit(IPC_CHANNELS.HEARTBEAT_TRIGGER);
     const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
@@ -360,11 +273,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     return result;
   });
 
-  ipcMain.handle(IPC_CHANNELS.HEARTBEAT_GET_STATUS, async (_, agentRoleId: string) => {
-    const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    return heartbeatService.getStatus(validated);
-  });
-
   ipcMain.handle(IPC_CHANNELS.HEARTBEAT_GET_ALL_STATUS, async () => {
     return heartbeatService.getAllStatus();
   });
@@ -372,152 +280,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_LIST, async () => {
     return automationProfileRepo.listAll();
   });
-
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_GET, async (_, id: string) => {
-    const validated = validateInput(UUIDSchema, id, "automation profile ID");
-    return automationProfileRepo.findById(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_CREATE, async (_, request) => {
-    checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_CREATE);
-    const validatedRequest = validateInput(
-      AutomationProfileCreateRequestSchema,
-      request,
-      "automation profile create request",
-    );
-    const agentRoleId = validatedRequest.agentRoleId;
-    const role = await agentRoleRepo.findById(agentRoleId);
-    if (!role) {
-      throw new Error("Agent role not found");
-    }
-    if (role.roleKind === "persona_template") {
-      throw new Error("Digital Twin roles cannot own core automation profiles");
-    }
-    return automationProfileRepo.createOrReplace({
-      agentRoleId,
-      enabled: validatedRequest.enabled,
-      cadenceMinutes: validatedRequest.cadenceMinutes,
-      staggerOffsetMinutes: validatedRequest.staggerOffsetMinutes,
-      dispatchCooldownMinutes: validatedRequest.dispatchCooldownMinutes,
-      maxDispatchesPerDay: validatedRequest.maxDispatchesPerDay,
-      profile: validatedRequest.profile,
-      activeHours: validatedRequest.activeHours,
-    });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_UPDATE, async (_, request) => {
-    checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_UPDATE);
-    const validatedRequest = validateInput(
-      AutomationProfileUpdateRequestSchema,
-      request,
-      "automation profile update request",
-    );
-    const id = validatedRequest.id;
-    return automationProfileRepo.update({
-      id,
-      enabled: validatedRequest.enabled,
-      cadenceMinutes: validatedRequest.cadenceMinutes,
-      staggerOffsetMinutes: validatedRequest.staggerOffsetMinutes,
-      dispatchCooldownMinutes: validatedRequest.dispatchCooldownMinutes,
-      maxDispatchesPerDay: validatedRequest.maxDispatchesPerDay,
-      profile: validatedRequest.profile,
-      activeHours: validatedRequest.activeHours,
-    });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_DELETE, async (_, id: string) => {
-    checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_DELETE);
-    const validated = validateInput(UUIDSchema, id, "automation profile ID");
-    await automationProfileRepo.deleteById(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH,
-    async (_, agentRoleId: string, request?: Record<string, unknown>) => {
-      checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH);
-      const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      const validatedRequest = validateInput(
-        AutomationProfileAttachRequestSchema,
-        request ?? {},
-        "automation profile attach request",
-      );
-      const role = await agentRoleRepo.findById(validatedRoleId);
-      if (!role) {
-        throw new Error("Agent role not found");
-      }
-      if (role.roleKind === "persona_template") {
-        throw new Error("Digital Twin roles cannot own core automation profiles");
-      }
-      return automationProfileRepo.createOrReplace({
-        agentRoleId: validatedRoleId,
-        enabled: validatedRequest.enabled ?? true,
-        cadenceMinutes: validatedRequest.cadenceMinutes,
-        staggerOffsetMinutes: validatedRequest.staggerOffsetMinutes,
-        dispatchCooldownMinutes: validatedRequest.dispatchCooldownMinutes,
-        maxDispatchesPerDay: validatedRequest.maxDispatchesPerDay,
-        profile: validatedRequest.profile,
-        activeHours: validatedRequest.activeHours,
-      });
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH, async (_, agentRoleId: string) => {
-    checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH);
-    const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    await automationProfileRepo.deleteByAgentRoleId(validatedRoleId);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS,
-    async (_, payload: { profileId: string; limit?: number }) => {
-      const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-      const profile = await automationProfileRepo.findById(profileId);
-      if (!profile) {
-        throw new Error("Automation profile not found");
-      }
-      const all = await heartbeatRunRepo.listRecentDispatches(profile.agentRoleId, 0);
-      return typeof payload?.limit === "number" ? all.slice(0, payload.limit) : all;
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS,
-    async (_, payload: { profileId: string; limit?: number }) => {
-      const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-      const profile = await automationProfileRepo.findById(profileId);
-      if (!profile) {
-        throw new Error("Automation profile not found");
-      }
-      return subconsciousRunRepo.list({
-        targetKey: `agent_role:${profile.agentRoleId}`,
-        limit: typeof payload?.limit === "number" ? payload.limit : 20,
-      });
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_TRACE_LIST,
-    async (_, request?: unknown): Promise<CoreTrace[]> => {
-      const validated = request
-        ? validateInput(CoreTraceListRequestSchema, request, "core trace list request")
-        : {};
-      return coreTraceRepo.list(validated);
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.CORE_TRACE_GET, async (_, id: string) => {
-    const validated = validateInput(StringIdSchema, id, "core trace ID");
-    return deps.coreTraceService.getTrace(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_TRACE_LIST_BY_PROFILE,
-    async (_, payload: { profileId: string; limit?: number }): Promise<CoreTrace[]> => {
-      const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-      const limit = typeof payload?.limit === "number" ? payload.limit : 50;
-      return deps.coreTraceService.listByProfile(profileId, limit);
-    },
-  );
 
   ipcMain.handle(
     IPC_CHANNELS.CORE_FAILURE_LIST,
@@ -555,40 +317,12 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.CORE_FAILURE_CLUSTER_REVIEW,
-    async (_, request: unknown): Promise<CoreFailureCluster | undefined> => {
-      const validated = validateInput(
-        CoreFailureClusterReviewSchema,
-        request,
-        "core failure cluster review request",
-      );
-      return coreFailureClusterRepo.update(validated.id, {
-        status: validated.status,
-        rootCauseSummary: validated.rootCauseSummary,
-        updatedAt: Date.now(),
-      });
-    },
-  );
-
-  ipcMain.handle(
     IPC_CHANNELS.CORE_EVAL_CASE_LIST,
     async (_, request?: unknown): Promise<CoreEvalCase[]> => {
       const validated = request
         ? validateInput(CoreEvalCaseListRequestSchema, request, "core eval case list request")
         : {};
       return deps.coreEvalCaseService.listEvalCases(validated);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_EVAL_CASE_REVIEW,
-    async (_, request: unknown): Promise<CoreEvalCase | undefined> => {
-      const validated = validateInput(
-        CoreEvalCaseReviewSchema,
-        request,
-        "core eval case review request",
-      );
-      return deps.coreEvalCaseService.reviewEvalCase(validated);
     },
   );
 
@@ -602,29 +336,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.CORE_EXPERIMENT_RUN, async (_, request: unknown) => {
-    checkRateLimit(IPC_CHANNELS.CORE_EXPERIMENT_RUN);
-    const validated = validateInput(
-      CoreExperimentRunSchema,
-      request,
-      "core experiment run request",
-    );
-    return deps.coreHarnessExperimentRunner.run(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_EXPERIMENT_REVIEW,
-    async (_, request: unknown): Promise<CoreHarnessExperiment | undefined> => {
-      checkRateLimit(IPC_CHANNELS.CORE_EXPERIMENT_REVIEW);
-      const validated = validateInput(
-        CoreExperimentReviewSchema,
-        request,
-        "core experiment review request",
-      );
-      return deps.coreHarnessExperimentRunner.review(validated);
-    },
-  );
-
   ipcMain.handle(
     IPC_CHANNELS.CORE_LEARNINGS_LIST,
     async (_, request?: unknown): Promise<CoreLearningsEntry[]> => {
@@ -632,63 +343,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         ? validateInput(CoreLearningsListRequestSchema, request, "core learnings list request")
         : {};
       return deps.coreLearningsService.list(validated);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_MEMORY_LIST_CANDIDATES,
-    async (_, request?: unknown): Promise<CoreMemoryCandidate[]> => {
-      if (hasInvalidCoreMemoryCandidateScope(request)) {
-        return [];
-      }
-      const validated = request
-        ? validateInput(
-            CoreMemoryCandidateListRequestSchema,
-            request,
-            "core memory candidate list request",
-          )
-        : {};
-      return coreMemoryCandidateRepo.list(validated);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_MEMORY_REVIEW_CANDIDATE,
-    async (_, request: unknown): Promise<CoreMemoryCandidate | undefined> => {
-      const validated = validateInput(
-        CoreMemoryCandidateReviewSchema,
-        request,
-        "core memory candidate review request",
-      );
-      return coreMemoryCandidateRepo.review(validated);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_MEMORY_LIST_DISTILL_RUNS,
-    async (
-      _,
-      payload: { profileId: string; workspaceId?: string; limit?: number },
-    ): Promise<CoreMemoryDistillRun[]> => {
-      const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-      const workspaceId =
-        typeof payload?.workspaceId === "string" && payload.workspaceId.trim().length > 0
-          ? validateInput(UUIDSchema, payload.workspaceId, "workspace ID")
-          : undefined;
-      const limit = typeof payload?.limit === "number" ? payload.limit : undefined;
-      return coreMemoryDistillRunRepo.list({ profileId, workspaceId, limit });
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.CORE_MEMORY_RUN_DISTILL_NOW,
-    async (_, request: unknown): Promise<CoreMemoryDistillRun> => {
-      const validated = validateInput(
-        CoreMemoryDistillRunNowSchema,
-        request,
-        "core memory distill run request",
-      );
-      return deps.coreMemoryDistiller.runOffline(validated);
     },
   );
 
@@ -715,67 +369,10 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   // ============ Task Subscription Handlers ============
 
-  ipcMain.handle(IPC_CHANNELS.SUBSCRIPTION_LIST, async (_, taskId: string) => {
-    const validated = validateInput(UUIDSchema, taskId, "task ID");
-    return taskSubscriptionRepo.getSubscribers(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.SUBSCRIPTION_ADD,
-    async (_, taskId: string, agentRoleId: string, reason: SubscriptionReason) => {
-      checkRateLimit(IPC_CHANNELS.SUBSCRIPTION_ADD);
-      const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-      const validatedAgentRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      const subscription = await taskSubscriptionRepo.subscribe(
-        validatedTaskId,
-        validatedAgentRoleId,
-        reason,
-      );
-      getMainWindow()?.webContents.send(IPC_CHANNELS.SUBSCRIPTION_EVENT, {
-        type: "added",
-        subscription,
-      });
-      return subscription;
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.SUBSCRIPTION_REMOVE,
-    async (_, taskId: string, agentRoleId: string) => {
-      checkRateLimit(IPC_CHANNELS.SUBSCRIPTION_REMOVE);
-      const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-      const validatedAgentRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      const success = await taskSubscriptionRepo.unsubscribe(validatedTaskId, validatedAgentRoleId);
-      if (success) {
-        getMainWindow()?.webContents.send(IPC_CHANNELS.SUBSCRIPTION_EVENT, {
-          type: "removed",
-          taskId: validatedTaskId,
-          agentRoleId: validatedAgentRoleId,
-        });
-      }
-      return { success };
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.SUBSCRIPTION_GET_SUBSCRIBERS, async (_, taskId: string) => {
-    const validated = validateInput(UUIDSchema, taskId, "task ID");
-    return taskSubscriptionRepo.getSubscribers(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUBSCRIPTION_GET_FOR_AGENT, async (_, agentRoleId: string) => {
-    const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    return taskSubscriptionRepo.getSubscriptionsForAgent(validated);
-  });
-
   // ============ Company Ops / Planner ============
 
   ipcMain.handle(IPC_CHANNELS.MC_COMPANY_LIST, async () => {
     return core.listCompanies();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_GET, async (_, companyId: string) => {
-    const validated = validateInput(UUIDSchema, companyId, "company ID");
-    return core.getCompany(validated);
   });
 
   ipcMain.handle(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, async (_, companyId: string) => {
@@ -1017,77 +614,9 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     return core.listGoals(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.MC_GOAL_GET, async (_, goalId: string) => {
-    const validated = validateInput(UUIDSchema, goalId, "goal ID");
-    return core.getGoal(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_GOAL_CREATE,
-    async (
-      _,
-      request: {
-        companyId?: string;
-        title: string;
-        description?: string;
-        status?: "active" | "completed" | "cancelled" | "archived";
-        targetDate?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_GOAL_CREATE);
-      return core.createGoal({
-        companyId: optionalUuid(request.companyId, "company ID"),
-        title: requireString(request.title, "goal title"),
-        description: request.description === null ? undefined : optionalString(request.description),
-        status: optionalString(request.status) as
-          | "active"
-          | "completed"
-          | "cancelled"
-          | "archived"
-          | undefined,
-        targetDate: request.targetDate === null ? undefined : optionalNumber(request.targetDate),
-      });
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_GOAL_UPDATE,
-    async (
-      _,
-      request: {
-        goalId: string;
-        companyId?: string;
-        title?: string;
-        description?: string;
-        status?: "active" | "completed" | "cancelled" | "archived";
-        targetDate?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_GOAL_UPDATE);
-      const validated = validateInput(UUIDSchema, request.goalId, "goal ID");
-      return core.updateGoal(validated, {
-        companyId: optionalUuid(request.companyId, "company ID"),
-        title: optionalString(request.title),
-        description: request.description === null ? "" : optionalString(request.description),
-        status: optionalString(request.status) as
-          | "active"
-          | "completed"
-          | "cancelled"
-          | "archived"
-          | undefined,
-        targetDate: request.targetDate === null ? null : optionalNumber(request.targetDate),
-      });
-    },
-  );
-
   ipcMain.handle(IPC_CHANNELS.MC_PROJECT_LIST, async (_, companyId: string) => {
     const validated = validateInput(UUIDSchema, companyId, "company ID");
     return core.listProjects({ companyId: validated });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.MC_PROJECT_GET, async (_, projectId: string) => {
-    const validated = validateInput(UUIDSchema, projectId, "project ID");
-    return core.getProject(validated);
   });
 
   ipcMain.handle(
@@ -1124,163 +653,10 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.MC_PROJECT_UPDATE,
-    async (
-      _,
-      request: {
-        projectId: string;
-        companyId?: string;
-        goalId?: string | null;
-        name?: string;
-        description?: string;
-        status?: "active" | "paused" | "completed" | "archived";
-        monthlyBudgetCost?: number | null;
-        archivedAt?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_PROJECT_UPDATE);
-      const validated = validateInput(UUIDSchema, request.projectId, "project ID");
-      return core.updateProject(validated, {
-        companyId: optionalUuid(request.companyId, "company ID"),
-        goalId: request.goalId === null ? null : optionalUuid(request.goalId, "goal ID"),
-        name: optionalString(request.name),
-        description: request.description === null ? "" : optionalString(request.description),
-        status: optionalString(request.status) as
-          | "active"
-          | "paused"
-          | "completed"
-          | "archived"
-          | undefined,
-        monthlyBudgetCost:
-          request.monthlyBudgetCost === null ? null : optionalNumber(request.monthlyBudgetCost),
-        archivedAt: request.archivedAt === null ? null : optionalNumber(request.archivedAt),
-      });
-    },
-  );
-
-  ipcMain.handle(
     IPC_CHANNELS.MC_ISSUE_LIST,
     async (_, params: { companyId: string; limit?: number }) => {
       const validated = validateInput(UUIDSchema, params.companyId, "company ID");
       return core.listIssues({ companyId: validated, limit: params.limit });
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.MC_ISSUE_GET, async (_, issueId: string) => {
-    const validated = validateInput(UUIDSchema, issueId, "issue ID");
-    return core.getIssue(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_ISSUE_CREATE,
-    async (
-      _,
-      request: {
-        companyId?: string;
-        goalId?: string;
-        projectId?: string;
-        parentIssueId?: string;
-        workspaceId?: string;
-        taskId?: string;
-        activeRunId?: string;
-        title: string;
-        description?: string;
-        status?: "backlog" | "todo" | "in_progress" | "review" | "blocked" | "done" | "cancelled";
-        priority?: number;
-        assigneeAgentRoleId?: string;
-        reporterAgentRoleId?: string;
-        requestDepth?: number | null;
-        billingCode?: string;
-        metadata?: Record<string, unknown> | null;
-        completedAt?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_ISSUE_CREATE);
-      return core.createIssue({
-        companyId: optionalUuid(request.companyId, "company ID"),
-        goalId: optionalUuid(request.goalId, "goal ID"),
-        projectId: optionalUuid(request.projectId, "project ID"),
-        parentIssueId: optionalUuid(request.parentIssueId, "parent issue ID"),
-        workspaceId: optionalUuid(request.workspaceId, "workspace ID"),
-        taskId: optionalUuid(request.taskId, "task ID"),
-        activeRunId: optionalUuid(request.activeRunId, "run ID"),
-        title: requireString(request.title, "issue title"),
-        description: request.description === null ? undefined : optionalString(request.description),
-        status: optionalString(request.status) as Issue["status"] | undefined,
-        priority: optionalNumber(request.priority),
-        assigneeAgentRoleId: optionalUuid(request.assigneeAgentRoleId, "assignee agent role ID"),
-        reporterAgentRoleId: optionalUuid(request.reporterAgentRoleId, "reporter agent role ID"),
-        requestDepth:
-          request.requestDepth === null ? undefined : optionalNumber(request.requestDepth),
-        billingCode: optionalString(request.billingCode),
-        metadata:
-          request.metadata && typeof request.metadata === "object" ? request.metadata : undefined,
-        completedAt: request.completedAt === null ? undefined : optionalNumber(request.completedAt),
-      });
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_ISSUE_UPDATE,
-    async (
-      _,
-      request: {
-        issueId: string;
-        goalId?: string | null;
-        projectId?: string | null;
-        parentIssueId?: string | null;
-        workspaceId?: string | null;
-        taskId?: string | null;
-        activeRunId?: string | null;
-        title?: string;
-        description?: string;
-        status?: "backlog" | "todo" | "in_progress" | "review" | "blocked" | "done" | "cancelled";
-        priority?: number;
-        assigneeAgentRoleId?: string | null;
-        reporterAgentRoleId?: string | null;
-        requestDepth?: number | null;
-        billingCode?: string;
-        metadata?: Record<string, unknown> | null;
-        completedAt?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_ISSUE_UPDATE);
-      const validated = validateInput(UUIDSchema, request.issueId, "issue ID");
-      return core.updateIssue(validated, {
-        goalId: request.goalId === null ? null : optionalUuid(request.goalId, "goal ID"),
-        projectId:
-          request.projectId === null ? null : optionalUuid(request.projectId, "project ID"),
-        parentIssueId:
-          request.parentIssueId === null
-            ? null
-            : optionalUuid(request.parentIssueId, "parent issue ID"),
-        workspaceId:
-          request.workspaceId === null ? null : optionalUuid(request.workspaceId, "workspace ID"),
-        taskId: request.taskId === null ? null : optionalUuid(request.taskId, "task ID"),
-        activeRunId:
-          request.activeRunId === null ? null : optionalUuid(request.activeRunId, "run ID"),
-        title: optionalString(request.title),
-        description: request.description === null ? "" : optionalString(request.description),
-        status: optionalString(request.status) as Issue["status"] | undefined,
-        priority: optionalNumber(request.priority),
-        assigneeAgentRoleId:
-          request.assigneeAgentRoleId === null
-            ? null
-            : optionalUuid(request.assigneeAgentRoleId, "assignee agent role ID"),
-        reporterAgentRoleId:
-          request.reporterAgentRoleId === null
-            ? null
-            : optionalUuid(request.reporterAgentRoleId, "reporter agent role ID"),
-        requestDepth: request.requestDepth === null ? null : optionalNumber(request.requestDepth),
-        billingCode: optionalString(request.billingCode),
-        metadata:
-          request.metadata === null
-            ? null
-            : request.metadata && typeof request.metadata === "object"
-              ? request.metadata
-              : undefined,
-        completedAt: request.completedAt === null ? null : optionalNumber(request.completedAt),
-      });
     },
   );
 

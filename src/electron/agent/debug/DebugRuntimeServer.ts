@@ -27,10 +27,6 @@ const sessions = new Map<string, SessionRecord>();
 let server: http.Server | null = null;
 let listenPort = 0;
 
-function getListenPort(): number {
-  return listenPort;
-}
-
 export async function ensureDebugRuntimeServer(): Promise<number> {
   if (server && listenPort > 0) {
     return listenPort;
@@ -147,8 +143,4 @@ export async function openDebugRuntimeSession(
 
 export function closeDebugRuntimeSession(taskId: string): void {
   sessions.delete(taskId);
-}
-
-export function getDebugRuntimeListenPort(): number {
-  return getListenPort();
 }

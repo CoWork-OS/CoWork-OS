@@ -356,8 +356,3 @@ export const ROUTINE_WORKFLOW_TEMPLATES: RoutineWorkflowTemplate[] = [
     ),
   },
 ];
-
-export function cloneWorkflowTemplate(templateId: string): RoutineWorkflowDefinition | null {
-  const template = ROUTINE_WORKFLOW_TEMPLATES.find((candidate) => candidate.id === templateId);
-  return template ? structuredClone(template.workflow) : null;
-}

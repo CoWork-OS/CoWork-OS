@@ -155,14 +155,6 @@ interface RegisteredChannel {
 }
 
 /**
- * Channel registry events
- */
-export type ChannelRegistryEventType =
-  | "channel:registered"
-  | "channel:unregistered"
-  | "channel:updated";
-
-/**
  * Channel Registry - Singleton for managing channel types
  */
 export class ChannelRegistry extends EventEmitter {

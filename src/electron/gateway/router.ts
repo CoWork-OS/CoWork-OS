@@ -4786,23 +4786,6 @@ export class MessageRouter {
       replyTo: message.messageId,
     });
 
-    // Notify desktop app via IPC (best-effort).
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send(IPC_CHANNELS.GATEWAY_MESSAGE, {
-        channel: adapter.type,
-        sessionId,
-        taskId: task.id,
-        message: {
-          id: message.messageId,
-          userId: message.userId,
-          userName: message.userName,
-          chatId: message.chatId,
-          text: params.prompt,
-          timestamp: message.timestamp.getTime(),
-        },
-      });
-    }
-
     // Start task execution
     try {
       await this.agentDaemon.startTask(task);
@@ -7218,23 +7201,6 @@ export class MessageRouter {
       text: ackMessage,
       replyTo: message.messageId,
     });
-
-    // Notify desktop app via IPC
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send(IPC_CHANNELS.GATEWAY_MESSAGE, {
-        channel: adapter.type,
-        sessionId,
-        taskId: task.id,
-        message: {
-          id: message.messageId,
-          userId: message.userId,
-          userName: message.userName,
-          chatId: message.chatId,
-          text: message.text,
-          timestamp: message.timestamp.getTime(),
-        },
-      });
-    }
 
     // Start task execution
     try {

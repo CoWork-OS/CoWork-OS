@@ -134,7 +134,6 @@
     "fmt:check": "oxfmt --check src",
     "lint": "oxlint src -c .oxlintrc.json --tsconfig tsconfig.json --max-warnings 0 && npm run -s lint:async-sqlite",
     "lint:async-sqlite": "eslint --no-config-lookup -c eslint.async-sqlite.config.mjs --max-warnings 0 src/electron",
-    "lint:eslint": "eslint src --ext ts,tsx",
     "skills:validate-routing": "node scripts/qa/validate-skills-routing.mjs",
     "skills:validate-content": "node scripts/qa/build-react-best-practices-guide.mjs --check && node scripts/qa/validate-skills-content.mjs",
     "skills:audit": "node scripts/qa/skills-audit-report.mjs",
@@ -277,7 +276,6 @@
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",
-    "@eslint/js": "10.0.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.6.2",
@@ -296,7 +294,6 @@
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
-    "globals": "^17.3.0",
     "langium": "4.4.0",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.47.0",

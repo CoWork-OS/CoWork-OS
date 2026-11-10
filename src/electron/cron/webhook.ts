@@ -26,13 +26,6 @@ export interface WebhookTriggerPayload {
   force?: boolean; // Run even if not due
 }
 
-export interface WebhookTriggerResult {
-  success: boolean;
-  jobId?: string;
-  taskId?: string;
-  error?: string;
-}
-
 type TriggerHandler = (jobId: string, force: boolean) => Promise<CronRunResult>;
 
 export class CronWebhookServer {

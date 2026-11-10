@@ -103,4 +103,3 @@ export class OpenCodeProvider implements LLMProvider {
 
 // Kept as an export alias for integrations that used the earlier Go-only name.
 export const OpenCodeGoProvider = OpenCodeProvider;
-export type OpenCodeGoProviderOptions = OpenCodeProviderOptions;

@@ -45,15 +45,6 @@ export interface UpdateContextPolicyOptions {
 }
 
 /**
- * Result of a context policy access check
- */
-export interface ContextAccessResult {
-  allowed: boolean;
-  policy: ContextPolicy;
-  deniedTools?: string[];
-}
-
-/**
  * Default tool restrictions for group contexts
  * Prevents clipboard access in shared contexts for security
  */

@@ -92,37 +92,6 @@ export async function loadCanvasStore(storePath?: string): Promise<CanvasStoreFi
 }
 
 /**
- * Load canvas store synchronously (for initialization)
- */
-export function loadCanvasStoreSync(storePath?: string): CanvasStoreFile {
-  const effectivePath = storePath || getCanvasStorePath();
-  try {
-    const raw = fs.readFileSync(effectivePath, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<CanvasStoreFile> | null;
-    const sessions = Array.isArray(parsed?.sessions) ? parsed.sessions : [];
-
-    // Validate and filter sessions
-    const validSessions = sessions.filter((s): s is CanvasSession => {
-      if (!isValidSession(s)) return false;
-
-      // Also verify the session directory still exists
-      try {
-        return fs.existsSync(s.sessionDir);
-      } catch {
-        return false;
-      }
-    });
-
-    return {
-      version: 1,
-      sessions: validSessions,
-    };
-  } catch {
-    return { version: 1, sessions: [] };
-  }
-}
-
-/**
  * Save canvas sessions to the store file
  * Uses atomic writes to prevent data corruption
  */
@@ -156,39 +125,4 @@ export async function saveCanvasStore(store: CanvasStoreFile, storePath?: string
 
   // Atomic rename
   await fs.promises.rename(tmp, effectivePath);
-}
-
-/**
- * Save canvas store synchronously
- */
-export function saveCanvasStoreSync(store: CanvasStoreFile, storePath?: string): void {
-  const effectivePath = storePath || getCanvasStorePath();
-
-  // Ensure directory exists
-  fs.mkdirSync(path.dirname(effectivePath), { recursive: true });
-
-  // Only keep non-closed sessions, and limit to max
-  let sessionsToSave = store.sessions.filter((s) => s.status !== "closed");
-
-  // Trim to max sessions (keep most recent)
-  if (sessionsToSave.length > MAX_SESSIONS) {
-    sessionsToSave = sessionsToSave
-      .sort((a, b) => b.lastUpdatedAt - a.lastUpdatedAt)
-      .slice(0, MAX_SESSIONS);
-  }
-
-  const storeToSave: CanvasStoreFile = {
-    version: 1,
-    sessions: sessionsToSave,
-  };
-
-  // Generate temp file path
-  const tmp = `${effectivePath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
-
-  // Write to temp file
-  const json = JSON.stringify(storeToSave, null, 2);
-  fs.writeFileSync(tmp, json, "utf-8");
-
-  // Atomic rename
-  fs.renameSync(tmp, effectivePath);
 }

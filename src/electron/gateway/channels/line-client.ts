@@ -114,20 +114,6 @@ export interface LineClientOptions {
 }
 
 /**
- * LINE client events
- */
-export interface LineClientEvents {
-  message: (message: LineMessage) => void;
-  follow: (userId: string, replyToken?: string) => void;
-  unfollow: (userId: string) => void;
-  join: (groupId: string, replyToken?: string) => void;
-  leave: (groupId: string) => void;
-  error: (error: Error) => void;
-  connected: () => void;
-  disconnected: () => void;
-}
-
-/**
  * LINE Messaging API Client
  */
 export class LineClient extends EventEmitter {

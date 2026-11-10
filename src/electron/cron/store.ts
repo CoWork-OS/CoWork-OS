@@ -27,10 +27,6 @@ export function getCronStorePath(): string {
   return _cronStorePath;
 }
 
-// Legacy exports - use getter functions instead
-export const DEFAULT_CRON_DIR = "" as string;
-export const DEFAULT_CRON_STORE_PATH = "" as string;
-
 /**
  * Resolve the cron store path, supporting ~ expansion
  */

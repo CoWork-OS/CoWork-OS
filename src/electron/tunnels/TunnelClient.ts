@@ -5,7 +5,6 @@ import { createLogger } from "../utils/logger";
 import { McpTunnelForwarder } from "./McpTunnelForwarder";
 import { parseTunnelRelayMessage, serializeTunnelClientMessage } from "./protocol";
 import type {
-  SecureMcpTunnelAuditEvent,
   SecureMcpTunnelConfig,
   SecureMcpTunnelConnectionState,
   SecureMcpTunnelStatus,
@@ -14,11 +13,6 @@ import type {
 import { SecureMcpTunnelSettingsManager } from "./settings";
 
 const logger = createLogger("SecureMcpTunnelClient");
-
-export interface TunnelClientEvents {
-  status: (status: SecureMcpTunnelStatus) => void;
-  audit: (event: SecureMcpTunnelAuditEvent) => void;
-}
 
 export class TunnelClient extends EventEmitter {
   private ws: WebSocket | null = null;

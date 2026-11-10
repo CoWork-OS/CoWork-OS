@@ -292,14 +292,3 @@ export function calculateImageCost(modelId: string, numberOfImages: number): num
   }
   return pricePerImage * numberOfImages;
 }
-
-/**
- * Get image generation pricing info for a model
- * @param modelId The image model identifier
- * @returns Price per image in USD, or null if unknown
- */
-export function getImagePricing(modelId: string): number | null {
-  return (
-    IMAGE_GENERATION_PRICING[modelId] || IMAGE_GENERATION_PRICING[modelId.toLowerCase()] || null
-  );
-}

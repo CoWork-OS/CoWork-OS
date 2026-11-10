@@ -102,10 +102,7 @@ import type {
   ApplyOnboardingProfileResult,
 } from "../shared/onboarding";
 import type {
-  AgentSecurityCaseBuildResult,
-  AgentSecurityCaseVerifyResult,
   AgentSecurityDiagnostic,
-  AgentSecurityEnforcement,
   AgentSecurityFinding,
   AgentSecurityFindingQuery,
   AgentSecurityFindingStatus,
@@ -174,8 +171,6 @@ import type {
   SpreadsheetOpenWorkbookResult,
   SpreadsheetPatch,
   SpreadsheetSaveWorkbookResult,
-  SpreadsheetViewportRequest,
-  SpreadsheetViewportResult,
 } from "../shared/spreadsheet-workbook";
 import type { DocumentPreview, EditableDocumentBlock } from "../shared/document-preview";
 import type {
@@ -195,12 +190,9 @@ import type {
   AgentBuilderCreateResult,
   AgentBuilderPlan,
   AgentBuilderPlanRequest,
-  AgentWorkspaceMembership,
   AgentWorkspacePermissionSnapshot,
   AgentTemplate,
   AppProfileSummary,
-  AudioSummaryConfig,
-  AudioSummaryResult,
   Annotation,
   AnnotationCreateInput,
   AnnotationListQuery,
@@ -209,11 +201,6 @@ import type {
   BrowserAnnotationTargetRef,
   BrowserAnnotationTargetResolveResult,
   ProfileExportResult,
-  ImprovementCampaign,
-  ImprovementCandidate,
-  ImprovementEligibility,
-  ImprovementHistoryResetResult,
-  ImprovementLoopSettings,
   CreateAgentTeamItemRequest,
   CreateAgentTeamMemberRequest,
   CreateAgentTeamRequest,
@@ -224,12 +211,8 @@ import type {
   CoreFailureRecord,
   CoreHarnessExperiment,
   CoreLearningsEntry,
-  CoreMemoryCandidate,
-  CoreMemoryDistillRun,
-  CoreTrace,
   TaskTraceRunDetail,
   TaskTraceRunSummary,
-  GetCoreTraceResult,
   ImageAttachment,
   JevTestProviderRequest,
   LLMReasoningEffort,
@@ -259,10 +242,6 @@ import type {
   ManagedSessionRequirementCorrectionRequest,
   ManagedSessionUserMessageRequest,
   ManagedSessionWorkpaper,
-  WorkContext,
-  WorkContextCreateInput,
-  WorkContextMemberInput,
-  WorkContextUpdateInput,
   SessionHumanMember,
   SessionInviteCreateInput,
   SessionInviteCreateResult,
@@ -276,7 +255,6 @@ import type {
   RecurringApprovalRuleSummary,
   ProtectedCredentialRequestSummary,
   ProtectedCredentialSummary,
-  SessionSearchResult,
   UpdateManagedAgentRoutineRequest,
   ConvertAgentRoleToManagedAgentRequest,
   ConvertAutomationProfileToManagedAgentRequest,
@@ -307,9 +285,7 @@ import type {
   UnifiedRecallSourceType,
   ChronicleSettings,
   ChronicleCaptureStatus,
-  ChronicleResolvedContext,
   ShellSessionInfo,
-  ShellSessionLifecycleEvent,
   TerminalTabRunResult,
   TerminalTabOutputEvent,
   TerminalBlockRunRequest,
@@ -364,11 +340,9 @@ import type {
   SubconsciousTargetSummary,
 } from "../shared/subconscious";
 import type {
-  ChannelPreferenceSummary,
   ContactIdentity,
   ContactIdentityCandidate,
   ContactIdentityCoverageStats,
-  ContactIdentityResolution,
   ContactIdentityReplyTarget,
   ContactIdentitySearchResult,
   MailboxApplyActionInput,
@@ -379,11 +353,9 @@ import type {
   MailboxAutomationRecord,
   MailboxAutomationStatus,
   MailboxClientState,
-  MailboxClientSettingsPatch,
   MailboxComposeDraft,
   MailboxComposeDraftInput,
   MailboxComposeDraftPatch,
-  MailboxDraftAttachmentInput,
   MailboxForwardRecipe,
   MailboxRuleRecipe,
   MailboxScheduleRecipe,
@@ -414,11 +386,69 @@ import type {
   MailboxSenderCleanupDigest,
   MailboxThreadDetail,
   MailboxThreadListItem,
-  MailboxTodayDigest,
-  RelationshipTimelineEvent,
-  RelationshipTimelineQuery,
 } from "../shared/mailbox";
-import type { UiTimelineEvent } from "../shared/timeline-events";
+import type {
+  ActivityActorType,
+  ActivityListQuery,
+  ActivityType,
+  AgentAutonomyLevel,
+  AgentCapability,
+  AgentToolRestrictions,
+  AppNotification,
+  CanvasEvent,
+  CanvasSession,
+  ControlPlaneSettingsData,
+  ControlPlaneStatus,
+  CreateActivityRequest,
+  CreateMentionRequest,
+  CronSchedule,
+  CustomSkill,
+  DeviceProxyRequest,
+  ExtensionData,
+  ExtensionState,
+  ExtensionType,
+  HeartbeatEvent,
+  HeartbeatResult,
+  HeartbeatStatus,
+  HooksStatus,
+  HygieneReport,
+  LifecycleKind,
+  ManagedDevice,
+  ManagedDeviceSummary,
+  MentionListQuery,
+  MentionStatus,
+  MentionType,
+  MergeReview,
+  MigrationStatus,
+  NotificationType,
+  RemoteGatewayConfig,
+  RemoteGatewayConnectionState,
+  RemoteGatewayStatus,
+  SSHTunnelConfig,
+  SSHTunnelStatus,
+  SkillSearchResult,
+  SkillStatusReport,
+  SkillsConfig,
+  TailscaleAvailability,
+  TailscaleMode,
+  TaskLabelListQuery,
+  TraySettings,
+  TunnelProvider,
+  TunnelStatus,
+  TunnelStatusData,
+  UserProfile,
+  VoiceEventType,
+  VoiceInputMode,
+  VoiceProvider,
+  VoiceResponseMode,
+} from "../shared/types";
+import type {
+  AgentIdentityDirectoryResult,
+  BrowserDataType,
+  BrowserSettings,
+  BrowserSettingsState,
+  BrowserSitePermissionEntry,
+} from "../shared/browser-settings";
 
 const ALLOWED_MESSAGE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
 const ALLOWED_MESSAGE_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
@@ -491,15 +521,6 @@ const isUuidLike = (value: unknown): value is string =>
 
 const isWorkspaceIdLike = (value: unknown): value is string =>
   isUuidLike(value) || (typeof value === "string" && isTempWorkspaceId(value));
-
-const hasInvalidCoreMemoryCandidateScope = (request: unknown): boolean => {
-  if (!request || typeof request !== "object") return false;
-  const candidate = request as { profileId?: unknown; workspaceId?: unknown };
-  return (
-    (candidate.profileId !== undefined && !isUuidLike(candidate.profileId)) ||
-    (candidate.workspaceId !== undefined && !isUuidLike(candidate.workspaceId))
-  );
-};
 
 const writeBase64ImageToTempFile = (
   imageData: string,
@@ -658,122 +679,7 @@ const IPC_CHANNELS = SHARED_IPC_CHANNELS;
 const LEGACY_IPC_CHANNELS_MIRROR = IPC_CHANNELS;
 void LEGACY_IPC_CHANNELS_MIRROR;
 
-// Custom Skill types (inlined for sandboxed preload)
-interface SkillParameter {
-  name: string;
-  type: "string" | "number" | "boolean" | "select";
-  description: string;
-  required?: boolean;
-  default?: string | number | boolean;
-  options?: string[];
-}
-
-type SkillSource = "bundled" | "managed" | "external" | "workspace";
-
-interface SkillRequirements {
-  tools?: string[];
-  bins?: string[];
-  anyBins?: string[];
-  env?: string[];
-  config?: string[];
-  os?: ("darwin" | "linux" | "win32")[];
-}
-
-interface SkillMetadata {
-  version?: string;
-  author?: string;
-  homepage?: string;
-  repository?: string;
-  license?: string;
-  tags?: string[];
-  primaryEnv?: string;
-}
-
-interface CustomSkill {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  prompt: string;
-  parameters?: SkillParameter[];
-  category?: string;
-  enabled?: boolean;
-  filePath?: string;
-  source?: SkillSource;
-  requires?: SkillRequirements;
-  metadata?: SkillMetadata;
-}
-
-// Skill Registry types (inlined for sandboxed preload)
-interface SkillRegistryEntry {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  source?: "cowork" | "clawhub";
-  author?: string;
-  downloads?: number;
-  rating?: number;
-  tags?: string[];
-  icon?: string;
-  category?: string;
-  updatedAt?: string;
-  homepage?: string;
-}
-
-interface SkillSearchResult {
-  query: string;
-  total: number;
-  page: number;
-  pageSize: number;
-  results: SkillRegistryEntry[];
-}
-
-interface SkillStatusEntry extends CustomSkill {
-  eligible: boolean;
-  disabled: boolean;
-  blockedByAllowlist: boolean;
-  requirements: {
-    bins: string[];
-    anyBins: string[];
-    env: string[];
-    config: string[];
-    os: string[];
-  };
-  missing: {
-    bins: string[];
-    anyBins: string[];
-    env: string[];
-    config: string[];
-    os: string[];
-  };
-}
-
-interface SkillStatusReport {
-  workspaceDir: string;
-  managedSkillsDir: string;
-  bundledSkillsDir: string;
-  externalSkillDirs: string[];
-  skills: SkillStatusEntry[];
-  summary: {
-    total: number;
-    eligible: number;
-    disabled: number;
-    missingRequirements: number;
-  };
-}
-
-interface SkillsConfig {
-  skillsDirectory: string;
-  externalSkillDirectories?: string[];
-  enabledSkillIds: string[];
-  registryUrl?: string;
-  autoUpdate?: boolean;
-  allowlist?: string[];
-  denylist?: string[];
-}
-
-// MCP types (inlined for sandboxed preload)
+// MCP types
 type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
 type MCPConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
 
@@ -873,51 +779,7 @@ interface MCPUpdateInfo {
   registryEntry: MCPRegistryEntry;
 }
 
-// Canvas types (inlined for sandboxed preload)
-type CanvasSessionStatus = "active" | "paused" | "closed";
-
-interface CanvasSession {
-  id: string;
-  taskId: string;
-  workspaceId: string;
-  sessionDir: string;
-  status: CanvasSessionStatus;
-  title?: string;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
-
-interface CanvasA2UIAction {
-  actionName: string;
-  sessionId: string;
-  componentId?: string;
-  context?: Record<string, unknown>;
-  timestamp: number;
-}
-
-interface CanvasEvent {
-  type:
-    | "session_created"
-    | "session_updated"
-    | "session_closed"
-    | "content_pushed"
-    | "a2ui_action"
-    | "window_opened"
-    | "console_message"
-    | "checkpoint_saved"
-    | "checkpoint_restored";
-  sessionId: string;
-  taskId: string;
-  session?: CanvasSession;
-  action?: CanvasA2UIAction;
-  console?: {
-    level: "log" | "warn" | "error" | "info";
-    message: string;
-  };
-  timestamp: number;
-}
-
-// Built-in Tools Settings types (inlined for sandboxed preload)
+// Built-in Tools Settings types
 interface ToolCategoryConfig {
   enabled: boolean;
   priority: "high" | "normal" | "low";
@@ -949,22 +811,6 @@ interface BuiltinToolsSettings {
   };
   version: string;
 }
-
-// Tray (Menu Bar) Settings (inlined for sandboxed preload)
-interface TraySettings {
-  enabled: boolean;
-  showDockIcon: boolean;
-  startMinimized: boolean;
-  closeToTray: boolean;
-  showNotifications: boolean;
-  showApprovalSavedNotifications: boolean;
-}
-
-// Cron (Scheduled Tasks) Types (inlined for sandboxed preload)
-type CronSchedule =
-  | { kind: "at"; atMs: number }
-  | { kind: "every"; everyMs: number; anchorMs?: number }
-  | { kind: "cron"; expr: string; tz?: string };
 
 type CronJobStatus =
   | "ok"
@@ -1139,39 +985,13 @@ interface CronEvent {
   nextRunAtMs?: number;
 }
 
-// Notification Types (inlined for sandboxed preload)
-type NotificationType =
-  | "task_completed"
-  | "task_failed"
-  | "scheduled_task"
-  | "input_required"
-  | "companion_suggestion"
-  | "info"
-  | "warning"
-  | "error";
-
-interface AppNotification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  read: boolean;
-  createdAt: number;
-  taskId?: string;
-  cronJobId?: string;
-  workspaceId?: string;
-  suggestionId?: string;
-  recommendedDelivery?: "briefing" | "inbox" | "nudge";
-  companionStyle?: "email" | "note";
-}
-
 interface NotificationEvent {
   type: "added" | "updated" | "removed" | "cleared";
   notification?: AppNotification;
   notifications?: AppNotification[];
 }
 
-// Memory System Types (inlined for sandboxed preload)
+// Memory System Types
 type MemoryType =
   | "observation"
   | "decision"
@@ -1211,59 +1031,6 @@ interface Memory {
   updatedAt: number;
 }
 
-type UserFactCategory =
-  | "identity"
-  | "preference"
-  | "bio"
-  | "work"
-  | "goal"
-  | "operating"
-  | "voice"
-  | "accountability"
-  | "constraint"
-  | "other";
-
-interface UserFact {
-  id: string;
-  category: UserFactCategory;
-  value: string;
-  confidence: number;
-  source: "conversation" | "feedback" | "manual";
-  pinned?: boolean;
-  firstSeenAt: number;
-  lastUpdatedAt: number;
-  lastTaskId?: string;
-}
-
-interface UserProfile {
-  summary?: string;
-  facts: UserFact[];
-  updatedAt: number;
-}
-
-type MemorySearchResult =
-  | {
-      id: string;
-      snippet: string;
-      type: MemoryType;
-      relevanceScore: number;
-      createdAt: number;
-      taskId?: string;
-      source: "db";
-    }
-  | {
-      id: string;
-      snippet: string;
-      type: MemoryType;
-      relevanceScore: number;
-      createdAt: number;
-      taskId?: string;
-      source: "markdown";
-      path: string;
-      startLine: number;
-      endLine: number;
-    };
-
 interface MemoryTimelineEntry {
   id: string;
   content: string;
@@ -1281,7 +1048,7 @@ interface MemoryStats {
   compressionDailyTokenBudget?: number;
 }
 
-// ChatGPT Import types (inlined for sandboxed preload)
+// ChatGPT Import types
 interface ChatGPTImportOptions {
   workspaceId: string;
   filePath: string;
@@ -1330,7 +1097,7 @@ interface TextMemoryImportResult {
   incomplete: boolean;
 }
 
-// Hooks types (inlined for sandboxed preload)
+// Hooks types
 interface HooksSettings {
   enabled: boolean;
   token: string;
@@ -1394,15 +1161,6 @@ interface ResendHooksConfig {
   allowUnsafeExternalContent?: boolean;
 }
 
-interface HooksStatus {
-  enabled: boolean;
-  serverRunning: boolean;
-  serverAddress?: { host: string; port: number };
-  gmailWatcherRunning: boolean;
-  gmailAccount?: string;
-  gogAvailable: boolean;
-}
-
 interface GmailHooksStatus {
   configured: boolean;
   running: boolean;
@@ -1411,238 +1169,10 @@ interface GmailHooksStatus {
   gogAvailable: boolean;
 }
 
-interface HooksEvent {
-  action: "started" | "stopped" | "request" | "error";
-  timestamp: number;
-  path?: string;
-  method?: string;
-  statusCode?: number;
-  error?: string;
-}
-
-// Control Plane types (inlined for sandboxed preload)
-// NOTE: These types are intentionally duplicated from shared/types.ts because
-// the preload script runs in a sandboxed context and cannot import from other modules.
-// When updating these types, ensure shared/types.ts is also updated to stay in sync.
-type TailscaleMode = "off" | "serve" | "funnel";
-type ControlPlaneConnectionMode = "local" | "remote";
-
-interface ControlPlaneSettingsData {
-  enabled: boolean;
-  port: number;
-  host: string;
-  token: string;
-  handshakeTimeoutMs: number;
-  heartbeatIntervalMs: number;
-  maxPayloadBytes: number;
-  tailscale: {
-    mode: TailscaleMode;
-    resetOnExit: boolean;
-  };
-  connectionMode?: ControlPlaneConnectionMode;
-  remote?: RemoteGatewayConfig;
-  savedRemoteDevices?: SavedRemoteGatewayDevice[];
-  activeRemoteDeviceId?: string;
-  managedDevices?: ManagedDevice[];
-  activeManagedDeviceId?: string;
-}
-
-interface ControlPlaneClientInfo {
-  id: string;
-  remoteAddress: string;
-  deviceName?: string;
-  authenticated: boolean;
-  scopes: string[];
-  connectedAt: number;
-  lastActivityAt: number;
-}
-
-interface ControlPlaneStatus {
-  enabled: boolean;
-  running: boolean;
-  address?: {
-    host: string;
-    port: number;
-    wsUrl: string;
-  };
-  clients: {
-    total: number;
-    authenticated: number;
-    pending: number;
-    list: ControlPlaneClientInfo[];
-  };
-  tailscale: {
-    active: boolean;
-    mode?: TailscaleMode;
-    hostname?: string;
-    httpsUrl?: string;
-    wssUrl?: string;
-  };
-}
-
-interface ControlPlaneEvent {
-  action:
-    | "started"
-    | "stopped"
-    | "client_connected"
-    | "client_disconnected"
-    | "client_authenticated"
-    | "request"
-    | "error";
-  timestamp: number;
-  clientId?: string;
-  method?: string;
-  error?: string;
-  details?: unknown;
-}
-
-interface TailscaleAvailability {
-  installed: boolean;
-  funnelAvailable: boolean;
-  hostname: string | null;
-}
-
-// Remote Gateway types
-interface RemoteGatewayConfig {
-  url: string;
-  token: string;
-  tlsFingerprint?: string;
-  deviceName?: string;
-  autoReconnect?: boolean;
-  reconnectIntervalMs?: number;
-  maxReconnectAttempts?: number;
-  sshTunnel?: SSHTunnelConfig;
-}
-
-interface SavedRemoteGatewayDevice {
-  id: string;
-  name: string;
-  config: RemoteGatewayConfig;
-  clientId?: string;
-  connectedAt?: number;
-  lastActivityAt?: number;
-}
-
 const LOCAL_MANAGED_DEVICE_ID = "local:this-device";
 const LOCAL_MANAGED_DEVICE_NODE_ID = "local:this-device";
 void LOCAL_MANAGED_DEVICE_ID;
 void LOCAL_MANAGED_DEVICE_NODE_ID;
-
-type ManagedDeviceRole = "local" | "remote";
-type ManagedDevicePurpose = "primary" | "work" | "personal" | "automation" | "archive" | "general";
-type ManagedDeviceTransport = "local" | "direct" | "ssh" | "tailscale" | "unknown";
-type ManagedDeviceAttentionState = "none" | "info" | "warning" | "critical";
-
-interface ManagedDeviceStorageSummary {
-  totalBytes?: number;
-  freeBytes?: number;
-  usedBytes?: number;
-  usagePercent?: number;
-  workspaceCount: number;
-  artifactCount: number;
-}
-
-interface ManagedDeviceAppsSummary {
-  channelsTotal: number;
-  channelsEnabled: number;
-  workspacesTotal: number;
-  approvalsPending: number;
-  inputRequestsPending: number;
-  accountsTotal?: number;
-}
-
-interface ManagedDeviceAlert {
-  id: string;
-  level: ManagedDeviceAttentionState;
-  title: string;
-  description?: string;
-  kind: "approval" | "input_request" | "channel" | "connection" | "storage" | "status" | "warning";
-}
-
-interface ManagedDevice {
-  id: string;
-  name: string;
-  role: ManagedDeviceRole;
-  purpose: ManagedDevicePurpose;
-  transport: ManagedDeviceTransport;
-  status: RemoteGatewayConnectionState | "local";
-  platform: "ios" | "android" | "macos" | "linux" | "windows";
-  version?: string;
-  modelIdentifier?: string;
-  clientId?: string;
-  connectedAt?: number;
-  lastSeenAt?: number;
-  taskNodeId?: string | null;
-  tags?: string[];
-  config?: RemoteGatewayConfig;
-  autoConnect?: boolean;
-  attentionState?: ManagedDeviceAttentionState;
-  activeRunCount?: number;
-  storageSummary?: ManagedDeviceStorageSummary;
-  appsSummary?: ManagedDeviceAppsSummary;
-}
-
-interface ManagedDeviceSummary {
-  device: ManagedDevice;
-  runtime?: {
-    platform?: string;
-    arch?: string;
-    node?: string;
-    electron?: string;
-    coworkVersion?: string;
-    cwd?: string;
-    userDataDir?: string;
-    headless?: boolean;
-  };
-  tasks: {
-    total: number;
-    active: number;
-    attention: number;
-    recent: Any[];
-  };
-  apps: ManagedDeviceAppsSummary & {
-    channels?: Any[];
-    workspaces?: Any[];
-    accounts?: Any[];
-  };
-  storage: ManagedDeviceStorageSummary & {
-    workspaceRoots: Array<{ id: string; name: string; path: string }>;
-  };
-  alerts: ManagedDeviceAlert[];
-  observer: Array<{
-    id: string;
-    timestamp: number;
-    title: string;
-    detail?: string;
-    level: ManagedDeviceAttentionState;
-  }>;
-}
-
-interface DeviceProxyRequest {
-  deviceId: string;
-  method: string;
-  params?: unknown;
-}
-
-type RemoteGatewayConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "authenticating"
-  | "connected"
-  | "reconnecting"
-  | "error";
-
-interface RemoteGatewayStatus {
-  state: RemoteGatewayConnectionState;
-  url?: string;
-  connectedAt?: number;
-  clientId?: string;
-  scopes?: string[];
-  error?: string;
-  reconnectAttempts?: number;
-  lastActivityAt?: number;
-  sshTunnel?: SSHTunnelStatus;
-}
 
 interface RemoteGatewayEvent {
   type: "stateChange" | "event";
@@ -1651,57 +1181,6 @@ interface RemoteGatewayEvent {
   event?: string;
   payload?: unknown;
   error?: string;
-}
-
-// SSH Tunnel types
-type SSHTunnelState = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
-
-interface SSHTunnelConfig {
-  enabled: boolean;
-  host: string;
-  sshPort: number;
-  username: string;
-  keyPath?: string;
-  localPort: number;
-  remotePort: number;
-  remoteBindAddress?: string;
-  autoReconnect?: boolean;
-  reconnectDelayMs?: number;
-  maxReconnectAttempts?: number;
-  connectionTimeoutMs?: number;
-}
-
-interface SSHTunnelStatus {
-  state: SSHTunnelState;
-  config?: Partial<SSHTunnelConfig>;
-  connectedAt?: number;
-  error?: string;
-  reconnectAttempts?: number;
-  pid?: number;
-  localEndpoint?: string;
-}
-
-interface SSHTunnelEvent {
-  type: "stateChange" | "connected" | "disconnected" | "error";
-  state?: SSHTunnelState;
-  reason?: string;
-  error?: string;
-}
-
-// Agent Role (Agent Squad) types (inlined for sandboxed preload)
-type AgentCapability =
-  | "code"
-  | "review"
-  | "research"
-  | "test"
-  | "document"
-  | "plan"
-  | "design"
-  | "analyze";
-
-interface AgentToolRestrictions {
-  allowedTools?: string[];
-  deniedTools?: string[];
 }
 
 /** What a reply-draft card's action did (see MailReplyDraftsService). */
@@ -1713,8 +1192,6 @@ type MailReplyDraftCardOutcome =
 type CalendarCardOutcome =
   | { ok: true; kind: "focus_hold" | "conflict" | "meeting_prep" }
   | { ok: false; reason: "not_connected" | "gone" | "not_allowed" | "failed"; message: string };
-
-type AgentAutonomyLevel = "intern" | "specialist" | "lead";
 
 interface AgentRoleData {
   id: string;
@@ -1868,26 +1345,6 @@ interface AutomationProfileData {
   updatedAt: number;
 }
 
-// Activity Feed types (inlined for sandboxed preload)
-type ActivityActorType = "agent" | "user" | "system";
-type ActivityType =
-  | "task_created"
-  | "task_started"
-  | "task_completed"
-  | "task_failed"
-  | "task_paused"
-  | "task_resumed"
-  | "comment"
-  | "file_created"
-  | "file_modified"
-  | "file_deleted"
-  | "command_executed"
-  | "tool_used"
-  | "mention"
-  | "agent_assigned"
-  | "error"
-  | "info";
-
 interface ActivityData {
   id: string;
   workspaceId: string;
@@ -1903,39 +1360,12 @@ interface ActivityData {
   createdAt: number;
 }
 
-interface CreateActivityRequest {
-  workspaceId: string;
-  taskId?: string;
-  agentRoleId?: string;
-  actorType: ActivityActorType;
-  activityType: ActivityType;
-  title: string;
-  description?: string;
-  metadata?: Record<string, unknown>;
-}
-
-interface ActivityListQuery {
-  workspaceId: string;
-  taskId?: string;
-  agentRoleId?: string;
-  activityType?: ActivityType | ActivityType[];
-  actorType?: ActivityActorType;
-  isRead?: boolean;
-  isPinned?: boolean;
-  limit?: number;
-  offset?: number;
-}
-
 interface ActivityEvent {
   type: "created" | "read" | "all_read" | "pinned" | "deleted";
   activity?: ActivityData;
   id?: string;
   workspaceId?: string;
 }
-
-// @Mention System types (inlined for sandboxed preload)
-type MentionType = "request" | "handoff" | "review" | "fyi";
-type MentionStatus = "pending" | "acknowledged" | "completed" | "dismissed";
 
 interface MentionData {
   id: string;
@@ -1951,98 +1381,12 @@ interface MentionData {
   completedAt?: number;
 }
 
-interface CreateMentionRequest {
-  workspaceId: string;
-  taskId: string;
-  fromAgentRoleId?: string;
-  toAgentRoleId: string;
-  mentionType: MentionType;
-  context?: string;
-}
-
-interface MentionListQuery {
-  workspaceId?: string;
-  taskId?: string;
-  toAgentRoleId?: string;
-  fromAgentRoleId?: string;
-  status?: MentionStatus | MentionStatus[];
-  limit?: number;
-  offset?: number;
-}
-
 interface MentionEvent {
   type: "created" | "acknowledged" | "completed" | "dismissed";
   mention?: MentionData;
 }
 
-// Mission Control types (inlined for sandboxed preload)
-type HeartbeatStatus = "idle" | "running" | "sleeping" | "error";
-
-interface HeartbeatResult {
-  agentRoleId: string;
-  status: "ok" | "work_done" | "error";
-  pendingMentions: number;
-  assignedTasks: number;
-  relevantActivities: number;
-  maintenanceChecks?: number;
-  maintenanceWorkspaceId?: string;
-  silent?: boolean;
-  taskCreated?: string;
-  triggerReason?: string;
-  loopType?: import("../shared/types").CompanyLoopType;
-  outputType?: import("../shared/types").CompanyOutputType;
-  expectedOutputType?: import("../shared/types").CompanyOutputType;
-  valueReason?: string;
-  reviewRequired?: boolean;
-  reviewReason?: import("../shared/types").CompanyReviewReason;
-  evidenceRefs?: import("../shared/types").CompanyEvidenceRef[];
-  companyPriority?: import("../shared/types").CompanyPriority;
-  error?: string;
-}
-
-interface HeartbeatEvent {
-  type:
-    | "started"
-    | "completed"
-    | "work_found"
-    | "no_work"
-    | "error"
-    | "wake_queued"
-    | "wake_coalesced"
-    | "wake_queue_saturated"
-    | "wake_immediate_deferred";
-  agentRoleId: string;
-  agentName: string;
-  timestamp: number;
-  result?: HeartbeatResult;
-  error?: string;
-  wake?: {
-    source: "hook" | "cron" | "api" | "manual";
-    mode: "now" | "next-heartbeat";
-    text: string;
-    deferredMs?: number;
-    reason?: "ready" | "drain";
-  };
-}
-
-type SubscriptionReason = "assigned" | "mentioned" | "commented" | "manual";
-
-interface TaskSubscription {
-  id: string;
-  taskId: string;
-  agentRoleId: string;
-  subscriptionReason: SubscriptionReason;
-  subscribedAt: number;
-}
-
-interface SubscriptionEvent {
-  type: "subscribed" | "unsubscribed";
-  taskId: string;
-  agentRoleId: string;
-  subscription?: TaskSubscription;
-}
-
-// Task Board types (inlined for sandboxed preload)
+// Task Board types
 type TaskBoardColumn = "backlog" | "todo" | "in_progress" | "review" | "done";
 
 interface TaskLabelData {
@@ -2051,21 +1395,6 @@ interface TaskLabelData {
   name: string;
   color: string;
   createdAt: number;
-}
-
-interface CreateTaskLabelRequest {
-  workspaceId: string;
-  name: string;
-  color?: string;
-}
-
-interface UpdateTaskLabelRequest {
-  name?: string;
-  color?: string;
-}
-
-interface TaskLabelListQuery {
-  workspaceId: string;
 }
 
 interface TaskBoardEvent {
@@ -2086,46 +1415,7 @@ interface TaskBoardEvent {
   };
 }
 
-// Agent Working State types (inlined for sandboxed preload)
-type WorkingStateType = "context" | "progress" | "notes" | "plan";
-
-interface AgentWorkingStateData {
-  id: string;
-  agentRoleId: string;
-  workspaceId: string;
-  taskId?: string;
-  stateType: WorkingStateType;
-  content: string;
-  fileReferences?: string[];
-  isCurrent: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface UpdateWorkingStateRequest {
-  agentRoleId: string;
-  workspaceId: string;
-  taskId?: string;
-  stateType: WorkingStateType;
-  content: string;
-  fileReferences?: string[];
-}
-
-interface WorkingStateQuery {
-  agentRoleId: string;
-  workspaceId: string;
-  taskId?: string;
-  stateType?: WorkingStateType;
-}
-
-interface WorkingStateHistoryQuery {
-  agentRoleId: string;
-  workspaceId: string;
-  limit?: number;
-  offset?: number;
-}
-
-// Context Policy types (inlined for sandboxed preload)
+// Context Policy types
 type SecurityModeType = "open" | "allowlist" | "pairing";
 type ContextTypeValue = "dm" | "group";
 
@@ -2281,11 +1571,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.SPREADSHEET_OPEN_WORKBOOK,
       data,
     ) as Promise<SpreadsheetOpenWorkbookResult>,
-  getSpreadsheetViewport: (data: SpreadsheetViewportRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.SPREADSHEET_GET_VIEWPORT,
-      data,
-    ) as Promise<SpreadsheetViewportResult>,
   applySpreadsheetPatches: (data: { sessionId: string; patches: SpreadsheetPatch[] }) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.SPREADSHEET_APPLY_PATCHES,
@@ -2910,12 +2195,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_REQUEST, handler);
   },
-  ingestYouTubeVideo: (data: {
-    workspaceId: string;
-    url: string;
-    language?: string;
-    force?: boolean;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_INGEST_VIDEO, data),
   askYouTubeVideo: (data: {
     workspaceId: string;
     question: string;
@@ -2925,14 +2204,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     limit?: number;
     force?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_ASK_VIDEO, data),
-  searchYouTubeSegments: (data: {
-    workspaceId: string;
-    query: string;
-    videoIds?: string[];
-    limit?: number;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_SEARCH_SEGMENTS, data),
-  listYouTubeVideos: (data: { workspaceId: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_LIST_VIDEOS, data),
   getLlmWikiVaultSummary: (data: { workspacePath: string; vaultPath?: string }) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.LLM_WIKI_GET_VAULT_SUMMARY,
@@ -2949,10 +2220,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.DOCUMENT_OPEN_EDITOR_SESSION,
       data,
     ) as Promise<DocumentEditorSession>,
-  listDocumentVersions: (data: { filePath: string; workspacePath?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_LIST_VERSIONS, data) as Promise<
-      DocumentVersionEntry[]
-    >,
   startDocumentEditTask: (data: DocumentEditRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_START_EDIT_TASK, data),
   getMailboxSyncStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_SYNC_STATUS),
@@ -2970,10 +2237,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     >,
   listMailboxAutomations: (query?: { workspaceId?: string; threadId?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_LIST, query) as Promise<
-      MailboxAutomationRecord[]
-    >,
-  listThreadMailboxAutomations: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_LIST_THREAD, threadId) as Promise<
       MailboxAutomationRecord[]
     >,
   createMailboxRule: (recipe: MailboxRuleRecipe) =>
@@ -3024,11 +2287,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_DIGEST, {
       workspaceId,
     }) as Promise<MailboxDigestSnapshot>,
-  getMailboxTodayDigest: (input?: { limitPerBucket?: number }) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.MAILBOX_TODAY_DIGEST,
-      input || {},
-    ) as Promise<MailboxTodayDigest>,
   getMailboxSenderCleanupDigest: (input?: { limit?: number }) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.MAILBOX_SENDER_CLEANUP_DIGEST,
@@ -3056,29 +2314,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       draftId,
       patch,
     }) as Promise<MailboxComposeDraft>,
-  addMailboxDraftAttachment: (draftId: string, input: MailboxDraftAttachmentInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ADD_DRAFT_ATTACHMENT, {
-      draftId,
-      input,
-    }) as Promise<MailboxComposeDraft>,
-  removeMailboxDraftAttachment: (draftId: string, attachmentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_REMOVE_DRAFT_ATTACHMENT, {
-      draftId,
-      attachmentId,
-    }) as Promise<MailboxComposeDraft>,
   sendMailboxDraft: (draftId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SEND_DRAFT, {
       draftId,
     }) as Promise<MailboxOutgoingMessage>,
-  scheduleMailboxSend: (draftId: string, scheduledAt: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SCHEDULE_SEND, {
-      draftId,
-      scheduledAt,
-    }) as Promise<MailboxComposeDraft>,
-  updateMailboxClientSettings: (patch: MailboxClientSettingsPatch) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_CLIENT_SETTINGS, patch) as Promise<
-      MailboxClientState["settings"]
-    >,
   retryMailboxAction: (actionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RETRY_ACTION, {
       actionId,
@@ -3092,10 +2331,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, { draftId }) as Promise<boolean>,
   cancelMailboxDraftSend: (draftId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_CANCEL_SEND, { draftId }) as Promise<boolean>,
-  undoMailboxAction: (actionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UNDO_ACTION, {
-      actionId,
-    }) as Promise<MailboxQueuedAction>,
   summarizeMailboxThread: (threadId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SUMMARIZE_THREAD, { threadId }),
   generateMailboxDraft: (threadId: string, options?: MailboxDraftOptions) =>
@@ -3108,14 +2343,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SCHEDULE_REPLY, { threadId }),
   researchMailboxContact: (threadId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RESEARCH_CONTACT, { threadId }),
-  resolveMailboxContactIdentity: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_RESOLVE, {
-      threadId,
-    }) as Promise<ContactIdentityResolution | null>,
-  getContactIdentity: (contactIdentityId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_GET, {
-      contactIdentityId,
-    }) as Promise<ContactIdentity | null>,
   listContactIdentities: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_LIST, { workspaceId }) as Promise<
       ContactIdentity[]
@@ -3141,10 +2368,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.MAILBOX_IDENTITY_LINK,
       input,
     ) as Promise<ContactIdentity | null>,
-  getMailboxRelationshipTimeline: (query: RelationshipTimelineQuery) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_TIMELINE, query) as Promise<
-      RelationshipTimelineEvent[]
-    >,
   listIdentityCandidates: (workspaceId?: string, status?: ContactIdentityCandidate["status"]) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_CANDIDATES, {
       workspaceId,
@@ -3160,10 +2383,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) as Promise<ContactIdentityCandidate | null>,
   unlinkIdentityHandle: (handleId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_UNLINK, { handleId }) as Promise<boolean>,
-  getChannelPreferenceSummary: (contactIdentityId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_PREFERENCE, {
-      contactIdentityId,
-    }) as Promise<ChannelPreferenceSummary>,
   getContactIdentityCoverageStats: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_COVERAGE, {
       workspaceId,
@@ -3231,10 +2450,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_QUICK_REPLY_SUGGESTIONS, {
       threadId,
     }) as Promise<MailboxQuickReplySuggestionsResult>,
-  createMailboxSavedViewReviewSchedule: (viewId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SAVED_VIEW_REVIEW_SCHEDULE, {
-      viewId,
-    }) as Promise<MailboxAutomationRecord>,
   applyMailboxAction: (input: MailboxApplyActionInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_APPLY_ACTION, input),
   updateMailboxCommitmentState: (commitmentId: string, state: MailboxCommitmentState) =>
@@ -3311,8 +2526,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       mustCreatePaths?: string[];
     };
   }) => ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_REPLAY_EVALUATE, request),
-  searchSessions: (request: { query: string; workspaceId?: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SESSION_SEARCH, request) as Promise<SessionSearchResult[]>,
   listTasks: (opts?: {
     limit?: number;
     offset?: number;
@@ -3469,7 +2682,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_RESOLVE, request),
   releaseComposerDraftAttachment: (request: ComposerDraftAttachmentReleaseRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_RELEASE, request),
-  exportTasksJson: (query?: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
   toggleTaskPin: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PIN, taskId),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
   discardInterruptedTask: (taskId: string, expectedUpdatedAt: number) =>
@@ -3477,7 +2689,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   wrapUpTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_WRAP_UP, id),
   pauseTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PAUSE, id),
   resumeTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_RESUME, id),
-  continueTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CONTINUE, id),
   forkTaskSession: (data: {
     taskId: string;
     prompt?: string;
@@ -3546,9 +2757,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       TaskLearningProgress[]
     >,
 
-  // Semantic timeline projection (normalised UiTimelineEvent[] derived from task_events)
-  getSemanticTimeline: (taskId: string) =>
-    invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_SEMANTIC_TIMELINE, taskId),
   listTaskTraceRuns: (request?: import("../shared/types").ListTaskTraceRunsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_TRACE_LIST, request) as Promise<TaskTraceRunSummary[]>,
   getTaskTraceRun: (taskId: string) =>
@@ -3625,8 +2833,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SELECT, id),
   getTempWorkspace: (options?: { createNew?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_TEMP, options),
-  pruneTempWorkspaces: (options?: { dryRun?: boolean }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_PRUNE_TEMP, options),
   touchWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_TOUCH, id),
   removeWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_REMOVE, id),
   updateWorkspacePermissions: (
@@ -3833,11 +3039,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_ENVIRONMENT_LIST_IPC, params) as Promise<
       ManagedEnvironment[]
     >,
-  getManagedEnvironment: (environmentId: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.MANAGED_ENVIRONMENT_GET_IPC,
-      environmentId,
-    ) as Promise<ManagedEnvironment | null>,
   createManagedEnvironment: (request: {
     name: string;
     kind?: ManagedEnvironment["kind"];
@@ -3899,25 +3100,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC,
       request,
     ) as Promise<SessionHandoffExportResult>,
-  listWorkContexts: (params?: {
-    workspaceId?: string;
-    includeArchived?: boolean;
-    limit?: number;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.WORK_CONTEXT_LIST_IPC, params) as Promise<WorkContext[]>,
-  getWorkContext: (contextId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORK_CONTEXT_GET_IPC, contextId) as Promise<WorkContext | null>,
-  createWorkContext: (request: WorkContextCreateInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORK_CONTEXT_CREATE_IPC, request) as Promise<WorkContext>,
-  updateWorkContext: (request: WorkContextUpdateInput) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.WORK_CONTEXT_UPDATE_IPC,
-      request,
-    ) as Promise<WorkContext | null>,
-  addWorkContextMember: (request: WorkContextMemberInput) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.WORK_CONTEXT_MEMBER_ADD_IPC,
-      request,
-    ) as Promise<WorkContext | null>,
   getSessionMembers: (request: SessionMembersRequest) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.SESSION_MEMBERS_GET_IPC,
@@ -3950,19 +3132,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) as Promise<ManagedSessionWorkpaper>,
   listAgentTemplates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_TEMPLATE_LIST) as Promise<AgentTemplate[]>,
-  listAgentWorkspaceMemberships: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC, workspaceId) as Promise<
-      AgentWorkspaceMembership[]
-    >,
-  updateAgentWorkspaceMembership: (request: {
-    workspaceId: string;
-    principalId: string;
-    role: AgentWorkspaceMembership["role"];
-  }) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC,
-      request,
-    ) as Promise<AgentWorkspaceMembership>,
   getMyAgentWorkspacePermissions: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_WORKSPACE_PERMISSION_SNAPSHOT_IPC, {
       workspaceId,
@@ -3990,11 +3159,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) as Promise<ImageGenProfile | null>,
   deleteImageGenProfile: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.IMAGE_GEN_PROFILE_DELETE, id) as Promise<boolean>,
-  generateManagedSessionAudioSummary: (sessionId: string, config?: Partial<AudioSummaryConfig>) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_GENERATE_AUDIO_SUMMARY, {
-      sessionId,
-      config,
-    }) as Promise<AudioSummaryResult>,
 
   // Skill APIs
   listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_LIST),
@@ -4164,11 +3328,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }),
 
   // Gateway event listener
-  onGatewayMessage: (callback: (data: Any) => void) => {
-    const subscription = (_: Any, data: Any) => callback(data);
-    ipcRenderer.on("gateway:message", subscription);
-    return () => ipcRenderer.removeListener("gateway:message", subscription);
-  },
   onGatewayUsersUpdated: (callback: (data: { channelId: string; channelType: string }) => void) => {
     const subscription = (_: Any, data: { channelId: string; channelType: string }) =>
       callback(data);
@@ -4418,15 +3577,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getPersonalitySettings: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_SETTINGS),
   savePersonalitySettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, settings),
-  getPersonalityDefinitions: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_DEFINITIONS),
   getPersonaDefinitions: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_PERSONAS),
   getRelationshipStats: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_RELATIONSHIP_STATS),
-  setActivePersonality: (personalityId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_ACTIVE, personalityId),
-  setActivePersona: (personaId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_PERSONA, personaId),
-  resetPersonalitySettings: (preserveRelationship?: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_RESET, preserveRelationship),
   getPersonalityConfigV2: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_CONFIG_V2),
   savePersonalityConfigV2: (config: Any, options?: { responseStyleBaseline?: object | null }) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, config, options),
@@ -4449,7 +3601,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getQueueSettings: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_SETTINGS),
   saveQueueSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, settings),
-  clearQueue: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_CLEAR),
   getWatchdogSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WATCHDOG_GET_SETTINGS),
   saveWatchdogSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WATCHDOG_SAVE_SETTINGS, settings),
@@ -4462,8 +3613,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Custom Skills APIs
   listCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST),
   listTaskSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST_TASKS),
-  listGuidelineSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST_GUIDELINES),
-  getCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_GET, id),
   createCustomSkill: (skill: Any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_CREATE, skill),
   updateCustomSkill: (id: string, updates: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_UPDATE, id, updates),
@@ -4481,8 +3630,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_SEARCH, query, options),
   searchClawHubSkills: (query: string, options?: { page?: number; pageSize?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_CLAWHUB_SEARCH, query, options),
-  getSkillDetails: (skillId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_DETAILS, skillId),
   installSkillFromRegistry: (skillId: string, version?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL, skillId, version),
   installSkillFromClawHub: (identifierOrUrl: string) =>
@@ -4491,16 +3638,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL_URL, url),
   installSkillFromGit: (gitUrl: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL_GIT, gitUrl),
-  updateSkillFromRegistry: (skillId: string, version?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UPDATE, skillId, version),
-  updateAllSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UPDATE_ALL),
   uninstallSkill: (skillId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UNINSTALL, skillId),
-  listManagedSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_LIST_MANAGED),
-  checkSkillUpdates: (skillId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_CHECK_UPDATES, skillId),
   getSkillStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_STATUS),
-  getEligibleSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_ELIGIBLE),
 
   // MCP (Model Context Protocol) APIs
   getMCPSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_SETTINGS),
@@ -4611,11 +3751,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateMCPServerFromRegistry: (serverId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_UPDATE_SERVER, serverId),
 
-  // MCP Host APIs
-  startMCPHost: (port?: number) => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_START, port),
-  stopMCPHost: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_STOP),
-  getMCPHostStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_GET_STATUS),
-
   // Secure MCP Tunnel APIs
   getSecureMcpTunnelSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_GET_SETTINGS),
@@ -4638,13 +3773,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener(IPC_CHANNELS.SECURE_MCP_TUNNELS_STATUS_CHANGE, subscription);
   },
 
-  // Scraping (Scrapling) APIs
-  scrapingGetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_GET_SETTINGS),
-  scrapingSaveSettings: (settings: Any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_SAVE_SETTINGS, settings),
-  scrapingGetStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_GET_STATUS),
-  scrapingReset: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_RESET),
-
   // Built-in Tools Settings APIs
   getBuiltinToolsSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_SETTINGS),
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) =>
@@ -4654,8 +3782,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveChronicleSettings: (settings: Partial<ChronicleSettings>) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_SAVE_SETTINGS, settings),
   getChronicleStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_GET_STATUS),
-  queryChronicleRecentContext: (input: { query: string; limit?: number; useFallback?: boolean }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_QUERY_RECENT_CONTEXT, input),
   listChronicleObservations: (input: { workspaceId: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_LIST_OBSERVATIONS, input),
   deleteChronicleObservation: (input: { workspaceId: string; observationId: string }) =>
@@ -4739,16 +3865,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TRAY_OPEN_ABOUT, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_OPEN_ABOUT, callback);
   },
-  onTrayCheckUpdates: (callback: () => void) => {
-    ipcRenderer.on(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
-  },
-  onTrayQuickTask: (
-    callback: (event: Any, data: { task: string; workspaceId?: string }) => void,
-  ) => {
-    ipcRenderer.on(IPC_CHANNELS.TRAY_QUICK_TASK, callback);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_QUICK_TASK, callback);
-  },
 
   // Quick Input APIs (for the floating quick input window)
   quickInputSubmit: (task: string, workspaceId?: string) =>
@@ -4773,7 +3889,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getCronRunHistory: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_RUN_HISTORY, id),
   clearCronRunHistory: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_CLEAR_RUN_HISTORY, id),
-  getCronWebhookStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_WEBHOOK_STATUS),
 
   // Notification APIs
   listNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_LIST),
@@ -4821,19 +3936,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   disableHooks: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_DISABLE),
   regenerateHookToken: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_REGENERATE_TOKEN),
   getHooksStatus: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_GET_STATUS),
-  addHookMapping: (mapping: HookMapping) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HOOKS_ADD_MAPPING, mapping),
-  removeHookMapping: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_REMOVE_MAPPING, id),
   configureGmailHooks: (config: GmailHooksConfig) =>
     ipcRenderer.invoke(IPC_CHANNELS.HOOKS_CONFIGURE_GMAIL, config),
   getGmailHooksStatus: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_GET_GMAIL_STATUS),
   startGmailWatcher: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_START_GMAIL_WATCHER),
   stopGmailWatcher: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_STOP_GMAIL_WATCHER),
-  onHooksEvent: (callback: (event: HooksEvent) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: HooksEvent) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.HOOKS_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.HOOKS_EVENT, subscription);
-  },
 
   // Control Plane (WebSocket Gateway)
   getControlPlaneSettings: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_GET_SETTINGS),
@@ -4847,15 +3954,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getControlPlaneToken: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_GET_TOKEN),
   regenerateControlPlaneToken: () =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_REGENERATE_TOKEN),
-  onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: ControlPlaneEvent) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.CONTROL_PLANE_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.CONTROL_PLANE_EVENT, subscription);
-  },
 
   // Tailscale
   checkTailscaleAvailability: () => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_CHECK_AVAILABILITY),
-  getTailscaleStatus: () => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_GET_STATUS),
   setTailscaleMode: (mode: TailscaleMode) =>
     ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_SET_MODE, mode),
 
@@ -4879,15 +3980,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_CONNECT, config),
   disconnectSSHTunnel: () => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_DISCONNECT),
   getSSHTunnelStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_GET_STATUS),
-  saveSSHTunnelConfig: (config: SSHTunnelConfig) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_SAVE_CONFIG, config),
   testSSHTunnelConnection: (config: SSHTunnelConfig) =>
     ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_TEST_CONNECTION, config),
-  onSSHTunnelEvent: (callback: (event: SSHTunnelEvent) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: SSHTunnelEvent) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.SSH_TUNNEL_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.SSH_TUNNEL_EVENT, subscription);
-  },
 
   // Device Fleet
   listManagedDevices: () => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_LIST_MANAGED),
@@ -4900,19 +3994,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.DEVICE_PROXY_REQUEST, request),
 
   // Live Canvas APIs
-  canvasCreate: (data: { taskId: string; workspaceId: string; title?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CREATE, data),
   canvasGetSession: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_GET_SESSION, sessionId),
   canvasListSessions: (taskId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_LIST_SESSIONS, taskId),
   canvasShow: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.CANVAS_SHOW, sessionId),
-  canvasHide: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.CANVAS_HIDE, sessionId),
   canvasClose: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CLOSE, sessionId),
-  canvasPush: (data: { sessionId: string; content: string; filename?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_PUSH, data),
-  canvasEval: (data: { sessionId: string; script: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EVAL, data),
   canvasSnapshot: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_SNAPSHOT, sessionId),
   canvasExportHTML: (sessionId: string) =>
@@ -4921,20 +4008,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EXPORT_TO_FOLDER, data),
   canvasOpenInBrowser: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_OPEN_IN_BROWSER, sessionId),
-  canvasOpenUrl: (data: { sessionId: string; url: string; show?: boolean }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_OPEN_URL, data),
   canvasGetSessionDir: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_GET_SESSION_DIR, sessionId),
-  canvasCheckpointSave: (data: { sessionId: string; label?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_SAVE, data),
-  canvasCheckpointList: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_LIST, sessionId),
-  canvasCheckpointRestore: (data: { sessionId: string; checkpointId: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_RESTORE, data),
-  canvasCheckpointDelete: (data: { sessionId: string; checkpointId: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_DELETE, data),
-  canvasGetContent: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_GET_CONTENT, sessionId),
   onCanvasEvent: (callback: (event: CanvasEvent) => void) => {
     const subscription = (_: Electron.IpcRendererEvent, data: CanvasEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.CANVAS_EVENT, subscription);
@@ -4955,19 +4030,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     accessProfileId?: string;
     shellAccess?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_ASSIGN_TASK, params),
-  deviceGetProfiles: () => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_GET_PROFILES),
-  deviceUpdateProfile: (
-    deviceId: string,
-    data: { customName?: string; platform?: string; modelIdentifier?: string },
-  ) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_UPDATE_PROFILE, deviceId, data),
 
   // Memory System APIs
   getMemorySettings: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_SETTINGS, workspaceId),
   saveMemorySettings: (data: { workspaceId: string; settings: Partial<MemorySettings> }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, data),
-  searchMemories: (data: { workspaceId: string; query: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SEARCH, data),
   getMemoryTimeline: (data: { workspaceId: string; memoryId: string; windowSize?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_TIMELINE, data),
   getMemoryDetails: (data: { workspaceId: string; ids: string[] }) =>
@@ -5227,10 +4295,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_DELETE_BELIEF, id),
   getAwarenessSummary: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_SUMMARY, workspaceId),
-  getAwarenessSnapshot: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_SNAPSHOT, workspaceId),
-  listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_LIST_EVENTS, params),
   // Memory Features APIs
   getMemoryFeaturesSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS),
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) =>
@@ -5248,55 +4312,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   countMemoryWriteApprovals: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_COUNT, workspaceId),
 
-  // Self-improvement loop APIs
-  getImprovementSettings: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_GET_SETTINGS) as Promise<ImprovementLoopSettings>,
-  getImprovementEligibility: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_GET_ELIGIBILITY) as Promise<ImprovementEligibility>,
-  saveImprovementOwnerEnrollment: (token: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.IMPROVEMENT_SAVE_OWNER_ENROLLMENT,
-      token,
-    ) as Promise<ImprovementEligibility>,
-  clearImprovementOwnerEnrollment: () =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.IMPROVEMENT_CLEAR_OWNER_ENROLLMENT,
-    ) as Promise<ImprovementEligibility>,
-  saveImprovementSettings: (settings: ImprovementLoopSettings) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.IMPROVEMENT_SAVE_SETTINGS,
-      settings,
-    ) as Promise<ImprovementLoopSettings>,
-  listImprovementCandidates: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_CANDIDATES, workspaceId) as Promise<
-      ImprovementCandidate[]
-    >,
-  listImprovementCampaigns: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, workspaceId) as Promise<
-      ImprovementCampaign[]
-    >,
-  refreshImprovementCandidates: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REFRESH) as Promise<{ candidateCount: number }>,
-  runNextImprovementExperiment: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT) as Promise<ImprovementCampaign | null>,
-  resetImprovementHistory: () =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.IMPROVEMENT_RESET_HISTORY,
-    ) as Promise<ImprovementHistoryResetResult>,
-  retryImprovementCampaign: (campaignId: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.IMPROVEMENT_RETRY_RUN,
-      campaignId,
-    ) as Promise<ImprovementCampaign | null>,
-  dismissImprovementCandidate: (candidateId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE, candidateId) as Promise<
-      ImprovementCandidate | undefined
-    >,
-  reviewImprovementCampaign: (campaignId: string, reviewStatus: "accepted" | "dismissed") =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN, campaignId, reviewStatus) as Promise<
-      ImprovementCampaign | undefined
-    >,
-
   // Subconscious loop APIs
   getSubconsciousSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_GET_SETTINGS) as Promise<SubconsciousSettings>,
@@ -5311,10 +4326,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_LIST_TARGETS, workspaceId) as Promise<
       SubconsciousTargetSummary[]
     >,
-  listSubconsciousRuns: (targetKey?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_LIST_RUNS, targetKey) as Promise<
-      SubconsciousRun[]
-    >,
   getSubconsciousTargetDetail: (targetKey: string) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.SUBCONSCIOUS_GET_TARGET_DETAIL,
@@ -5327,15 +4338,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.SUBCONSCIOUS_RUN_NOW,
       targetKey,
     ) as Promise<SubconsciousRun | null>,
-  retrySubconsciousRun: (runId: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.SUBCONSCIOUS_RETRY_RUN,
-      runId,
-    ) as Promise<SubconsciousRun | null>,
-  reviewSubconsciousRun: (runId: string, reviewStatus: "accepted" | "dismissed") =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_REVIEW_RUN, runId, reviewStatus) as Promise<
-      SubconsciousRun | undefined
-    >,
   dismissSubconsciousTarget: (targetKey: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_DISMISS_TARGET, targetKey) as Promise<
       SubconsciousTargetSummary | undefined
@@ -5400,10 +4402,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   enableExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_ENABLE, name),
   disableExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_DISABLE, name),
   reloadExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_RELOAD, name),
-  getExtensionConfig: (name: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_GET_CONFIG, name),
-  setExtensionConfig: (name: string, config: Record<string, unknown>) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_SET_CONFIG, { name, config }),
   discoverExtensions: () => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_DISCOVER),
 
   // Webhook Tunnel APIs
@@ -5454,9 +4452,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteAgentRole: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_DELETE, id),
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK, taskId, agentRoleId),
-  getDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET_DEFAULTS),
-  seedDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
-  syncDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS),
   getBotNotificationPolicy: (agentRoleId: string) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.BOT_NOTIFICATION_GET,
@@ -5470,7 +4465,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Mission Control - Company Ops / Planner
   listCompanies: () => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_LIST),
-  getCompany: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_GET, companyId),
   getCommandCenterSummary: (companyId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, companyId) as Promise<
       import("../shared/types").CompanyCommandCenterSummary
@@ -5480,10 +4474,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.MC_AUTOMATION_OUTCOME_RETRY,
       outcomeId,
     ) as Promise<AutomationRunOutcome>,
-  getMissionControlBrief: (request?: import("../shared/types").MissionControlScopeRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_GET_BRIEF, request) as Promise<
-      import("../shared/types").MissionControlBrief
-    >,
   listMissionControlItems: (request?: import("../shared/types").MissionControlListRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_LIST_ITEMS, request) as Promise<
       import("../shared/types").MissionControlItem[]
@@ -5497,25 +4487,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       import("../shared/types").MissionControlBrief
     >,
   listCompanyGoals: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_LIST, companyId),
-  getGoal: (goalId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_GET, goalId),
-  createGoal: (input: import("../shared/types").GoalCreateInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_CREATE, input),
-  updateGoal: (request: { goalId: string } & import("../shared/types").GoalUpdate) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_UPDATE, request),
   listCompanyProjects: (companyId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_LIST, companyId),
-  getProject: (projectId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_GET, projectId),
   createProject: (input: import("../shared/types").ProjectCreateInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_CREATE, input),
-  updateProject: (request: { projectId: string } & import("../shared/types").ProjectUpdate) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_UPDATE, request),
   listCompanyIssues: (companyId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_LIST, { companyId, limit }),
-  getIssue: (issueId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_GET, issueId),
-  createIssue: (input: import("../shared/types").IssueCreateInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_CREATE, input),
-  updateIssue: (request: { issueId: string } & import("../shared/types").IssueUpdate) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_UPDATE, request),
   listIssueComments: (issueId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_COMMENT_LIST, issueId),
   listCompanyRuns: (companyId: string, issueId?: string, limit?: number) =>
@@ -5540,7 +4517,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Plugin Packs (Customize panel) APIs
   listPluginPacks: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_LIST),
-  getPluginPack: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_GET, name),
   togglePluginPack: (name: string, enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_TOGGLE, name, enabled),
   getActiveContext: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_GET_CONTEXT),
@@ -5567,13 +4543,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     query: string,
     options?: { page?: number; pageSize?: number; category?: string },
   ) => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_SEARCH, query, options),
-  getPackRegistryDetails: (packId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_DETAILS, packId),
   getPackRegistryCategories: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_CATEGORIES),
   checkPackUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_CHECK_UPDATES),
   listQuarantinedImports: () => ipcRenderer.invoke(IPC_CHANNELS.IMPORT_SECURITY_LIST_QUARANTINED),
-  getImportSecurityReport: (request: import("../shared/types").ImportSecurityReportRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPORT_SECURITY_GET_REPORT, request),
   retryQuarantinedImport: (recordId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPORT_SECURITY_RETRY_QUARANTINED, recordId),
   removeQuarantinedImport: (recordId: string) =>
@@ -5583,8 +4555,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAdminPolicies: () => ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_GET),
   updateAdminPolicies: (updates: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_UPDATE, updates),
-  checkPackPolicy: (packId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_CHECK_PACK, packId),
 
   // Agent Security APIs
   agentSecurityGetStatus: (refresh?: boolean) =>
@@ -5602,10 +4572,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       findingId,
       status,
     ) as Promise<AgentSecurityFinding | null>,
-  agentSecurityListDecisions: (taskId?: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_DECISIONS_LIST, taskId, limit) as Promise<
-      AgentSecurityEnforcement[]
-    >,
   agentSecurityListDiagnostics: (limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_DIAGNOSTICS_LIST, limit) as Promise<
       AgentSecurityDiagnostic[]
@@ -5624,11 +4590,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(
       IPC_CHANNELS.AGENT_SECURITY_RULES_CHECK,
     ) as Promise<AgentSecurityRulesCheckResult>,
-  agentSecurityHookStatus: (agent: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.AGENT_SECURITY_HOOK_STATUS,
-      agent,
-    ) as Promise<AgentSecurityHookManagementResult>,
   agentSecurityInstallHook: (agent: string) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.AGENT_SECURITY_HOOK_INSTALL,
@@ -5639,23 +4600,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.AGENT_SECURITY_HOOK_UNINSTALL,
       agent,
     ) as Promise<AgentSecurityHookManagementResult>,
-  agentSecurityBuildCase: (caseId: string, taskId: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.AGENT_SECURITY_CASE_BUILD,
-      caseId,
-      taskId,
-    ) as Promise<AgentSecurityCaseBuildResult>,
-  agentSecurityVerifyCase: (bundleName: string) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.AGENT_SECURITY_CASE_VERIFY,
-      bundleName,
-    ) as Promise<AgentSecurityCaseVerifyResult>,
-  agentSecurityPrune: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_PRUNE) as Promise<{
-      findings: number;
-      decisions: number;
-      diagnostics: number;
-    }>,
 
   // Agent Teams APIs
   listTeams: (workspaceId: string, includeInactive?: boolean) =>
@@ -5738,20 +4682,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // ============ Mission Control APIs ============
 
   // Heartbeat System
-  getHeartbeatConfig: (agentRoleId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_CONFIG, agentRoleId),
-  updateHeartbeatConfig: (
-    agentRoleId: string,
-    config: {
-      heartbeatEnabled?: boolean;
-      heartbeatIntervalMinutes?: number;
-      heartbeatStaggerOffset?: number;
-    },
-  ) => ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_UPDATE_CONFIG, agentRoleId, config),
   triggerHeartbeat: (agentRoleId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_TRIGGER, agentRoleId),
-  getHeartbeatStatus: (agentRoleId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_STATUS, agentRoleId),
   getAllHeartbeatStatus: () => ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_ALL_STATUS),
   onHeartbeatEvent: (callback: (event: HeartbeatEvent) => void) => {
     const subscription = (_: Any, data: HeartbeatEvent) => callback(data);
@@ -5759,109 +4691,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.HEARTBEAT_EVENT, subscription);
   },
   listAutomationProfiles: () => ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST),
-  getAutomationProfile: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_GET, id),
-  createAutomationProfile: (request: import("../shared/types").CreateAutomationProfileRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_CREATE, request),
-  updateAutomationProfile: (request: import("../shared/types").UpdateAutomationProfileRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_UPDATE, request),
-  deleteAutomationProfile: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_DELETE, id),
-  attachAutomationProfileToAgentRole: (
-    agentRoleId: string,
-    request?: Partial<import("../shared/types").CreateAutomationProfileRequest>,
-  ) => ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH, agentRoleId, request),
-  detachAutomationProfileFromAgentRole: (agentRoleId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH, agentRoleId),
-  listHeartbeatRunsForAutomationProfile: (profileId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS, { profileId, limit }),
-  listSubconsciousRunsForAutomationProfile: (profileId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS, {
-      profileId,
-      limit,
-    }),
-  listCoreTraces: (request?: import("../shared/types").ListCoreTracesRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_LIST, request) as Promise<CoreTrace[]>,
-  getCoreTrace: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_GET, id) as Promise<GetCoreTraceResult | undefined>,
-  listCoreTracesForAutomationProfile: (profileId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_LIST_BY_PROFILE, { profileId, limit }) as Promise<
-      CoreTrace[]
-    >,
   listCoreFailureRecords: (request?: import("../shared/types").ListCoreFailureRecordsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_LIST, request) as Promise<CoreFailureRecord[]>,
   listCoreFailureClusters: (request?: import("../shared/types").ListCoreFailureClustersRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_CLUSTER_LIST, request) as Promise<
       CoreFailureCluster[]
     >,
-  reviewCoreFailureCluster: (request: import("../shared/types").ReviewCoreFailureClusterRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_CLUSTER_REVIEW, request) as Promise<
-      CoreFailureCluster | undefined
-    >,
   listCoreEvalCases: (request?: import("../shared/types").ListCoreEvalCasesRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_EVAL_CASE_LIST, request) as Promise<CoreEvalCase[]>,
-  reviewCoreEvalCase: (request: import("../shared/types").ReviewCoreEvalCaseRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_EVAL_CASE_REVIEW, request) as Promise<
-      CoreEvalCase | undefined
-    >,
   listCoreExperiments: (request?: import("../shared/types").ListCoreExperimentsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_EXPERIMENT_LIST, request) as Promise<
       CoreHarnessExperiment[]
     >,
-  runCoreExperiment: (request: import("../shared/types").RunCoreExperimentRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_EXPERIMENT_RUN, request) as Promise<{
-      experiment: CoreHarnessExperiment;
-      run: import("../shared/types").CoreHarnessExperimentRun;
-      gate: import("../shared/types").CoreRegressionGateResult;
-    }>,
-  reviewCoreExperiment: (request: import("../shared/types").ReviewCoreExperimentRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_EXPERIMENT_REVIEW, request) as Promise<
-      CoreHarnessExperiment | undefined
-    >,
   listCoreLearnings: (request?: import("../shared/types").ListCoreLearningsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_LEARNINGS_LIST, request) as Promise<CoreLearningsEntry[]>,
-  listCoreMemoryCandidates: (
-    request?: import("../shared/types").ListCoreMemoryCandidatesRequest,
-  ) => {
-    if (hasInvalidCoreMemoryCandidateScope(request)) {
-      return Promise.resolve([]);
-    }
-    return ipcRenderer.invoke(IPC_CHANNELS.CORE_MEMORY_LIST_CANDIDATES, request) as Promise<
-      CoreMemoryCandidate[]
-    >;
-  },
-  reviewCoreMemoryCandidate: (
-    request: import("../shared/types").ReviewCoreMemoryCandidateRequest,
-  ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_MEMORY_REVIEW_CANDIDATE, request) as Promise<
-      CoreMemoryCandidate | undefined
-    >,
-  listCoreMemoryDistillRuns: (profileId: string, workspaceId?: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_MEMORY_LIST_DISTILL_RUNS, {
-      profileId,
-      workspaceId,
-      limit,
-    }) as Promise<CoreMemoryDistillRun[]>,
-  runCoreMemoryDistillNow: (request: import("../shared/types").RunCoreMemoryDistillNowRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.CORE_MEMORY_RUN_DISTILL_NOW,
-      request,
-    ) as Promise<CoreMemoryDistillRun>,
-
-  // Task Subscriptions
-  listSubscriptions: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_LIST, taskId),
-  addSubscription: (taskId: string, agentRoleId: string, reason: SubscriptionReason) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_ADD, taskId, agentRoleId, reason),
-  removeSubscription: (taskId: string, agentRoleId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_REMOVE, taskId, agentRoleId),
-  getTaskSubscribers: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_GET_SUBSCRIBERS, taskId),
-  getAgentSubscriptions: (agentRoleId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_GET_FOR_AGENT, agentRoleId),
-  onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => {
-    const subscription = (_: Any, data: SubscriptionEvent) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
-  },
 
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) =>
@@ -5891,35 +4734,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) =>
     ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_RECALL_QUERY, query) as Promise<UnifiedRecallResponse>,
 
-  // Shell sessions
-  onShellSessionEvent: (callback: (event: ShellSessionLifecycleEvent) => void) => {
-    const subscription = (_: Any, data: ShellSessionLifecycleEvent) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.SHELL_SESSION_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.SHELL_SESSION_EVENT, subscription);
-  },
-  getShellSessionInfo: (taskId: string, workspaceId: string, scope?: "task" | "workspace") =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_GET, {
-      taskId,
-      workspaceId,
-      scope,
-    }) as Promise<ShellSessionInfo | null>,
-  listShellSessions: (taskId?: string, workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_LIST, { taskId, workspaceId }) as Promise<
-      ShellSessionInfo[]
-    >,
-  resetShellSession: (taskId: string, workspaceId: string, scope?: "task" | "workspace") =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_RESET, {
-      taskId,
-      workspaceId,
-      scope,
-    }) as Promise<ShellSessionInfo | null>,
-  closeShellSession: (taskId: string, workspaceId: string, scope?: "task" | "workspace") =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_CLOSE, {
-      taskId,
-      workspaceId,
-      scope,
-    }) as Promise<ShellSessionInfo | null>,
-
   // LLM routing observability
   getLLMRoutingStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_ROUTING_STATUS) as Promise<LLMRoutingRuntimeState>,
@@ -5936,30 +4750,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
     return ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_LIST, query);
   },
-  createTaskLabel: (request: CreateTaskLabelRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_CREATE, request),
-  updateTaskLabel: (id: string, request: UpdateTaskLabelRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_UPDATE, id, request),
-  deleteTaskLabel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_DELETE, id),
-
-  // Agent Working State APIs
-  getWorkingState: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_GET, id),
-  getCurrentWorkingState: (query: WorkingStateQuery) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_GET_CURRENT, query),
-  updateWorkingState: (request: UpdateWorkingStateRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_UPDATE, request),
-  getWorkingStateHistory: (query: WorkingStateHistoryQuery) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_HISTORY, query),
-  restoreWorkingState: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_RESTORE, id),
-  deleteWorkingState: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_DELETE, id),
-  listWorkingStatesForTask: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_LIST_FOR_TASK, taskId),
 
   // Context Policy APIs (per-context security DM vs group)
-  getContextPolicy: (channelId: string, contextType: ContextTypeValue) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_GET, channelId, contextType),
-  getContextPolicyForChat: (channelId: string, chatId: string, isGroup: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_GET_FOR_CHAT, channelId, chatId, isGroup),
   listContextPolicies: (channelId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_LIST, channelId),
   updateContextPolicy: (
@@ -5967,23 +4759,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     contextType: ContextTypeValue,
     options: UpdateContextPolicyOptions,
   ) => ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_UPDATE, channelId, contextType, options),
-  deleteContextPolicies: (channelId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_DELETE, channelId),
-  createDefaultContextPolicies: (channelId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_CREATE_DEFAULTS, channelId),
-  isToolAllowedInContext: (
-    channelId: string,
-    contextType: ContextTypeValue,
-    toolName: string,
-    toolGroups: string[],
-  ) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.CONTEXT_POLICY_IS_TOOL_ALLOWED,
-      channelId,
-      contextType,
-      toolName,
-      toolGroups,
-    ),
   listChannelSpecializations: (channelId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_SPECIALIZATION_LIST, channelId) as Promise<
       ChannelSpecializationData[]
@@ -6002,18 +4777,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_SPECIALIZATION_DELETE, id) as Promise<{
       success: boolean;
     }>,
-  resolveChannelSpecialization: (data: { channelId: string; chatId?: string; threadId?: string }) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.CHANNEL_SPECIALIZATION_RESOLVE,
-      data,
-    ) as Promise<ChannelSpecializationData | null>,
 
   // Voice Mode
   getVoiceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_SETTINGS),
   getVoiceCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_CAPABILITIES),
   saveVoiceSettings: (settings: Partial<VoiceSettingsData>) =>
     ipcRenderer.invoke(IPC_CHANNELS.VOICE_SAVE_SETTINGS, settings),
-  getVoiceState: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_STATE),
   voiceSpeak: (text: string) => ipcRenderer.invoke(IPC_CHANNELS.VOICE_SPEAK, text),
   voiceStopSpeaking: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_STOP_SPEAKING),
   voiceTranscribe: (audioData: ArrayBuffer) =>
@@ -6031,12 +4800,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Git Worktree APIs
   getWorktreeWorkspaceInfo: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_WORKSPACE_INFO, workspaceId),
-  getWorktreeInfo: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_INFO, taskId),
-  listWorktrees: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_LIST, workspaceId),
   mergeWorktree: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_MERGE, taskId),
   cleanupWorktree: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_CLEANUP, taskId),
-  getWorktreeDiff: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_DIFF, taskId),
   getWorktreeSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_SETTINGS),
   saveWorktreeSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_SAVE_SETTINGS, settings),
@@ -6160,18 +4925,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_RUNS, { routineId, limit }),
   listRoutineWorkflowRunSteps: (runId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_STEPS, runId),
-  listRoutineWorkflowEvents: (routineId?: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_EVENTS, { routineId, limit }),
-  listRoutineWorkflowEventSamples: (source?: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_EVENT_SAMPLES, { source, limit }),
   respondToRoutineWorkflowApproval: (request: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_RESPOND_APPROVAL, request),
-  retryRoutineWorkflowRun: (runId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_RETRY, runId),
   cancelRoutineWorkflowRun: (runId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_CANCEL, runId),
-  enqueueRoutineWorkflowEvent: (envelope: Any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_ENQUEUE_EVENT, envelope),
   listRoutineWorkflowSecrets: () => ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_SECRETS),
   upsertRoutineWorkflowSecret: (input: { id?: string; name: string; value: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_UPSERT_SECRET, input),
@@ -6181,10 +4938,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Daily Briefing (extended)
   getLatestBriefing: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_GET_LATEST, workspaceId),
-  getBriefingConfig: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_GET_CONFIG, workspaceId),
-  saveBriefingConfig: (workspaceId: string, config: Any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_SAVE_CONFIG, { workspaceId, config }),
 
   // File Hub
   listHubFiles: (options: Any) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_LIST, options),
@@ -6205,23 +4958,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openWebAccessBrowserApp: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_OPEN_BROWSER_APP),
   signOutWebAccessBrowsers: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SIGN_OUT_BROWSERS),
 
-  // Playwright QA APIs
-  qaGetRuns: () => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUNS),
-  qaGetRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUN, runId),
-  qaStartRun: (data: { taskId: string; workspaceId: string; config: Any }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.QA_START_RUN, data),
-  qaStopRun: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.QA_STOP_RUN, taskId),
-  onQAEvent: (callback: (event: Any) => void) => {
-    const handler = (_: Any, event: Any) => callback(event);
-    ipcRenderer.on(IPC_CHANNELS.QA_EVENT, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.QA_EVENT, handler);
-  },
-
   // Window control APIs (for custom title bar on Windows)
   windowMinimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),
   windowMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MAXIMIZE),
   windowClose: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CLOSE),
-  windowIsMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED) as Promise<boolean>,
   getPlatform: () => process.platform,
   getNativeFrameMode: () =>
     shouldUseNativeWindowFrame({
@@ -6325,23 +5065,7 @@ export type {
 };
 
 // Export Task Board types
-export type {
-  TaskBoardColumn,
-  TaskLabelData,
-  CreateTaskLabelRequest,
-  UpdateTaskLabelRequest,
-  TaskLabelListQuery,
-  TaskBoardEvent,
-};
-
-// Export Agent Working State types
-export type {
-  WorkingStateType,
-  AgentWorkingStateData,
-  UpdateWorkingStateRequest,
-  WorkingStateQuery,
-  WorkingStateHistoryQuery,
-};
+export type { TaskBoardColumn, TaskLabelData, TaskLabelListQuery, TaskBoardEvent };
 
 // Export Context Policy types
 export type {
@@ -6428,12 +5152,6 @@ export interface BrowserWorkbenchUserNavigateResult {
   block?: { reason: BrowserWorkbenchBlockReason | string; detail?: string };
 }
 
-export type BrowserSettings = import("../shared/browser-settings").BrowserSettings;
-export type BrowserSettingsState = import("../shared/browser-settings").BrowserSettingsState;
-export type BrowserDataType = import("../shared/browser-settings").BrowserDataType;
-export type HygieneReport = import("../shared/types").HygieneReport;
-export type MergeReview = import("../shared/types").MergeReview;
-export type LifecycleKind = import("../shared/types").LifecycleKind;
 export type LifecycleMetaInput = {
   kind: LifecycleKind;
   id: string;
@@ -6442,10 +5160,6 @@ export type LifecycleMetaInput = {
   evidence?: string | null;
   dependsOn?: import("../shared/types").LifecycleRef[];
 };
-export type AgentIdentityDirectoryResult =
-  import("../shared/browser-settings").AgentIdentityDirectoryResult;
-export type BrowserSitePermissionEntry =
-  import("../shared/browser-settings").BrowserSitePermissionEntry;
 
 export interface BrowserWorkbenchInspectArea {
   rect: { x: number; y: number; width: number; height: number };
@@ -6699,15 +5413,7 @@ export interface BrowserWorkbenchInspectTarget {
 }
 
 // Export Mission Control types
-export type {
-  HeartbeatStatus,
-  HeartbeatResult,
-  HeartbeatEvent,
-  SubscriptionReason,
-  TaskSubscription,
-  SubscriptionEvent,
-  AgentAutonomyLevel,
-};
+export type { HeartbeatStatus, HeartbeatResult, HeartbeatEvent, AgentAutonomyLevel };
 
 export interface ElectronAPI {
   listHubFiles: (
@@ -6769,7 +5475,6 @@ export interface ElectronAPI {
     workspacePath: string;
     workspaceId?: string;
   }) => Promise<SpreadsheetOpenWorkbookResult>;
-  getSpreadsheetViewport: (data: SpreadsheetViewportRequest) => Promise<SpreadsheetViewportResult>;
   applySpreadsheetPatches: (data: {
     sessionId: string;
     patches: SpreadsheetPatch[];
@@ -7145,12 +5850,6 @@ export interface ElectronAPI {
   onBrowserWorkbenchContextAction: (
     callback: (event: BrowserWorkbenchContextActionEvent) => void,
   ) => () => void;
-  ingestYouTubeVideo: (data: {
-    workspaceId: string;
-    url: string;
-    language?: string;
-    force?: boolean;
-  }) => Promise<Any>;
   askYouTubeVideo: (data: {
     workspaceId: string;
     question: string;
@@ -7160,13 +5859,6 @@ export interface ElectronAPI {
     limit?: number;
     force?: boolean;
   }) => Promise<Any>;
-  searchYouTubeSegments: (data: {
-    workspaceId: string;
-    query: string;
-    videoIds?: string[];
-    limit?: number;
-  }) => Promise<Any>;
-  listYouTubeVideos: (data: { workspaceId: string; limit?: number }) => Promise<Any>;
   getLlmWikiVaultSummary: (data: {
     workspacePath: string;
     vaultPath?: string;
@@ -7183,10 +5875,6 @@ export interface ElectronAPI {
     filePath: string;
     workspacePath?: string;
   }) => Promise<DocumentEditorSession>;
-  listDocumentVersions: (data: {
-    filePath: string;
-    workspacePath?: string;
-  }) => Promise<DocumentVersionEntry[]>;
   startDocumentEditTask: (data: DocumentEditRequest) => Promise<Any>;
   getMailboxSyncStatus: () => Promise<MailboxSyncStatus>;
   getMailboxClientState: () => Promise<MailboxClientState>;
@@ -7198,7 +5886,6 @@ export interface ElectronAPI {
     workspaceId?: string;
     threadId?: string;
   }) => Promise<MailboxAutomationRecord[]>;
-  listThreadMailboxAutomations: (threadId: string) => Promise<MailboxAutomationRecord[]>;
   createMailboxRule: (recipe: MailboxRuleRecipe) => Promise<MailboxAutomationRecord>;
   updateMailboxRule: (
     id: string,
@@ -7219,7 +5906,6 @@ export interface ElectronAPI {
   deleteMailboxForward: (id: string) => Promise<boolean>;
   runMailboxForward: (id: string) => Promise<string>;
   getMailboxDigest: (workspaceId?: string) => Promise<MailboxDigestSnapshot>;
-  getMailboxTodayDigest: (input?: { limitPerBucket?: number }) => Promise<MailboxTodayDigest>;
   getMailboxSenderCleanupDigest: (input?: {
     limit?: number;
   }) => Promise<MailboxSenderCleanupDigest>;
@@ -7232,19 +5918,7 @@ export interface ElectronAPI {
     draftId: string,
     patch: MailboxComposeDraftPatch,
   ) => Promise<MailboxComposeDraft>;
-  addMailboxDraftAttachment: (
-    draftId: string,
-    input: MailboxDraftAttachmentInput,
-  ) => Promise<MailboxComposeDraft>;
-  removeMailboxDraftAttachment: (
-    draftId: string,
-    attachmentId: string,
-  ) => Promise<MailboxComposeDraft>;
   sendMailboxDraft: (draftId: string) => Promise<MailboxOutgoingMessage>;
-  scheduleMailboxSend: (draftId: string, scheduledAt: number) => Promise<MailboxComposeDraft>;
-  updateMailboxClientSettings: (
-    patch: MailboxClientSettingsPatch,
-  ) => Promise<MailboxClientState["settings"]>;
   retryMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   resolveMailboxSendOutcome: (
     actionId: string,
@@ -7253,7 +5927,6 @@ export interface ElectronAPI {
   discardMailboxDraft: (draftId: string) => Promise<boolean>;
   /** Takes back a queued send and returns the draft to editing; false when it's too late. */
   cancelMailboxDraftSend: (draftId: string) => Promise<boolean>;
-  undoMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   summarizeMailboxThread: (threadId: string) => Promise<MailboxSummaryCard | null>;
   generateMailboxDraft: (
     threadId: string,
@@ -7270,8 +5943,6 @@ export interface ElectronAPI {
     summary: string;
   }>;
   researchMailboxContact: (threadId: string) => Promise<MailboxResearchResult | null>;
-  resolveMailboxContactIdentity: (threadId: string) => Promise<ContactIdentityResolution | null>;
-  getContactIdentity: (contactIdentityId: string) => Promise<ContactIdentity | null>;
   listContactIdentities: (workspaceId?: string) => Promise<ContactIdentity[]>;
   searchIdentityLinkTargets: (
     workspaceId: string,
@@ -7289,9 +5960,6 @@ export interface ElectronAPI {
     channelType?: string;
     channelUserId?: string;
   }) => Promise<ContactIdentity | null>;
-  getMailboxRelationshipTimeline: (
-    query: RelationshipTimelineQuery,
-  ) => Promise<RelationshipTimelineEvent[]>;
   listIdentityCandidates: (
     workspaceId?: string,
     status?: ContactIdentityCandidate["status"],
@@ -7299,7 +5967,6 @@ export interface ElectronAPI {
   confirmIdentityLink: (candidateId: string) => Promise<ContactIdentityCandidate | null>;
   rejectIdentityLink: (candidateId: string) => Promise<ContactIdentityCandidate | null>;
   unlinkIdentityHandle: (handleId: string) => Promise<boolean>;
-  getChannelPreferenceSummary: (contactIdentityId: string) => Promise<ChannelPreferenceSummary>;
   getContactIdentityCoverageStats: (workspaceId?: string) => Promise<ContactIdentityCoverageStats>;
   replyViaChannel: (input: {
     threadId: string;
@@ -7345,7 +6012,6 @@ export interface ElectronAPI {
   getMailboxQuickReplySuggestions: (
     threadId: string,
   ) => Promise<MailboxQuickReplySuggestionsResult>;
-  createMailboxSavedViewReviewSchedule: (viewId: string) => Promise<MailboxAutomationRecord>;
   applyMailboxAction: (input: MailboxApplyActionInput) => Promise<{
     success: boolean;
     action: string;
@@ -7400,11 +6066,6 @@ export interface ElectronAPI {
       mustCreatePaths?: string[];
     };
   }) => Promise<Any>;
-  searchSessions: (request: {
-    query: string;
-    workspaceId?: string;
-    limit?: number;
-  }) => Promise<SessionSearchResult[]>;
   listTasks: (opts?: {
     limit?: number;
     offset?: number;
@@ -7503,14 +6164,12 @@ export interface ElectronAPI {
       createdAt?: number;
     };
   }) => Promise<Any[]>;
-  exportTasksJson: (query?: Any) => Promise<Any>;
   toggleTaskPin: (taskId: string) => Promise<Any>;
   cancelTask: (id: string) => Promise<void>;
   discardInterruptedTask: (taskId: string, expectedUpdatedAt: number) => Promise<void>;
   wrapUpTask: (id: string) => Promise<void>;
   pauseTask: (id: string) => Promise<void>;
   resumeTask: (id: string) => Promise<void>;
-  continueTask: (id: string) => Promise<void>;
   forkTaskSession: (data: {
     taskId: string;
     prompt?: string;
@@ -7549,8 +6208,6 @@ export interface ElectronAPI {
   getTaskEvents: (taskId: string) => Promise<Any[]>;
   getTaskTimelinePage: (request: TaskTimelinePageRequest) => Promise<TaskTimelinePageResult>;
   getTaskEventDetail: (request: TaskEventDetailRequest) => Promise<TaskEventDetailResult>;
-  /** Normalized semantic timeline projection for a task */
-  getSemanticTimeline: (taskId: string) => Promise<UiTimelineEvent[]>;
   getTaskLearningProgress: (taskId: string) => Promise<TaskLearningProgress[]>;
   getQueuedTaskInputs: (
     taskId: string,
@@ -7595,23 +6252,6 @@ export interface ElectronAPI {
     limit?: number;
     sourceTypes?: UnifiedRecallSourceType[];
   }) => Promise<UnifiedRecallResponse>;
-  getShellSessionInfo: (
-    taskId: string,
-    workspaceId: string,
-    scope?: "task" | "workspace",
-  ) => Promise<ShellSessionInfo | null>;
-  listShellSessions: (taskId?: string, workspaceId?: string) => Promise<ShellSessionInfo[]>;
-  resetShellSession: (
-    taskId: string,
-    workspaceId: string,
-    scope?: "task" | "workspace",
-  ) => Promise<ShellSessionInfo | null>;
-  closeShellSession: (
-    taskId: string,
-    workspaceId: string,
-    scope?: "task" | "workspace",
-  ) => Promise<ShellSessionInfo | null>;
-  onShellSessionEvent: (callback: (event: ShellSessionLifecycleEvent) => void) => () => void;
   listTerminalTabs: (workspaceId: string, taskId?: string) => Promise<ShellSessionInfo[]>;
   createTerminalTab: (data: {
     workspaceId: string;
@@ -7666,15 +6306,6 @@ export interface ElectronAPI {
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;
   getTempWorkspace: (options?: { createNew?: boolean }) => Promise<Workspace | null>;
-  pruneTempWorkspaces: (options?: { dryRun?: boolean }) => Promise<{
-    removedDirs: number;
-    removedRows: number;
-    candidateWorkspaceIds: string[];
-    candidateDirPaths: string[];
-    checkedRows: number;
-    checkedDirs: number;
-    dryRun: boolean;
-  }>;
   touchWorkspace: (id: string) => Promise<Any>;
   /** Removes the workspace from CoWork with its sessions and memory; files stay. */
   removeWorkspace: (
@@ -7800,7 +6431,6 @@ export interface ElectronAPI {
     offset?: number;
     status?: ManagedEnvironment["status"];
   }) => Promise<ManagedEnvironment[]>;
-  getManagedEnvironment: (environmentId: string) => Promise<ManagedEnvironment | null>;
   createManagedEnvironment: (request: {
     name: string;
     kind?: ManagedEnvironment["kind"];
@@ -7837,15 +6467,6 @@ export interface ElectronAPI {
     sessionId?: string;
     taskId?: string;
   }) => Promise<SessionHandoffExportResult>;
-  listWorkContexts: (params?: {
-    workspaceId?: string;
-    includeArchived?: boolean;
-    limit?: number;
-  }) => Promise<WorkContext[]>;
-  getWorkContext: (contextId: string) => Promise<WorkContext | null>;
-  createWorkContext: (request: WorkContextCreateInput) => Promise<WorkContext>;
-  updateWorkContext: (request: WorkContextUpdateInput) => Promise<WorkContext | null>;
-  addWorkContextMember: (request: WorkContextMemberInput) => Promise<WorkContext | null>;
   getSessionMembers: (request: SessionMembersRequest) => Promise<SessionShareSnapshot>;
   createSessionInvite: (request: SessionInviteCreateInput) => Promise<SessionInviteCreateResult>;
   acceptSessionInvite: (request: SessionInviteAcceptInput) => Promise<SessionInviteAcceptResult>;
@@ -7853,12 +6474,6 @@ export interface ElectronAPI {
   listManagedSessionEvents: (sessionId: string, limit?: number) => Promise<ManagedSessionEvent[]>;
   getManagedSessionWorkpaper: (sessionId: string) => Promise<ManagedSessionWorkpaper>;
   listAgentTemplates: () => Promise<AgentTemplate[]>;
-  listAgentWorkspaceMemberships: (workspaceId?: string) => Promise<AgentWorkspaceMembership[]>;
-  updateAgentWorkspaceMembership: (request: {
-    workspaceId: string;
-    principalId: string;
-    role: AgentWorkspaceMembership["role"];
-  }) => Promise<AgentWorkspaceMembership>;
   getMyAgentWorkspacePermissions: (
     workspaceId: string,
   ) => Promise<AgentWorkspacePermissionSnapshot>;
@@ -7878,10 +6493,6 @@ export interface ElectronAPI {
     removeReferencePhotoIds?: string[];
   }) => Promise<ImageGenProfile | null>;
   deleteImageGenProfile: (id: string) => Promise<boolean>;
-  generateManagedSessionAudioSummary: (
-    sessionId: string,
-    config?: Partial<AudioSummaryConfig>,
-  ) => Promise<AudioSummaryResult>;
   listSkills: () => Promise<Any[]>;
   getSkill: (id: string) => Promise<Any>;
   // LLM Settings
@@ -8135,7 +6746,6 @@ export interface ElectronAPI {
     displayName?: string,
     contextType?: ContextTypeValue,
   ) => Promise<string>;
-  onGatewayMessage: (callback: (data: Any) => void) => () => void;
   onGatewayUsersUpdated: (
     callback: (data: { channelId: string; channelType: string }) => void,
   ) => () => void;
@@ -8692,16 +7302,6 @@ export interface ElectronAPI {
     };
     workStyle?: "planner" | "flexible";
   }) => Promise<{ success: boolean }>;
-  getPersonalityDefinitions: () => Promise<
-    Array<{
-      id: "professional" | "friendly" | "concise" | "creative" | "technical" | "casual" | "custom";
-      name: string;
-      description: string;
-      icon: string;
-      traits: string[];
-      promptTemplate: string;
-    }>
-  >;
   getPersonaDefinitions: () => Promise<
     Array<{
       id:
@@ -8731,9 +7331,6 @@ export interface ElectronAPI {
     daysTogether: number;
     nextMilestone: number | null;
   }>;
-  setActivePersonality: (personalityId: string) => Promise<{ success: boolean }>;
-  setActivePersona: (personaId: string) => Promise<{ success: boolean }>;
-  resetPersonalitySettings: (preserveRelationship?: boolean) => Promise<{ success: boolean }>;
   getPersonalityConfigV2: () => Promise<Any>;
   /** `responseStyleBaseline`: the style the form loaded (tells a user change from a stale copy). */
   savePersonalityConfigV2: (
@@ -8761,7 +7358,6 @@ export interface ElectronAPI {
     maxConcurrentTasks?: number;
     taskTimeoutMinutes?: number;
   }) => Promise<{ success: boolean }>;
-  clearQueue: () => Promise<{ success: boolean; clearedRunning: number; clearedQueued: number }>;
   getWatchdogSettings: () => Promise<WatchdogSettings>;
   saveWatchdogSettings: (
     settings: Partial<WatchdogSettings>,
@@ -8778,8 +7374,6 @@ export interface ElectronAPI {
   // Custom Skills APIs
   listCustomSkills: () => Promise<CustomSkill[]>;
   listTaskSkills: () => Promise<CustomSkill[]>;
-  listGuidelineSkills: () => Promise<CustomSkill[]>;
-  getCustomSkill: (id: string) => Promise<CustomSkill | undefined>;
   createCustomSkill: (skill: Omit<CustomSkill, "filePath">) => Promise<CustomSkill>;
   updateCustomSkill: (id: string, updates: Partial<CustomSkill>) => Promise<CustomSkill>;
   deleteCustomSkill: (id: string) => Promise<boolean>;
@@ -8797,7 +7391,6 @@ export interface ElectronAPI {
     query: string,
     options?: { page?: number; pageSize?: number },
   ) => Promise<SkillSearchResult>;
-  getSkillDetails: (skillId: string) => Promise<SkillRegistryEntry | null>;
   installSkillFromRegistry: (
     skillId: string,
     version?: string,
@@ -8833,27 +7426,9 @@ export interface ElectronAPI {
       security?: Partial<import("../shared/types").InstallSecurityOutcome>;
     }>;
   }>;
-  updateSkillFromRegistry: (
-    skillId: string,
-    version?: string,
-  ) => Promise<{
-    success: boolean;
-    skill?: CustomSkill;
-    error?: string;
-    security?: import("../shared/types").InstallSecurityOutcome;
-  }>;
-  updateAllSkills: () => Promise<{ updated: string[]; failed: string[] }>;
   uninstallSkill: (skillId: string) => Promise<{ success: boolean; error?: string }>;
-  listManagedSkills: () => Promise<CustomSkill[]>;
-  checkSkillUpdates: (
-    skillId: string,
-  ) => Promise<{ hasUpdate: boolean; currentVersion: string | null; latestVersion: string | null }>;
   getSkillStatus: () => Promise<SkillStatusReport>;
-  getEligibleSkills: () => Promise<CustomSkill[]>;
   listQuarantinedImports: () => Promise<import("../shared/types").QuarantinedImportRecord[]>;
-  getImportSecurityReport: (
-    request: import("../shared/types").ImportSecurityReportRequest,
-  ) => Promise<import("../shared/types").CapabilitySecurityReport | null>;
   retryQuarantinedImport: (
     recordId: string,
   ) => Promise<import("../shared/types").RetryQuarantinedImportResult>;
@@ -8963,10 +7538,6 @@ export interface ElectronAPI {
   uninstallMCPServer: (serverId: string) => Promise<void>;
   checkMCPUpdates: () => Promise<MCPUpdateInfo[]>;
   updateMCPServerFromRegistry: (serverId: string) => Promise<MCPServerConfig>;
-  // MCP Host
-  startMCPHost: (port?: number) => Promise<{ success: boolean; port?: number }>;
-  stopMCPHost: () => Promise<void>;
-  getMCPHostStatus: () => Promise<{ running: boolean; port?: number }>;
   // Secure MCP Tunnels
   getSecureMcpTunnelSettings: () => Promise<
     import("../shared/types").SecureMcpTunnelDisplaySettings
@@ -9008,16 +7579,6 @@ export interface ElectronAPI {
   onSecureMcpTunnelStatusChange: (
     callback: (status: import("../shared/types").SecureMcpTunnelStatus[]) => void,
   ) => () => void;
-  // Scraping (Scrapling)
-  scrapingGetSettings: () => Promise<Any>;
-  scrapingSaveSettings: (settings: Any) => Promise<{ success: boolean }>;
-  scrapingGetStatus: () => Promise<{
-    installed: boolean;
-    pythonAvailable: boolean;
-    version: string | null;
-    error?: string;
-  }>;
-  scrapingReset: () => Promise<{ success: boolean }>;
   // Built-in Tools Settings
   getBuiltinToolsSettings: () => Promise<BuiltinToolsSettings>;
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => Promise<{ success: boolean }>;
@@ -9027,11 +7588,6 @@ export interface ElectronAPI {
     settings: Partial<ChronicleSettings>,
   ) => Promise<{ success: boolean; settings: ChronicleSettings }>;
   getChronicleStatus: () => Promise<ChronicleCaptureStatus>;
-  queryChronicleRecentContext: (input: {
-    query: string;
-    limit?: number;
-    useFallback?: boolean;
-  }) => Promise<ChronicleResolvedContext[]>;
   listChronicleObservations: (input: { workspaceId: string; limit?: number }) => Promise<Any[]>;
   deleteChronicleObservation: (input: {
     workspaceId: string;
@@ -9100,7 +7656,6 @@ export interface ElectronAPI {
   onTraySelectWorkspace: (callback: (event: Any, workspaceId: string) => void) => () => void;
   onTrayOpenSettings: (callback: () => void) => () => void;
   onTrayOpenAbout: (callback: () => void) => () => void;
-  onTrayCheckUpdates: (callback: () => void) => () => void;
   // Cron (Scheduled Tasks)
   getCronStatus: () => Promise<CronStatusSummary>;
   listCronJobs: (opts?: { includeDisabled?: boolean }) => Promise<CronJob[]>;
@@ -9126,7 +7681,6 @@ export interface ElectronAPI {
   onCronEvent: (callback: (event: CronEvent) => void) => () => void;
   getCronRunHistory: (id: string) => Promise<CronRunHistoryResult | null>;
   clearCronRunHistory: (id: string) => Promise<boolean>;
-  getCronWebhookStatus: () => Promise<CronWebhookStatus>;
   // Notifications
   listNotifications: () => Promise<AppNotification[]>;
   addNotification: (data: {
@@ -9157,15 +7711,12 @@ export interface ElectronAPI {
   disableHooks: () => Promise<{ enabled: boolean }>;
   regenerateHookToken: () => Promise<{ token: string }>;
   getHooksStatus: () => Promise<HooksStatus>;
-  addHookMapping: (mapping: HookMapping) => Promise<{ ok: boolean }>;
-  removeHookMapping: (id: string) => Promise<{ ok: boolean }>;
   configureGmailHooks: (
     config: GmailHooksConfig,
   ) => Promise<{ ok: boolean; gmail?: GmailHooksConfig }>;
   getGmailHooksStatus: () => Promise<GmailHooksStatus>;
   startGmailWatcher: () => Promise<{ ok: boolean; error?: string }>;
   stopGmailWatcher: () => Promise<{ ok: boolean }>;
-  onHooksEvent: (callback: (event: HooksEvent) => void) => () => void;
   listRoutines: () => Promise<Any[]>;
   getRoutine: (id: string) => Promise<Any | null>;
   listRoutineRuns: (routineId?: string, limit?: number) => Promise<Any[]>;
@@ -9183,12 +7734,8 @@ export interface ElectronAPI {
   testRoutineWorkflow: (request: Any) => Promise<Any>;
   listRoutineWorkflowRuns: (routineId?: string, limit?: number) => Promise<Any[]>;
   listRoutineWorkflowRunSteps: (runId: string) => Promise<Any[]>;
-  listRoutineWorkflowEvents: (routineId?: string, limit?: number) => Promise<Any[]>;
-  listRoutineWorkflowEventSamples: (source?: string, limit?: number) => Promise<Any[]>;
   respondToRoutineWorkflowApproval: (request: Any) => Promise<Any>;
-  retryRoutineWorkflowRun: (runId: string) => Promise<Any>;
   cancelRoutineWorkflowRun: (runId: string) => Promise<Any | null>;
-  enqueueRoutineWorkflowEvent: (envelope: Any) => Promise<Any>;
   listRoutineWorkflowSecrets: () => Promise<Any[]>;
   upsertRoutineWorkflowSecret: (input: {
     id?: string;
@@ -9227,11 +7774,9 @@ export interface ElectronAPI {
     token?: string;
     error?: string;
   }>;
-  onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => () => void;
 
   // Tailscale
   checkTailscaleAvailability: () => Promise<TailscaleAvailability>;
-  getTailscaleStatus: () => Promise<{ settings: Any; exposure: Any }>;
   setTailscaleMode: (mode: TailscaleMode) => Promise<{ ok: boolean; error?: string }>;
 
   // Remote Gateway
@@ -9250,11 +7795,9 @@ export interface ElectronAPI {
   connectSSHTunnel: (config: SSHTunnelConfig) => Promise<{ ok: boolean; error?: string }>;
   disconnectSSHTunnel: () => Promise<{ ok: boolean; error?: string }>;
   getSSHTunnelStatus: () => Promise<SSHTunnelStatus>;
-  saveSSHTunnelConfig: (config: SSHTunnelConfig) => Promise<{ ok: boolean; error?: string }>;
   testSSHTunnelConnection: (
     config: SSHTunnelConfig,
   ) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
-  onSSHTunnelEvent: (callback: (event: SSHTunnelEvent) => void) => () => void;
 
   // Device Fleet
   listManagedDevices: () => Promise<{ ok: boolean; devices?: ManagedDevice[]; error?: string }>;
@@ -9272,22 +7815,10 @@ export interface ElectronAPI {
   ) => Promise<{ ok: boolean; payload?: unknown; error?: string }>;
 
   // Live Canvas APIs
-  canvasCreate: (data: {
-    taskId: string;
-    workspaceId: string;
-    title?: string;
-  }) => Promise<CanvasSession>;
   canvasGetSession: (sessionId: string) => Promise<CanvasSession | null>;
   canvasListSessions: (taskId?: string) => Promise<CanvasSession[]>;
   canvasShow: (sessionId: string) => Promise<{ success: boolean }>;
-  canvasHide: (sessionId: string) => Promise<{ success: boolean }>;
   canvasClose: (sessionId: string) => Promise<{ success: boolean }>;
-  canvasPush: (data: {
-    sessionId: string;
-    content: string;
-    filename?: string;
-  }) => Promise<{ success: boolean }>;
-  canvasEval: (data: { sessionId: string; script: string }) => Promise<{ result: unknown }>;
   canvasSnapshot: (
     sessionId: string,
   ) => Promise<{ imageBase64: string; width: number; height: number }>;
@@ -9296,28 +7827,7 @@ export interface ElectronAPI {
     sessionId: string;
   }) => Promise<{ files: string[]; targetDir: string } | null>;
   canvasOpenInBrowser: (sessionId: string) => Promise<{ success: boolean; path: string }>;
-  canvasOpenUrl: (data: {
-    sessionId: string;
-    url: string;
-    show?: boolean;
-  }) => Promise<{ success: boolean; url: string }>;
   canvasGetSessionDir: (sessionId: string) => Promise<string | null>;
-  canvasCheckpointSave: (data: {
-    sessionId: string;
-    label?: string;
-  }) => Promise<{ id: string; label: string; createdAt: number }>;
-  canvasCheckpointList: (
-    sessionId: string,
-  ) => Promise<Array<{ id: string; label: string; createdAt: number }>>;
-  canvasCheckpointRestore: (data: {
-    sessionId: string;
-    checkpointId: string;
-  }) => Promise<{ id: string; label: string }>;
-  canvasCheckpointDelete: (data: {
-    sessionId: string;
-    checkpointId: string;
-  }) => Promise<{ success: boolean }>;
-  canvasGetContent: (sessionId: string) => Promise<Record<string, string>>;
   onCanvasEvent: (callback: (event: CanvasEvent) => void) => () => void;
 
   // Device Management
@@ -9330,11 +7840,6 @@ export interface ElectronAPI {
     accessProfileId?: string;
     shellAccess?: boolean;
   }) => Promise<{ ok: boolean; taskId?: string; error?: string }>;
-  deviceGetProfiles: () => Promise<{ ok: boolean; profiles?: Any[]; error?: string }>;
-  deviceUpdateProfile: (
-    deviceId: string,
-    data: { customName?: string; platform?: string; modelIdentifier?: string },
-  ) => Promise<{ ok: boolean; error?: string }>;
 
   // Memory System
   getMemorySettings: (workspaceId: string) => Promise<MemorySettings>;
@@ -9342,11 +7847,6 @@ export interface ElectronAPI {
     workspaceId: string;
     settings: Partial<MemorySettings>;
   }) => Promise<{ success: boolean }>;
-  searchMemories: (data: {
-    workspaceId: string;
-    query: string;
-    limit?: number;
-  }) => Promise<MemorySearchResult[]>;
   getMemoryTimeline: (data: {
     workspaceId: string;
     memoryId: string;
@@ -9652,8 +8152,6 @@ export interface ElectronAPI {
   updateAwarenessBelief: (id: string, patch: Any) => Promise<Any | null>;
   deleteAwarenessBelief: (id: string) => Promise<{ success: boolean }>;
   getAwarenessSummary: (workspaceId?: string) => Promise<Any>;
-  getAwarenessSnapshot: (workspaceId?: string) => Promise<Any>;
-  listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) => Promise<Any[]>;
   // Memory Features (global toggles)
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
@@ -9674,38 +8172,14 @@ export interface ElectronAPI {
   }) => Promise<MemoryWriteApprovalItem>;
   countMemoryWriteApprovals: (workspaceId?: string) => Promise<{ pending: number }>;
 
-  // Self-improvement loop
-  getImprovementSettings: () => Promise<ImprovementLoopSettings>;
-  getImprovementEligibility: () => Promise<ImprovementEligibility>;
-  saveImprovementOwnerEnrollment: (token: string) => Promise<ImprovementEligibility>;
-  clearImprovementOwnerEnrollment: () => Promise<ImprovementEligibility>;
-  saveImprovementSettings: (settings: ImprovementLoopSettings) => Promise<ImprovementLoopSettings>;
-  listImprovementCandidates: (workspaceId?: string) => Promise<ImprovementCandidate[]>;
-  listImprovementCampaigns: (workspaceId?: string) => Promise<ImprovementCampaign[]>;
-  refreshImprovementCandidates: () => Promise<{ candidateCount: number }>;
-  runNextImprovementExperiment: () => Promise<ImprovementCampaign | null>;
-  resetImprovementHistory: () => Promise<ImprovementHistoryResetResult>;
-  retryImprovementCampaign: (campaignId: string) => Promise<ImprovementCampaign | null>;
-  dismissImprovementCandidate: (candidateId: string) => Promise<ImprovementCandidate | undefined>;
-  reviewImprovementCampaign: (
-    campaignId: string,
-    reviewStatus: "accepted" | "dismissed",
-  ) => Promise<ImprovementCampaign | undefined>;
-
   // Subconscious loop
   getSubconsciousSettings: () => Promise<SubconsciousSettings>;
   saveSubconsciousSettings: (settings: SubconsciousSettings) => Promise<SubconsciousSettings>;
   getSubconsciousBrain: () => Promise<SubconsciousBrainSummary>;
   listSubconsciousTargets: (workspaceId?: string) => Promise<SubconsciousTargetSummary[]>;
-  listSubconsciousRuns: (targetKey?: string) => Promise<SubconsciousRun[]>;
   getSubconsciousTargetDetail: (targetKey: string) => Promise<SubconsciousTargetDetail | null>;
   refreshSubconsciousTargets: () => Promise<SubconsciousRefreshResult>;
   runSubconsciousNow: (targetKey?: string) => Promise<SubconsciousRun | null>;
-  retrySubconsciousRun: (runId: string) => Promise<SubconsciousRun | null>;
-  reviewSubconsciousRun: (
-    runId: string,
-    reviewStatus: "accepted" | "dismissed",
-  ) => Promise<SubconsciousRun | undefined>;
   dismissSubconsciousTarget: (targetKey: string) => Promise<SubconsciousTargetSummary | undefined>;
   resetSubconsciousHistory: () => Promise<SubconsciousHistoryResetResult>;
 
@@ -9744,11 +8218,6 @@ export interface ElectronAPI {
   enableExtension: (name: string) => Promise<{ success: boolean; error?: string }>;
   disableExtension: (name: string) => Promise<{ success: boolean; error?: string }>;
   reloadExtension: (name: string) => Promise<{ success: boolean; error?: string }>;
-  getExtensionConfig: (name: string) => Promise<Record<string, unknown>>;
-  setExtensionConfig: (
-    name: string,
-    config: Record<string, unknown>,
-  ) => Promise<{ success: boolean; error?: string }>;
   discoverExtensions: () => Promise<ExtensionData[]>;
 
   // Webhook Tunnel
@@ -9768,8 +8237,6 @@ export interface ElectronAPI {
   updateAgentRole: (request: UpdateAgentRoleRequest) => Promise<AgentRoleData | undefined>;
   deleteAgentRole: (id: string) => Promise<boolean>;
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) => Promise<boolean>;
-  getDefaultAgentRoles: () => Promise<Omit<AgentRoleData, "id" | "createdAt" | "updatedAt">[]>;
-  seedDefaultAgentRoles: () => Promise<AgentRoleData[]>;
   getBotNotificationPolicy: (agentRoleId: string) => Promise<BotNotificationPolicy>;
   updateBotNotificationPolicy: (
     request: UpdateBotNotificationPolicyRequest,
@@ -9777,14 +8244,10 @@ export interface ElectronAPI {
 
   // Mission Control - Company Ops / Planner
   listCompanies: () => Promise<import("../shared/types").Company[]>;
-  getCompany: (companyId: string) => Promise<import("../shared/types").Company | undefined>;
   getCommandCenterSummary: (
     companyId: string,
   ) => Promise<import("../shared/types").CompanyCommandCenterSummary>;
   retryAutomationOutcomeNotification: (outcomeId: string) => Promise<AutomationRunOutcome>;
-  getMissionControlBrief: (
-    request?: import("../shared/types").MissionControlScopeRequest,
-  ) => Promise<import("../shared/types").MissionControlBrief>;
   listMissionControlItems: (
     request?: import("../shared/types").MissionControlListRequest,
   ) => Promise<import("../shared/types").MissionControlItem[]>;
@@ -9795,32 +8258,14 @@ export interface ElectronAPI {
     request?: import("../shared/types").MissionControlScopeRequest,
   ) => Promise<import("../shared/types").MissionControlBrief>;
   listCompanyGoals: (companyId: string) => Promise<import("../shared/types").Goal[]>;
-  getGoal: (goalId: string) => Promise<import("../shared/types").Goal | undefined>;
-  createGoal: (
-    input: import("../shared/types").GoalCreateInput,
-  ) => Promise<import("../shared/types").Goal>;
-  updateGoal: (
-    request: { goalId: string } & import("../shared/types").GoalUpdate,
-  ) => Promise<import("../shared/types").Goal | undefined>;
   listCompanyProjects: (companyId: string) => Promise<import("../shared/types").Project[]>;
-  getProject: (projectId: string) => Promise<import("../shared/types").Project | undefined>;
   createProject: (
     input: import("../shared/types").ProjectCreateInput,
   ) => Promise<import("../shared/types").Project>;
-  updateProject: (
-    request: { projectId: string } & import("../shared/types").ProjectUpdate,
-  ) => Promise<import("../shared/types").Project | undefined>;
   listCompanyIssues: (
     companyId: string,
     limit?: number,
   ) => Promise<import("../shared/types").Issue[]>;
-  getIssue: (issueId: string) => Promise<import("../shared/types").Issue | undefined>;
-  createIssue: (
-    input: import("../shared/types").IssueCreateInput,
-  ) => Promise<import("../shared/types").Issue>;
-  updateIssue: (
-    request: { issueId: string } & import("../shared/types").IssueUpdate,
-  ) => Promise<import("../shared/types").Issue | undefined>;
   listIssueComments: (issueId: string) => Promise<import("../shared/types").IssueComment[]>;
   listCompanyRuns: (
     companyId: string,
@@ -9885,37 +8330,6 @@ export interface ElectronAPI {
       securityReport?: import("../shared/types").CapabilitySecurityReport;
     }>
   >;
-  getPluginPack: (name: string) => Promise<{
-    name: string;
-    displayName: string;
-    version: string;
-    description: string;
-    icon?: string;
-    category?: string;
-    personaTemplateId?: string;
-    recommendedConnectors?: string[];
-    tryAsking?: string[];
-    skills: Array<{
-      id: string;
-      name: string;
-      description: string;
-      icon?: string;
-      enabled?: boolean;
-    }>;
-    slashCommands: Array<{ name: string; description: string; skillId: string }>;
-    agentRoles: Array<{
-      name: string;
-      displayName: string;
-      description?: string;
-      icon: string;
-      color: string;
-    }>;
-    state: string;
-    enabled: boolean;
-    policyBlocked?: boolean;
-    policyRequired?: boolean;
-    securityReport?: import("../shared/types").CapabilitySecurityReport;
-  } | null>;
   togglePluginPack: (
     name: string,
     enabled: boolean,
@@ -9985,16 +8399,6 @@ export interface ElectronAPI {
       agentCount?: number;
     }>;
   }>;
-  getPackRegistryDetails: (packId: string) => Promise<{
-    id: string;
-    name: string;
-    displayName: string;
-    description: string;
-    version: string;
-    author: string;
-    icon?: string;
-    category?: string;
-  } | null>;
   getPackRegistryCategories: () => Promise<string[]>;
   checkPackUpdates: () => Promise<
     Array<{ name: string; currentVersion: string; latestVersion: string }>
@@ -10057,9 +8461,6 @@ export interface ElectronAPI {
       orgPluginDir?: string;
     };
   }>;
-  checkPackPolicy: (
-    packId: string,
-  ) => Promise<{ packId: string; allowed: boolean; required: boolean }>;
 
   // Agent Security
   agentSecurityGetStatus: (refresh?: boolean) => Promise<AgentSecurityRuntimeStatus>;
@@ -10068,25 +8469,13 @@ export interface ElectronAPI {
     findingId: string,
     status: AgentSecurityFindingStatus,
   ) => Promise<AgentSecurityFinding | null>;
-  agentSecurityListDecisions: (
-    taskId?: string,
-    limit?: number,
-  ) => Promise<AgentSecurityEnforcement[]>;
   agentSecurityListDiagnostics: (limit?: number) => Promise<AgentSecurityDiagnostic[]>;
   agentSecurityListInventory: () => Promise<AgentSecurityInventoryItem[]>;
   agentSecurityRefreshInventory: () => Promise<AgentSecurityInventoryItem[]>;
   agentSecurityScan: () => Promise<AgentSecurityScanResult>;
   agentSecurityCheckRules: () => Promise<AgentSecurityRulesCheckResult>;
-  agentSecurityHookStatus: (agent: string) => Promise<AgentSecurityHookManagementResult>;
   agentSecurityInstallHook: (agent: string) => Promise<AgentSecurityHookManagementResult>;
   agentSecurityUninstallHook: (agent: string) => Promise<AgentSecurityHookManagementResult>;
-  agentSecurityBuildCase: (caseId: string, taskId: string) => Promise<AgentSecurityCaseBuildResult>;
-  agentSecurityVerifyCase: (bundleName: string) => Promise<AgentSecurityCaseVerifyResult>;
-  agentSecurityPrune: () => Promise<{
-    findings: number;
-    decisions: number;
-    diagnostics: number;
-  }>;
 
   // Agent Teams
   listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;
@@ -10137,55 +8526,7 @@ export interface ElectronAPI {
   dismissMention: (id: string) => Promise<MentionData | undefined>;
   onMentionEvent: (callback: (event: MentionEvent) => void) => () => void;
   // Mission Control - Heartbeat APIs
-  getHeartbeatConfig: (agentRoleId: string) => Promise<
-    | {
-        heartbeatEnabled: boolean;
-        heartbeatIntervalMinutes: number;
-        heartbeatStaggerOffset: number;
-        pulseEveryMinutes?: number;
-        dispatchCooldownMinutes?: number;
-        maxDispatchesPerDay?: number;
-        heartbeatProfile?: import("../shared/types").HeartbeatProfile;
-        activeHours?: import("../shared/types").HeartbeatActiveHours;
-        heartbeatStatus: HeartbeatStatus;
-        lastHeartbeatAt?: number;
-      }
-    | undefined
-  >;
-  updateHeartbeatConfig: (
-    agentRoleId: string,
-    config: {
-      heartbeatEnabled?: boolean;
-      heartbeatIntervalMinutes?: number;
-      heartbeatStaggerOffset?: number;
-      pulseEveryMinutes?: number;
-      dispatchCooldownMinutes?: number;
-      maxDispatchesPerDay?: number;
-      heartbeatProfile?: import("../shared/types").HeartbeatProfile;
-      activeHours?: import("../shared/types").HeartbeatActiveHours | null;
-    },
-  ) => Promise<Any>;
   listAutomationProfiles: () => Promise<AutomationProfileData[]>;
-  getAutomationProfile: (id: string) => Promise<AutomationProfileData | undefined>;
-  createAutomationProfile: (
-    request: import("../shared/types").CreateAutomationProfileRequest,
-  ) => Promise<AutomationProfileData>;
-  updateAutomationProfile: (
-    request: import("../shared/types").UpdateAutomationProfileRequest,
-  ) => Promise<AutomationProfileData | undefined>;
-  deleteAutomationProfile: (id: string) => Promise<void>;
-  attachAutomationProfileToAgentRole: (
-    agentRoleId: string,
-    request?: Partial<import("../shared/types").CreateAutomationProfileRequest>,
-  ) => Promise<AutomationProfileData>;
-  detachAutomationProfileFromAgentRole: (agentRoleId: string) => Promise<void>;
-  listHeartbeatRunsForAutomationProfile: (profileId: string, limit?: number) => Promise<Any[]>;
-  listSubconsciousRunsForAutomationProfile: (profileId: string, limit?: number) => Promise<Any[]>;
-  listCoreTraces: (
-    request?: import("../shared/types").ListCoreTracesRequest,
-  ) => Promise<CoreTrace[]>;
-  getCoreTrace: (id: string) => Promise<GetCoreTraceResult | undefined>;
-  listCoreTracesForAutomationProfile: (profileId: string, limit?: number) => Promise<CoreTrace[]>;
   listTaskTraceRuns: (
     request?: import("../shared/types").ListTaskTraceRunsRequest,
   ) => Promise<TaskTraceRunSummary[]>;
@@ -10196,63 +8537,16 @@ export interface ElectronAPI {
   listCoreFailureClusters: (
     request?: import("../shared/types").ListCoreFailureClustersRequest,
   ) => Promise<CoreFailureCluster[]>;
-  reviewCoreFailureCluster: (
-    request: import("../shared/types").ReviewCoreFailureClusterRequest,
-  ) => Promise<CoreFailureCluster | undefined>;
   listCoreEvalCases: (
     request?: import("../shared/types").ListCoreEvalCasesRequest,
   ) => Promise<CoreEvalCase[]>;
-  reviewCoreEvalCase: (
-    request: import("../shared/types").ReviewCoreEvalCaseRequest,
-  ) => Promise<CoreEvalCase | undefined>;
   listCoreExperiments: (
     request?: import("../shared/types").ListCoreExperimentsRequest,
   ) => Promise<CoreHarnessExperiment[]>;
-  runCoreExperiment: (request: import("../shared/types").RunCoreExperimentRequest) => Promise<{
-    experiment: CoreHarnessExperiment;
-    run: import("../shared/types").CoreHarnessExperimentRun;
-    gate: import("../shared/types").CoreRegressionGateResult;
-  }>;
-  reviewCoreExperiment: (
-    request: import("../shared/types").ReviewCoreExperimentRequest,
-  ) => Promise<CoreHarnessExperiment | undefined>;
   listCoreLearnings: (
     request?: import("../shared/types").ListCoreLearningsRequest,
   ) => Promise<CoreLearningsEntry[]>;
-  listCoreMemoryCandidates: (
-    request?: import("../shared/types").ListCoreMemoryCandidatesRequest,
-  ) => Promise<CoreMemoryCandidate[]>;
-  reviewCoreMemoryCandidate: (
-    request: import("../shared/types").ReviewCoreMemoryCandidateRequest,
-  ) => Promise<CoreMemoryCandidate | undefined>;
-  listCoreMemoryDistillRuns: (
-    profileId: string,
-    workspaceId?: string,
-    limit?: number,
-  ) => Promise<CoreMemoryDistillRun[]>;
-  runCoreMemoryDistillNow: (
-    request: import("../shared/types").RunCoreMemoryDistillNowRequest,
-  ) => Promise<CoreMemoryDistillRun>;
   triggerHeartbeat: (agentRoleId: string) => Promise<HeartbeatResult>;
-  getHeartbeatStatus: (agentRoleId: string) => Promise<
-    | {
-        heartbeatEnabled: boolean;
-        heartbeatStatus: HeartbeatStatus;
-        lastHeartbeatAt?: number;
-        nextHeartbeatAt?: number;
-        lastPulseResult?: import("../shared/types").HeartbeatPulseResultKind;
-        lastDispatchKind?: string;
-        deferred?: import("../shared/types").HeartbeatDeferredState;
-        compressedSignalCount?: number;
-        dueProactiveCount?: number;
-        checklistDueCount?: number;
-        dispatchCooldownUntil?: number;
-        dispatchesToday?: number;
-        maxDispatchesPerDay?: number;
-        isRunning: boolean;
-      }
-    | undefined
-  >;
   getAllHeartbeatStatus: () => Promise<
     Array<{
       agentRoleId: string;
@@ -10273,17 +8567,6 @@ export interface ElectronAPI {
     }>
   >;
   onHeartbeatEvent: (callback: (event: HeartbeatEvent) => void) => () => void;
-  // Mission Control - Task Subscription APIs
-  listSubscriptions: (taskId: string) => Promise<TaskSubscription[]>;
-  addSubscription: (
-    taskId: string,
-    agentRoleId: string,
-    reason: SubscriptionReason,
-  ) => Promise<TaskSubscription>;
-  removeSubscription: (taskId: string, agentRoleId: string) => Promise<boolean>;
-  getTaskSubscribers: (taskId: string) => Promise<TaskSubscription[]>;
-  getAgentSubscriptions: (agentRoleId: string) => Promise<TaskSubscription[]>;
-  onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => () => void;
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<Any>;
   setTaskPriority: (taskId: string, priority: number) => Promise<Any>;
@@ -10294,41 +8577,13 @@ export interface ElectronAPI {
   onTaskBoardEvent: (callback: (event: TaskBoardEvent) => void) => () => void;
   // Task Label APIs
   listTaskLabels: (query: TaskLabelListQuery) => Promise<TaskLabelData[]>;
-  createTaskLabel: (request: CreateTaskLabelRequest) => Promise<TaskLabelData>;
-  updateTaskLabel: (id: string, request: UpdateTaskLabelRequest) => Promise<TaskLabelData>;
-  deleteTaskLabel: (id: string) => Promise<boolean>;
-  // Agent Working State APIs
-  getWorkingState: (id: string) => Promise<AgentWorkingStateData | undefined>;
-  getCurrentWorkingState: (query: WorkingStateQuery) => Promise<AgentWorkingStateData | undefined>;
-  updateWorkingState: (request: UpdateWorkingStateRequest) => Promise<AgentWorkingStateData>;
-  getWorkingStateHistory: (query: WorkingStateHistoryQuery) => Promise<AgentWorkingStateData[]>;
-  restoreWorkingState: (id: string) => Promise<AgentWorkingStateData | undefined>;
-  deleteWorkingState: (id: string) => Promise<{ success: boolean }>;
-  listWorkingStatesForTask: (taskId: string) => Promise<AgentWorkingStateData[]>;
   // Context Policy APIs
-  getContextPolicy: (
-    channelId: string,
-    contextType: ContextTypeValue,
-  ) => Promise<ContextPolicyData>;
-  getContextPolicyForChat: (
-    channelId: string,
-    chatId: string,
-    isGroup: boolean,
-  ) => Promise<ContextPolicyData>;
   listContextPolicies: (channelId: string) => Promise<ContextPolicyData[]>;
   updateContextPolicy: (
     channelId: string,
     contextType: ContextTypeValue,
     options: UpdateContextPolicyOptions,
   ) => Promise<ContextPolicyData>;
-  deleteContextPolicies: (channelId: string) => Promise<{ count: number }>;
-  createDefaultContextPolicies: (channelId: string) => Promise<{ success: boolean }>;
-  isToolAllowedInContext: (
-    channelId: string,
-    contextType: ContextTypeValue,
-    toolName: string,
-    toolGroups: string[],
-  ) => Promise<{ allowed: boolean }>;
   listChannelSpecializations: (channelId: string) => Promise<ChannelSpecializationData[]>;
   createChannelSpecialization: (
     data: CreateChannelSpecializationData,
@@ -10337,16 +8592,10 @@ export interface ElectronAPI {
     data: UpdateChannelSpecializationData,
   ) => Promise<ChannelSpecializationData>;
   deleteChannelSpecialization: (id: string) => Promise<{ success: boolean }>;
-  resolveChannelSpecialization: (data: {
-    channelId: string;
-    chatId?: string;
-    threadId?: string;
-  }) => Promise<ChannelSpecializationData | null>;
   // Voice Mode APIs
   getVoiceSettings: () => Promise<VoiceSettingsData>;
   getVoiceCapabilities: () => Promise<VoiceCapabilitiesData>;
   saveVoiceSettings: (settings: Partial<VoiceSettingsData>) => Promise<VoiceSettingsData>;
-  getVoiceState: () => Promise<VoiceStateData>;
   voiceSpeak: (
     text: string,
   ) => Promise<{ success: boolean; audioData?: number[] | null; error?: string }>;
@@ -10366,11 +8615,8 @@ export interface ElectronAPI {
   getWorktreeWorkspaceInfo: (
     workspaceId: string,
   ) => Promise<import("../shared/types").WorktreeWorkspaceInfo>;
-  getWorktreeInfo: (taskId: string) => Promise<Any>;
-  listWorktrees: (workspaceId: string) => Promise<Any[]>;
   mergeWorktree: (taskId: string) => Promise<Any>;
   cleanupWorktree: (taskId: string) => Promise<{ success: boolean }>;
-  getWorktreeDiff: (taskId: string) => Promise<Any>;
   getWorktreeSettings: () => Promise<Any>;
   saveWorktreeSettings: (settings: Any) => Promise<{ success: boolean; error?: string }>;
 
@@ -10443,64 +8689,13 @@ export interface ElectronAPI {
     query?: import("../shared/types").SpeculativeRunListQuery,
   ) => Promise<import("../shared/types").SpeculativeRun[]>;
 
-  // Playwright QA APIs
-  qaGetRuns: () => Promise<Any[]>;
-  qaGetRun: (runId: string) => Promise<Any | null>;
-  qaStartRun: (data: { taskId: string; workspaceId: string; config: Any }) => Promise<Any>;
-  qaStopRun: (taskId: string) => Promise<{ success: boolean }>;
-  onQAEvent: (callback: (event: Any) => void) => () => void;
-
   // Window control APIs (for custom title bar on Windows)
   windowMinimize: () => Promise<void>;
   windowMaximize: () => Promise<void>;
   windowClose: () => Promise<void>;
-  windowIsMaximized: () => Promise<boolean>;
   getPlatform: () => string;
   getNativeFrameMode: () => boolean;
 }
-
-// Migration status type (for showing one-time notifications after app rename)
-export interface MigrationStatus {
-  migrated: boolean;
-  notificationDismissed: boolean;
-  timestamp?: string;
-}
-
-// Extension / Plugin types (duplicated from shared/types since preload is sandboxed)
-export type ExtensionType = "channel" | "tool" | "provider" | "integration";
-export type ExtensionState = "loading" | "loaded" | "registered" | "active" | "error" | "disabled";
-
-export interface ExtensionData {
-  name: string;
-  displayName: string;
-  version: string;
-  description: string;
-  author?: string;
-  type: ExtensionType;
-  state: ExtensionState;
-  path: string;
-  loadedAt: number;
-  error?: string;
-  capabilities?: Record<string, boolean>;
-  configSchema?: Record<string, unknown>;
-}
-
-// Webhook Tunnel types
-export type TunnelProvider = "ngrok" | "tailscale" | "cloudflare" | "localtunnel";
-export type TunnelStatus = "stopped" | "starting" | "running" | "error";
-
-export interface TunnelStatusData {
-  status: TunnelStatus;
-  provider?: TunnelProvider;
-  url?: string;
-  error?: string;
-  startedAt?: number;
-}
-
-// Voice Mode types (inlined for sandboxed preload)
-export type VoiceProvider = "elevenlabs" | "openai" | "azure" | "local";
-export type VoiceInputMode = "push_to_talk" | "voice_activity" | "disabled";
-export type VoiceResponseMode = "auto" | "manual" | "smart";
 
 export interface VoiceCapabilitiesData {
   systemTts: {
@@ -10569,15 +8764,6 @@ export interface ElevenLabsVoiceData {
   labels?: Record<string, string>;
 }
 
-export type VoiceEventType =
-  | "voice:state-changed"
-  | "voice:transcript"
-  | "voice:partial-transcript"
-  | "voice:speaking-start"
-  | "voice:speaking-end"
-  | "voice:error"
-  | "voice:audio-level";
-
 export interface VoiceEventData {
   type: VoiceEventType;
   data: VoiceStateData | string | number | { message: string };
@@ -10588,3 +8774,25 @@ declare global {
     electronAPI: ElectronAPI;
   }
 }
+
+export type {
+  MigrationStatus,
+  ExtensionType,
+  ExtensionState,
+  TunnelProvider,
+  TunnelStatus,
+  TunnelStatusData,
+  VoiceProvider,
+  VoiceInputMode,
+  VoiceResponseMode,
+  VoiceEventType,
+  BrowserSettings,
+  BrowserSettingsState,
+  BrowserDataType,
+  HygieneReport,
+  MergeReview,
+  LifecycleKind,
+  AgentIdentityDirectoryResult,
+  BrowserSitePermissionEntry,
+  ExtensionData,
+};

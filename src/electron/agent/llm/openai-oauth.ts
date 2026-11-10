@@ -293,18 +293,6 @@ function credentialsToTokens(credentials: OAuthCredentials): OpenAIOAuthTokens {
 }
 
 /**
- * Convert our token format to pi-ai OAuthCredentials
- */
-export function tokensToCredentials(tokens: OpenAIOAuthTokens): OAuthCredentials {
-  return {
-    access: tokens.access_token,
-    refresh: tokens.refresh_token,
-    expires: tokens.expires_at,
-    email: tokens.email,
-  };
-}
-
-/**
  * OpenAI OAuth handler using pi-ai SDK
  * Uses the ChatGPT OAuth flow for users with ChatGPT subscriptions
  */

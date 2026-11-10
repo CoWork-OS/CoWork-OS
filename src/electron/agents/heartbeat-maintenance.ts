@@ -1,11 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
-import {
-  buildWorkspaceKitSections,
-  parseHeartbeatChecklist,
-  renderHeartbeatPrompt,
-} from "../context/kit-injection";
+import { buildWorkspaceKitSections, parseHeartbeatChecklist } from "../context/kit-injection";
 import { getUserDataDir } from "../utils/user-data-dir";
 
 const KIT_DIRNAME = ".cowork";
@@ -22,13 +18,6 @@ export interface HeartbeatChecklistItem {
   cadence: HeartbeatChecklistCadence;
   cadenceMs: number;
   sourcePath: string;
-}
-
-function getLocalDateStamp(now: Date): string {
-  const yyyy = String(now.getFullYear());
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 function readTextFile(absPath: string, maxChars = 3000): string {
@@ -130,42 +119,6 @@ export function readHeartbeatChecklist(
     items: items.map((item) => ({ ...item, workspaceId: undefined })),
   });
   return items.map((item) => ({ ...item, workspaceId }));
-}
-
-export function buildHeartbeatWorkspaceContext(workspacePath?: string, now = new Date()): string {
-  const root = typeof workspacePath === "string" ? workspacePath.trim() : "";
-  if (!root) return "";
-
-  const kitRoot = path.join(root, KIT_DIRNAME);
-  const sections: string[] = [];
-  const pushSection = (title: string, relPath: string, maxChars = 2200) => {
-    const text = readTextFile(path.join(kitRoot, relPath), maxChars);
-    if (!text) return;
-    sections.push(`### ${title}\n${text}`);
-  };
-
-  const heartbeatItems = readHeartbeatChecklist(root);
-  const heartbeatPrompt = renderHeartbeatPrompt(
-    heartbeatItems.map((item) => ({
-      check: item.title,
-      cadence: item.sectionTitle,
-      action: "propose",
-    })),
-  );
-  if (heartbeatPrompt) {
-    sections.push(`### Heartbeat Contract\n${heartbeatPrompt}`);
-  }
-
-  pushSection("Priorities", "PRIORITIES.md");
-  pushSection("Company Profile", "COMPANY.md");
-  pushSection("Operating System", "OPERATIONS.md");
-  pushSection("KPIs", "KPIS.md");
-  pushSection("User Profile", "USER.md", 1400);
-  pushSection("Long-Term Memory", "MEMORY.md", 1800);
-  pushSection("Today's Log", path.join("memory", `${getLocalDateStamp(now)}.md`), 1800);
-
-  if (sections.length === 0) return "";
-  return sections.join("\n\n");
 }
 
 export class HeartbeatMaintenanceStateStore {

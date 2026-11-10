@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import { randomBytes } from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import {
   SecureSettingsRepository,
@@ -256,10 +255,6 @@ export class SecureMcpTunnelSettingsManager {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(settings, null, 2), { mode: 0o600 });
   }
-}
-
-export function generateTunnelToken(prefix = "ctun"): string {
-  return `${prefix}_${randomBytes(24).toString("base64url")}`;
 }
 
 function sanitizeAllowedTools(value: unknown): string[] {

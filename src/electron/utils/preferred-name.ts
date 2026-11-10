@@ -132,10 +132,6 @@ export function sanitizeStoredPreferredName(name: string | null | undefined): st
   return normalized;
 }
 
-export function sanitizePreferredName(name: string | null | undefined): string | undefined {
-  return sanitizeInferredPreferredName(name);
-}
-
 export function extractPreferredNameFromMessage(message: string): string | null {
   const text = collapseWhitespace(message);
   if (!text) return null;

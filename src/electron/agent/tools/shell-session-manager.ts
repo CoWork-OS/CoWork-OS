@@ -1249,33 +1249,6 @@ export class ShellSessionManager {
       .map((session) => ({ ...session.info }));
   }
 
-  async resetSession(
-    taskId: string,
-    workspaceId: string,
-    scope: ShellSessionScope = "task",
-  ): Promise<ShellSessionInfo | null> {
-    await this.ensureStateLoaded();
-    const key = this.getSessionKey(taskId, workspaceId, scope);
-    const session = this.sessions.get(key);
-    if (!session) return null;
-
-    this.updateRuntimeInfo(session, { status: "resetting" });
-    session.process?.kill("SIGTERM");
-    session.process = null;
-    session.ready = false;
-    session.buffer = "";
-    session.busy = false;
-    session.snapshot = { cwd: session.info.cwd, env: {}, aliases: {} };
-    session.info.commandCount = 0;
-    session.info.lastCommand = undefined;
-    session.info.lastExitCode = undefined;
-    session.info.lastTerminationReason = undefined;
-    session.info.lastError = undefined;
-    this.updateRuntimeInfo(session, { status: "inactive" });
-    void this.persistState();
-    return { ...session.info };
-  }
-
   async closeSession(
     taskId: string,
     workspaceId: string,

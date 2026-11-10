@@ -1860,32 +1860,6 @@ export class SkillRegistry {
   }
 
   /**
-   * Update all managed skills
-   */
-  async updateAll(
-    onProgress?: (skillId: string, progress: SkillInstallProgress) => void,
-  ): Promise<{ updated: string[]; failed: string[] }> {
-    const updated: string[] = [];
-    const failed: string[] = [];
-
-    const managedSkills = this.listManagedSkills();
-
-    for (const skill of managedSkills) {
-      const result = await this.update(skill.id, undefined, (progress) => {
-        onProgress?.(skill.id, progress);
-      });
-
-      if (result.success) {
-        updated.push(skill.id);
-      } else {
-        failed.push(skill.id);
-      }
-    }
-
-    return { updated, failed };
-  }
-
-  /**
    * Uninstall a managed skill
    */
   uninstall(skillId: string): { success: boolean; error?: string } {

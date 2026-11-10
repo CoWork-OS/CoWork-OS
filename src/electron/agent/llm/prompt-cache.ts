@@ -778,22 +778,3 @@ export function isPromptCacheRequestUnsupportedError(
     /unsupported|not support|unknown|unrecognized|unexpected|invalid/.test(lower)
   );
 }
-
-export function countCacheBreakpoints(messages: LLMMessage[]): number {
-  let count = 0;
-  for (const message of messages) {
-    if (!message) continue;
-    const content = message.content as Any;
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (block && typeof block === "object" && "cache_control" in block) {
-          count += 1;
-        }
-      }
-    } else if (content && typeof content === "object" && "cache_control" in content) {
-      count += 1;
-    }
-    if ((message as Any).cache_control) count += 1;
-  }
-  return count;
-}

@@ -528,8 +528,3 @@ export function parseVerificationVerdict(summary: string): VerificationVerdict {
   }
   return verdict;
 }
-
-export function buildWorkerRoleInstructionPrefix(workerRole: WorkerRoleKind): string {
-  const spec = getWorkerRoleSpec(workerRole);
-  return [`You are acting as ${spec.displayName}.`, spec.description].join(" ");
-}

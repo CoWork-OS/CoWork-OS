@@ -166,22 +166,6 @@ export class VoiceSettingsManager {
   }
 
   /**
-   * Delete all voice settings (reset to defaults)
-   */
-  static resetSettings(): void {
-    try {
-      if (this.repository) {
-        this.repository.delete("voice");
-      }
-      this.cachedSettings = null;
-      logger.debug("Settings reset to defaults");
-    } catch (error) {
-      logger.error("Failed to reset settings:", error);
-      throw error;
-    }
-  }
-
-  /**
    * Check if ElevenLabs API key is configured
    */
   static hasElevenLabsKey(): boolean {

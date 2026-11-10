@@ -108,7 +108,3 @@ export function classifyLiveTaskEvent(event: TaskEvent): LiveTaskEventLane {
   if (BATCHABLE_EVENT_TYPES.has(effectiveType)) return "batchable";
   return "immediate";
 }
-
-export function isImmediateLiveTaskEvent(event: TaskEvent): boolean {
-  return classifyLiveTaskEvent(event) === "immediate";
-}

@@ -813,7 +813,6 @@ Update checks are non-blocking and fail silently if the registry is unavailable.
 | Channel                         | Direction       | Purpose                                                      |
 | ------------------------------- | --------------- | ------------------------------------------------------------ |
 | `pluginPack:list`               | Renderer → Main | List all plugin packs with metadata                          |
-| `pluginPack:get`                | Renderer → Main | Get single pack details                                      |
 | `pluginPack:toggle`             | Renderer → Main | Enable or disable a pack (persisted)                         |
 | `pluginPack:toggleSkill`        | Renderer → Main | Enable or disable a specific skill within a pack (persisted) |
 | `pluginPack:getContext`         | Renderer → Main | Get active connectors and skills                             |
@@ -823,11 +822,9 @@ Update checks are non-blocking and fail silently if the registry is unavailable.
 | `pluginPack:installUrl`         | Renderer → Main | Install a pack from a manifest URL                           |
 | `pluginPack:uninstall`          | Renderer → Main | Uninstall a user-installed pack                              |
 | `pluginPack:registrySearch`     | Renderer → Main | Search the remote pack registry                              |
-| `pluginPack:registryDetails`    | Renderer → Main | Get pack details from remote registry                        |
 | `pluginPack:registryCategories` | Renderer → Main | Get available categories from registry                       |
 | `admin:policiesGet`             | Renderer → Main | Get current admin policies                                   |
 | `admin:policiesUpdate`          | Renderer → Main | Update admin policies                                        |
-| `admin:checkPack`               | Renderer → Main | Check if a pack is allowed/required                          |
 
 ### Preload API
 
@@ -835,9 +832,6 @@ Update checks are non-blocking and fail silently if the registry is unavailable.
 // Core pack operations
 window.electronAPI.listPluginPacks()
 // Returns: PluginPackData[] — all packs with skills, agents, commands, policy flags
-
-window.electronAPI.getPluginPack(name)
-// Returns: PluginPackData | null — single pack detail
 
 window.electronAPI.togglePluginPack(name, enabled)
 // Returns: { success, name, enabled } — toggle result (blocked by policy if pack is blocked/required)
@@ -870,9 +864,6 @@ window.electronAPI.uninstallPluginPack(packName)
 window.electronAPI.searchPackRegistry(query, options?)
 // Searches the remote pack catalog
 
-window.electronAPI.getPackRegistryDetails(packId)
-// Gets full details for a pack from the registry
-
 window.electronAPI.getPackRegistryCategories()
 // Returns available categories from the registry
 
@@ -882,9 +873,6 @@ window.electronAPI.getAdminPolicies()
 
 window.electronAPI.updateAdminPolicies(updates)
 // Updates admin policies (partial merge)
-
-window.electronAPI.checkPackPolicy(packId)
-// Returns { allowed, required } for a specific pack
 ```
 
 ---
@@ -958,7 +946,7 @@ If a pack is blocked, CoWork stores it in quarantine outside the normal discover
 
 Only user-installed packs (in `~/.cowork/extensions/`) can be uninstalled. Bundled packs and organization packs cannot be removed.
 
-To uninstall: right-click a personal pack in the sidebar or use the API:
+The app has no uninstall control yet. The preload API removes a personal pack:
 
 ```typescript
 window.electronAPI.uninstallPluginPack("my-custom-pack");

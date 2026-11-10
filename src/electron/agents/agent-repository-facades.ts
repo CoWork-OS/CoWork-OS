@@ -131,7 +131,6 @@ const AUTOMATION_PROFILE_METHODS = [
   "updateByAgentRoleId",
   "updateRuntimeState",
   "deleteById",
-  "deleteByAgentRoleId",
 ] as const;
 export type AutomationProfileRepository = AsyncStore<
   AutomationProfileStore,
@@ -226,7 +225,6 @@ export const TaskSubscriptionRepository = serviceRepositoryFacade<
 
 const WORKING_STATE_METHODS = [
   "findById",
-  "getCurrent",
   "getAllCurrent",
   "update",
   "getHistory",

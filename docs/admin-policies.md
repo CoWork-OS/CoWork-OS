@@ -37,7 +37,6 @@ Policies are enforced in the following IPC handlers:
 | Handler                 | Enforcement                                                                                   |
 | ----------------------- | --------------------------------------------------------------------------------------------- |
 | `pluginPack:list`       | Blocked packs returned with `policyBlocked: true`, required packs with `policyRequired: true` |
-| `pluginPack:get`        | Same policy flags included in response                                                        |
 | `pluginPack:toggle`     | Blocked packs cannot be enabled; required packs cannot be disabled                            |
 | `pluginPack:scaffold`   | Blocked if `allowCustomPacks` is false                                                        |
 | `pluginPack:installGit` | Blocked if `allowGitInstall` is false                                                         |
@@ -420,7 +419,6 @@ A complete enterprise setup:
 | ---------------------- | ----------------------------------------------------------- |
 | `admin:policiesGet`    | Returns the full policy object                              |
 | `admin:policiesUpdate` | Accepts partial updates, merges with existing policies      |
-| `admin:checkPack`      | Returns `{ packId, allowed, required }` for a specific pack |
 
 `admin:policiesUpdate` asks for confirmation in a native dialog, which the renderer
 cannot answer, before it saves a change that weakens the policy. Cancelling rejects the
@@ -449,10 +447,6 @@ const updated = await window.electronAPI.updateAdminPolicies({
   packs: { blocked: ["unwanted-pack"] },
   general: { allowGitInstall: false },
 });
-
-// Check a specific pack
-const check = await window.electronAPI.checkPackPolicy("engineering");
-// Returns: { packId: "engineering", allowed: true, required: false }
 ```
 
 ---

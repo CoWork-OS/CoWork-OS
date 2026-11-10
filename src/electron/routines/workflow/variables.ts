@@ -19,13 +19,6 @@ export function resolveWorkflowInputs(
   return resolveValue(input, context) as Record<string, unknown>;
 }
 
-export function resolveWorkflowValue(
-  value: WorkflowInputValue,
-  context: WorkflowVariableContext,
-): unknown {
-  return resolveValue(value, context);
-}
-
 function resolveValue(value: WorkflowInputValue, context: WorkflowVariableContext): unknown {
   if (Array.isArray(value)) return value.map((item) => resolveValue(item, context));
   if (isReference(value)) {

@@ -284,7 +284,6 @@ import type { AccessProfileId } from "../shared/access-profiles";
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./canvas";
 import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handlers";
-import { setupQAHandlers } from "./ipc/qa-handlers";
 import { getBrowserWorkbenchService } from "./browser/browser-workbench-service";
 import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
 import { getBrowserSessionManager } from "./browser/browser-session-manager";
@@ -349,7 +348,7 @@ import {
 import { setupBriefingHandlers } from "./ipc/briefing-handlers";
 import { setupMeetingArtifactHandlers } from "./ipc/meeting-artifacts-handlers";
 import { MeetingArtifactsService } from "./meetings/meeting-artifacts-service";
-import { setupImprovementHandlers, setupSubconsciousHandlers } from "./ipc/subconscious-handlers";
+import { setupSubconsciousHandlers } from "./ipc/subconscious-handlers";
 import { FileHubService } from "./file-hub/FileHubService";
 import { setupFileHubHandlers } from "./ipc/file-hub-handlers";
 import { HooksSettingsManager } from "./hooks/settings";
@@ -2647,7 +2646,7 @@ if (isMacSafeStorageMigrationWorker) {
         const coreRegressionGateRepo = new CoreRegressionGateRepository(db);
         const coreLearningsRepo = new CoreLearningsRepository(db);
         const coreMemoryScopeResolver = new CoreMemoryScopeResolver();
-        coreTraceService = new CoreTraceService(coreTraceRepo, coreMemoryCandidateRepo);
+        coreTraceService = new CoreTraceService(coreTraceRepo);
         coreMemoryCandidateService = new CoreMemoryCandidateService(
           coreTraceRepo,
           coreMemoryCandidateRepo,
@@ -3642,7 +3641,6 @@ if (isMacSafeStorageMigrationWorker) {
       logStartupLane("blocking_startup", { event: "ipc_handlers_ready" });
       if (subconsciousLoopService) {
         setupSubconsciousHandlers(subconsciousLoopService);
-        setupImprovementHandlers(subconsciousLoopService);
       }
       void notifyKeychainIdentityMismatch();
       // Initialize heartbeat and Mission Control services
@@ -4186,7 +4184,6 @@ if (isMacSafeStorageMigrationWorker) {
         // Initialize Live Canvas handlers BEFORE async operations so IPC handlers
         // are registered before the renderer finishes loading and calls them
         setupCanvasHandlers(mainWindow, agentDaemon);
-        setupQAHandlers(mainWindow, agentDaemon);
         startupActionGate.open();
         CanvasManager.getInstance().setMainWindow(mainWindow);
 
@@ -4727,11 +4724,7 @@ if (isMacSafeStorageMigrationWorker) {
           db,
         );
         const activeDailyBriefingService = dailyBriefingService;
-        setupBriefingHandlers(dailyBriefingService, {
-          onConfigSaved: async (workspaceId, config) => {
-            await syncDailyBriefingCronJob(cronService, workspaceId, config);
-          },
-        });
+        setupBriefingHandlers(dailyBriefingService);
         if (!startupQuietMode) {
           deferStartupTask("daily-briefing-schedule-sync", async () => {
             if (!cronService) return;
@@ -5396,9 +5389,6 @@ if (isMacSafeStorageMigrationWorker) {
     });
     ipcMain.handle(IPC_CHANNELS.WINDOW_CLOSE, () => {
       BrowserWindow.getFocusedWindow()?.close();
-    });
-    ipcMain.handle(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, () => {
-      return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false;
     });
 
     /** Set a workbench session's access policy from its task's effective access profile. */

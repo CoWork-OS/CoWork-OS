@@ -15,10 +15,8 @@ export const MICROSOFT_EMAIL_GRAPH_SEND_SCOPES = [
 ] as const;
 
 export const MICROSOFT_EMAIL_DEFAULT_TENANT = "consumers";
-export const MICROSOFT_EMAIL_OAUTH_PROVIDER = "microsoft";
 
 export const MICROSOFT_GRAPH_MAIL_READWRITE_SCOPE = "https://graph.microsoft.com/Mail.ReadWrite";
-export const MICROSOFT_GRAPH_MAIL_SEND_SCOPE = "https://graph.microsoft.com/Mail.Send";
 const OFFLINE_ACCESS_SCOPE = "offline_access";
 
 export function normalizeMicrosoftEmailReadScopes(scopes?: readonly string[]): string[] {

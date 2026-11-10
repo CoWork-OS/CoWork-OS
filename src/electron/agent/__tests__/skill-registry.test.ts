@@ -1441,48 +1441,6 @@ describe("SkillRegistry", () => {
       expect(dir).toBe("/mock/skills");
     });
   });
-
-  describe("updateAll", () => {
-    it("should update all installed skills", async () => {
-      const skill1 = createMockSkill({ id: "skill-1" });
-      const skill2 = createMockSkill({ id: "skill-2" });
-      mockFiles.set(managedPath("skill-1.json"), JSON.stringify(skill1));
-      mockFiles.set(managedPath("skill-2.json"), JSON.stringify(skill2));
-
-      // Mock successful updates
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(skill1),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(skill2),
-        });
-
-      const result = await registry.updateAll();
-
-      expect(result.updated).toContain("skill-1");
-      expect(result.updated).toContain("skill-2");
-      expect(result.failed).toHaveLength(0);
-    });
-
-    it("should track failed updates", async () => {
-      const skill1 = createMockSkill({ id: "skill-1" });
-      mockFiles.set(managedPath("skill-1.json"), JSON.stringify(skill1));
-
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "Server Error",
-      });
-
-      const result = await registry.updateAll();
-
-      expect(result.failed).toContain("skill-1");
-      expect(result.updated).toHaveLength(0);
-    });
-  });
 });
 
 describe("getSkillRegistry", () => {

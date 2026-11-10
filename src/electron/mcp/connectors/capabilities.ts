@@ -411,10 +411,6 @@ export function getConnectorCapability(id: string): ConnectorCapability | undefi
   return CAPABILITIES[key];
 }
 
-export function listConnectorCapabilities(): ConnectorCapability[] {
-  return Object.values(CAPABILITIES);
-}
-
 export function listTier1ConnectorCapabilities(): ConnectorCapability[] {
   return TIER1_CONNECTOR_IDS.map((id) => CAPABILITIES[id]);
 }

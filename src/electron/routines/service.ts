@@ -227,14 +227,6 @@ export class RoutineService {
     return this.workflowRepository.listSteps(runId);
   }
 
-  listWorkflowEvents(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT) {
-    return this.workflowRepository.listEvents(routineId, limit);
-  }
-
-  listWorkflowEventSamples(source?: string, limit = 20) {
-    return this.workflowRepository.listEventSamples(source, limit);
-  }
-
   listWorkflowSecrets() {
     return this.workflowSecretStore.list();
   }
@@ -334,26 +326,6 @@ export class RoutineService {
     const run = await this.workflowEngine.cancel(runId);
     if (run) await this.refreshRoutineRunFromWorkflow(run.id);
     return run;
-  }
-
-  async retryWorkflowRun(runId: string) {
-    const previous = await this.workflowRepository.getRun(runId);
-    if (!previous) throw new Error(`Workflow run not found: ${runId}`);
-    const routine = await this.get(previous.routineId);
-    const version = await this.workflowRepository.getVersion(previous.workflowVersionId);
-    if (!routine || !version)
-      throw new Error("The workflow definition for this run is unavailable.");
-    const context = previous.context as Record<string, Any>;
-    return this.startDeterministicWorkflow(routine, version.definition, version.id, {
-      trigger: isPlainRecord(context.trigger) ? context.trigger : {},
-      idempotencyKey: `retry:${previous.id}:${this.deps.now()}`,
-      sourceSummary: `Retry of workflow run ${previous.id}`,
-      triggerId: previous.triggerNodeId,
-      triggerType: "manual",
-      ...(typeof context.accessProfileId === "string" && context.accessProfileId.trim()
-        ? { accessProfileId: context.accessProfileId.trim() as AccessProfileId }
-        : {}),
-    });
   }
 
   startWorkflowRuntime(): Promise<void> {
@@ -2762,10 +2734,6 @@ function summarizeWorkflowRun(
   ]
     .filter(Boolean)
     .join(" · ");
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function flattenWorkflowNodes(

@@ -1,6 +1,6 @@
 import type { AgentConfig } from "../../shared/types";
 import type { ChannelType } from "../gateway/channels/types";
-import type { CronDeliveryConfig, CronSchedule } from "../cron/types";
+import type { CronSchedule } from "../cron/types";
 import type { CronService } from "../cron";
 import type { EventTriggerRegistry, TriggerCondition } from "../triggers/types";
 import type { HooksConfig } from "../hooks/types";
@@ -315,15 +315,4 @@ export interface RoutineServiceDeps {
     signal: AbortSignal;
     accessProfileId?: AccessProfileId;
   }) => Promise<Record<string, unknown>>;
-}
-
-export interface CompiledRoutineTarget {
-  workspaceId: string;
-  agentConfig?: AgentConfig;
-  chatContext?: RoutineContextBindings["chatContext"];
-}
-
-export interface CompiledRoutineOutputs {
-  cronDelivery?: CronDeliveryConfig;
-  webhookResponse?: RoutineWebhookResponseOutput;
 }

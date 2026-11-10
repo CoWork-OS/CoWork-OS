@@ -208,11 +208,6 @@ export function createBrowserMailboxDefinitions(
     mailbox.getMailboxDigest(workspaceId),
   );
   add(
-    "getMailboxTodayDigest",
-    optional(z.object({ limitPerBucket: limit }).strict().optional()),
-    ([request]) => mailbox.getMailboxTodayDigest(request),
-  );
-  add(
     "getMailboxSenderCleanupDigest",
     optional(z.object({ limit }).strict().optional()),
     ([request]) => mailbox.getMailboxSenderCleanupDigest(request),
@@ -224,9 +219,6 @@ export function createBrowserMailboxDefinitions(
     oneId,
     ([threadId]) => mailbox.getMailboxQuickReplySuggestions(threadId),
     true,
-  );
-  add("listThreadMailboxAutomations", oneId, ([threadId]) =>
-    mailbox.listThreadAutomations(threadId),
   );
   add(
     "listMailboxAutomations",

@@ -2606,12 +2606,7 @@ export async function startControlPlaneFromSettings(
         heartbeatIntervalMs: settings.heartbeatIntervalMs,
         maxPayloadBytes: settings.maxPayloadBytes,
         allowedOrigins: settings.allowedOrigins,
-        onEvent: (event) => {
-          options.onEvent?.(event);
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-          }
-        },
+        onEvent: options.onEvent,
       });
 
       controlPlaneServer = server;
@@ -4226,12 +4221,6 @@ export function setupControlPlaneHandlers(
           heartbeatIntervalMs: settings.heartbeatIntervalMs,
           maxPayloadBytes: settings.maxPayloadBytes,
           allowedOrigins: settings.allowedOrigins,
-          onEvent: (event) => {
-            // Forward events to renderer
-            if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-              mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-            }
-          },
         });
         controlPlaneServer = server;
 
@@ -4408,11 +4397,6 @@ export function setupControlPlaneHandlers(
             heartbeatIntervalMs: settings.heartbeatIntervalMs,
             maxPayloadBytes: settings.maxPayloadBytes,
             allowedOrigins: settings.allowedOrigins,
-            onEvent: (event) => {
-              if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-                mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-              }
-            },
           });
 
           if (controlPlaneDeps) {
@@ -4448,17 +4432,6 @@ export function setupControlPlaneHandlers(
     },
   );
 
-  // Get Tailscale status
-  ipcMain.handle(IPC_CHANNELS.TAILSCALE_GET_STATUS, async () => {
-    const settings = TailscaleSettingsManager.loadSettings();
-    const exposure = getExposureStatus();
-
-    return {
-      settings,
-      exposure,
-    };
-  });
-
   // Set Tailscale mode
   ipcMain.handle(
     IPC_CHANNELS.TAILSCALE_SET_MODE,
@@ -4488,11 +4461,6 @@ export function setupControlPlaneHandlers(
             heartbeatIntervalMs: settings.heartbeatIntervalMs,
             maxPayloadBytes: settings.maxPayloadBytes,
             allowedOrigins: settings.allowedOrigins,
-            onEvent: (event) => {
-              if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-                mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-              }
-            },
           });
 
           if (controlPlaneDeps) {
@@ -4742,42 +4710,9 @@ export function setupControlPlaneHandlers(
           enabled: true,
         });
 
-        // Setup event forwarding to renderer
-        tunnel.on("stateChange", (state: string, error?: string) => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "stateChange",
-              state,
-              error,
-            });
-          }
-        });
-
-        tunnel.on("connected", () => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "connected",
-            });
-          }
-        });
-
-        tunnel.on("disconnected", (reason: string) => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "disconnected",
-              reason,
-            });
-          }
-        });
-
-        tunnel.on("error", (error: Error) => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "error",
-              error: errorMessage(error),
-            });
-          }
-        });
+        // The tunnel emits "error"; an emitter with no "error" listener would throw instead.
+        // The UI reads tunnel state through the status call, which reports the last error.
+        tunnel.on("error", () => {});
 
         await tunnel.connect();
 
@@ -4821,27 +4756,6 @@ export function setupControlPlaneHandlers(
     }
     return tunnel.getStatus();
   });
-
-  // Save SSH tunnel config
-  ipcMain.handle(
-    IPC_CHANNELS.SSH_TUNNEL_SAVE_CONFIG,
-    async (_, config: SSHTunnelConfig): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        const settings = ControlPlaneSettingsManager.loadSettings();
-        ControlPlaneSettingsManager.updateSettings({
-          remote: {
-            ...settings.remote,
-            url: settings.remote?.url || "",
-            token: settings.remote?.token || "",
-            sshTunnel: config,
-          },
-        });
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, error: errorMessage(error) };
-      }
-    },
-  );
 
   // Test SSH tunnel connection
   ipcMain.handle(
@@ -5129,36 +5043,6 @@ export function setupControlPlaneHandlers(
       return { ok: false, error: errorMessage(error) };
     }
   });
-
-  ipcMain.handle(IPC_CHANNELS.DEVICE_GET_PROFILES, async () => {
-    try {
-      if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
-      const { DeviceProfileRepository } = await import("../database/repository-facades");
-      const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
-      return { ok: true, profiles: await repo.list() };
-    } catch (error) {
-      return { ok: false, error: errorMessage(error) };
-    }
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.DEVICE_UPDATE_PROFILE,
-    async (
-      _,
-      deviceId: string,
-      data: { customName?: string; platform?: string; modelIdentifier?: string },
-    ) => {
-      try {
-        if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
-        const { DeviceProfileRepository } = await import("../database/repository-facades");
-        const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
-        await repo.upsert(deviceId, data);
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, error: errorMessage(error) };
-      }
-    },
-  );
 
   console.log("[ControlPlane] IPC handlers initialized");
 }

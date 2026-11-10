@@ -7,7 +7,6 @@ const { dialogMock, handlers, serviceMock } = vi.hoisted(() => ({
   serviceMock: {
     installHook: vi.fn(),
     uninstallHook: vi.fn(),
-    prune: vi.fn(),
   },
 }));
 
@@ -42,18 +41,13 @@ describe("agent security IPC mutation confirmation", () => {
     expect(serviceMock.installHook).not.toHaveBeenCalled();
   });
 
-  it("allows confirmed hook installation and pruning", async () => {
+  it("allows confirmed hook installation", async () => {
     dialogMock.mockResolvedValue({ response: 1 });
     serviceMock.installHook.mockResolvedValueOnce({ ok: true });
-    serviceMock.prune.mockReturnValueOnce({ findings: 1, decisions: 2, diagnostics: 3 });
 
     await expect(
       handlers.get(IPC_CHANNELS.AGENT_SECURITY_HOOK_INSTALL)!({ sender: {} }, "codex"),
     ).resolves.toEqual({ ok: true });
-    await expect(handlers.get(IPC_CHANNELS.AGENT_SECURITY_PRUNE)!({ sender: {} })).resolves.toEqual(
-      { findings: 1, decisions: 2, diagnostics: 3 },
-    );
     expect(serviceMock.installHook).toHaveBeenCalledWith("codex");
-    expect(serviceMock.prune).toHaveBeenCalledTimes(1);
   });
 });

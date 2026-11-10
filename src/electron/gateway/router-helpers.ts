@@ -70,12 +70,6 @@ export const SCHEDULE_CRON_TAG = "cowork_schedule_v1";
 
 // ── Pure utility functions ──────────────────────────────────────────────────
 
-export function sanitizeTempKey(value: string): string {
-  const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (safe.length > 0) return safe.slice(0, 120);
-  return `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
 export function slugify(value: string): string {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   const slug = normalized

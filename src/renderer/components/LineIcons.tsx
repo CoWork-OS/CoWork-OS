@@ -84,34 +84,6 @@ export function ClipboardIcon(props: IconProps) {
   );
 }
 
-export function ColumnsIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <rect x="3" y="4" width="5" height="16" rx="1" />
-      <rect x="9.5" y="4" width="5" height="16" rx="1" />
-      <rect x="16" y="4" width="5" height="16" rx="1" />
-    </BaseIcon>
-  );
-}
-
-export function FlagIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <path d="M4 4v16" />
-      <path d="M4 4h12l-2 4 2 4H4" />
-    </BaseIcon>
-  );
-}
-
-export function TagIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <path d="M20.59 13.41 11 3H4v7l9.59 9.59a2 2 0 0 0 2.82 0l4.18-4.18a2 2 0 0 0 0-2.82z" />
-      <circle cx="7.5" cy="7.5" r="1.5" />
-    </BaseIcon>
-  );
-}
-
 export function BotIcon(props: IconProps) {
   return (
     <BaseIcon {...props}>
@@ -130,24 +102,6 @@ export function CalendarIcon(props: IconProps) {
       <path d="M16 2v4" />
       <path d="M8 2v4" />
       <path d="M3 10h18" />
-    </BaseIcon>
-  );
-}
-
-export function ClockIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </BaseIcon>
-  );
-}
-
-export function TargetIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <circle cx="12" cy="12" r="8" />
-      <circle cx="12" cy="12" r="2.5" />
     </BaseIcon>
   );
 }
@@ -195,16 +149,6 @@ export function SlidersIcon(props: IconProps) {
       <circle cx="9" cy="6" r="2" />
       <circle cx="15" cy="12" r="2" />
       <circle cx="7" cy="18" r="2" />
-    </BaseIcon>
-  );
-}
-
-export function PackageIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <path d="M21 8l-9 5-9-5 9-5 9 5z" />
-      <path d="M3 8v8l9 5 9-5V8" />
-      <path d="M12 13v8" />
     </BaseIcon>
   );
 }
@@ -278,29 +222,12 @@ export function TrashIcon(props: IconProps) {
   );
 }
 
-export function StopIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </BaseIcon>
-  );
-}
-
 export function AlertTriangleIcon(props: IconProps) {
   return (
     <BaseIcon {...props}>
       <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
       <line x1="12" y1="9" x2="12" y2="13" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
-    </BaseIcon>
-  );
-}
-
-export function BanIcon(props: IconProps) {
-  return (
-    <BaseIcon {...props}>
-      <circle cx="12" cy="12" r="9" />
-      <line x1="5" y1="5" x2="19" y2="19" />
     </BaseIcon>
   );
 }
@@ -356,21 +283,5 @@ export function AtIcon(props: IconProps) {
       <path d="M12 8a4 4 0 1 0 4 4" />
       <path d="M16 12v1a3 3 0 0 1-6 0v-1a6 6 0 1 1 6 6" />
     </BaseIcon>
-  );
-}
-
-export function DotIcon({ size = 8, ...props }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 8 8"
-      fill="currentColor"
-      stroke="none"
-      aria-hidden="true"
-      {...props}
-    >
-      <circle cx="4" cy="4" r="3" />
-    </svg>
   );
 }

@@ -107,7 +107,6 @@ Follow existing naming style in `IPC_CHANNELS`.
 ### Team CRUD
 
 - `TEAM_LIST` -> `team:list`
-- `TEAM_GET` -> `team:get`
 - `TEAM_CREATE` -> `team:create`
 - `TEAM_UPDATE` -> `team:update`
 - `TEAM_DELETE` -> `team:delete`
@@ -123,7 +122,6 @@ Follow existing naming style in `IPC_CHANNELS`.
 ### Run Lifecycle
 
 - `TEAM_RUN_CREATE` -> `teamRun:create`
-- `TEAM_RUN_GET` -> `teamRun:get`
 - `TEAM_RUN_LIST` -> `teamRun:list`
 - `TEAM_RUN_CANCEL` -> `teamRun:cancel`
 - `TEAM_RUN_PAUSE` -> `teamRun:pause`

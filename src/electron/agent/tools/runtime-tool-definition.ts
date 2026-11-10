@@ -423,11 +423,3 @@ export function withRuntimeToolMetadata(
 export function withRuntimeToolMetadataList(tools: LLMTool[]): LLMTool[] {
   return tools.map((tool) => withRuntimeToolMetadata(tool));
 }
-
-export function isRuntimeToolParallelEligible(tool: Pick<LLMTool, "name" | "runtime">): boolean {
-  const metadata = tool.runtime || getDefaultRuntimeToolMetadata(tool.name);
-  return (
-    metadata.concurrencyClass === "read_parallel" ||
-    metadata.concurrencyClass === "side_effect_parallel"
-  );
-}

@@ -145,7 +145,6 @@ window.electronAPI = new Proxy(
         : Promise.resolve({ enabled: false }),
     getVoiceSettings: async () => ({ enabled: false }),
     getMailboxDigest: async () => null,
-    getMailboxTodayDigest: async () => null,
     getMailboxSenderCleanupDigest: async () => null,
     getMailboxQuickReplySuggestions: async () => ({ suggestions: [] }),
     onMailboxEvent: (cb) => {

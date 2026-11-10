@@ -2,13 +2,12 @@
  * MCPHostServer - Exposes CoWork's tools as an MCP server
  *
  * This allows external clients (like Claude Code, other AI agents, or MCP clients)
- * to connect to CoWork and use its tools via the MCP protocol over stdio.
+ * to connect to CoWork and use its tools via the MCP protocol over loopback HTTP.
  */
 
 import { EventEmitter } from "events";
 import { randomBytes } from "crypto";
 import * as http from "http";
-import * as readline from "readline";
 import { createLogger } from "../../utils/logger";
 import { readBearerToken, timingSafeEqualString } from "../../utils/webhook-auth";
 import {
@@ -59,9 +58,8 @@ export class MCPHostServer extends EventEmitter {
   private running = false;
   private initialized = false;
   private toolProvider: ToolProvider | null = null;
-  private rl: readline.Interface | null = null;
   private httpServer: http.Server | null = null;
-  private transportMode: "stdio" | "http" | null = null;
+  private transportMode: "http" | null = null;
   private httpPort: number | null = null;
   private httpAuthToken: string | null = null;
 
@@ -84,47 +82,6 @@ export class MCPHostServer extends EventEmitter {
    */
   setToolProvider(provider: ToolProvider): void {
     this.toolProvider = provider;
-  }
-
-  /**
-   * Start the MCP host server on stdio
-   */
-  async startStdio(): Promise<void> {
-    if (this.running) {
-      logger.info("Already running");
-      return;
-    }
-
-    if (!this.toolProvider) {
-      throw new Error("Tool provider not set");
-    }
-
-    logger.info("Starting stdio server...");
-
-    this.running = true;
-    this.initialized = false;
-    this.transportMode = "stdio";
-    this.httpPort = null;
-
-    // Create readline interface for reading from stdin
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: false,
-    });
-
-    // Listen for lines (JSON-RPC messages)
-    this.rl.on("line", (line) => {
-      this.handleLine(line);
-    });
-
-    this.rl.on("close", () => {
-      logger.info("Stdin closed");
-      this.stop();
-    });
-
-    logger.info("Listening on stdio");
-    this.emit("started");
   }
 
   async startHttp(port: number): Promise<{ authToken: string }> {
@@ -231,10 +188,6 @@ export class MCPHostServer extends EventEmitter {
 
     logger.info("Stopping...");
 
-    if (this.rl) {
-      this.rl.close();
-      this.rl = null;
-    }
     if (this.httpServer) {
       await new Promise<void>((resolve) => {
         this.httpServer?.close(() => resolve());
@@ -259,7 +212,7 @@ export class MCPHostServer extends EventEmitter {
     return this.running;
   }
 
-  getTransportMode(): "stdio" | "http" | null {
+  getTransportMode(): "http" | null {
     return this.transportMode;
   }
 
@@ -276,26 +229,6 @@ export class MCPHostServer extends EventEmitter {
    */
   hasToolProvider(): boolean {
     return this.toolProvider !== null;
-  }
-
-  /**
-   * Handle an incoming line (JSON-RPC message)
-   */
-  private handleLine(line: string): void {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-
-    try {
-      const message = JSON.parse(trimmed);
-      void this.processMessage(message).then((response) => {
-        if (response) {
-          this.sendMessage(response);
-        }
-      });
-    } catch (error) {
-      logger.error("Failed to parse message:", error);
-      this.sendError(null, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
-    }
   }
 
   /**
@@ -532,22 +465,6 @@ export class MCPHostServer extends EventEmitter {
         data,
       },
     };
-  }
-
-  private sendResult(id: string | number, result: Any): void {
-    this.sendMessage(this.buildResult(id, result));
-  }
-
-  private sendError(id: string | number | null, code: number, message: string, data?: Any): void {
-    this.sendMessage(this.buildError(id, code, message, data));
-  }
-
-  /**
-   * Send a message to stdout
-   */
-  private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    const json = JSON.stringify(message);
-    process.stdout.write(json + "\n");
   }
 
   private async readHttpBody(req: http.IncomingMessage): Promise<string> {

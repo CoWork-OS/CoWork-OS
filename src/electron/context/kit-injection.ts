@@ -91,13 +91,6 @@ export function buildWorkspaceKitSections(ctx: InjectionContext): RenderedKitSec
   return sections;
 }
 
-export function buildOrderedKitPrompt(ctx: InjectionContext): string {
-  return buildWorkspaceKitSections(ctx)
-    .map((section) => section.rendered)
-    .join("\n\n")
-    .trim();
-}
-
 export function buildRoleKitSection(
   workspacePath: string,
   roleDir: string,
@@ -156,18 +149,4 @@ export function parseHeartbeatChecklist(body: string): HeartbeatTask[] {
   }
 
   return tasks;
-}
-
-export function renderHeartbeatPrompt(tasks: HeartbeatTask[]): string {
-  if (!tasks.length) return "HEARTBEAT: no proactive checks configured.";
-
-  return [
-    "HEARTBEAT CHECKLIST",
-    ...tasks.map((task, index) => {
-      const cadence = task.cadence ? ` [${task.cadence}]` : "";
-      return `${index + 1}. ${task.check}${cadence} -> default action: ${task.action || "propose"}`;
-    }),
-    "",
-    "Do not take irreversible or external actions unless separately allowed.",
-  ].join("\n");
 }

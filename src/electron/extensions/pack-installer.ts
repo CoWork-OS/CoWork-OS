@@ -594,36 +594,3 @@ export async function uninstallPack(packName: string): Promise<UninstallResult> 
     };
   }
 }
-
-/**
- * List user-installed plugin packs (from ~/.cowork/extensions/)
- */
-export function listInstalledPacks(): { name: string; path: string; manifest?: PluginManifest }[] {
-  const extensionsDir = getUserExtensionsDir();
-
-  if (!fs.existsSync(extensionsDir)) {
-    return [];
-  }
-
-  const results: { name: string; path: string; manifest?: PluginManifest }[] = [];
-
-  const entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    const packDir = path.join(extensionsDir, entry.name);
-    const manifestPath = path.join(packDir, MANIFEST_FILENAME);
-
-    if (!fs.existsSync(manifestPath)) continue;
-
-    try {
-      const content = fs.readFileSync(manifestPath, "utf-8");
-      const manifest = JSON.parse(content) as PluginManifest;
-      results.push({ name: entry.name, path: packDir, manifest });
-    } catch {
-      results.push({ name: entry.name, path: packDir });
-    }
-  }
-
-  return results;
-}

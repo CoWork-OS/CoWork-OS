@@ -174,7 +174,6 @@ export const ASYNC_SQLITE_LINT_FILES = [
   "src/electron/database/storage-units.ts",
   "src/electron/memory/MemoryWriteGate.ts",
   "src/electron/memory/CuratedMemoryService.ts",
-  "src/electron/gateway/infrastructure.ts",
   "src/electron/git/WorktreeManager.ts",
   "src/electron/documents/DocumentEditorSessionService.ts",
   "src/electron/gateway/security.ts",

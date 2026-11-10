@@ -25,8 +25,6 @@ export function setupVoiceActionHandlers(options: VoiceActionHandlerOptions = {}
 
   ipc.handle(IPC_CHANNELS.VOICE_GET_CAPABILITIES, async () => resolveService().getCapabilities());
 
-  ipc.handle(IPC_CHANNELS.VOICE_GET_STATE, async () => resolveService().getState());
-
   ipc.handle(IPC_CHANNELS.VOICE_SPEAK, async (_event, text: string) => {
     try {
       const audioBuffer = await resolveService().speak(text);

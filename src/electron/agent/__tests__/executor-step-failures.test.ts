@@ -920,7 +920,7 @@ describe("TaskExecutor executeStep failure handling", () => {
   it("keeps a step that reads an absolute path with spaces read-only", () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
     const packFile =
-      "/Users/mesut/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md";
+      "/Users/alex/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md";
     const step: Any = {
       id: "read-pack-reference",
       description: `Read the skill instructions and ${packFile}, check repository status, and scan existing purchasing integrations to resolve the required implementation route before reading other references or changing files.`,

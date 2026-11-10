@@ -301,7 +301,7 @@ bounded_research=true
       expect(IntentRouter.route("", prompt).intent).not.toBe("execution");
     });
 
-    it.each(["hi", "thanks!", "ok", "who are you", "Sounds good", "My name is Mesut"])(
+    it.each(["hi", "thanks!", "ok", "who are you", "Sounds good", "My name is Alex"])(
       "keeps the casual message %s as chat",
       (prompt) => {
         expect(IntentRouter.route("", prompt).intent).toBe("chat");

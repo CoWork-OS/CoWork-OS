@@ -509,7 +509,7 @@ describe("browser file bridge", () => {
   });
 
   it("translates Windows absolute paths by separator-aware workspace components", async () => {
-    const windowsWorkspace = { ...writableWorkspace, path: "C:\\Users\\Mesut\\project" };
+    const windowsWorkspace = { ...writableWorkspace, path: "C:\\Users\\Alex\\project" };
     const { api } = createBridge([windowsWorkspace]);
     fetchMock.mockResolvedValueOnce(
       new Response("windows bytes", {
@@ -519,7 +519,7 @@ describe("browser file bridge", () => {
     );
 
     await expect(
-      api.readFileForViewer("c:\\users\\mesut\\PROJECT\\docs\\readme.txt", windowsWorkspace.path),
+      api.readFileForViewer("c:\\users\\alex\\PROJECT\\docs\\readme.txt", windowsWorkspace.path),
     ).resolves.toMatchObject({ success: true, data: { path: "docs/readme.txt" } });
     const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(url.pathname).toContain("workspace-files/download");

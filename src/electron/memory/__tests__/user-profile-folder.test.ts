@@ -123,7 +123,7 @@ describe("user profile over the memory folder", () => {
   });
 
   it("includes PersonalityManager's name instead of folder name lines", async () => {
-    personality.name = "Mesut";
+    personality.name = "Alex";
     await service.remember({
       text: "Preferred name: Old",
       kind: "identity",
@@ -138,7 +138,7 @@ describe("user profile over the memory folder", () => {
     );
     expect(names).toEqual([
       expect.objectContaining({
-        value: "Preferred name: Mesut",
+        value: "Preferred name: Alex",
         category: "identity",
         pinned: true,
       }),

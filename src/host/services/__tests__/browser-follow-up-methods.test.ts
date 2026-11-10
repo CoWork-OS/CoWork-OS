@@ -431,7 +431,7 @@ describe("browser task follow-up methods", () => {
 
   it("accepts renderer-linked JSON host paths and protected glob tokens", async () => {
     const raw =
-      '{"path":"/Users/mesut/Downloads/app/cowork/src/renderer/App.tsx"}\nThe matching files are **/src/*.tsx.';
+      '{"path":"/Users/alex/Downloads/app/cowork/src/renderer/App.tsx"}\nThe matching files are **/src/*.tsx.';
     const quote = createQuotedAssistantMessage(raw, "event-paths", task.id);
     expect(quote).not.toBeNull();
     const assistantEvent = {

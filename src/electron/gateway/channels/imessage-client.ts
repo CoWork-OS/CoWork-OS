@@ -95,32 +95,6 @@ interface PendingRequest {
 }
 
 /**
- * Send message options
- */
-export interface ImessageSendOptions {
-  /** Target phone number, email, or chat_id */
-  to?: string;
-  /** Chat ID for group chats */
-  chatId?: number;
-  /** Message text */
-  text: string;
-  /** Service preference */
-  service?: "imessage" | "sms" | "auto";
-  /** File path for attachment */
-  file?: string;
-  /** Request timeout in ms */
-  timeoutMs?: number;
-}
-
-/**
- * Send message result
- */
-export interface ImessageSendResult {
-  messageId: string;
-  ok?: boolean;
-}
-
-/**
  * Resolve user home path (expand ~)
  */
 function resolveUserPath(inputPath: string): string {

@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as readline from "readline";
+import { pinProjectRoot, projectPath, writeProjectOutput } from "./project-files";
 
 type JSONRPCId = string | number;
 type JSONRPCRequest = {
@@ -225,7 +226,9 @@ function apiTimeoutMs(endpoint: string): number {
   return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 30 * 60_000) : DEFAULT_API_TIMEOUT_MS;
 }
 
-function projectRoot(): string {
+let pinnedRoot: { configured: string; get: () => string } | undefined;
+
+function configuredProjectRoot(): string {
   const raw = process.env.COWORK_ARCH_PROJECT_ROOT || process.env.COWORK_WORKSPACE_ROOT || "";
   if (!raw.trim()) {
     throw new Error(
@@ -233,6 +236,13 @@ function projectRoot(): string {
     );
   }
   return path.resolve(raw);
+}
+
+function projectRoot(): string {
+  const configured = configuredProjectRoot();
+  pinnedRoot ??= { configured, get: pinProjectRoot(configured) };
+  if (pinnedRoot.configured !== configured) throw new Error("Configured project root changed");
+  return pinnedRoot.get();
 }
 
 function normalizeProjectPath(value: unknown, fieldName: string): string {
@@ -243,10 +253,17 @@ function normalizeProjectPath(value: unknown, fieldName: string): string {
     throw new Error(`${fieldName} must be a local filesystem path, not a URL.`);
   }
   const root = projectRoot();
-  const resolved = path.resolve(root, value);
+  const configured = configuredProjectRoot();
+  const lexical = path.resolve(configured, value);
+  const relative = path.relative(configured, lexical);
+  const resolved =
+    !path.isAbsolute(relative) && !relative.split(path.sep).includes("..")
+      ? path.resolve(root, relative)
+      : path.resolve(value);
   if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
     throw new Error(`${fieldName} must stay inside project root: ${root}`);
   }
+  projectPath(root, resolved);
   return resolved;
 }
 
@@ -462,6 +479,7 @@ async function listWorkflows(): Promise<any> {
   }
   const safeWorkflowDir = normalizeProjectPath(workflowDir, "COMFYUI_WORKFLOW_DIR");
   const entries = await fs.readdir(safeWorkflowDir, { withFileTypes: true });
+  projectPath(projectRoot(), safeWorkflowDir);
   const workflows = entries
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
     .map((entry) => ({ name: entry.name, path: path.join(safeWorkflowDir, entry.name) }));
@@ -541,7 +559,7 @@ async function collectOutputs(args: Record<string, any>): Promise<any> {
     typeof args.outputDir === "string" && args.outputDir.trim()
       ? normalizeProjectPath(args.outputDir, "outputDir")
       : null;
-  if (outputDir) await fs.mkdir(outputDir, { recursive: true });
+  if (outputDir) projectPath(projectRoot(), outputDir, true);
   const images: Array<{
     nodeId: string;
     filename: string;
@@ -572,8 +590,7 @@ async function collectOutputs(args: Record<string, any>): Promise<any> {
       if (outputDir && url && record.filename) {
         const data = await fetchComfyBinary(url, record.filename);
         const localPath = path.join(outputDir, path.basename(record.filename));
-        await fs.writeFile(localPath, data);
-        record.localPath = localPath;
+        record.localPath = writeProjectOutput(projectRoot(), localPath, data);
       }
       images.push(record);
     }

@@ -38,6 +38,7 @@ function event(type: string, payload: Record<string, unknown>): TaskEvent {
 
 function sources(overrides: Partial<BrowserTaskEventSources> = {}): BrowserTaskEventSources {
   return {
+    resolveWorkspace: vi.fn().mockResolvedValue({ ...workspace, permissions: { read: true } }),
     findScopedTimelineSnapshot: vi.fn().mockResolvedValue({
       outcome: "available",
       cursor: { taskId: task.id, position: 7 },
@@ -84,6 +85,49 @@ function sources(overrides: Partial<BrowserTaskEventSources> = {}): BrowserTaskE
 }
 
 describe("browser task event methods", () => {
+  it.each(["task.events.snapshot", "task.events.page", "task.events.history"])(
+    "enforces current workspace read authority for %s before querying and after awaits",
+    async (name) => {
+      const dependency = sources();
+      const request = {
+        taskId: task.id,
+        workspaceId: workspace.id,
+        limit: 1,
+        afterCursor: { taskId: task.id, position: 0 },
+        beforeCursor: { order: 1, timestamp: 1, id: "old" },
+      };
+      const method = createBrowserTaskEventMethods(dependency)[name];
+      vi.mocked(dependency.resolveWorkspace).mockResolvedValue({
+        ...workspace,
+        permissions: { read: false },
+      } as never);
+      await expect(method.handler(context, request)).rejects.toThrow(/unavailable/);
+      expect(dependency.findScopedTimelineSnapshot).not.toHaveBeenCalled();
+      expect(dependency.findScopedTimelineHistoryPage).not.toHaveBeenCalled();
+      expect(dependency.findScopedMutationPage).not.toHaveBeenCalled();
+      vi.mocked(dependency.resolveWorkspace).mockResolvedValue({
+        ...workspace,
+        isTemp: true,
+        permissions: { read: true },
+      } as never);
+      await expect(method.handler(context, request)).rejects.toThrow(/unavailable/);
+      let allowed = true;
+      vi.mocked(dependency.resolveWorkspace).mockImplementation(
+        async () => ({ ...workspace, permissions: { read: allowed } }) as never,
+      );
+      const source = name.endsWith("snapshot")
+        ? dependency.findScopedTimelineSnapshot
+        : name.endsWith("history")
+          ? dependency.findScopedTimelineHistoryPage
+          : dependency.findScopedMutationPage;
+      const result = await (source as Any)(request);
+      vi.mocked(source as Any).mockImplementation(async () => {
+        allowed = false;
+        return result;
+      });
+      await expect(method.handler(context, request)).rejects.toThrow(/unavailable/);
+    },
+  );
   it.each(["llm_usage", "timeline_step_updated"])(
     "preserves %s counters while redacting credential tokens on snapshot and replay",
     async (type) => {

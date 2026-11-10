@@ -1,4 +1,4 @@
-import { CoreMemoryCandidateRepository, CoreTraceRepository } from "./core-repository-facades";
+import { CoreTraceRepository } from "./core-repository-facades";
 import type {
   CoreTrace,
   CoreTraceEvent,
@@ -8,10 +8,7 @@ import type {
 } from "../../shared/types";
 
 export class CoreTraceService {
-  constructor(
-    private readonly traceRepo: CoreTraceRepository,
-    private readonly candidateRepo: CoreMemoryCandidateRepository,
-  ) {}
+  constructor(private readonly traceRepo: CoreTraceRepository) {}
 
   async startTrace(
     input: Omit<CoreTrace, "id" | "createdAt"> & { id?: string; createdAt?: number },
@@ -81,16 +78,6 @@ export class CoreTraceService {
       error,
       completedAt: Date.now(),
     });
-  }
-
-  async getTrace(id: string) {
-    const trace = await this.traceRepo.findById(id);
-    if (!trace) return undefined;
-    return {
-      trace,
-      events: await this.traceRepo.listEvents(id),
-      candidates: await this.candidateRepo.listForTrace(id),
-    };
   }
 
   list(request: ListCoreTracesRequest = {}) {

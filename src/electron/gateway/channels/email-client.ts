@@ -1254,23 +1254,57 @@ export class EmailClient extends EventEmitter {
           });
         }
 
-        let step = 0;
+        let state:
+          | "greeting"
+          | "ehlo"
+          | "starttls"
+          | "tls_handshake"
+          | "auth"
+          | "mail"
+          | "rcpt"
+          | "data"
+          | "sent" = "greeting";
         let responseBuffer = "";
         let supportsStartTls = false;
-        let startTlsComplete = this.options.smtpSecure;
+        let startTlsComplete = false;
         let rcptIndex = 0;
         let timeout: NodeJS.Timeout | undefined;
+        let settled = false;
+
+        const fail = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          socket.destroy();
+          reject(error);
+        };
+
+        const verifyTls = (tlsSocket: tls.TLSSocket, upgraded: boolean) => {
+          tlsSocket.once("secureConnect", () => {
+            if (settled) return;
+            if (!tlsSocket.authorized) {
+              fail(new Error("SMTP TLS certificate verification failed"));
+              return;
+            }
+            startTlsComplete = true;
+            if (upgraded) {
+              state = "ehlo";
+              tlsSocket.write(`EHLO ${this.options.smtpHost}\r\n`);
+            }
+          });
+        };
 
         const attachSmtpHandlers = (activeSocket: net.Socket | tls.TLSSocket) => {
-          activeSocket.on("error", (error) => {
-            reject(error);
-          });
+          activeSocket.on("error", fail);
 
           activeSocket.on("close", () => {
-            if (timeout) clearTimeout(timeout);
+            // The original TCP socket remains underneath the TLS transport.
+            if (activeSocket === socket && !settled)
+              fail(new Error("SMTP connection closed before completion"));
           });
 
-          activeSocket.on("data", (data) => {
+          const onData = (data: Buffer) => {
+            if (settled || activeSocket !== socket || state === "tls_handshake") return;
             responseBuffer += data.toString();
 
             // Check for complete response
@@ -1284,8 +1318,13 @@ export class EmailClient extends EventEmitter {
                 console.log("SMTP <", line);
               }
 
-              const code = parseInt(line.substring(0, 3), 10);
-              if (/STARTTLS/i.test(line)) {
+              const response = /^(\d{3})([ -])(.*)$/.exec(line);
+              if (!response) {
+                fail(new Error("Invalid SMTP response"));
+                return;
+              }
+              const code = Number(response[1]);
+              if (state === "ehlo" && code === 250 && /^STARTTLS(?:\s|$)/i.test(response[3])) {
                 supportsStartTls = true;
               }
 
@@ -1293,85 +1332,111 @@ export class EmailClient extends EventEmitter {
               if (line[3] === "-") continue;
 
               if (code >= 400) {
-                socket.destroy();
-                reject(new Error(`SMTP error: ${line}`));
+                fail(new Error(`SMTP error: ${line}`));
                 return;
               }
 
-              step++;
-              switch (step) {
-                case 1: // After greeting
+              const expected =
+                state === "greeting" || state === "starttls"
+                  ? 220
+                  : state === "auth"
+                    ? 235
+                    : state === "data"
+                      ? 354
+                      : 250;
+              if (
+                !(state === "auth" && code === 334 && this.options.authMethod === "oauth") &&
+                !(state === "rcpt" && (code === 251 || code === 252)) &&
+                code !== expected
+              ) {
+                fail(new Error(`Unexpected SMTP response during ${state}: ${code}`));
+                return;
+              }
+              switch (state) {
+                case "greeting":
                   supportsStartTls = false;
+                  state = "ehlo";
                   socket.write(`EHLO ${this.options.smtpHost}\r\n`);
                   break;
-                case 2: // After EHLO
-                  if (!startTlsComplete && supportsStartTls) {
+                case "ehlo":
+                  if (!startTlsComplete) {
+                    if (!supportsStartTls) {
+                      fail(new Error("SMTP server does not offer required STARTTLS"));
+                      return;
+                    }
+                    state = "starttls";
                     socket.write("STARTTLS\r\n");
                   } else {
+                    state = "auth";
                     socket.write(authCommand);
                   }
                   break;
-                case 3: // After STARTTLS or AUTH
-                  if (line.includes("220") && !startTlsComplete) {
-                    // Upgrade to TLS
-                    const servername = net.isIP(this.options.smtpHost)
-                      ? undefined
-                      : this.options.smtpHost;
-                    const tlsSocket = tls.connect({
-                      socket: socket as net.Socket,
-                      host: this.options.smtpHost,
-                      servername,
-                      ca: getSystemCA(),
-                      rejectUnauthorized: true,
-                    });
-                    socket = tlsSocket;
-                    startTlsComplete = true;
-                    supportsStartTls = false;
-                    responseBuffer = "";
-                    step = 0;
-                    attachSmtpHandlers(tlsSocket);
-                    tlsSocket.once("secureConnect", () => {
-                      tlsSocket.write(`EHLO ${this.options.smtpHost}\r\n`);
-                      step = 1;
-                    });
-                  } else if (code === 334 && this.options.authMethod === "oauth") {
+                case "starttls": {
+                  // Upgrade to TLS
+                  state = "tls_handshake";
+                  activeSocket.removeListener("data", onData);
+                  const servername = net.isIP(this.options.smtpHost)
+                    ? undefined
+                    : this.options.smtpHost;
+                  const tlsSocket = tls.connect({
+                    socket: socket as net.Socket,
+                    host: this.options.smtpHost,
+                    servername,
+                    ca: getSystemCA(),
+                    rejectUnauthorized: true,
+                  });
+                  socket = tlsSocket;
+                  supportsStartTls = false;
+                  responseBuffer = "";
+                  attachSmtpHandlers(tlsSocket);
+                  verifyTls(tlsSocket, true);
+                  // Discard any further plaintext responses in this chunk.
+                  return;
+                }
+                case "auth":
+                  if (code === 334) {
                     // Some SMTP servers still send a continuation challenge even when the
                     // XOAUTH2 initial client response is included on the AUTH line.
                     socket.write("\r\n");
-                    step = 2;
                   } else {
+                    state = "mail";
                     socket.write(`MAIL FROM:<${this.options.email}>\r\n`);
                   }
                   break;
-                case 4: // After MAIL FROM
+                case "mail":
+                  state = "rcpt";
                   socket.write(`RCPT TO:<${envelopeRecipients[rcptIndex++]}>\r\n`);
                   break;
-                case 5: // After RCPT TO
+                case "rcpt":
                   if (rcptIndex < envelopeRecipients.length) {
                     socket.write(`RCPT TO:<${envelopeRecipients[rcptIndex++]}>\r\n`);
-                    step = 4;
                   } else {
+                    state = "data";
                     socket.write("DATA\r\n");
                   }
                   break;
-                case 6: // After DATA
+                case "data":
+                  state = "sent";
                   socket.write(email);
                   break;
-                case 7: // After email sent
+                case "sent":
+                  settled = true;
+                  if (timeout) clearTimeout(timeout);
                   socket.write("QUIT\r\n");
                   socket.end();
                   resolve(messageId.replace(/[<>]/g, ""));
                   break;
               }
             }
-          });
+          };
+          activeSocket.on("data", onData);
         };
 
         attachSmtpHandlers(socket);
+        if (this.options.smtpSecure) verifyTls(socket as tls.TLSSocket, false);
 
         timeout = setTimeout(() => {
-          socket.destroy();
-          reject(new Error("SMTP connection timeout"));
+          fail(new Error("SMTP connection timeout"));
         }, 30000);
       };
 

@@ -781,19 +781,19 @@ export class BrowserWorkbenchService {
     return session;
   }
 
-  allowLocalPreviewUrl(rawUrl: string): void {
+  allowLocalPreviewUrl(rawUrl: string, taskId?: string, sessionId?: unknown): void {
     if (!isLocalHtmlFileUrl(rawUrl) && !isLoopbackHttpUrl(rawUrl)) return;
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.set(normalized, Date.now() + 5 * 60_000);
-    this.browserSessionManager.allowLocalPreviewUrl(normalized);
+    if (taskId) this.browserSessionManager.allowLocalPreviewUrl(normalized, taskId, sessionId);
   }
 
-  revokeLocalPreviewUrl(rawUrl: string): void {
+  revokeLocalPreviewUrl(rawUrl: string, taskId?: string, sessionId?: unknown): void {
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.delete(normalized);
-    this.browserSessionManager.revokeLocalPreviewUrl(normalized);
+    if (taskId) this.browserSessionManager.revokeLocalPreviewUrl(normalized, taskId, sessionId);
   }
 
   isAllowedLocalPreviewUrl(rawUrl: string): boolean {
@@ -826,7 +826,7 @@ export class BrowserWorkbenchService {
       url: normalizeUrl(input.url),
     };
     if (request.url) {
-      this.allowLocalPreviewUrl(request.url);
+      this.allowLocalPreviewUrl(request.url, input.taskId, sessionId);
     }
     this.mainWindow.webContents.send(IPC_CHANNELS.BROWSER_WORKBENCH_OPEN_REQUEST, request);
     return await this.waitForSession(input.taskId, sessionId, 12_000);
@@ -842,7 +842,7 @@ export class BrowserWorkbenchService {
     if (!url) return null;
     // Agent navigation to a loopback dev server gets the TTL allowance up front;
     // the tool already applied the network policy to it.
-    if (isLoopbackHttpUrl(url)) this.allowLocalPreviewUrl(url);
+    if (isLoopbackHttpUrl(url)) this.allowLocalPreviewUrl(url, input.taskId, input.sessionId);
     this.browserSessionManager.assertUrlAllowed(input.taskId, url, input.sessionId);
     const session =
       this.getSession(input.taskId, input.sessionId) ||
@@ -850,7 +850,7 @@ export class BrowserWorkbenchService {
     this.browserSessionManager.assertUrlAllowed(input.taskId, url, input.sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
-    this.allowLocalPreviewUrl(url);
+    this.allowLocalPreviewUrl(url, input.taskId, input.sessionId);
     this.emitCursor(session, { x: 32, y: 32, kind: "navigate", label: "Navigate", pulse: true });
     const loadPromise = this.waitForLoad(contents, 45_000);
     // While this agent navigation loads, the partition's header hook signs each main-frame hop

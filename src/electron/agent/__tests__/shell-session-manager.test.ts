@@ -20,7 +20,7 @@ describe("ShellSessionManager", () => {
     vi.restoreAllMocks();
   });
 
-  it("preserves cwd across commands and resets session state", async () => {
+  it("preserves cwd across commands and ends the session on close", async () => {
     const { ShellSessionManager } = await import("../tools/shell-session-manager");
     const manager = ShellSessionManager.getInstance();
 
@@ -62,11 +62,6 @@ describe("ShellSessionManager", () => {
     const listed = manager.listSessions("task-1", "workspace-1");
     expect(listed).toHaveLength(1);
     expect(listed[0]?.cwd).toBe(path.join(workspaceDir, "subdir"));
-
-    const reset = await manager.resetSession("task-1", "workspace-1");
-    expect(reset?.status).toBe("inactive");
-    expect(reset?.commandCount).toBe(0);
-    expect(reset?.cwd).toBe(path.join(workspaceDir, "subdir"));
 
     const closed = await manager.closeSession("task-1", "workspace-1");
     expect(closed?.status).toBe("ended");

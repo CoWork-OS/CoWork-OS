@@ -1353,26 +1353,6 @@ export class PluginRegistry extends EventEmitter {
   }
 
   /**
-   * Get plugin configuration
-   */
-  getPluginConfig(name: string): Record<string, unknown> | undefined {
-    return this.configs.get(name);
-  }
-
-  /**
-   * Set plugin configuration
-   */
-  async setPluginConfig(name: string, config: Record<string, unknown>): Promise<void> {
-    if (!this.plugins.has(name)) {
-      throw new Error(`Plugin not found: ${name}`);
-    }
-
-    this.configs.set(name, config);
-    await this.savePluginConfig(name, config);
-    this.emitPluginEvent("plugin:config-changed", name, { config });
-  }
-
-  /**
    * Shutdown the registry
    */
   async shutdown(): Promise<void> {

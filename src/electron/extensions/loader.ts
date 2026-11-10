@@ -362,19 +362,6 @@ export async function loadPlugin(pluginPath: string): Promise<PluginLoadResult> 
 }
 
 /**
- * Create the user extensions directory if it doesn't exist
- */
-export function ensureExtensionsDirectory(): string {
-  const extensionsDir = getUserExtensionsDir();
-
-  if (!fs.existsSync(extensionsDir)) {
-    fs.mkdirSync(extensionsDir, { recursive: true });
-  }
-
-  return extensionsDir;
-}
-
-/**
  * Get the path to a plugin's data directory
  */
 export function getPluginDataPath(pluginName: string): string {
@@ -460,16 +447,4 @@ export function generateManifestTemplate(
         : undefined,
     keywords: [type, name.toLowerCase()],
   };
-}
-
-/**
- * Write a manifest template to a plugin directory
- */
-export function writeManifestTemplate(pluginDir: string, manifest: PluginManifest): void {
-  if (!fs.existsSync(pluginDir)) {
-    fs.mkdirSync(pluginDir, { recursive: true });
-  }
-
-  const manifestPath = path.join(pluginDir, MANIFEST_FILENAME);
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
 }

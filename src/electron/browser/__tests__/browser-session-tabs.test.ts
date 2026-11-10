@@ -16,6 +16,20 @@ function tabbedManager(pages: Record<number, FakePage>) {
 }
 
 describe("BrowserSessionManager workbench tabs", () => {
+  it("revokes preview grants when the owner's last tab closes", async () => {
+    const pages = { 11: new FakePage(), 12: new FakePage() };
+    const manager = tabbedManager(pages);
+    manager.setAccessPolicy("t", { networkEnabled: false });
+    await manager.registerElectronWorkbenchSession({ taskId: "t", tabId: "a", webContentsId: 11 });
+    await manager.registerElectronWorkbenchSession({ taskId: "t", tabId: "b", webContentsId: 12 });
+    const url = "http://127.0.0.1:4173";
+    manager.allowLocalPreviewUrl(url, "t");
+    expect(() => manager.assertUrlAllowed("t", `${url}/assets/style.css`)).not.toThrow();
+    manager.unregisterSession({ taskId: "t", tabId: "a" });
+    expect(() => manager.assertUrlAllowed("t", url)).not.toThrow();
+    manager.unregisterSession({ taskId: "t", tabId: "b" });
+    expect(() => manager.assertUrlAllowed("t", url)).toThrow();
+  });
   it("lists every registered tab and acts on the active one", async () => {
     const pages = { 11: new FakePage(), 12: new FakePage(), 13: new FakePage() };
     pages[11].mount(button("a", "Alpha"));

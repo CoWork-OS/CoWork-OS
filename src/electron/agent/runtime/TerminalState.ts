@@ -40,17 +40,6 @@ export function createTerminalState(
   };
 }
 
-export function projectTerminalState(
-  terminalState?: TerminalState,
-): Pick<TerminalState, "terminalKind" | "terminalStatus" | "failureClass"> | undefined {
-  if (!terminalState) return undefined;
-  return {
-    terminalKind: terminalState.terminalKind,
-    terminalStatus: terminalState.terminalStatus,
-    ...(terminalState.failureClass ? { failureClass: terminalState.failureClass } : {}),
-  };
-}
-
 function resolveTerminalStatus(
   terminalKind: TerminalKind,
   override?: Task["terminalStatus"],

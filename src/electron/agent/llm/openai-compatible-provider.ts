@@ -1,3 +1,4 @@
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse, LLMProviderError } from "./types";
 import { getProviderImageCaps } from "./image-utils";
 import { reasoningFromChatCompletionMessage } from "./reasoning-replay";
@@ -180,6 +181,7 @@ function resolveModelsUrl(baseUrl: string, providerType?: LLMProviderType): stri
 }
 
 export interface OpenAICompatibleProviderOptions {
+  diagnosticFetch?: ProviderDiagnosticFetch;
   type: LLMProviderType;
   providerName: string;
   apiKey: string;
@@ -200,6 +202,7 @@ export interface OpenAICompatibleProviderOptions {
 
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly type: LLMProviderType;
+  private diagnosticFetch?: ProviderDiagnosticFetch;
   private apiKey: string;
   private chatCompletionsUrl: string;
   private modelsUrl: string;
@@ -213,6 +216,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   constructor(options: OpenAICompatibleProviderOptions) {
     this.type = options.type;
+    this.diagnosticFetch = options.diagnosticFetch;
     this.apiKey = options.apiKey;
     this.normalizedBaseUrl = normalizeBaseUrl(options.baseUrl, options.type);
     this.chatCompletionsUrl = resolveChatCompletionsUrl(options.baseUrl, options.type);
@@ -691,7 +695,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       };
       this.addAuthHeaders(headers);
 
-      const response = await fetch(this.chatCompletionsUrl, {
+      const response = await (this.diagnosticFetch ?? fetch)(this.chatCompletionsUrl, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -779,7 +783,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const headers: Record<string, string> = { ...this.extraHeaders };
       this.addAuthHeaders(headers);
 
-      const response = await fetch(this.modelsUrl, {
+      const response = await (this.diagnosticFetch ?? fetch)(this.modelsUrl, {
         headers,
         ...(deadline.signal ? { signal: deadline.signal } : {}),
       });

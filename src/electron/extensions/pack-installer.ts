@@ -17,6 +17,7 @@ import { app } from "electron";
 import { InstallSecurityOutcome } from "../../shared/types";
 import { getCapabilityBundleSecurityService } from "../security/capability-bundle-security";
 import { assertNetworkPolicyAllowed } from "../security/network-policy";
+import { fetchWithPolicyCheckedRedirects } from "../security/policy-checked-fetch";
 import { readBoundedResponse } from "../security/bounded-response";
 import { validateManifest } from "./loader";
 import { PluginManifest } from "./types";
@@ -440,7 +441,19 @@ export async function installFromUrl(
 
     let manifestData: unknown;
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      const { response } = await fetchWithPolicyCheckedRedirects(
+        url,
+        { signal: controller.signal },
+        {
+          toolName: "plugin_pack_url_install",
+          networkContext: { networkEnabled: true },
+          requirePinnedDestination: true,
+          onHop: (hop) => {
+            if (new URL(hop).protocol !== "https:")
+              throw new Error("Plugin packs must be installed over https");
+          },
+        },
+      );
       if (!response.ok) {
         await response.body?.cancel();
         return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
@@ -580,37 +593,4 @@ export async function uninstallPack(packName: string): Promise<UninstallResult> 
       error: `Uninstall failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-}
-
-/**
- * List user-installed plugin packs (from ~/.cowork/extensions/)
- */
-export function listInstalledPacks(): { name: string; path: string; manifest?: PluginManifest }[] {
-  const extensionsDir = getUserExtensionsDir();
-
-  if (!fs.existsSync(extensionsDir)) {
-    return [];
-  }
-
-  const results: { name: string; path: string; manifest?: PluginManifest }[] = [];
-
-  const entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    const packDir = path.join(extensionsDir, entry.name);
-    const manifestPath = path.join(packDir, MANIFEST_FILENAME);
-
-    if (!fs.existsSync(manifestPath)) continue;
-
-    try {
-      const content = fs.readFileSync(manifestPath, "utf-8");
-      const manifest = JSON.parse(content) as PluginManifest;
-      results.push({ name: entry.name, path: packDir, manifest });
-    } catch {
-      results.push({ name: entry.name, path: packDir });
-    }
-  }
-
-  return results;
 }

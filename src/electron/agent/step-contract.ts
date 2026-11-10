@@ -55,10 +55,6 @@ const CANONICAL_ARTIFACT_EXTENSION_LIST = [
 ] as const;
 
 const CANONICAL_ARTIFACT_EXTENSION_SET = new Set<string>(CANONICAL_ARTIFACT_EXTENSION_LIST);
-export { CANONICAL_ARTIFACT_EXTENSION_SET as CANONICAL_ARTIFACT_EXTENSION_SET_EXPORT };
-const CANONICAL_EXTENSIONS_WITH_DOT = CANONICAL_ARTIFACT_EXTENSION_LIST.map(
-  (extension) => `.${extension}`,
-);
 const CANONICAL_EXTENSION_PATTERN = CANONICAL_ARTIFACT_EXTENSION_LIST.map((extension) =>
   extension.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
 ).join("|");
@@ -116,10 +112,6 @@ function normalizeWithLeadingDot(extension: string): string {
     .toLowerCase();
   if (!raw) return "";
   return raw.startsWith(".") ? raw : `.${raw}`;
-}
-
-export function getCanonicalArtifactExtensions(): string[] {
-  return [...CANONICAL_EXTENSIONS_WITH_DOT];
 }
 
 export function hasArtifactExtensionMention(text: string): boolean {

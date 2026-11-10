@@ -149,7 +149,21 @@ export function buildLocalVideoArgs(input: {
   return args;
 }
 
+export interface LocalVideoJobOwner {
+  readonly taskId: string;
+  readonly workspaceId: string;
+  /** Live host authority; deliberately not persisted on the job. */
+  readonly isCurrent?: () => boolean;
+}
+
+function validOwner(owner: LocalVideoJobOwner): boolean {
+  return Boolean(
+    owner?.taskId?.trim() && owner?.workspaceId?.trim() && (!owner.isCurrent || owner.isCurrent()),
+  );
+}
+
 interface LocalVideoJob {
+  owner: Pick<LocalVideoJobOwner, "taskId" | "workspaceId">;
   status: "running" | "succeeded" | "failed" | "cancelled";
   outputPath: string;
   startedAt: number;
@@ -173,7 +187,7 @@ function pruneFinishedJobs(now = Date.now()): void {
 }
 
 /** A render uses most of the GPU and memory; run one at a time. */
-export function getRunningLocalVideoJobId(): string | null {
+function getRunningLocalVideoJobId(): string | null {
   for (const [jobId, job] of jobs) if (job.status === "running") return jobId;
   return null;
 }
@@ -203,19 +217,21 @@ function finish(job: LocalVideoJob, status: LocalVideoJob["status"], error?: str
 }
 
 export function startLocalVideoJob(
-  input: Parameters<typeof buildLocalVideoArgs>[0],
+  input: Parameters<typeof buildLocalVideoArgs>[0] & { owner: LocalVideoJobOwner },
   spawnImpl: Spawn = spawn,
 ): { jobId: string } {
+  if (!validOwner(input.owner)) throw new Error("Local video job authority is unavailable.");
   pruneFinishedJobs();
   const running = getRunningLocalVideoJobId();
   if (running) {
     throw new Error(
-      `The local video model is busy with job ${running}. Poll it with get_video_generation_job and start the next clip when it finishes.`,
+      "The local video model is busy with another render. Wait for it to finish before starting another clip.",
     );
   }
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
   const jobId = `local-${randomUUID()}`;
   const job: LocalVideoJob = {
+    owner: { taskId: input.owner.taskId, workspaceId: input.owner.workspaceId },
     status: "running",
     outputPath: input.outputPath,
     startedAt: Date.now(),
@@ -266,14 +282,23 @@ export function startLocalVideoJob(
   return { jobId };
 }
 
-export function getLocalVideoJob(jobId: string): {
+export function getLocalVideoJob(
+  jobId: string,
+  owner: LocalVideoJobOwner,
+): {
   status: LocalVideoJob["status"];
   outputPath: string;
   elapsedSeconds: number;
   error?: string;
 } | null {
   const job = jobs.get(jobId);
-  if (!job) return null;
+  if (
+    !job ||
+    !validOwner(owner) ||
+    job.owner.taskId !== owner.taskId ||
+    job.owner.workspaceId !== owner.workspaceId
+  )
+    return null;
   return {
     status: job.status,
     outputPath: job.outputPath,
@@ -289,22 +314,34 @@ export function getLocalVideoJob(jobId: string): {
  */
 export async function waitForLocalVideoJob(
   jobId: string,
+  owner: LocalVideoJobOwner,
   maxWaitMs: number,
   intervalMs = 2000,
 ): Promise<ReturnType<typeof getLocalVideoJob>> {
   const deadline = Date.now() + Math.max(0, maxWaitMs);
-  let job = getLocalVideoJob(jobId);
+  let job = getLocalVideoJob(jobId, owner);
   while (job?.status === "running" && Date.now() < deadline) {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.min(intervalMs, deadline - Date.now())),
     );
-    job = getLocalVideoJob(jobId);
+    job = getLocalVideoJob(jobId, owner);
   }
   return job;
 }
 
-export function cancelLocalVideoJob(jobId: string): boolean {
+export function cancelLocalVideoJob(jobId: string, owner: LocalVideoJobOwner): boolean {
   const job = jobs.get(jobId);
+  if (
+    !job ||
+    !validOwner(owner) ||
+    job.owner.taskId !== owner.taskId ||
+    job.owner.workspaceId !== owner.workspaceId
+  )
+    return false;
+  return cancelJob(job);
+}
+
+function cancelJob(job: LocalVideoJob): boolean {
   if (!job || job.status !== "running") return false;
   finish(job, "cancelled");
   if (job.child) stopChild(job.child);
@@ -313,5 +350,5 @@ export function cancelLocalVideoJob(jobId: string): boolean {
 
 /** Stop every running render, e.g. when the app quits. */
 export function stopAllLocalVideoJobs(): void {
-  for (const jobId of jobs.keys()) cancelLocalVideoJob(jobId);
+  for (const job of jobs.values()) cancelJob(job);
 }

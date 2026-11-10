@@ -1,3 +1,4 @@
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -37,7 +38,6 @@ const OPENROUTER_AUTH_ERROR_MESSAGE =
 
 export const OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_MODEL_ID;
 export const OPENROUTER_PARETO_CODE_MODEL = "openrouter/pareto-code";
-export const OPENROUTER_PARETO_CODE_NITRO_MODEL = `${OPENROUTER_PARETO_CODE_MODEL}:nitro`;
 
 function normalizeOpenRouterApiKey(value?: string): string | undefined {
   let normalized = value?.trim() || "";
@@ -114,6 +114,7 @@ export function toLiveModelMetadata(models: Any[]): Record<string, ModelMetadata
 
 export class OpenRouterProvider implements LLMProvider {
   readonly type = "openrouter" as const;
+  private diagnosticFetch?: ProviderDiagnosticFetch;
   private apiKey: string;
   private baseUrl: string;
   private defaultModel: string;
@@ -131,6 +132,7 @@ export class OpenRouterProvider implements LLMProvider {
       );
     }
 
+    this.diagnosticFetch = config.diagnosticFetch;
     this.apiKey = apiKey;
     this.baseUrl = config.openrouterBaseUrl || "https://openrouter.ai/api/v1";
     this.defaultModel = config.model || OPENROUTER_DEFAULT_MODEL;
@@ -211,7 +213,7 @@ export class OpenRouterProvider implements LLMProvider {
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await (this.diagnosticFetch ?? fetch)(`${this.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
@@ -556,12 +558,15 @@ export class OpenRouterProvider implements LLMProvider {
     this.modelCatalogLoadPromise = (async () => {
       this.modelCatalogLastAttemptAt = Date.now();
       try {
-        const response = await fetch(`${this.baseUrl}/models?output_modalities=all`, {
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            ...getOpenRouterAttributionHeaders(),
+        const response = await (this.diagnosticFetch ?? fetch)(
+          `${this.baseUrl}/models?output_modalities=all`,
+          {
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              ...getOpenRouterAttributionHeaders(),
+            },
           },
-        });
+        );
 
         if (!response.ok) {
           return;
@@ -682,7 +687,7 @@ export class OpenRouterProvider implements LLMProvider {
    */
   async getAvailableModels(): Promise<Array<{ id: string; name: string; context_length: number }>> {
     try {
-      const response = await fetch(`${this.baseUrl}/models`, {
+      const response = await (this.diagnosticFetch ?? fetch)(`${this.baseUrl}/models`, {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           ...getOpenRouterAttributionHeaders(),

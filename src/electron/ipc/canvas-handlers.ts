@@ -37,21 +37,6 @@ export function setupCanvasHandlers(mainWindow: BrowserWindow, agentDaemon: Agen
     }
   });
 
-  // Create a new canvas session
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_CREATE,
-    async (
-      _,
-      data: {
-        taskId: string;
-        workspaceId: string;
-        title?: string;
-      },
-    ): Promise<CanvasSession> => {
-      return manager.createSession(data.taskId, data.workspaceId, data.title);
-    },
-  );
-
   // Get a canvas session by ID
   ipcMain.handle(
     IPC_CHANNELS.CANVAS_GET_SESSION,
@@ -80,52 +65,12 @@ export function setupCanvasHandlers(mainWindow: BrowserWindow, agentDaemon: Agen
     },
   );
 
-  // Hide a canvas window
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_HIDE,
-    async (_, sessionId: string): Promise<{ success: boolean }> => {
-      manager.hideCanvas(sessionId);
-      return { success: true };
-    },
-  );
-
   // Close a canvas session
   ipcMain.handle(
     IPC_CHANNELS.CANVAS_CLOSE,
     async (_, sessionId: string): Promise<{ success: boolean }> => {
       await manager.closeSession(sessionId);
       return { success: true };
-    },
-  );
-
-  // Push content to a canvas
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_PUSH,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        content: string;
-        filename?: string;
-      },
-    ): Promise<{ success: boolean }> => {
-      await manager.pushContent(data.sessionId, data.content, data.filename);
-      return { success: true };
-    },
-  );
-
-  // Execute script in canvas context
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_EVAL,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        script: string;
-      },
-    ): Promise<{ result: unknown }> => {
-      const result = await manager.evalScript(data.sessionId, data.script);
-      return { result };
     },
   );
 
@@ -194,104 +139,11 @@ export function setupCanvasHandlers(mainWindow: BrowserWindow, agentDaemon: Agen
     },
   );
 
-  // Open a remote URL inside the canvas window
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_OPEN_URL,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        url: string;
-        show?: boolean;
-      },
-    ): Promise<{ success: boolean; url: string }> => {
-      const normalizedUrl = await manager.openUrl(data.sessionId, data.url, {
-        show: data.show,
-        authorizedNetwork: true,
-      });
-      return { success: true, url: normalizedUrl };
-    },
-  );
-
   // Get session directory
   ipcMain.handle(
     IPC_CHANNELS.CANVAS_GET_SESSION_DIR,
     async (_, sessionId: string): Promise<string | null> => {
       return manager.getSessionDir(sessionId);
-    },
-  );
-
-  // Save a checkpoint
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_CHECKPOINT_SAVE,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        label?: string;
-      },
-    ): Promise<{ id: string; label: string; createdAt: number }> => {
-      const cp = await manager.saveCheckpoint(data.sessionId, data.label);
-      return { id: cp.id, label: cp.label, createdAt: cp.createdAt };
-    },
-  );
-
-  // List checkpoints
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_CHECKPOINT_LIST,
-    async (
-      _,
-      sessionId: string,
-    ): Promise<
-      Array<{
-        id: string;
-        label: string;
-        createdAt: number;
-      }>
-    > => {
-      return manager.listCheckpoints(sessionId).map((cp) => ({
-        id: cp.id,
-        label: cp.label,
-        createdAt: cp.createdAt,
-      }));
-    },
-  );
-
-  // Restore a checkpoint
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_CHECKPOINT_RESTORE,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        checkpointId: string;
-      },
-    ): Promise<{ id: string; label: string }> => {
-      const cp = await manager.restoreCheckpoint(data.sessionId, data.checkpointId);
-      return { id: cp.id, label: cp.label };
-    },
-  );
-
-  // Delete a checkpoint
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_CHECKPOINT_DELETE,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        checkpointId: string;
-      },
-    ): Promise<{ success: boolean }> => {
-      const removed = manager.deleteCheckpoint(data.sessionId, data.checkpointId);
-      return { success: removed };
-    },
-  );
-
-  // Get canvas session content (all files)
-  ipcMain.handle(
-    IPC_CHANNELS.CANVAS_GET_CONTENT,
-    async (_, sessionId: string): Promise<Record<string, string>> => {
-      return manager.getSessionContent(sessionId);
     },
   );
 

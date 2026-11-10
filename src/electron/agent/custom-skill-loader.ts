@@ -1163,17 +1163,6 @@ export class CustomSkillLoader {
   }
 
   /**
-   * Get eligible skills (those that meet all requirements)
-   */
-  async getEligibleSkills(): Promise<CustomSkill[]> {
-    const statusEntries = await this.getSkillStatus();
-    return statusEntries.skills
-      .filter((entry) => entry.eligible)
-      .map((entry) => this.getSkill(entry.id)!)
-      .filter(Boolean);
-  }
-
-  /**
    * Get skill status with eligibility information
    */
   async getSkillStatus(): Promise<SkillStatusReport> {

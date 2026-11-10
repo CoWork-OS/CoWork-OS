@@ -61,10 +61,6 @@ export function isOpenCodeAnthropicMessagesModel(model: string, product: OpenCod
   );
 }
 
-export function isOpenCodeGoAnthropicMessagesModel(model: string): boolean {
-  return isOpenCodeAnthropicMessagesModel(model, "go");
-}
-
 export function isOpenCodeResponsesModel(model: string): boolean {
   const normalized = withoutOpenCodePrefix(model).toLowerCase();
   return (

@@ -781,22 +781,6 @@ export interface MailboxDigestSnapshot extends MailboxDigest {
   generatedAt: number;
 }
 
-export interface MailboxTodayDigest {
-  buckets: Array<{
-    bucket: MailboxTodayBucket;
-    label: string;
-    count: number;
-    threads: MailboxThreadListItem[];
-  }>;
-  domainCounts: Array<{ category: MailboxDomainCategory; count: number }>;
-  syncHealth?: MailboxSyncHealth[];
-  queuedActionCount?: number;
-  failedActionCount?: number;
-  composeDraftCount?: number;
-  scheduledSendCount?: number;
-  generatedAt: number;
-}
-
 export interface MailboxAttachmentRecord extends MailboxAttachmentSummary {
   threadId: string;
   provider: MailboxProvider;

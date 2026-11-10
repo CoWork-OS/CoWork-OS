@@ -28,37 +28,6 @@ type VisualAnnotatorTarget = {
   style?: string; // e.g. "minimal", "editorial", "flat infographic"
 };
 
-export type VisualAnnotationPayloadV1 = {
-  version: 1;
-  kind: "visual_annotation";
-  image: {
-    filename: string;
-    originalPath?: string;
-    iteration?: number;
-    naturalWidth?: number;
-    naturalHeight?: number;
-  };
-  target?: VisualAnnotatorTarget;
-  notes: {
-    global: string;
-  };
-  annotations: Array<{
-    id: string;
-    type: "rect" | "pen";
-    note?: string;
-    color: string;
-    strokeWidth: number;
-    // normalized to the *natural* image size, in [0,1]
-    data:
-      | { x: number; y: number; w: number; h: number }
-      | { points: Array<{ x: number; y: number }> };
-    createdAt: number;
-  }>;
-  export: {
-    markdown: string;
-  };
-};
-
 type AnnotatorBootstrap = {
   version: 1;
   sessionId: string;

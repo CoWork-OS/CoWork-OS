@@ -16,6 +16,7 @@ import {
   resolveLocalVideoConfig,
   waitForLocalVideoJob,
   startLocalVideoJob,
+  type LocalVideoJobOwner,
 } from "./local-video-provider";
 
 // ── Provider & model types ────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ export interface VideoGenerationResult {
 // ── Internal adapters ─────────────────────────────────────────────────────────
 
 interface AdapterArgs {
+  localOwner?: LocalVideoJobOwner;
   request: VideoGenerationRequest;
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>;
   outputDir: string;
@@ -101,6 +103,7 @@ interface AdapterResult {
 const LOCAL_VIDEO_POLL_WAIT_MS = 240_000;
 
 function generateWithLocal(args: AdapterArgs): AdapterResult {
+  if (!args.localOwner) throw new Error("Local video job authority is unavailable.");
   const config = resolveLocalVideoConfig(args.settings.videoGeneration?.local);
   if (!config) {
     return { success: false, error: "The local video model is not installed or configured." };
@@ -112,6 +115,7 @@ function generateWithLocal(args: AdapterArgs): AdapterResult {
   const outputPath = buildOutputPath(args.outputDir, args.request.filename);
   args.outputPathGuard(outputPath);
   const input = {
+    owner: args.localOwner,
     config,
     prompt: args.request.prompt,
     outputPath,
@@ -1002,7 +1006,19 @@ export class VideoGenerator {
   constructor(
     private workspace: Workspace,
     private filesystemApprovalHandlers: WorkspaceFilesystemApprovalHandlers = {},
+    private localOwner?: LocalVideoJobOwner,
   ) {}
+
+  private getLocalOwner(): LocalVideoJobOwner {
+    if (
+      !this.localOwner ||
+      this.localOwner.workspaceId !== this.workspace.id ||
+      !this.workspace.permissions.write ||
+      this.localOwner.isCurrent?.() === false
+    )
+      throw new Error("Local video job authority is unavailable.");
+    return this.localOwner;
+  }
 
   /** Check the concrete provider/download destination against profile rules. */
   private assertNetworkAccess(url: string, toolName = "generate_video"): void {
@@ -1146,6 +1162,7 @@ export class VideoGenerator {
       let result: AdapterResult;
 
       try {
+        if (provider === "local") args.localOwner = this.getLocalOwner();
         if (provider === "openai-compatible") result = await generateWithOpenAICompatible(args);
         else if (provider === "gemini") result = await generateWithGemini(args);
         else if (provider === "vertex") result = await generateWithVertex(args);
@@ -1239,7 +1256,11 @@ export class VideoGenerator {
         );
       }
       if (provider === "local") {
-        const job = await waitForLocalVideoJob(normalizedJobId, LOCAL_VIDEO_POLL_WAIT_MS);
+        const job = await waitForLocalVideoJob(
+          normalizedJobId,
+          this.getLocalOwner(),
+          LOCAL_VIDEO_POLL_WAIT_MS,
+        );
         if (!job) {
           return {
             jobId: normalizedJobId,
@@ -1294,7 +1315,7 @@ export class VideoGenerator {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       if (provider === "local") {
-        return cancelLocalVideoJob(jobId)
+        return cancelLocalVideoJob(jobId, this.getLocalOwner())
           ? { success: true }
           : { success: false, error: "No running local video job with that ID." };
       }

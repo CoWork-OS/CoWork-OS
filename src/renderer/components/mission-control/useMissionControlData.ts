@@ -112,12 +112,6 @@ export const TASK_PRIORITY_OPTIONS: TaskPriorityMeta[] = [
 
 const STALE_TASK_AGE_MS = 6 * 60 * 60 * 1000;
 
-export const AUTONOMY_BADGES: Record<string, { label: string; color: string }> = {
-  lead: { label: "LEAD", color: "#f59e0b" },
-  specialist: { label: "SPC", color: "#3b82f6" },
-  intern: { label: "INT", color: "#6b7280" },
-};
-
 export type FeedItem = {
   id: string;
   type: "comments" | "tasks" | "status" | MissionControlCategory;

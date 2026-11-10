@@ -525,6 +525,30 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     expect(getBackgroundProcessManager().list(taskId)).toEqual([]);
   });
 
+  it("does not grant listener authority to a network-disabled macOS background command", async () => {
+    const child = spawn("sleep", ["30"], { stdio: ["pipe", "pipe", "pipe"] });
+    const spawnProcess = vi.fn(() => ({ process: child, cleanup: () => child.kill("SIGKILL") }));
+    vi.mocked(createSandbox).mockResolvedValueOnce({
+      type: "macos",
+      spawnProcess,
+      cleanup: vi.fn(),
+    } as never);
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const workspace = createWorkspace();
+    workspace.permissions.accessSandboxMode = "workspace-write";
+    workspace.permissions.network = false;
+    const tools = new ShellTools(workspace, createDaemon() as unknown as AgentDaemon, taskId);
+    const result = await tools.startBackgroundCommand("sleep 30", { startupWaitMs: 0 });
+    expect(spawnProcess).toHaveBeenCalledWith(
+      "/bin/sh",
+      ["-c", "sleep 30"],
+      expect.objectContaining({ allowNetwork: false, allowLoopbackListen: false }),
+    );
+    expect(result.notes).toContainEqual(expect.stringMatching(/TCP listeners are denied/));
+    await tools.stopBackgroundProcess({ process_id: result.process_id });
+  });
+
   it("passes an approved background network grant to the sandbox", async () => {
     const child = spawn("sleep", ["30"], { stdio: ["pipe", "pipe", "pipe"] });
     const spawnProcess = vi.fn(() => ({ process: child, cleanup: () => child.kill("SIGKILL") }));

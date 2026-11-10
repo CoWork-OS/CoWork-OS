@@ -14,8 +14,6 @@ function setup() {
     updateBelief: vi.fn(),
     deleteBelief: vi.fn(() => true),
     getSummary: vi.fn(),
-    getSnapshot: vi.fn(),
-    listEvents: vi.fn(() => [{ id: "event-one", payload: { privatePath: "/private" } }]),
   };
   const resolveWorkspace = vi.fn(
     async () =>
@@ -70,15 +68,8 @@ describe("browser awareness", () => {
       code: "FORBIDDEN",
     });
   });
-  it("bounds and scopes reads, omits raw event payloads, and propagates storage errors", async () => {
+  it("propagates storage errors and rejects a spoofed workspace in a belief edit", async () => {
     const { call, service } = setup();
-    expect(
-      await call("listAwarenessEvents", [{ workspaceId: "workspace-one", limit: 20 }]),
-    ).toEqual([{ id: "event-one" }]);
-    expect(service.listEvents).toHaveBeenCalledWith({ workspaceId: "workspace-one", limit: 20 });
-    await expect(
-      call("listAwarenessEvents", [{ workspaceId: "workspace-one", limit: 201 }]),
-    ).rejects.toThrow();
     service.getSummary.mockImplementation(() => {
       throw new Error("Awareness storage failed");
     });

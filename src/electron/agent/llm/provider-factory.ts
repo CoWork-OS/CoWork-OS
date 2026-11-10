@@ -1,3 +1,4 @@
+import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -591,6 +592,7 @@ function createCustomProvider(
 
   if (resolvedType === "atomic-chat") {
     return new AtomicChatProvider({
+      diagnosticFetch: config.diagnosticFetch,
       apiKey,
       baseUrl,
       defaultModel: model,
@@ -602,6 +604,7 @@ function createCustomProvider(
     isOpenCodeBaseUrl(baseUrl)
   ) {
     return new OpenCodeProvider({
+      diagnosticFetch: config.diagnosticFetch,
       type: resolvedType,
       providerName: entry.name,
       apiKey,
@@ -612,6 +615,7 @@ function createCustomProvider(
 
   if (entry.compatibility === "openai") {
     return new OpenAICompatibleProvider({
+      diagnosticFetch: config.diagnosticFetch,
       type: resolvedType,
       providerName: entry.name,
       apiKey,
@@ -622,6 +626,7 @@ function createCustomProvider(
   }
 
   return new AnthropicCompatibleProvider({
+    diagnosticFetch: config.diagnosticFetch,
     type: resolvedType,
     providerName: entry.name,
     apiKey,
@@ -2588,6 +2593,7 @@ export class LLMProviderFactory {
           ? OpenCodeProvider
           : OpenAICompatibleProvider;
         provider = new ProviderClass({
+          diagnosticFetch: config.diagnosticFetch,
           type: "openai-compatible",
           providerName: "OpenAI-Compatible",
           apiKey: config.openaiCompatibleApiKey || "",
@@ -4014,6 +4020,7 @@ export class LLMProviderFactory {
    */
   static async getOllamaModels(
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<Array<{ name: string; size: number; modified: string }>> {
     const settings = this.loadSettings();
     const url = baseUrl || settings.ollama?.baseUrl || "http://localhost:11434";
@@ -4030,6 +4037,7 @@ export class LLMProviderFactory {
     try {
       console.log(`[ProviderFactory] Fetching Ollama models from ${url}...`);
       const provider = new OllamaProvider({
+        diagnosticFetch,
         type: "ollama",
         model: "",
         ollamaBaseUrl: url,
@@ -4215,6 +4223,7 @@ export class LLMProviderFactory {
   static async getOpenRouterModels(
     apiKey?: string,
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<Array<{ id: string; name: string; context_length: number }>> {
     const settings = this.loadSettings();
     // Normalize empty strings to undefined
@@ -4275,6 +4284,7 @@ export class LLMProviderFactory {
 
     try {
       const provider = new OpenRouterProvider({
+        diagnosticFetch,
         type: "openrouter",
         model: "",
         openrouterApiKey: key,
@@ -4298,6 +4308,7 @@ export class LLMProviderFactory {
   static async getOpenRouterImageModels(
     apiKey?: string,
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<OpenRouterImageModel[]> {
     const settings = this.loadSettings();
     const resolvedBaseUrl = (
@@ -4349,7 +4360,7 @@ export class LLMProviderFactory {
     if (!key) return defaultModels;
 
     try {
-      const response = await fetch(`${resolvedBaseUrl}/images/models`, {
+      const response = await (diagnosticFetch ?? fetch)(`${resolvedBaseUrl}/images/models`, {
         headers: {
           Authorization: `Bearer ${key}`,
           ...getOpenRouterAttributionHeaders(),
@@ -4574,6 +4585,7 @@ export class LLMProviderFactory {
   static async getGroqModels(
     apiKey?: string,
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
@@ -4601,6 +4613,7 @@ export class LLMProviderFactory {
 
     try {
       const provider = new GroqProvider({
+        diagnosticFetch,
         type: "groq",
         model: "",
         groqApiKey: key,
@@ -4619,6 +4632,7 @@ export class LLMProviderFactory {
   static async getXAIModels(
     apiKey?: string,
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
@@ -4648,6 +4662,7 @@ export class LLMProviderFactory {
 
     try {
       const provider = new XAIProvider({
+        diagnosticFetch,
         type: "xai",
         model: "",
         xaiApiKey: key,
@@ -4666,6 +4681,7 @@ export class LLMProviderFactory {
   static async getKimiModels(
     apiKey?: string,
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
@@ -4693,6 +4709,7 @@ export class LLMProviderFactory {
 
     try {
       const provider = new KimiProvider({
+        diagnosticFetch,
         type: "kimi",
         model: "",
         kimiApiKey: key,
@@ -4715,6 +4732,7 @@ export class LLMProviderFactory {
   static async getDeepSeekModels(
     apiKey?: string,
     baseUrl?: string,
+    diagnosticFetch?: ProviderDiagnosticFetch,
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
@@ -4739,6 +4757,7 @@ export class LLMProviderFactory {
 
     try {
       const provider = new DeepSeekProvider({
+        diagnosticFetch,
         type: "deepseek",
         model: "deepseek-chat",
         deepseekApiKey: key,
@@ -4939,9 +4958,10 @@ export class LLMProviderFactory {
   static async getOpenAICompatibleModels(
     baseUrl: string,
     apiKey?: string,
-    options: { cacheModels?: boolean } = {},
+    options: { cacheModels?: boolean; diagnosticFetch?: ProviderDiagnosticFetch } = {},
   ): Promise<CachedModelInfo[]> {
     const provider = new OpenAICompatibleProvider({
+      diagnosticFetch: options.diagnosticFetch,
       type: "openai-compatible",
       providerName: "OpenAI-Compatible",
       apiKey: (await resolveSecretValue(apiKey)) || "",
@@ -4970,6 +4990,7 @@ export class LLMProviderFactory {
     overrides?: {
       apiKey?: string;
       baseUrl?: string;
+      diagnosticFetch?: ProviderDiagnosticFetch;
     },
   ): Promise<CachedModelInfo[]> {
     const resolvedProviderType = resolveCustomProviderId(providerType);
@@ -5053,6 +5074,7 @@ export class LLMProviderFactory {
       isOpenCodeBaseUrl(baseUrl)
     ) {
       provider = new OpenCodeProvider({
+        diagnosticFetch: overrides?.diagnosticFetch,
         type: resolvedProviderType,
         providerName: entry.name,
         apiKey,
@@ -5061,12 +5083,14 @@ export class LLMProviderFactory {
       });
     } else if (resolvedProviderType === "atomic-chat") {
       provider = new AtomicChatProvider({
+        diagnosticFetch: overrides?.diagnosticFetch,
         apiKey,
         baseUrl,
         defaultModel: entry.defaultModel,
       });
     } else if (entry.compatibility === "anthropic") {
       provider = new AnthropicCompatibleProvider({
+        diagnosticFetch: overrides?.diagnosticFetch,
         type: resolvedProviderType,
         providerName: entry.name,
         apiKey,
@@ -5075,6 +5099,7 @@ export class LLMProviderFactory {
       });
     } else {
       provider = new OpenAICompatibleProvider({
+        diagnosticFetch: overrides?.diagnosticFetch,
         type: resolvedProviderType,
         providerName: entry.name,
         apiKey,
@@ -5153,6 +5178,7 @@ export class LLMProviderFactory {
   static async getAtomicChatModelsDetailed(overrides?: {
     apiKey?: string;
     baseUrl?: string;
+    diagnosticFetch?: ProviderDiagnosticFetch;
   }): Promise<AtomicChatModelDiscoveryResult> {
     const entry = getCustomProviderEntry("atomic-chat");
     const settings = this.loadSettings();
@@ -5180,6 +5206,7 @@ export class LLMProviderFactory {
     }
 
     const provider = new AtomicChatProvider({
+      diagnosticFetch: overrides?.diagnosticFetch,
       apiKey,
       baseUrl,
       defaultModel: entry.defaultModel || "auto",

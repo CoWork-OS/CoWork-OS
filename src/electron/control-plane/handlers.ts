@@ -56,7 +56,6 @@ import type {
   ManagedDeviceAlert,
   ManagedDeviceAttentionState,
   ManagedDeviceSummary,
-  NodeInfo,
   RemoteGatewayConfig,
   RemoteGatewayStatus,
   SSHTunnelConfig,
@@ -525,73 +524,39 @@ function findManagedDeviceById(deviceId?: string | null): ManagedDevice | null {
   return listStoredManagedDevices().find((device) => device.id === deviceId) || null;
 }
 
-async function getManagedRemoteNodeInfo(device: ManagedDevice): Promise<NodeInfo | null> {
-  const fleetManager = getFleetConnectionManager();
-  const client = fleetManager?.getClient(device.id);
-  const status = fleetManager?.getStatus(device.id);
-  if (!client || status?.state !== "connected") {
-    return null;
-  }
-
-  let configSnapshot: Any = null;
-  try {
-    configSnapshot = await client.request(Methods.CONFIG_GET, undefined, 5000);
-  } catch {
-    configSnapshot = null;
-  }
-
-  const runtime = configSnapshot?.runtime || {};
-  const hostname = getHostnameFromUrl(device.config?.url) || device.modelIdentifier;
-  return {
-    id: device.taskNodeId || `remote-gateway:${device.id}`,
-    displayName: device.name || "Remote Device",
-    platform: toNodePlatform(runtime.platform || device.platform),
-    version:
-      typeof runtime.coworkVersion === "string"
-        ? runtime.coworkVersion
-        : device.version || "unknown",
-    deviceId: status.clientId,
-    modelIdentifier: hostname,
-    connectedAt: status.connectedAt || Date.now(),
-    lastActivityAt: status.lastActivityAt || status.connectedAt || Date.now(),
-  };
-}
-
-async function getManagedRemoteNodeAliases(
-  device: ManagedDevice,
-  nodeId?: string,
-): Promise<string[]> {
+async function getManagedRemoteNodeAliases(device: ManagedDevice): Promise<string[]> {
   const aliases = new Set<string>();
-  if (typeof nodeId === "string" && nodeId.trim()) {
-    aliases.add(nodeId.trim());
-  }
+  aliases.add(device.id);
   aliases.add(device.taskNodeId || `remote-gateway:${device.id}`);
   const legacyRemoteNodeId = getLegacyRemoteNodeId(device.config?.url);
   if (legacyRemoteNodeId) aliases.add(legacyRemoteNodeId);
   if (device.clientId) aliases.add(device.clientId);
 
-  const remoteNode = await getManagedRemoteNodeInfo(device);
-  if (remoteNode) {
-    aliases.add(remoteNode.id);
-    if (remoteNode.deviceId) aliases.add(remoteNode.deviceId);
-  }
+  // Identity lookup must not contact unrelated remotes or add the requested ID
+  // to each candidate's aliases. A connected client's identity is local state.
+  const status = getFleetConnectionManager()?.getStatus(device.id);
+  if (status?.clientId) aliases.add(status.clientId);
 
   return Array.from(aliases);
 }
 
-async function findManagedRemoteDeviceByNodeId(nodeId: string): Promise<ManagedDevice | null> {
+export async function findManagedRemoteDeviceByNodeId(
+  nodeId: string,
+): Promise<ManagedDevice | null> {
   const normalized = nodeId.trim();
   if (!normalized || isLocalManagedDeviceIdentifier(normalized)) {
     return null;
   }
   const remoteDevices = listStoredManagedDevices();
+  let match: ManagedDevice | null = null;
   for (const device of remoteDevices) {
-    const aliases = await getManagedRemoteNodeAliases(device, normalized);
+    const aliases = await getManagedRemoteNodeAliases(device);
     if (aliases.includes(normalized)) {
-      return device;
+      if (match) throw new Error("Remote device identity is ambiguous");
+      match = device;
     }
   }
-  return null;
+  return match;
 }
 
 async function getDefaultLocalWorkspaceId(db: Any): Promise<string | undefined> {
@@ -848,7 +813,7 @@ async function syncRemoteShadowTasksForNode(nodeId: string): Promise<void> {
       : [];
     const repo = new TaskRepository(db);
     const targetNodeId = remoteDevice.taskNodeId || `remote-gateway:${remoteDevice.id}`;
-    const targetNodeAliases = await getManagedRemoteNodeAliases(remoteDevice, nodeId);
+    const targetNodeAliases = await getManagedRemoteNodeAliases(remoteDevice);
     const remoteTaskIds: string[] = [];
     let oldestFetchedCreatedAt: number | undefined;
     for (const remoteTask of remoteTasks) {
@@ -901,7 +866,7 @@ async function listTasksForNode(nodeId: string): Promise<Task[]> {
   await syncRemoteShadowTasksForNode(nodeId);
   const remoteDevice = await findManagedRemoteDeviceByNodeId(nodeId);
   if (!remoteDevice) return [];
-  const aliases = await getManagedRemoteNodeAliases(remoteDevice, nodeId);
+  const aliases = await getManagedRemoteNodeAliases(remoteDevice);
   return taskRepo.findByTargetNodeIds(aliases, 50);
 }
 
@@ -1134,7 +1099,7 @@ async function buildRemoteManagedDeviceSummary(
   const connected = status.state === "connected";
   const db = controlPlaneDeps?.dbManager?.getDatabase() || null;
   const taskRepo = db ? new TaskRepository(db) : null;
-  const aliases = await getManagedRemoteNodeAliases(device, device.taskNodeId || device.id);
+  const aliases = await getManagedRemoteNodeAliases(device);
   const fallbackTasks = taskRepo ? await taskRepo.findByTargetNodeIds(aliases, 12) : [];
 
   let configSnapshot: Any = null;
@@ -2641,12 +2606,7 @@ export async function startControlPlaneFromSettings(
         heartbeatIntervalMs: settings.heartbeatIntervalMs,
         maxPayloadBytes: settings.maxPayloadBytes,
         allowedOrigins: settings.allowedOrigins,
-        onEvent: (event) => {
-          options.onEvent?.(event);
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-          }
-        },
+        onEvent: options.onEvent,
       });
 
       controlPlaneServer = server;
@@ -4261,12 +4221,6 @@ export function setupControlPlaneHandlers(
           heartbeatIntervalMs: settings.heartbeatIntervalMs,
           maxPayloadBytes: settings.maxPayloadBytes,
           allowedOrigins: settings.allowedOrigins,
-          onEvent: (event) => {
-            // Forward events to renderer
-            if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-              mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-            }
-          },
         });
         controlPlaneServer = server;
 
@@ -4443,11 +4397,6 @@ export function setupControlPlaneHandlers(
             heartbeatIntervalMs: settings.heartbeatIntervalMs,
             maxPayloadBytes: settings.maxPayloadBytes,
             allowedOrigins: settings.allowedOrigins,
-            onEvent: (event) => {
-              if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-                mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-              }
-            },
           });
 
           if (controlPlaneDeps) {
@@ -4483,17 +4432,6 @@ export function setupControlPlaneHandlers(
     },
   );
 
-  // Get Tailscale status
-  ipcMain.handle(IPC_CHANNELS.TAILSCALE_GET_STATUS, async () => {
-    const settings = TailscaleSettingsManager.loadSettings();
-    const exposure = getExposureStatus();
-
-    return {
-      settings,
-      exposure,
-    };
-  });
-
   // Set Tailscale mode
   ipcMain.handle(
     IPC_CHANNELS.TAILSCALE_SET_MODE,
@@ -4523,11 +4461,6 @@ export function setupControlPlaneHandlers(
             heartbeatIntervalMs: settings.heartbeatIntervalMs,
             maxPayloadBytes: settings.maxPayloadBytes,
             allowedOrigins: settings.allowedOrigins,
-            onEvent: (event) => {
-              if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-                mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
-              }
-            },
           });
 
           if (controlPlaneDeps) {
@@ -4777,42 +4710,9 @@ export function setupControlPlaneHandlers(
           enabled: true,
         });
 
-        // Setup event forwarding to renderer
-        tunnel.on("stateChange", (state: string, error?: string) => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "stateChange",
-              state,
-              error,
-            });
-          }
-        });
-
-        tunnel.on("connected", () => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "connected",
-            });
-          }
-        });
-
-        tunnel.on("disconnected", (reason: string) => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "disconnected",
-              reason,
-            });
-          }
-        });
-
-        tunnel.on("error", (error: Error) => {
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
-              type: "error",
-              error: errorMessage(error),
-            });
-          }
-        });
+        // The tunnel emits "error"; an emitter with no "error" listener would throw instead.
+        // The UI reads tunnel state through the status call, which reports the last error.
+        tunnel.on("error", () => {});
 
         await tunnel.connect();
 
@@ -4856,27 +4756,6 @@ export function setupControlPlaneHandlers(
     }
     return tunnel.getStatus();
   });
-
-  // Save SSH tunnel config
-  ipcMain.handle(
-    IPC_CHANNELS.SSH_TUNNEL_SAVE_CONFIG,
-    async (_, config: SSHTunnelConfig): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        const settings = ControlPlaneSettingsManager.loadSettings();
-        ControlPlaneSettingsManager.updateSettings({
-          remote: {
-            ...settings.remote,
-            url: settings.remote?.url || "",
-            token: settings.remote?.token || "",
-            sshTunnel: config,
-          },
-        });
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, error: errorMessage(error) };
-      }
-    },
-  );
 
   // Test SSH tunnel connection
   ipcMain.handle(
@@ -5164,36 +5043,6 @@ export function setupControlPlaneHandlers(
       return { ok: false, error: errorMessage(error) };
     }
   });
-
-  ipcMain.handle(IPC_CHANNELS.DEVICE_GET_PROFILES, async () => {
-    try {
-      if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
-      const { DeviceProfileRepository } = await import("../database/repository-facades");
-      const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
-      return { ok: true, profiles: await repo.list() };
-    } catch (error) {
-      return { ok: false, error: errorMessage(error) };
-    }
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.DEVICE_UPDATE_PROFILE,
-    async (
-      _,
-      deviceId: string,
-      data: { customName?: string; platform?: string; modelIdentifier?: string },
-    ) => {
-      try {
-        if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
-        const { DeviceProfileRepository } = await import("../database/repository-facades");
-        const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
-        await repo.upsert(deviceId, data);
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, error: errorMessage(error) };
-      }
-    },
-  );
 
   console.log("[ControlPlane] IPC handlers initialized");
 }

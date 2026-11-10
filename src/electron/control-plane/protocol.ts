@@ -16,8 +16,6 @@ export const FrameType = {
   Event: "event",
 } as const;
 
-export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType];
-
 /**
  * Error shape for response frames
  */

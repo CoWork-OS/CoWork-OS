@@ -340,11 +340,3 @@ export const WORKSPACE_HEALTH_FILES = [
   "MISTAKES.md",
   "DESIGN.md",
 ] as const;
-
-export function getKitContract(file: string): KitContract | undefined {
-  return WORKSPACE_KIT_CONTRACTS[file];
-}
-
-export function isRoleKitFile(file: string): boolean {
-  return (ROLE_KIT_FILES as readonly string[]).includes(file);
-}

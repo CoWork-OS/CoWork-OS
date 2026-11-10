@@ -1,6 +1,6 @@
 # Security Policy
 
-> **For end users**: See [SECURITY_GUIDE.md](SECURITY_GUIDE.md) and the canonical [Access Profiles guide](docs/access-profiles.md) for the app's security model, task-level permissions, and best practices.
+> **For end users**: See the [Security Guide](docs/security-guide.md) and the canonical [Access Profiles guide](docs/access-profiles.md) for the app's security model, task-level permissions, and best practices.
 
 ## Supported Versions
 

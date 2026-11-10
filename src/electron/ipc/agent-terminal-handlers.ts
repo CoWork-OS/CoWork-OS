@@ -17,6 +17,8 @@ const OUTPUT_FLUSH_MS = 60;
 const MAX_WATCHED_TASKS_PER_WINDOW = 20;
 
 export type AgentTerminalHandlerDeps = {
+  /** Current trusted client binding; never supplied by a renderer request. */
+  principalForEvent: (event: IpcMainInvokeEvent) => string;
   /** Throws when the sender may not act on the task with that capability. */
   authorizeTask: (
     event: IpcMainInvokeEvent,
@@ -35,9 +37,17 @@ export type AgentTerminalHandlerDeps = {
 
 type Watcher = {
   sender: WebContents;
+  event: IpcMainInvokeEvent;
+  principalId: string;
   taskIds: Set<string>;
+  taskGenerations: Map<string, number>;
+  generation: number;
   pending: Map<string, { taskId: string; output: string }>;
   flushTimer: ReturnType<typeof setTimeout> | null;
+  delivery: Promise<void>;
+  queued: number;
+  readVersions: Map<string, { taskId: string; version: number }>;
+  onDestroyed: () => void;
 };
 
 export function toAgentTerminalTab(
@@ -69,45 +79,130 @@ export function setupAgentTerminalHandlers(deps: AgentTerminalHandlerDeps): void
   const manager = deps.manager ?? getBackgroundProcessManager();
   const watchers = new Map<number, Watcher>();
 
+  const dropTask = (watcher: Watcher, taskId: string) => {
+    watcher.taskIds.delete(taskId);
+    watcher.taskGenerations.delete(taskId);
+    for (const [tabId, entry] of watcher.pending)
+      if (entry.taskId === taskId) watcher.pending.delete(tabId);
+    for (const [tabId, entry] of watcher.readVersions)
+      if (entry.taskId === taskId) watcher.readVersions.delete(tabId);
+  };
+  const dropWatcher = (watcher: Watcher) => {
+    if (watcher.flushTimer) clearTimeout(watcher.flushTimer);
+    watcher.flushTimer = null;
+    watcher.pending.clear();
+    watcher.taskIds.clear();
+    watcher.taskGenerations.clear();
+    watcher.readVersions.clear();
+    watcher.sender.removeListener("destroyed", watcher.onDestroyed);
+    if (watchers.get(watcher.sender.id) === watcher) watchers.delete(watcher.sender.id);
+  };
+  const current = (watcher: Watcher) => {
+    if (watchers.get(watcher.sender.id) !== watcher) return false;
+    if (
+      watcher.sender.isDestroyed() ||
+      deps.principalForEvent(watcher.event) !== watcher.principalId
+    ) {
+      dropWatcher(watcher);
+      return false;
+    }
+    return true;
+  };
+  const canDeliver = async (watcher: Watcher, taskId: string, generation: number | undefined) => {
+    if (
+      !current(watcher) ||
+      !watcher.taskIds.has(taskId) ||
+      watcher.taskGenerations.get(taskId) !== generation
+    )
+      return false;
+    try {
+      await deps.authorizeTask(watcher.event, taskId, "view");
+    } catch {
+      dropTask(watcher, taskId);
+      return false;
+    }
+    return (
+      current(watcher) &&
+      watcher.taskIds.has(taskId) &&
+      watcher.taskGenerations.get(taskId) === generation
+    );
+  };
+  const enqueue = (watcher: Watcher, deliver: () => Promise<void>) => {
+    // A stalled authority lookup must not retain an unbounded output queue.
+    if (++watcher.queued > MAX_WATCHED_TASKS_PER_WINDOW * 2) {
+      dropWatcher(watcher);
+      return;
+    }
+    watcher.delivery = watcher.delivery
+      .then(deliver)
+      .catch(() => dropWatcher(watcher))
+      .finally(() => {
+        watcher.queued--;
+      });
+  };
+
   const flush = (watcher: Watcher) => {
     if (watcher.flushTimer) clearTimeout(watcher.flushTimer);
     watcher.flushTimer = null;
-    if (watcher.sender.isDestroyed()) return;
-    for (const [tabId, entry] of watcher.pending) {
-      const outputEvent: AgentTerminalEvent = {
-        kind: "output",
-        taskId: entry.taskId,
-        tabId,
-        output: entry.output,
-      };
-      watcher.sender.send(IPC_CHANNELS.AGENT_TERMINAL_EVENT, outputEvent);
-    }
+    const batch = Array.from(watcher.pending, ([tabId, entry]) => ({
+      tabId,
+      ...entry,
+      version: watcher.readVersions.get(tabId)?.version ?? 0,
+      generation: watcher.taskGenerations.get(entry.taskId),
+    }));
     watcher.pending.clear();
+    if (!batch.length) return;
+    enqueue(watcher, async () => {
+      for (const entry of batch) {
+        if (!(await canDeliver(watcher, entry.taskId, entry.generation))) continue;
+        if ((watcher.readVersions.get(entry.tabId)?.version ?? 0) !== entry.version) continue;
+        watcher.sender.send(IPC_CHANNELS.AGENT_TERMINAL_EVENT, {
+          kind: "output",
+          taskId: entry.taskId,
+          tabId: entry.tabId,
+          output: entry.output,
+        } satisfies AgentTerminalEvent);
+      }
+    });
   };
 
-  const watch = (sender: WebContents, taskId: string) => {
+  const watch = (event: IpcMainInvokeEvent, taskId: string, principalId: string) => {
+    const sender = event.sender;
     let watcher = watchers.get(sender.id);
+    if (watcher && !current(watcher)) watcher = undefined;
     if (!watcher) {
-      const created: Watcher = { sender, taskIds: new Set(), pending: new Map(), flushTimer: null };
+      const created: Watcher = {
+        sender,
+        event,
+        principalId,
+        taskIds: new Set(),
+        taskGenerations: new Map(),
+        generation: 0,
+        pending: new Map(),
+        flushTimer: null,
+        delivery: Promise.resolve(),
+        queued: 0,
+        readVersions: new Map(),
+        onDestroyed: () => dropWatcher(created),
+      };
       watchers.set(sender.id, created);
-      sender.once("destroyed", () => {
-        if (created.flushTimer) clearTimeout(created.flushTimer);
-        watchers.delete(sender.id);
-      });
+      sender.once("destroyed", created.onDestroyed);
       watcher = created;
     }
     watcher.taskIds.delete(taskId);
     watcher.taskIds.add(taskId);
+    if (!watcher.taskGenerations.has(taskId))
+      watcher.taskGenerations.set(taskId, ++watcher.generation);
     while (watcher.taskIds.size > MAX_WATCHED_TASKS_PER_WINDOW) {
       const oldest = watcher.taskIds.values().next().value;
       if (oldest === undefined) break;
-      watcher.taskIds.delete(oldest);
+      dropTask(watcher, oldest);
     }
   };
 
   manager.subscribe((change) => {
     for (const watcher of watchers.values()) {
-      if (!watcher.taskIds.has(change.taskId) || watcher.sender.isDestroyed()) continue;
+      if (!current(watcher) || !watcher.taskIds.has(change.taskId)) continue;
       if (change.kind === "output") {
         const entry = watcher.pending.get(change.processId);
         if (entry) entry.output += change.output;
@@ -126,7 +221,12 @@ export function setupAgentTerminalHandlers(deps: AgentTerminalHandlerDeps): void
               tab: toAgentTerminalTab(change.taskId, change.process),
             }
           : { kind: "removed", taskId: change.taskId, tabId: change.processId };
-      watcher.sender.send(IPC_CHANNELS.AGENT_TERMINAL_EVENT, event);
+      const generation = watcher.taskGenerations.get(change.taskId);
+      enqueue(watcher, async () => {
+        if (!(await canDeliver(watcher, change.taskId, generation))) return;
+        watcher.sender.send(IPC_CHANNELS.AGENT_TERMINAL_EVENT, event);
+        if (change.kind === "removed") watcher.readVersions.delete(change.processId);
+      });
     }
   });
 
@@ -134,8 +234,11 @@ export function setupAgentTerminalHandlers(deps: AgentTerminalHandlerDeps): void
     IPC_CHANNELS.AGENT_TERMINAL_LIST,
     async (event, data: unknown): Promise<AgentTerminalTab[]> => {
       const request = validateInput(AgentTerminalListRequestSchema, data, "agent terminal list");
+      const principalId = deps.principalForEvent(event);
       await deps.authorizeTask(event, request.taskId, "view");
-      watch(event.sender, request.taskId);
+      if (deps.principalForEvent(event) !== principalId)
+        throw new Error("Terminal client identity changed");
+      watch(event, request.taskId, principalId);
       return manager
         .list(request.taskId)
         .sort((a, b) => a.started_at - b.started_at)
@@ -145,11 +248,19 @@ export function setupAgentTerminalHandlers(deps: AgentTerminalHandlerDeps): void
 
   ipcMain.handle(IPC_CHANNELS.AGENT_TERMINAL_READ, async (event, data: unknown) => {
     const request = validateInput(AgentTerminalTabRequestSchema, data, "agent terminal read");
+    const principalId = deps.principalForEvent(event);
     await deps.authorizeTask(event, request.taskId, "view");
-    watch(event.sender, request.taskId);
+    if (deps.principalForEvent(event) !== principalId)
+      throw new Error("Terminal client identity changed");
+    watch(event, request.taskId, principalId);
     // The buffer already holds output not yet flushed to this window, and the window ignores
     // a tab's output until this reply arrives; output after this point follows the reply.
     watchers.get(event.sender.id)?.pending.delete(request.tabId);
+    const watcher = watchers.get(event.sender.id)!;
+    watcher.readVersions.set(request.tabId, {
+      taskId: request.taskId,
+      version: (watcher.readVersions.get(request.tabId)?.version ?? 0) + 1,
+    });
     return manager.peek(request.taskId, request.tabId);
   });
 

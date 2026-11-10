@@ -1,17 +1,13 @@
 /**
  * Loopback listener guard for the macOS shell sandbox.
  *
- * When outbound networking is denied, the seatbelt profile may still allow a
- * command to accept TCP connections so that local dev servers, test servers
- * (supertest, Playwright webServer) and watchers work. Seatbelt cannot scope
- * that to loopback: a `(local tcp "localhost:*")` filter also matches 0.0.0.0,
- * :: and LAN addresses (verified on macOS 26), so a server bound to all
- * interfaces would be reachable from the network. This guard closes that gap
- * after the fact: it polls the TCP listener table and stops any guarded
- * process group that listens on a non-loopback address.
+ * Supplementary monitoring only: it polls the TCP listener table and stops
+ * watched process groups that listen on a non-loopback address. Descendants
+ * can change process groups, so this must never authorize or contain a
+ * listener exception. Network-disabled macOS profiles deny bind/inbound
+ * operations in the kernel, including loopback; the denial survives detaching.
  *
- * The profile rule and this guard must always be used together; see
- * MacOSSandbox's `allowLoopbackListen` option.
+ * Network permission, not this monitor, governs whether a command may listen.
  */
 
 import { execFile } from "child_process";

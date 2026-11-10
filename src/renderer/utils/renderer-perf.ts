@@ -764,11 +764,3 @@ export function markTaskEventVisible(
   }
   schedulePendingVisibleEvents(state, enabled);
 }
-
-export function noteRendererTaskEventVisible(
-  event: Pick<TaskEvent, "id" | "eventId">,
-  location: string,
-  enabled?: boolean,
-): void {
-  markTaskEventVisible(event, location, enabled);
-}

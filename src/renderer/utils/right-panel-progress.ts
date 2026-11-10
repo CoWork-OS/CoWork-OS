@@ -1,21 +1,10 @@
-import type { PlanStep, QueueStatus, Task } from "../../shared/types";
+import type { PlanStep, Task } from "../../shared/types";
 
 export type ProgressDisplayStep = PlanStep & {
   isOverflow?: boolean;
   hiddenCount?: number;
   hiddenLabel?: string;
 };
-
-export function getQueueStatusSignature(queueStatus: QueueStatus | null | undefined): string {
-  if (!queueStatus) return "none";
-  return [
-    queueStatus.runningCount,
-    queueStatus.queuedCount,
-    queueStatus.maxConcurrent,
-    queueStatus.runningTaskIds.join(","),
-    queueStatus.queuedTaskIds.join(","),
-  ].join(":");
-}
 
 export function getPlanStepsSignature(planSteps: PlanStep[]): string {
   return planSteps

@@ -386,6 +386,8 @@ export class CanvasTools {
       if (!absolutePath) continue;
 
       try {
+        await this.assertProjectAccess(absolutePath);
+        if (this.resolveWorkspaceAssetPath(href) !== absolutePath) continue;
         const cssContent = await fs.readFile(absolutePath, "utf-8");
         const escapedCss = cssContent.replace(/<\/style/gi, "<\\/style");
         const inlineStyle = `<style data-canvas-inline-source="${this.sanitizeForCanvasText(href)}">\n${escapedCss}\n</style>`;

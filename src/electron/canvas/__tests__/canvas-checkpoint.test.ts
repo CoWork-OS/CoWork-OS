@@ -310,21 +310,14 @@ describe("Canvas Checkpoint System", () => {
     });
   });
 
-  it("compares saved file states and finds a named build phase checkpoint", async () => {
+  it("finds a named build phase checkpoint", async () => {
     const concept = await store.saveCheckpoint(sessionId, "Phase 1 — Concept");
     writeFileSync(path.join(tmpDir, "index.html"), "<h1>Scaffold</h1>");
     rmSync(path.join(tmpDir, "style.css"));
     writeFileSync(path.join(tmpDir, "app.js"), "console.log('ready')");
-    const scaffold = await store.saveCheckpoint(sessionId, "Phase 3 — Scaffold");
+    await store.saveCheckpoint(sessionId, "Phase 3 — Scaffold");
 
-    expect(store.diffCheckpoints(sessionId, concept.id, scaffold.id)).toEqual({
-      added: ["app.js"],
-      removed: ["style.css"],
-      modified: ["index.html"],
-    });
     expect(store.findCheckpointByLabel(sessionId, "Phase 1 — Concept")).toEqual(concept);
     expect(store.findCheckpointByLabel(sessionId, "missing")).toBeUndefined();
-    expect(store.diffCheckpoints(sessionId, "missing", scaffold.id)).toBeNull();
-    expect(store.diffCheckpoints("unknown", concept.id, scaffold.id)).toBeNull();
   });
 });

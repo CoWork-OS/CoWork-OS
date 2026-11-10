@@ -366,13 +366,6 @@ export const AGENT_UNITS = {
       readonly: false,
     },
   ),
-  automationProfile_deleteByAgentRoleId: storeUnit(
-    (db: Database.Database) => new AutomationProfileStore(db),
-    "deleteByAgentRoleId",
-    {
-      readonly: false,
-    },
-  ),
   agentTeam_create: storeUnit((db: Database.Database) => new AgentTeamStore(db), "create", {
     readonly: false,
   }),
@@ -605,13 +598,6 @@ export const AGENT_UNITS = {
   workingState_findById: storeUnit(
     (db: Database.Database) => new WorkingStateStore(db),
     "findById",
-    {
-      readonly: true,
-    },
-  ),
-  workingState_getCurrent: storeUnit(
-    (db: Database.Database) => new WorkingStateStore(db),
-    "getCurrent",
     {
       readonly: true,
     },

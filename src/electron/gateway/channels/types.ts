@@ -980,22 +980,6 @@ export interface ChannelSession {
 }
 
 /**
- * Security configuration for channel access
- */
-export interface SecurityConfig {
-  /** Access mode */
-  mode: "open" | "allowlist" | "pairing";
-  /** Allowed user IDs (for allowlist mode) */
-  allowedUsers?: string[];
-  /** Pairing code TTL in seconds (for pairing mode) */
-  pairingCodeTTL?: number;
-  /** Maximum pairing attempts */
-  maxPairingAttempts?: number;
-  /** Rate limit: messages per minute */
-  rateLimitPerMinute?: number;
-}
-
-/**
  * Gateway event types
  */
 export type GatewayEventType =
@@ -1179,28 +1163,6 @@ export interface ScheduledMessage {
 }
 
 /**
- * Message delivery status
- */
-export interface MessageDelivery {
-  /** Message ID */
-  messageId: string;
-  /** Channel type */
-  channel: ChannelType;
-  /** Chat ID */
-  chatId: string;
-  /** Delivery status */
-  status: "pending" | "sent" | "delivered" | "read" | "failed";
-  /** Sent timestamp */
-  sentAt?: Date;
-  /** Delivered timestamp */
-  deliveredAt?: Date;
-  /** Read timestamp */
-  readAt?: Date;
-  /** Error if failed */
-  error?: string;
-}
-
-/**
  * Audit log entry
  */
 export interface AuditLogEntry {
@@ -1218,122 +1180,6 @@ export interface AuditLogEntry {
   chatId?: string;
   /** Additional details */
   details?: Record<string, unknown>;
-}
-
-/**
- * User rate limit info
- */
-export interface UserRateLimit {
-  /** User ID */
-  userId: string;
-  /** Channel type */
-  channel: ChannelType;
-  /** Message count in current window */
-  messageCount: number;
-  /** Window start time */
-  windowStart: Date;
-  /** Whether currently limited */
-  isLimited: boolean;
-  /** When limit expires */
-  limitExpiresAt?: Date;
-}
-
-/**
- * Broadcast configuration
- */
-export interface BroadcastConfig {
-  /** Target chat IDs */
-  chatIds: string[];
-  /** Channel type */
-  channel: ChannelType;
-  /** Message to broadcast */
-  message: OutgoingMessage;
-  /** Delay between sends (ms) */
-  delayBetweenSends?: number;
-}
-
-/**
- * Broadcast result
- */
-export interface BroadcastResult {
-  /** Total recipients */
-  total: number;
-  /** Successfully sent */
-  sent: number;
-  /** Failed sends */
-  failed: number;
-  /** Details per chat */
-  results: Array<{
-    chatId: string;
-    success: boolean;
-    messageId?: string;
-    error?: string;
-  }>;
-}
-
-/**
- * Extended channel adapter interface with all features
- */
-export interface ExtendedChannelAdapter extends ChannelAdapter {
-  /**
-   * Send typing indicator
-   * @param chatId Chat ID
-   * @param threadId Optional thread ID
-   */
-  sendTyping?(chatId: string, threadId?: string): Promise<void>;
-
-  /**
-   * Add reaction to a message
-   * @param chatId Chat ID
-   * @param messageId Message ID
-   * @param emoji Emoji to react with
-   */
-  addReaction?(chatId: string, messageId: string, emoji: string): Promise<void>;
-
-  /**
-   * Remove reaction from a message
-   * @param chatId Chat ID
-   * @param messageId Message ID
-   * @param emoji Emoji to remove
-   */
-  removeReaction?(chatId: string, messageId: string, emoji: string): Promise<void>;
-
-  /**
-   * Send a poll
-   * @param chatId Chat ID
-   * @param poll Poll configuration
-   * @returns Message ID
-   */
-  sendPoll?(chatId: string, poll: Poll): Promise<string>;
-
-  /**
-   * Send a message with reply keyboard
-   * @param chatId Chat ID
-   * @param text Message text
-   * @param keyboard Reply keyboard
-   * @returns Message ID
-   */
-  sendWithReplyKeyboard?(chatId: string, text: string, keyboard: ReplyKeyboard): Promise<string>;
-
-  /**
-   * Remove reply keyboard
-   * @param chatId Chat ID
-   * @param text Message text
-   */
-  removeReplyKeyboard?(chatId: string, text: string): Promise<string>;
-
-  /**
-   * Send a message with select menu (Discord)
-   * @param chatId Chat ID
-   * @param text Message text
-   * @param menu Select menu configuration
-   */
-  sendWithSelectMenu?(chatId: string, text: string, menu: SelectMenu): Promise<string>;
-
-  /**
-   * Register select menu handler (Discord)
-   */
-  onSelectMenu?(handler: SelectMenuHandler): void;
 }
 
 /**

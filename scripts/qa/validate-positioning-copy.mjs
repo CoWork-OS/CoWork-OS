@@ -7,7 +7,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const positioningFiles = [
   "README.md",
   "SECURITY.md",
-  "SECURITY_GUIDE.md",
   "package.json",
   "docs/.vitepress/config.mts",
   "docs/index.md",

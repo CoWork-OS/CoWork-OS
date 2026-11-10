@@ -2763,17 +2763,6 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
     { maxArgs: 1, validate: (args) => [parseEnvironmentListParams(args[0])] },
   );
 
-  definitions.getManagedEnvironment = definition(
-    agents,
-    async ([id]) => {
-      const environment = await managed.getEnvironment(String(id));
-      if (!environment) return null;
-      await permission(environment.config.workspaceId, "canViewAgents");
-      return sanitizeEnvironment(environment);
-    },
-    { minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
-  );
-
   definitions.createManagedEnvironment = definition(
     agents,
     async ([value]) => {
@@ -3945,32 +3934,6 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   // The desktop renderer uses this name for workflow run detail refreshes.
   // Keep the shorter legacy method as an alias for callers that already use it.
   definitions.listRoutineWorkflowRunSteps = definitions.listRoutineWorkflowSteps;
-  definitions.listRoutineWorkflowEvents = definition(
-    automation,
-    async ([routineId, limit]) => {
-      if (routineId !== undefined) {
-        const routine = await currentRoutineService()!.get(String(routineId));
-        if (!routine) return [];
-        await visibleRoutine(routine, "canViewAgents");
-      }
-      const rows = await currentRoutineService()!.listWorkflowEvents(
-        routineId as string | undefined,
-        limit as number | undefined,
-      );
-      if (routineId !== undefined) return rows;
-      const visibleIds = new Set(
-        (await filterRoutines(await currentRoutineService()!.list())).map((routine) => routine.id),
-      );
-      return rows.filter((row) => visibleIds.has(row.routineId));
-    },
-    {
-      maxArgs: 2,
-      validate: (args) => [
-        args[0] === undefined ? undefined : stringArg(args[0]),
-        optionalInteger(args[1], 1, 500),
-      ],
-    },
-  );
   definitions.respondToRoutineWorkflowApproval = definition(
     automation,
     async ([request]) => {
@@ -4010,19 +3973,6 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
         ];
       },
     },
-  );
-  definitions.retryRoutineWorkflowRun = definition(
-    automation,
-    async ([runId]) => {
-      const run = (await currentRoutineService()!.listWorkflowRuns(undefined, 500)).find(
-        (candidate) => candidate.id === String(runId),
-      );
-      const routine = run ? await currentRoutineService()!.get(run.routineId) : null;
-      if (!routine) return null;
-      await visibleRoutine(routine, "canRunAgents");
-      return currentRoutineService()!.retryWorkflowRun(run!.id);
-    },
-    { mutation: true, minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
   );
   definitions.cancelRoutineWorkflowRun = definition(
     automation,

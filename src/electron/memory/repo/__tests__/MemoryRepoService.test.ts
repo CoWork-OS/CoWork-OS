@@ -70,6 +70,41 @@ describeWithGit("MemoryRepoService", () => {
     );
   });
 
+  it.each(["leaf", "ancestor"])(
+    "refuses a tracked %s link in a dream review worktree",
+    async (kind) => {
+      const outside = path.join(base, "outside");
+      fs.mkdirSync(outside);
+      const sentinel = path.join(outside, "secret.md");
+      fs.writeFileSync(sentinel, "unchanged");
+      const target = kind === "leaf" ? "secret.md" : "linked/secret.md";
+      fs.symlinkSync(
+        kind === "leaf" ? sentinel : outside,
+        path.join(root, kind === "leaf" ? "secret.md" : "linked"),
+      );
+      git(root, "add", "-A");
+      git(
+        root,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "-qm",
+        "link fixture",
+      );
+      await expect(
+        (service as Any).commitOnBranch(`review-${kind}`, new Map([[target, "overwrite"]]), {
+          message: "review",
+          details: [],
+          dreamId: "fixture",
+        }),
+      ).rejects.toThrow(/symbolic link/);
+      expect(fs.readFileSync(sentinel, "utf8")).toBe("unchanged");
+      expect(git(root, "branch", "--list", `review-${kind}`).trim()).toBe("");
+    },
+  );
+
   it("writes a workspace fact with metadata, links the file and commits it", async () => {
     const result = await remember();
     expect(result).toMatchObject({

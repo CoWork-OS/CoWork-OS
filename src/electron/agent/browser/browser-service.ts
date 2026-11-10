@@ -38,6 +38,25 @@ import {
 
 const log = createLogger("BrowserService");
 
+export function validateBrowserScrollInput(
+  direction: unknown,
+  amount: unknown,
+): {
+  direction: "up" | "down" | "top" | "bottom";
+  amount: number;
+} {
+  if (direction !== "up" && direction !== "down" && direction !== "top" && direction !== "bottom") {
+    throw new Error("Invalid browser scroll direction");
+  }
+  if (
+    amount !== undefined &&
+    (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0)
+  ) {
+    throw new Error("Browser scroll amount must be a finite non-negative number");
+  }
+  return { direction, amount: amount ?? 500 };
+}
+
 /**
  * Consent auto-dismissal only ever acts inside these consent-manager (CMP) containers, or inside
  * a dialog whose text is about cookies/consent and that overlays the page like a consent banner.
@@ -410,15 +429,6 @@ export interface ScreenshotResult {
   path: string;
   width: number;
   height: number;
-}
-
-export interface ElementInfo {
-  tag: string;
-  text: string;
-  href?: string;
-  src?: string;
-  value?: string;
-  placeholder?: string;
 }
 
 export interface PageContentOptions {
@@ -2409,28 +2419,21 @@ export class BrowserService {
     direction: "up" | "down" | "top" | "bottom",
     amount?: number,
   ): Promise<{ success: boolean }> {
+    const scroll = validateBrowserScrollInput(direction, amount);
     await this.ensurePage();
 
     try {
-      const scrollAmount = amount || 500;
-      let script: string;
-
-      switch (direction) {
-        case "up":
-          script = `window.scrollBy(0, -${scrollAmount})`;
-          break;
-        case "down":
-          script = `window.scrollBy(0, ${scrollAmount})`;
-          break;
-        case "top":
-          script = `window.scrollTo(0, 0)`;
-          break;
-        case "bottom":
-          script = `window.scrollTo(0, document.body.scrollHeight)`;
-          break;
-      }
-
-      await this.page!.evaluate(script);
+      await this.page!.evaluate(({ direction, amount }) => {
+        const page = globalThis as unknown as {
+          scrollBy: (x: number, y: number) => void;
+          scrollTo: (x: number, y: number) => void;
+          document: { body: { scrollHeight: number } };
+        };
+        if (direction === "up") page.scrollBy(0, -amount);
+        else if (direction === "down") page.scrollBy(0, amount);
+        else if (direction === "top") page.scrollTo(0, 0);
+        else page.scrollTo(0, page.document.body.scrollHeight);
+      }, scroll);
       return { success: true };
     } catch {
       return { success: false };

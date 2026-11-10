@@ -317,8 +317,6 @@ export function buildRichFrameDesignCss(theme: RichFrameTheme, hostBackground?: 
     .join("\n\n");
 }
 
-export const RICH_FRAME_DESIGN_CSS = buildRichFrameDesignCss("light");
-
 function normalizeRichFrameTheme(theme?: RichFrameTheme): RichFrameTheme {
   return theme === "dark" ? "dark" : "light";
 }

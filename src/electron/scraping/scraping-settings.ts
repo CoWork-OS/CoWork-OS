@@ -130,18 +130,6 @@ export class ScrapingSettingsManager {
     }
   }
 
-  static resetSettings(): void {
-    this.cachedSettings = null;
-    try {
-      const filePath = path.join(getUserDataDir(), SETTINGS_FILE);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch {
-      // Best-effort cleanup
-    }
-  }
-
   static isEnabled(): boolean {
     return this.loadSettings().enabled;
   }

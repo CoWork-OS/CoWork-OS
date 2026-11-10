@@ -92,8 +92,8 @@ type PreviewRuntime = {
 export interface LocalPreviewProcessServiceDeps {
   templates?: readonly LocalPreviewCommandTemplate[];
   spawnProcess?: typeof spawn;
-  allowLocalPreviewUrl?: (url: string) => void;
-  revokeLocalPreviewUrl?: (url: string) => void;
+  allowLocalPreviewUrl?: (url: string, taskId?: string) => void;
+  revokeLocalPreviewUrl?: (url: string, taskId?: string) => void;
   now?: () => number;
 }
 
@@ -283,8 +283,8 @@ async function checkUrl(
 export class LocalPreviewProcessService {
   private readonly templates: readonly LocalPreviewCommandTemplate[];
   private readonly spawnProcess: typeof spawn;
-  private readonly allowLocalPreviewUrl?: (url: string) => void;
-  private readonly revokeLocalPreviewUrl?: (url: string) => void;
+  private readonly allowLocalPreviewUrl?: (url: string, taskId?: string) => void;
+  private readonly revokeLocalPreviewUrl?: (url: string, taskId?: string) => void;
   private readonly now: () => number;
   private readonly runtimes = new Map<string, PreviewRuntime>();
   private readonly runtimeIdsByKey = new Map<string, string>();
@@ -349,7 +349,7 @@ export class LocalPreviewProcessService {
     runtime.stopRequested = true;
     killProcessTree(runtime.child);
     await waitForProcessExit(runtime.child);
-    this.revokeLocalPreviewUrl?.(runtime.info.url);
+    this.revokeLocalPreviewUrl?.(runtime.info.url, runtime.info.taskId);
     runtime.info = {
       ...runtime.info,
       status: "stopped",
@@ -447,7 +447,7 @@ export class LocalPreviewProcessService {
     };
     this.runtimes.set(id, runtime);
     this.runtimeIdsByKey.set(runtime.key, id);
-    this.allowLocalPreviewUrl?.(url);
+    this.allowLocalPreviewUrl?.(url, request.taskId);
     this.attachOutput(runtime, "stdout", child.stdout);
     this.attachOutput(runtime, "stderr", child.stderr);
     child.once("error", (error) => {
@@ -475,7 +475,7 @@ export class LocalPreviewProcessService {
     runtime.stopRequested = true;
     killProcessTree(runtime.child);
     await waitForProcessExit(runtime.child);
-    this.revokeLocalPreviewUrl?.(runtime.info.url);
+    this.revokeLocalPreviewUrl?.(runtime.info.url, runtime.info.taskId);
     runtime.info = {
       ...runtime.info,
       status: "failed",
@@ -512,7 +512,7 @@ export class LocalPreviewProcessService {
 
   private updateAfterExit(runtime: PreviewRuntime, exitCode: number | null, error?: string): void {
     if (runtime.info.status === "stopped" && runtime.stopRequested) return;
-    this.revokeLocalPreviewUrl?.(runtime.info.url);
+    this.revokeLocalPreviewUrl?.(runtime.info.url, runtime.info.taskId);
     runtime.info = {
       ...runtime.info,
       status: runtime.stopRequested ? "stopped" : "failed",
@@ -554,8 +554,10 @@ export function getLocalPreviewProcessService(): LocalPreviewProcessService {
       "../browser/browser-workbench-service",
     ) as typeof import("../browser/browser-workbench-service");
     localPreviewProcessService = new LocalPreviewProcessService({
-      allowLocalPreviewUrl: (url) => getBrowserWorkbenchService().allowLocalPreviewUrl(url),
-      revokeLocalPreviewUrl: (url) => getBrowserWorkbenchService().revokeLocalPreviewUrl(url),
+      allowLocalPreviewUrl: (url, taskId) =>
+        getBrowserWorkbenchService().allowLocalPreviewUrl(url, taskId),
+      revokeLocalPreviewUrl: (url, taskId) =>
+        getBrowserWorkbenchService().revokeLocalPreviewUrl(url, taskId),
     });
   }
   return localPreviewProcessService;

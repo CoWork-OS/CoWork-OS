@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 
-export const COWORK_PRIVATE_ROOT = ".cowork";
 export const COWORK_TASK_TMP_ROOT = ".cowork/tmp";
 export const COWORK_AUTOMATED_OUTPUT_ROOT = ".cowork/automated-outputs";
 

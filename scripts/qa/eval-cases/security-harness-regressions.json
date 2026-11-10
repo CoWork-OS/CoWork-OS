@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "private-browser-autofill",
-    "taskId": "private-browser-autofill"
+    "incident": "1637e95d-security-remediation",
+    "taskId": "1637e95d-security-remediation"
   },
   "categories": [
     {
@@ -457,6 +457,322 @@
         "requiresProofArtifact": true,
         "executableTest": "src/electron/agent/tools/__tests__/browser-vault-privacy.test.ts",
         "companionTest": "src/electron/browser/credentials/__tests__/private-browser-flow.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-matrix-audio-confirmed-fix",
+      "prompt": "Regression guard for Transcribe gateway audio buffers without filename-derived temporary writes or cleanup deletions: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-matrix-audio",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/gateway/__tests__/audio-transcription-security.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-recurring-identity-confirmed-fix",
+      "prompt": "Regression guard for Bind recurring approvals to full unredacted arguments and invalidate legacy lossy fingerprints: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-recurring-identity",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/security/__tests__/recurring-approval-service.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-retention-links-confirmed-fix",
+      "prompt": "Regression guard for Reject nested retention directory symlinks and recheck each aged run deletion after asynchronous metadata reads: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-retention-links",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/memory/__tests__/MemoryRetentionService.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-sandbox-npmrc-confirmed-fix",
+      "prompt": "Regression guard for Initialize sanitized npmrc once in fresh scratch and refuse overwriting links across cached executions: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-sandbox-npmrc",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/sandbox/__tests__/macos-sandbox-toolchains.test.ts",
+        "companionTest": "src/electron/agent/sandbox/__tests__/macos-toolchain-access.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-smtp-tls-confirmed-fix",
+      "prompt": "Regression guard for Require verified implicit TLS or STARTTLS before password or OAuth authentication and discard plaintext upgrade responses: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-smtp-tls",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/gateway/channels/__tests__/email-client-smtp-security.test.ts",
+        "companionTest": "src/electron/gateway/channels/__tests__/email-client.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-git-read-helpers-confirmed-fix",
+      "prompt": "Regression guard for Disable executable helpers for read-only Git status and diff: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-git-read-helpers",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/git/__tests__/read-only-security.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-mcp-policy-alias-confirmed-fix",
+      "prompt": "Regression guard for Derive MCP policy identity from raw catalog names on initial load and refresh: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-mcp-policy-alias",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/mcp/client/__tests__/tool-namespacing.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-npmrc-url-credentials-confirmed-fix",
+      "prompt": "Regression guard for Remove URL userinfo and authentication queries from sanitized npmrc copies: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-npmrc-url-credentials",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/sandbox/__tests__/macos-toolchain-access.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-comfy-output-links-confirmed-fix",
+      "prompt": "Regression guard for Confine ComfyUI workflow paths and atomic output writes to physical project paths: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-comfy-output-links",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/utils/__tests__/confined-file.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-browser-scroll-data-confirmed-fix",
+      "prompt": "Regression guard for Validate scroll arguments and pass them as data to a fixed evaluator: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-browser-scroll-data",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/browser/__tests__/browser-service-evaluate.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-permission-mirror-links-confirmed-fix",
+      "prompt": "Regression guard for Reject permission mirror leaf and ancestor symlinks for approval writes and removals: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-permission-mirror-links",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/security/__tests__/workspace-permission-manifest.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-fleet-ssh-transport-confirmed-fix",
+      "prompt": "Regression guard for Resolve SSH forwarding before constructing and authenticating gateway clients: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-fleet-ssh-transport",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/control-plane/__tests__/fleet-manager-security.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-device-assignment-identity-confirmed-fix",
+      "prompt": "Regression guard for Match only saved or authenticated unambiguous remote identities without contacting unrelated remotes: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-device-assignment-identity",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/control-plane/__tests__/device-identity-security.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-terminal-cursor-bounds-confirmed-fix",
+      "prompt": "Regression guard for Bound terminal cursor expansion and total parser input and allocation work: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-terminal-cursor-bounds",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/renderer/utils/__tests__/ansi-lines.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-preview-owner-scope-confirmed-fix",
+      "prompt": "Regression guard for Bind agent preview grants to the owning task and session and revoke on policy changes or close: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-preview-owner-scope",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/browser/__tests__/browser-session-manager.test.ts",
+        "companionTest": "src/electron/browser/__tests__/browser-session-tabs.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-memory-dream-links-confirmed-fix",
+      "prompt": "Regression guard for Refuse tracked symlinks when writing dream review branches in temporary worktrees: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-memory-dream-links",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/memory/repo/__tests__/MemoryRepoService.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-memory-source-links-confirmed-fix",
+      "prompt": "Regression guard for Revalidate canonical source bindings and no-follow descriptors for memory recheck evidence: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-memory-source-links",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/memory/__tests__/MemorySourceRecheckService.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-canvas-stylesheet-access-confirmed-fix",
+      "prompt": "Regression guard for Apply project ACCESS policy before reading and inlining local canvas stylesheets: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-canvas-stylesheet-access",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/canvas-tools.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-role-persona-access-confirmed-fix",
+      "prompt": "Regression guard for Confine role profile reads and apply current task filesystem guards before prompt injection: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-role-persona-access",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agents/__tests__/role-persona.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-listener-isolation-confirmed-fix",
+      "prompt": "Regression guard for Deny TCP listeners in network-disabled macOS profiles across process-group changes and require authorized network access for QA servers: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-listener-isolation",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/sandbox/__tests__/macos-sandbox-loopback.test.ts",
+        "companionTest": "src/electron/agent/qa/__tests__/qa-server-policy.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-low-ssrf-url-installer-unchecked-destination-confirmed-fix",
+      "prompt": "Regression guard for Skill and plugin URL imports follow redirects beyond network policy: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-low-ssrf-url-installer-unchecked-destination",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/security/__tests__/url-import-and-discovery.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-low-ssrf-browser-provider-discovery-redirect-confirmed-fix",
+      "prompt": "Regression guard for Browser model discovery bypasses private-address restrictions through redirects: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-low-ssrf-browser-provider-discovery-redirect",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/security/__tests__/url-import-and-discovery.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-low-authorization-browser-timeline-workspace-read-confirmed-fix",
+      "prompt": "Regression guard for Browser timeline reads bypass current workspace read permission: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-low-authorization-browser-timeline-workspace-read",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/host/services/__tests__/browser-task-event-methods.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-low-availability-proxy-shared-pairing-lockout-confirmed-fix",
+      "prompt": "Regression guard for One proxy client can block browser pairing for all clients: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-low-availability-proxy-shared-pairing-lockout",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/host/web/__tests__/WebApplication.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-low-authorization-agent-terminal-revocation-stream-confirmed-fix",
+      "prompt": "Regression guard for Revoked session members continue receiving subscribed agent terminal output: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-low-authorization-agent-terminal-revocation-stream",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/ipc/__tests__/agent-terminal-handlers.test.ts"
+      }
+    },
+    {
+      "id": "1637e95d-low-authorization-local-video-job-owner-confirmed-fix",
+      "prompt": "Regression guard for Local video jobs can be cancelled from another task: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "1637e95d-low-authorization-local-video-job-owner",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/skills/__tests__/local-video-provider.test.ts"
       }
     }
   ],

@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { VideoTools } from "../../tools/video-tools";
+import { LLMProviderFactory } from "../../llm/provider-factory";
 import {
   buildLocalVideoArgs,
   cancelLocalVideoJob,
@@ -15,6 +17,7 @@ import {
   waitForLocalVideoJob,
 } from "../local-video-provider";
 
+const owner = { taskId: "task-a", workspaceId: "workspace-a" };
 let dir = "";
 let python = "";
 let modelDir = "";
@@ -32,6 +35,7 @@ afterEach(() => {
   // A failed test must not leave a "running" job that blocks the next one.
   stopAllLocalVideoJobs();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -44,6 +48,99 @@ function fakeChild() {
   child.kill = vi.fn();
   return child;
 }
+
+describe("local video job ownership", () => {
+  it("binds the production tool facade to its task and current workspace authority", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({} as never);
+    const workspace = { id: owner.workspaceId, path: dir, permissions: { write: true } };
+    const daemon = { logEvent: vi.fn() };
+    const tools = new VideoTools(workspace as never, daemon as never, owner.taskId);
+    const foreign = new VideoTools(workspace as never, daemon as never, "other-task");
+    const child = fakeChild();
+    const config = resolveLocalVideoConfig({ pythonPath: python, modelDir }, {})!;
+    const { jobId } = startLocalVideoJob(
+      { owner, config, prompt: "p", outputPath: path.join(dir, "private.mp4") },
+      vi.fn(() => child) as never,
+    );
+    expect(await foreign.getVideoGenerationJob({ jobId, provider: "local" })).toMatchObject({
+      status: "failed",
+    });
+    expect(await foreign.cancelVideoGenerationJob({ jobId, provider: "local" })).toMatchObject({
+      success: false,
+    });
+    const waiting = tools.getVideoGenerationJob({ jobId, provider: "local" });
+    tools.setWorkspace({ ...workspace, permissions: { write: false } } as never);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await waiting).toMatchObject({ status: "failed" });
+    expect(await tools.cancelVideoGenerationJob({ jobId, provider: "local" })).toMatchObject({
+      success: false,
+    });
+    tools.setWorkspace(workspace as never);
+    expect(await tools.cancelVideoGenerationJob({ jobId, provider: "local" })).toEqual({
+      success: true,
+    });
+    expect(child.kill).toHaveBeenCalled();
+  });
+
+  it("keeps foreign jobs opaque and preserves owner and shutdown control", async () => {
+    const config = resolveLocalVideoConfig({ pythonPath: python, modelDir }, {})!;
+    const child = fakeChild();
+    const spawnImpl = vi.fn(() => child) as never;
+    const outputPath = path.join(dir, "private.mp4");
+    const { jobId } = startLocalVideoJob({ owner, config, prompt: "p", outputPath }, spawnImpl);
+    for (const foreign of [
+      { ...owner, taskId: "task-b" },
+      { ...owner, workspaceId: "workspace-b" },
+    ]) {
+      expect(getLocalVideoJob(jobId, foreign)).toBeNull();
+      expect(cancelLocalVideoJob(jobId, foreign)).toBe(false);
+      expect(await waitForLocalVideoJob(jobId, foreign, 1000)).toBeNull();
+      let message = "";
+      try {
+        startLocalVideoJob(
+          { owner: foreign, config, prompt: "p", outputPath: path.join(dir, "other.mp4") },
+          spawnImpl,
+        );
+      } catch (error) {
+        message = String(error);
+      }
+      expect(message).toContain("busy");
+      expect(message).not.toContain(jobId);
+      expect(message).not.toContain(outputPath);
+    }
+    expect(getLocalVideoJob(jobId, owner)).toMatchObject({ status: "running" });
+    expect(cancelLocalVideoJob(jobId, owner)).toBe(true);
+    expect(child.kill).toHaveBeenCalled();
+    const otherOwner = { taskId: "task-b", workspaceId: "workspace-b" };
+    const second = startLocalVideoJob(
+      { owner: otherOwner, config, prompt: "p", outputPath },
+      vi.fn(() => fakeChild()) as never,
+    );
+    stopAllLocalVideoJobs();
+    expect(getLocalVideoJob(second.jobId, otherOwner)).toMatchObject({ status: "cancelled" });
+  });
+
+  it("reauthorizes every wait iteration and refuses management after authority changes", async () => {
+    vi.useFakeTimers();
+    let authorized = true;
+    const currentOwner = { ...owner, isCurrent: () => authorized };
+    const config = resolveLocalVideoConfig({ pythonPath: python, modelDir }, {})!;
+    const { jobId } = startLocalVideoJob(
+      { owner: currentOwner, config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
+      vi.fn(() => fakeChild()) as never,
+    );
+    const waiting = waitForLocalVideoJob(jobId, currentOwner, 60_000, 1000);
+    authorized = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await waiting).toBeNull();
+    expect(getLocalVideoJob(jobId, currentOwner)).toBeNull();
+    expect(cancelLocalVideoJob(jobId, currentOwner)).toBe(false);
+    stopAllLocalVideoJobs();
+    authorized = true;
+    expect(getLocalVideoJob(jobId, currentOwner)?.status).toBe("cancelled");
+  });
+});
 
 describe("resolveLocalVideoConfig", () => {
   it("reads settings first, then the environment", () => {
@@ -143,7 +240,7 @@ describe("local video jobs", () => {
     process.env.FAKE_PROVIDER_API_KEY = "secret";
     try {
       const { jobId } = startLocalVideoJob(
-        { config, prompt: "p", outputPath: path.join(dir, "a.mp4") },
+        { owner, config, prompt: "p", outputPath: path.join(dir, "a.mp4") },
         spawnImpl as never,
       );
       const options = (spawnImpl.mock.calls[0] as unknown[])[2] as {
@@ -156,11 +253,11 @@ describe("local video jobs", () => {
       expect((options as unknown as { cwd: string }).cwd).toBe(modelDir);
       expect(() =>
         startLocalVideoJob(
-          { config, prompt: "p", outputPath: path.join(dir, "b.mp4") },
+          { owner, config, prompt: "p", outputPath: path.join(dir, "b.mp4") },
           spawnImpl as never,
         ),
       ).toThrow(/busy/);
-      cancelLocalVideoJob(jobId);
+      cancelLocalVideoJob(jobId, owner);
     } finally {
       delete process.env.FAKE_PROVIDER_API_KEY;
     }
@@ -171,25 +268,25 @@ describe("local video jobs", () => {
     const child = fakeChild();
     const spawnImpl = vi.fn(() => child) as never;
     const outputPath = path.join(dir, "out", "clip.mp4");
-    const { jobId } = startLocalVideoJob({ config, prompt: "p", outputPath }, spawnImpl);
+    const { jobId } = startLocalVideoJob({ owner, config, prompt: "p", outputPath }, spawnImpl);
 
     expect((spawnImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(python);
-    expect(getLocalVideoJob(jobId)?.status).toBe("running");
+    expect(getLocalVideoJob(jobId, owner)?.status).toBe("running");
     fs.writeFileSync(outputPath, "mp4");
     child.emit("exit", 0);
-    expect(getLocalVideoJob(jobId)).toMatchObject({ status: "succeeded", outputPath });
+    expect(getLocalVideoJob(jobId, owner)).toMatchObject({ status: "succeeded", outputPath });
   });
 
   it("fails with the end of stderr when the model errors", () => {
     const config = resolveLocalVideoConfig({ pythonPath: python, modelDir }, {})!;
     const child = fakeChild();
     const { jobId } = startLocalVideoJob(
-      { config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
+      { owner, config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
       vi.fn(() => child) as never,
     );
     child.stderr.emit("data", Buffer.from("loading\nValueError: out of memory\n"));
     child.emit("exit", 1);
-    const job = getLocalVideoJob(jobId)!;
+    const job = getLocalVideoJob(jobId, owner)!;
     expect(job.status).toBe("failed");
     expect(job.error).toContain("out of memory");
   });
@@ -199,12 +296,12 @@ describe("local video jobs", () => {
     const config = resolveLocalVideoConfig({ pythonPath: python, modelDir, maxMinutes: 1 }, {})!;
     const child = fakeChild();
     const { jobId } = startLocalVideoJob(
-      { config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
+      { owner, config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
       vi.fn(() => child) as never,
     );
     vi.advanceTimersByTime(60_000);
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(getLocalVideoJob(jobId)?.status).toBe("failed");
+    expect(getLocalVideoJob(jobId, owner)?.status).toBe("failed");
   });
 
   it("waits for a running job to finish, up to the limit", async () => {
@@ -213,15 +310,15 @@ describe("local video jobs", () => {
     const child = fakeChild();
     const outputPath = path.join(dir, "wait.mp4");
     const { jobId } = startLocalVideoJob(
-      { config, prompt: "p", outputPath },
+      { owner, config, prompt: "p", outputPath },
       vi.fn(() => child) as never,
     );
 
-    const timedOut = waitForLocalVideoJob(jobId, 10_000, 1_000);
+    const timedOut = waitForLocalVideoJob(jobId, owner, 10_000, 1_000);
     await vi.advanceTimersByTimeAsync(10_000);
     expect((await timedOut)?.status).toBe("running");
 
-    const finished = waitForLocalVideoJob(jobId, 60_000, 1_000);
+    const finished = waitForLocalVideoJob(jobId, owner, 60_000, 1_000);
     await vi.advanceTimersByTimeAsync(3_000);
     fs.writeFileSync(outputPath, "mp4");
     child.emit("exit", 0);
@@ -233,13 +330,13 @@ describe("local video jobs", () => {
     const config = resolveLocalVideoConfig({ pythonPath: python, modelDir }, {})!;
     const child = fakeChild();
     const { jobId } = startLocalVideoJob(
-      { config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
+      { owner, config, prompt: "p", outputPath: path.join(dir, "clip.mp4") },
       vi.fn(() => child) as never,
     );
-    expect(cancelLocalVideoJob(jobId)).toBe(true);
+    expect(cancelLocalVideoJob(jobId, owner)).toBe(true);
     expect(child.kill).toHaveBeenCalled();
     child.emit("exit", null);
-    expect(getLocalVideoJob(jobId)?.status).toBe("cancelled");
-    expect(cancelLocalVideoJob(jobId)).toBe(false);
+    expect(getLocalVideoJob(jobId, owner)?.status).toBe("cancelled");
+    expect(cancelLocalVideoJob(jobId, owner)).toBe(false);
   });
 });

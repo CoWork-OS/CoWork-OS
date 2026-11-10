@@ -1,5 +1,8 @@
-import { ensureWorkspaceDirectorySync } from "../utils/workspace-directory";
-import * as fs from "fs";
+import {
+  confinedFilePath,
+  readConfinedFileSync,
+  writeConfinedFileSync,
+} from "../utils/confined-file";
 import * as path from "path";
 import type { PermissionRule } from "../../shared/types";
 import { normalizePermissionScope, permissionRuleFingerprint } from "./permission-utils";
@@ -20,7 +23,7 @@ export function loadWorkspacePermissionManifest(
 ): WorkspacePermissionManifest {
   const manifestPath = getWorkspacePermissionManifestPath(workspacePath);
   try {
-    const raw = fs.readFileSync(manifestPath, "utf8");
+    const raw = readConfinedFileSync(workspacePath, manifestPath);
     const parsed = JSON.parse(raw) as WorkspacePermissionManifest;
     return normalizeManifest(parsed);
   } catch (error: Any) {
@@ -67,6 +70,7 @@ export function appendWorkspacePermissionManifestRule(
 ): { success: boolean; manifestPath: string; error?: string } {
   const manifestPath = getWorkspacePermissionManifestPath(workspacePath);
   try {
+    confinedFilePath(workspacePath, manifestPath);
     const current = loadWorkspacePermissionManifest(workspacePath);
     const nextRules = [...current.rules];
     const normalizedRule: PermissionRule = {
@@ -79,9 +83,8 @@ export function appendWorkspacePermissionManifestRule(
     if (!nextRules.some((existing) => permissionRuleFingerprint(existing) === fingerprint)) {
       nextRules.push(normalizedRule);
     }
-    const dir = path.dirname(manifestPath);
-    ensureWorkspaceDirectorySync(workspacePath, dir);
-    fs.writeFileSync(
+    writeConfinedFileSync(
+      workspacePath,
       manifestPath,
       JSON.stringify(
         {
@@ -91,7 +94,6 @@ export function appendWorkspacePermissionManifestRule(
         null,
         2,
       ) + "\n",
-      "utf8",
     );
     return { success: true, manifestPath };
   } catch (error) {
@@ -109,6 +111,7 @@ export function removeWorkspacePermissionManifestRule(
 ): { success: boolean; manifestPath: string; removed: boolean; error?: string } {
   const manifestPath = getWorkspacePermissionManifestPath(workspacePath);
   try {
+    confinedFilePath(workspacePath, manifestPath);
     const current = loadWorkspacePermissionManifest(workspacePath);
     const fingerprint = permissionRuleFingerprint(rule);
     const nextRules = current.rules.filter(
@@ -118,9 +121,8 @@ export function removeWorkspacePermissionManifestRule(
     if (!removed) {
       return { success: true, manifestPath, removed: false };
     }
-    const dir = path.dirname(manifestPath);
-    ensureWorkspaceDirectorySync(workspacePath, dir);
-    fs.writeFileSync(
+    writeConfinedFileSync(
+      workspacePath,
       manifestPath,
       JSON.stringify(
         {
@@ -130,7 +132,6 @@ export function removeWorkspacePermissionManifestRule(
         null,
         2,
       ) + "\n",
-      "utf8",
     );
     return { success: true, manifestPath, removed: true };
   } catch (error) {

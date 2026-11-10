@@ -102,7 +102,9 @@ export function assignExposedToolNames(catalogs: ServerToolCatalog[]): {
         tool: {
           ...tool,
           name: exposedName,
-          ...(exposedName !== tool.name ? { serverToolName: tool.name } : {}),
+          // Routing and approval identity come from the raw catalog name, never
+          // a host-only field supplied by the remote server (even without a collision).
+          serverToolName: tool.name,
           inputSchema: tool.inputSchema ? { ...tool.inputSchema } : tool.inputSchema,
         },
       });

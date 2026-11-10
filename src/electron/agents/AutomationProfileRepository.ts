@@ -273,12 +273,4 @@ export class AutomationProfileStore {
     }
     this.db.prepare("DELETE FROM automation_profiles WHERE id = ?").run(id);
   }
-
-  deleteByAgentRoleId(agentRoleId: string): void {
-    const existing = this.findByAgentRoleId(agentRoleId);
-    if (!existing) {
-      return;
-    }
-    this.deleteById(existing.id);
-  }
 }

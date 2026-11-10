@@ -73,7 +73,12 @@ export class VideoTools {
           }
         : {}),
     };
-    return new VideoGenerator(workspace, approvalHandlers);
+    return new VideoGenerator(workspace, approvalHandlers, {
+      taskId: this.taskId,
+      workspaceId: workspace.id,
+      isCurrent: () =>
+        this.workspace.id === workspace.id && this.workspace.permissions.write === true,
+    });
   }
 
   /**

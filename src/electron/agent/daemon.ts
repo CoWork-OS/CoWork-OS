@@ -1597,10 +1597,6 @@ export class AgentDaemon extends EventEmitter {
     return this.workSessionProtocolService.getReliabilityService();
   }
 
-  searchSessions(query: string, workspaceId?: string, limit?: number) {
-    return this.sessionProgressService.search(query, { workspaceId, limit });
-  }
-
   getDatabase(): Database.Database {
     return this.dbManager.getDatabase();
   }
@@ -4616,67 +4612,6 @@ export class AgentDaemon extends EventEmitter {
     this.launchContinuationExecution(effectiveTask, executor);
   }
 
-  async continueTask(taskId: string): Promise<void> {
-    if (this.shutdownRequested) {
-      throw new Error("Agent daemon is shutting down; continuation was not admitted.");
-    }
-    // Guard against double-click: if the task is already running, bail out
-    if (this.activeTasks.has(taskId)) {
-      console.log(`[AgentDaemon] Task ${taskId} is already active, ignoring continue request`);
-      return;
-    }
-
-    const task = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
-    if (!task) {
-      throw new Error(`Task ${taskId} not found`);
-    }
-    if (task.status !== "failed") {
-      throw new Error(`Task ${taskId} is not in failed status (current: ${task.status})`);
-    }
-    // Fetch all events for this task
-    const events = this.getTaskEventsForReplay(taskId);
-    if (!this.isTurnLimitContinuationEligible(task, events)) {
-      throw new Error(
-        `Task ${taskId} cannot be continued because it was not stopped by turn-limit exhaustion`,
-      );
-    }
-
-    const { effectiveTask, executor } = this.createContinuationExecutor(task, events);
-
-    // Register in active tasks map
-    this.activeTasks.set(effectiveTask.id, {
-      executor,
-      lastAccessed: Date.now(),
-      status: "active",
-    });
-
-    // Register with queue manager for concurrency limits and timeout tracking.
-    const canRun = this.queueManager.registerResumedTask(effectiveTask.id);
-    if (!canRun) {
-      this.activeTasks.delete(effectiveTask.id);
-      this.pendingContinuationTaskIds.add(effectiveTask.id);
-      this.taskRepo.update(effectiveTask.id, { status: "queued" });
-      this.logEvent(effectiveTask.id, "task_queued", {
-        reason: "continuation_concurrency",
-        message:
-          "Queued — concurrency limit reached. Continuation will resume automatically when a slot opens.",
-      });
-      return;
-    }
-
-    // Update status and log continuation
-    this.taskRepo.update(effectiveTask.id, {
-      status: "executing",
-      error: undefined,
-      completedAt: undefined,
-    });
-    this.logEvent(effectiveTask.id, "task_resumed", {
-      message: "Continuing task after budget/limit exhaustion",
-    });
-
-    this.launchContinuationExecution(effectiveTask, executor);
-  }
-
   async forkTaskSession(params: {
     taskId: string;
     prompt?: string;
@@ -7077,6 +7012,14 @@ export class AgentDaemon extends EventEmitter {
           includeRoleDetails: false,
           includeRoleProfile: true,
           workspacePath,
+          readGuard: (candidatePath) => {
+            try {
+              this.assertTaskWorkspaceFilesystemAccess(task.id, candidatePath, "read");
+              return true;
+            } catch {
+              return false;
+            }
+          },
           fileOwnershipZone: myZone?.zone,
           peerAgentZones: peerZones,
         },

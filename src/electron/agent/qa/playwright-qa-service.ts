@@ -20,7 +20,6 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { createSandbox, type ISandbox } from "../sandbox/sandbox-factory";
-import { getLoopbackListenerGuard } from "../sandbox/loopback-listener-guard";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
 import { authorizationFingerprint } from "../../security/authorization-identity";
@@ -620,7 +619,6 @@ export class PlaywrightQAService {
     const { command, args } = parseServerCommand(config.serverCommand);
     const requestedSandboxType = this.workspace.permissions.sandboxType || "auto";
     const sandbox = await createSandbox(this.workspace, requestedSandboxType);
-    let guardLoopback = false;
     const sandboxProcess = (() => {
       try {
         const currentWorkspace = this.getCurrentWorkspace
@@ -665,12 +663,16 @@ export class PlaywrightQAService {
             `QA server sandbox type "${sandbox.type}" is blocked by administrator policy`,
           );
         }
-        guardLoopback = sandbox.type === "macos" && !allowNetwork;
+        if (sandbox.type === "macos" && !allowNetwork) {
+          throw new Error(
+            "QA dev servers on macOS require network access enabled by the task profile and administrator policy. TCP listeners are denied while subprocess network access is off.",
+          );
+        }
         const launched = sandbox.spawnProcess?.(command, args, {
           cwd,
           allowNetwork,
-          allowLoopbackListen: guardLoopback,
-          detached: guardLoopback,
+          allowLoopbackListen: false,
+          detached: false,
           envPassthrough: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR"],
         });
         if (!launched)
@@ -684,23 +686,14 @@ export class PlaywrightQAService {
     this.serverSandbox = sandbox;
     this.serverProcess = sandboxProcess.process;
     const child = sandboxProcess.process;
-    let unwatch = () => {};
-    let listenerError: Error | undefined;
     let stopped = false;
     const release = () => {
-      unwatch();
       sandboxProcess.cleanup();
     };
     const stop = (signal: NodeJS.Signals = "SIGTERM") => {
       if (stopped) return;
       stopped = true;
-      if (guardLoopback && Number.isInteger(child.pid) && child.pid! > 0) {
-        try {
-          process.kill(-child.pid!, signal);
-        } catch {
-          child.kill(signal);
-        }
-      } else if (!child.killed) child.kill(signal);
+      if (!child.killed) child.kill(signal);
       release();
     };
     this.stopServerProcess = stop;
@@ -712,21 +705,8 @@ export class PlaywrightQAService {
       stopped = true;
       release();
     });
-    if (guardLoopback) {
-      if (!Number.isInteger(child.pid) || child.pid! <= 0) {
-        stop();
-        throw new Error("QA server process cannot be guarded for loopback-only listening");
-      }
-      unwatch = getLoopbackListenerGuard().watch(child.pid!, (violation) => {
-        listenerError = new Error(
-          `QA server listened on a non-loopback address: ${violation.address}`,
-        );
-        stop("SIGKILL");
-      });
-    }
     // Wait for port to be ready
     const ready = await waitForPort(port, timeout);
-    if (listenerError) throw listenerError;
     if (!ready) {
       throw new Error(
         `Dev server did not start on port ${port} within ${timeout}ms. ` +

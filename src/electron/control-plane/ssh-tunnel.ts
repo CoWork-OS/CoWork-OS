@@ -53,17 +53,6 @@ export const DEFAULT_SSH_TUNNEL_CONFIG: SSHTunnelConfig = {
 };
 
 /**
- * SSH Tunnel Manager events
- */
-export interface SSHTunnelEvents {
-  stateChange: (state: SSHTunnelState, error?: string) => void;
-  connected: () => void;
-  disconnected: (reason: string) => void;
-  error: (error: Error) => void;
-  output: (data: string) => void;
-}
-
-/**
  * SSH Tunnel Manager
  *
  * Creates SSH tunnels using the system's ssh command.

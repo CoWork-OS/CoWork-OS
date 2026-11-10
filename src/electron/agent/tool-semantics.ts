@@ -248,16 +248,7 @@ export function getToolDedupeClass(toolName: string): string {
   return semantics?.dedupeClass || canonicalizeToolName(toolName);
 }
 
-export function getAllToolSemantics(): ToolSemantics[] {
-  return [...TOOL_SEMANTICS_TABLE];
-}
-
 export function getAliasesForCanonicalTool(canonicalName: string): string[] {
   const semantics = CANONICAL_TO_SEMANTICS.get(canonicalName);
   return semantics ? [...semantics.aliases] : [];
-}
-
-export function hasSemanticsAlias(toolName: string): boolean {
-  const normalized = normalizeToolName(toolName);
-  return ALIAS_TO_SEMANTICS.has(normalized.stripped);
 }

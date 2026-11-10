@@ -6,7 +6,8 @@ import {
   WORKSPACE_KIT_CONTRACTS,
   WORKSPACE_PROMPT_ORDER,
 } from "./kit-contracts";
-import { type ParsedKitDoc, parseKitDocument } from "./kit-parser";
+import { type ParsedKitDoc, parseKitDocument, parseKitDocumentFromString } from "./kit-parser";
+import { readConfinedFileSync } from "../utils/confined-file";
 
 export interface InjectionContext {
   workspacePath: string;
@@ -90,24 +91,27 @@ export function buildWorkspaceKitSections(ctx: InjectionContext): RenderedKitSec
   return sections;
 }
 
-export function buildOrderedKitPrompt(ctx: InjectionContext): string {
-  return buildWorkspaceKitSections(ctx)
-    .map((section) => section.rendered)
-    .join("\n\n")
-    .trim();
-}
-
 export function buildRoleKitSection(
   workspacePath: string,
   roleDir: string,
   file: (typeof ROLE_KIT_FILES)[number],
+  readGuard?: (candidatePath: string) => boolean,
 ): RenderedKitSection | null {
   const contract = WORKSPACE_KIT_CONTRACTS[file];
   if (!contract) return null;
 
   const relPath = path.join(".cowork", "agents", roleDir, file).replace(/\\/g, "/");
   const absPath = path.join(workspacePath, ".cowork", "agents", roleDir, file);
-  const parsed = parseKitDocument(absPath, contract, relPath);
+  let parsed: ParsedKitDoc | null;
+  try {
+    if (roleDir === "." || roleDir === ".." || /[\\/]/.test(roleDir)) return null;
+    if (readGuard && !readGuard(absPath)) return null;
+    const raw = readConfinedFileSync(workspacePath, absPath);
+    if (readGuard && !readGuard(absPath)) return null;
+    parsed = parseKitDocumentFromString(raw, contract, file, relPath);
+  } catch {
+    return null;
+  }
   if (!parsed) return null;
 
   return {
@@ -145,18 +149,4 @@ export function parseHeartbeatChecklist(body: string): HeartbeatTask[] {
   }
 
   return tasks;
-}
-
-export function renderHeartbeatPrompt(tasks: HeartbeatTask[]): string {
-  if (!tasks.length) return "HEARTBEAT: no proactive checks configured.";
-
-  return [
-    "HEARTBEAT CHECKLIST",
-    ...tasks.map((task, index) => {
-      const cadence = task.cadence ? ` [${task.cadence}]` : "";
-      return `${index + 1}. ${task.check}${cadence} -> default action: ${task.action || "propose"}`;
-    }),
-    "",
-    "Do not take irreversible or external actions unless separately allowed.",
-  ].join("\n");
 }

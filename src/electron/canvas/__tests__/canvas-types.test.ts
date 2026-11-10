@@ -36,28 +36,15 @@ describe("Canvas Protocol Methods", () => {
 });
 
 describe("Canvas IPC Channels", () => {
-  it("defines checkpoint IPC channels", () => {
-    expect(IPC_CHANNELS.CANVAS_CHECKPOINT_SAVE).toBe("canvas:checkpointSave");
-    expect(IPC_CHANNELS.CANVAS_CHECKPOINT_LIST).toBe("canvas:checkpointList");
-    expect(IPC_CHANNELS.CANVAS_CHECKPOINT_RESTORE).toBe("canvas:checkpointRestore");
-    expect(IPC_CHANNELS.CANVAS_CHECKPOINT_DELETE).toBe("canvas:checkpointDelete");
-    expect(IPC_CHANNELS.CANVAS_GET_CONTENT).toBe("canvas:getContent");
-  });
-
-  it("defines all original canvas IPC channels", () => {
-    expect(IPC_CHANNELS.CANVAS_CREATE).toBe("canvas:create");
+  it("defines the canvas IPC channels the renderer calls", () => {
     expect(IPC_CHANNELS.CANVAS_GET_SESSION).toBe("canvas:getSession");
     expect(IPC_CHANNELS.CANVAS_LIST_SESSIONS).toBe("canvas:listSessions");
     expect(IPC_CHANNELS.CANVAS_SHOW).toBe("canvas:show");
-    expect(IPC_CHANNELS.CANVAS_HIDE).toBe("canvas:hide");
     expect(IPC_CHANNELS.CANVAS_CLOSE).toBe("canvas:close");
-    expect(IPC_CHANNELS.CANVAS_PUSH).toBe("canvas:push");
-    expect(IPC_CHANNELS.CANVAS_EVAL).toBe("canvas:eval");
     expect(IPC_CHANNELS.CANVAS_SNAPSHOT).toBe("canvas:snapshot");
     expect(IPC_CHANNELS.CANVAS_EXPORT_HTML).toBe("canvas:exportHTML");
     expect(IPC_CHANNELS.CANVAS_EXPORT_TO_FOLDER).toBe("canvas:exportToFolder");
     expect(IPC_CHANNELS.CANVAS_OPEN_IN_BROWSER).toBe("canvas:openInBrowser");
-    expect(IPC_CHANNELS.CANVAS_OPEN_URL).toBe("canvas:openUrl");
     expect(IPC_CHANNELS.CANVAS_GET_SESSION_DIR).toBe("canvas:getSessionDir");
   });
 });

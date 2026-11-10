@@ -1,5 +1,4 @@
 export const AGENT_SECURITY_PROTOCOL_VERSION = "cowork-os/numbat-hook/v1" as const;
-export const NUMBAT_RECORD_SCHEMA_VERSION = "0.2.0" as const;
 
 export type AgentSecurityMode = "monitor" | "enforce";
 export type AgentSecurityFailurePolicy = "open" | "deny_high_risk";
@@ -215,20 +214,5 @@ export interface AgentSecurityRulesCheckResult {
 }
 
 export interface AgentSecurityHookManagementResult {
-  output: string;
-}
-
-export interface AgentSecurityCaseBuildResult {
-  caseId: string;
-  taskId: string;
-  bundleName: string;
-  bundlePath: string;
-  output: string;
-}
-
-export interface AgentSecurityCaseVerifyResult {
-  bundleName: string;
-  bundlePath: string;
-  verified: true;
   output: string;
 }

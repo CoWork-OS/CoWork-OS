@@ -333,7 +333,3 @@ export class VerificationRuntime {
 export function createVerificationRuntime(deps: VerificationRuntimeDeps): VerificationRuntime {
   return new VerificationRuntime(deps);
 }
-
-export function normalizeVerificationVerdict(value: string): VerificationVerdict {
-  return parseVerificationVerdict(value);
-}

@@ -9,6 +9,7 @@ const MAX_FILE_CHARS = 4000;
 interface RolePersonaOptions {
   workspacePath?: string | null;
   includeDbFallback?: boolean;
+  readGuard?: (candidatePath: string) => boolean;
 }
 
 export interface RolePersonaInput {
@@ -114,7 +115,11 @@ function summarizeSoulFromDb(soul?: string | null): string | null {
   }
 }
 
-function buildRoleProfileFromFiles(role: RolePersonaInput, workspacePath?: string | null): string {
+function buildRoleProfileFromFiles(
+  role: RolePersonaInput,
+  workspacePath?: string | null,
+  readGuard?: RolePersonaOptions["readGuard"],
+): string {
   if (!workspacePath) return "";
 
   const profileByFile = new Map<string, string>();
@@ -124,7 +129,7 @@ function buildRoleProfileFromFiles(role: RolePersonaInput, workspacePath?: strin
     for (const file of ROLE_FILE_ORDER) {
       if (profileByFile.has(file)) continue;
 
-      const section = buildRoleKitSection(workspacePath, roleDir, file);
+      const section = buildRoleKitSection(workspacePath, roleDir, file, readGuard);
       if (!section) continue;
       profileByFile.set(file, section.rendered);
     }
@@ -150,7 +155,7 @@ export function buildRolePersonaPrompt(
   options: RolePersonaOptions = {},
 ): string {
   const includeDbFallback = options.includeDbFallback ?? true;
-  const fromFiles = buildRoleProfileFromFiles(role, workspacePath);
+  const fromFiles = buildRoleProfileFromFiles(role, workspacePath, options.readGuard);
 
   if (fromFiles) {
     return `ROLE PROFILE\n${fromFiles}`;

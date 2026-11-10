@@ -233,10 +233,3 @@ export async function scaffoldPluginPack(options: ScaffoldOptions): Promise<Scaf
 export function getAvailableCategories(): string[] {
   return [...VALID_CATEGORIES];
 }
-
-/**
- * Get the user extensions directory path
- */
-export function getExtensionsDir(): string {
-  return getUserExtensionsDir();
-}

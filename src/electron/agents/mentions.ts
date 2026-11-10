@@ -181,6 +181,3 @@ export const extractMentionedRoles = (text: string, roles: AgentRole[]) => {
 
   return Array.from(matches.values());
 };
-
-export const extractMentionedRoleIds = (text: string, roles: AgentRole[]): string[] =>
-  extractMentionedRoles(text, roles).map((role) => role.id);

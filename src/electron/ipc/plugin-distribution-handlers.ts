@@ -175,15 +175,6 @@ export function setupPluginDistributionHandlers(): void {
     },
   );
 
-  // Get pack details from remote registry
-  ipcMain.handle(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_DETAILS, async (_, packId: string) => {
-    if (!packId || typeof packId !== "string") {
-      return null;
-    }
-    const packRegistry = getPackRegistry();
-    return packRegistry.getPackDetails(packId);
-  });
-
   // Get available categories from remote registry
   ipcMain.handle(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_CATEGORIES, async () => {
     const packRegistry = getPackRegistry();

@@ -39,14 +39,6 @@ const QuerySchema = z.string().max(MAX_QUERY_LENGTH);
 const ConfidenceSchema = z.number().finite().min(0).max(1);
 const TimestampSchema = z.number().finite().min(0);
 
-export const MemorySearchRequestSchema = z
-  .object({
-    workspaceId: WorkspaceIdSchema,
-    query: QuerySchema,
-    limit: cappedLimit(100).optional(),
-  })
-  .strict();
-
 export const MemoryTimelineRequestSchema = z
   .object({
     workspaceId: WorkspaceIdSchema,

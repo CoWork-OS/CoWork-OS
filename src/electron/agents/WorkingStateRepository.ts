@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from "uuid";
 import {
   AgentWorkingState,
   UpdateWorkingStateRequest,
-  WorkingStateQuery,
   WorkingStateHistoryQuery,
   WorkingStateType,
 } from "../../shared/types";
@@ -20,37 +19,6 @@ export class WorkingStateStore {
   findById(id: string): AgentWorkingState | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_working_state WHERE id = ?");
     const row = stmt.get(id) as Any;
-    return row ? this.mapRowToState(row) : undefined;
-  }
-
-  /**
-   * Get the current working state for an agent in a workspace
-   */
-  getCurrent(query: WorkingStateQuery): AgentWorkingState | undefined {
-    let sql = `
-      SELECT * FROM agent_working_state
-      WHERE agent_role_id = ?
-        AND workspace_id = ?
-        AND is_current = 1
-    `;
-    const params: Any[] = [query.agentRoleId, query.workspaceId];
-
-    if (query.taskId) {
-      sql += " AND task_id = ?";
-      params.push(query.taskId);
-    } else {
-      sql += " AND task_id IS NULL";
-    }
-
-    if (query.stateType) {
-      sql += " AND state_type = ?";
-      params.push(query.stateType);
-    }
-
-    sql += " ORDER BY updated_at DESC LIMIT 1";
-
-    const stmt = this.db.prepare(sql);
-    const row = stmt.get(...params) as Any;
     return row ? this.mapRowToState(row) : undefined;
   }
 

@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseManager } from "../../database/schema";
+import { WorkspaceRepository } from "../../database/repository-facades";
 import { MemoryService } from "../MemoryService";
 
 // LOOP-14: quiet mode starts no memory background jobs, and shutdown waits (bounded) for a
@@ -48,6 +49,26 @@ describe("MemoryService background jobs and drain", () => {
     });
     return manager;
   };
+
+  it("reads current workspace permissions and refuses lookups after shutdown", async () => {
+    const manager = profile();
+    const workspaces = new WorkspaceRepository(manager.getDatabase());
+    const workspace = await workspaces.create("Source", os.tmpdir(), {
+      read: true,
+      write: false,
+      delete: false,
+      shell: false,
+      network: false,
+    });
+    expect(await MemoryService.getWorkspace(workspace.id)).toBeNull();
+    MemoryService.initialize(manager, { backgroundJobs: false });
+    expect((await MemoryService.getWorkspace(workspace.id))?.permissions.read).toBe(true);
+    await workspaces.updatePermissions(workspace.id, { ...workspace.permissions, read: false });
+    expect((await MemoryService.getWorkspace(workspace.id))?.permissions.read).toBe(false);
+    expect(await MemoryService.getWorkspace("missing-workspace")).toBeNull();
+    MemoryService.shutdown();
+    expect(await MemoryService.getWorkspace(workspace.id)).toBeNull();
+  });
 
   it("starts the cleanup interval and the archive migration only outside quiet mode", () => {
     const manager = profile();

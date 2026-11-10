@@ -204,6 +204,35 @@ describe("CanvasTools asset and export boundaries", () => {
     }
   });
 
+  it("does not inline a denied project's stylesheet and still inlines an allowed one", async () => {
+    const fsSync = await vi.importActual<typeof import("fs")>("fs");
+    const realFs = await vi.importActual<typeof import("fs/promises")>("fs/promises");
+    readFileMock.mockImplementation(realFs.readFile as Any);
+    const projectDir = path.join(workspace.path, ".cowork/projects/secret");
+    fsSync.mkdirSync(projectDir, { recursive: true });
+    fsSync.writeFileSync(path.join(projectDir, "ACCESS.md"), "## Deny\n- role-1\n");
+    fsSync.writeFileSync(path.join(projectDir, "style.css"), "PRIVATE_SENTINEL");
+    fsSync.writeFileSync(path.join(workspace.path, "public.css"), "body { color: green; }");
+    (daemon as Any).getTask = vi.fn(() => ({ assignedAgentRoleId: "role-1" }));
+    const html =
+      '<link rel="stylesheet" href=".cowork/projects/secret/style.css"><link rel="stylesheet" href="public.css">';
+    try {
+      const result = await (tools as Any).inlineWorkspaceStylesheetsForCanvas(
+        html,
+        "index.html",
+        "session-1",
+      );
+      expect(result).not.toContain("PRIVATE_SENTINEL");
+      expect(result).toContain('href=".cowork/projects/secret/style.css"');
+      expect(result).toContain("body { color: green; }");
+      expect(
+        readFileMock.mock.calls.filter((call) => String(call[0]).endsWith("style.css")),
+      ).toHaveLength(0);
+    } finally {
+      delete (daemon as Any).getTask;
+    }
+  });
+
   it("refuses another task's canvas", async () => {
     manager.getSession.mockReturnValue({ ...manager.getSession(), taskId: "other-task" });
     await expect(tools.addAsset("session-1", "scene.png")).rejects.toThrow("another task");

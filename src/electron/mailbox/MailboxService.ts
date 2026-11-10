@@ -94,7 +94,6 @@ import {
   MailboxComposeDraftPatch,
   MailboxClientSettingsPatch,
   MailboxDomainCategory,
-  MAILBOX_TODAY_BUCKET_LABELS,
   MailboxDigestSnapshot,
   MailboxDraftOptions,
   MailboxDraftAttachmentInput,
@@ -150,7 +149,6 @@ import {
   MailboxThreadSortOrder,
   MailboxThreadMailboxView,
   MailboxTodayBucket,
-  MailboxTodayDigest,
   RelationshipTimelineEvent,
   RelationshipTimelineQuery,
   getMailboxNoReplySender,
@@ -2319,21 +2317,6 @@ export class MailboxService {
     return (await this.getMailboxComposeDraft(draftId))!;
   }
 
-  async removeMailboxDraftAttachment(
-    draftId: string,
-    attachmentId: string,
-  ): Promise<MailboxComposeDraft> {
-    const draft = await this.getMailboxComposeDraft(draftId);
-    if (!draft) throw new Error("Mailbox compose draft not found");
-    const attachments = draft.attachments.filter((attachment) => attachment.id !== attachmentId);
-    await this.sql.run("addMailboxDraftAttachment_1", [
-      JSON.stringify(attachments),
-      Date.now(),
-      draftId,
-    ]);
-    return (await this.getMailboxComposeDraft(draftId))!;
-  }
-
   async updateMailboxClientSettings(
     patch: MailboxClientSettingsPatch,
   ): Promise<MailboxClientState["settings"]> {
@@ -2414,13 +2397,6 @@ export class MailboxService {
     });
     void this.processMailboxQueue();
     return (await this.getMailboxOutgoingMessage(outgoingId))!;
-  }
-
-  async scheduleMailboxSend(draftId: string, scheduledAt: number): Promise<MailboxComposeDraft> {
-    if (!Number.isFinite(scheduledAt) || scheduledAt <= Date.now()) {
-      throw new Error("Scheduled send time must be in the future.");
-    }
-    return this.updateMailboxDraft(draftId, { scheduledAt });
   }
 
   async discardMailboxDraft(draftId: string): Promise<boolean> {
@@ -2954,57 +2930,6 @@ export class MailboxService {
       syncHealth: clientState.syncHealth,
       recentEventTypes: recentEventRows.map((row) => ({ type: row.event_type, count: row.count })),
     };
-  }
-
-  async getMailboxTodayDigest(
-    input: { limitPerBucket?: number } = {},
-  ): Promise<MailboxTodayDigest> {
-    const limitPerBucket = Math.min(Math.max(input.limitPerBucket ?? 8, 1), 20);
-    const buckets = await Promise.all(
-      VALID_MAILBOX_TODAY_BUCKETS.map(async (bucket) => ({
-        bucket,
-        label: MAILBOX_TODAY_BUCKET_LABELS[bucket],
-        count: await this.countThreadsByTodayBucket(bucket),
-        threads: await this.listThreads({
-          todayBucket: bucket,
-          mailboxView: "inbox",
-          sortBy: "priority",
-          limit: limitPerBucket,
-        }),
-      })),
-    );
-    const domainRows = (await this.sql.all("getMailboxTodayDigest_1", [])) as Array<{
-      domain_category: MailboxDomainCategory;
-      count: number;
-    }>;
-    const clientState = await this.getMailboxClientState();
-    return {
-      buckets,
-      domainCounts: domainRows.map((row) => ({
-        category: normalizeDomainCategory(row.domain_category, "other"),
-        count: row.count,
-      })),
-      syncHealth: clientState.syncHealth,
-      queuedActionCount: clientState.queuedActions.filter((action) => action.status === "queued")
-        .length,
-      failedActionCount: clientState.queuedActions.filter((action) => action.status === "failed")
-        .length,
-      composeDraftCount: clientState.composeDrafts.filter((draft) => draft.status !== "sent")
-        .length,
-      scheduledSendCount: clientState.composeDrafts.filter((draft) => draft.status === "scheduled")
-        .length,
-      generatedAt: Date.now(),
-    };
-  }
-
-  private async countThreadsByTodayBucket(bucket: MailboxTodayBucket): Promise<number> {
-    const inboxVisibleFilter = await this.buildInboxVisibleThreadFilter();
-    const row = (await this.sql.get(
-      "visibleTodayBucketCount",
-      [bucket, ...inboxVisibleFilter.params],
-      inboxVisibleFilter.shape,
-    )) as { count: number } | undefined;
-    return row?.count || 0;
   }
 
   async getMailboxSenderCleanupDigest(
@@ -11544,48 +11469,6 @@ export class MailboxService {
       summary: summaryText,
       latestSnippet,
     });
-  }
-
-  async createReviewScheduleForSavedView(viewId: string): Promise<MailboxAutomationRecord> {
-    const workspaceId = await this.resolveDefaultWorkspaceId();
-    if (!workspaceId) {
-      throw new Error("No workspace for mailbox automation");
-    }
-    const row = (await this.sql.get("createReviewScheduleForSavedView_1", [
-      viewId,
-      workspaceId,
-    ])) as { id: string; name: string; instructions: string } | undefined;
-    if (!row) {
-      throw new Error("Saved view not found");
-    }
-    try {
-      return await MailboxAutomationRegistry.createSchedule({
-        workspaceId,
-        name: `Inbox view review: ${row.name}`,
-        description: row.instructions,
-        kind: "reminder",
-        schedule: {
-          kind: "cron",
-          expr: "0 9 * * 1",
-          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
-        taskTitle: `Review saved inbox view: ${row.name}`,
-        taskPrompt: [
-          `Review and triage threads in the Inbox Agent saved view "${row.name}".`,
-          `View instructions: ${row.instructions}`,
-          "Open Inbox Agent, select this saved view filter, and process outstanding threads.",
-        ].join("\n"),
-        enabled: true,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("Cron service") || msg.toLowerCase().includes("cron")) {
-        throw new Error(
-          "The automation scheduler is not available, so weekly reminders cannot be created. Enable automation/cron in your environment and try again.",
-        );
-      }
-      throw e;
-    }
   }
 
   private async resolveFollowUpWorkspaceId(): Promise<string | null> {

@@ -73,12 +73,6 @@ test("standalone connector builds declare the Node types used by their source", 
   assert.deepEqual(missing, []);
 });
 
-test("the ESLint configuration owns and loads its imported preset", async () => {
-  const manifest = readJson(path.join(root, "package.json"));
-  assert.ok(manifest.devDependencies["@eslint/js"]);
-  assert.ok(Array.isArray((await import("../eslint.config.js")).default));
-});
-
 test("checked-in npm locks agree with their owning manifests", () => {
   for (const folder of [".", "connectors/figma-mcp", "connectors/monday-mcp", "connectors/vercel-mcp"]) {
     const manifest = readJson(path.join(root, folder, "package.json"));

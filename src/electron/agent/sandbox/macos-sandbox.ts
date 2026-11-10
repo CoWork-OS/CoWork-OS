@@ -132,6 +132,7 @@ export class MacOSSandbox implements ISandbox {
   private workspace: Workspace;
   private sandboxProfile?: string;
   private runtimeTempDir?: string;
+  private runtimeNpmrcPath?: string;
 
   constructor(workspace: Workspace) {
     this.workspace = workspace;
@@ -329,6 +330,7 @@ export class MacOSSandbox implements ISandbox {
    */
   cleanup(): void {
     this.sandboxProfile = undefined;
+    this.runtimeNpmrcPath = undefined;
     if (this.runtimeTempDir) {
       if (holdsProtectedEntry(this.runtimeTempDir)) {
         // A command may move a workspace directory into scratch; if that
@@ -556,8 +558,8 @@ export class MacOSSandbox implements ISandbox {
 
     // The user's npmrc keeps registry, proxy and script settings, but its
     // auth tokens stay outside the sandbox (the original file is denied).
-    const npmrc = writeSanitizedNpmrc(this.getHomeDir(), process.env, this.getRuntimeTempDir());
-    if (npmrc) safeEnv.NPM_CONFIG_USERCONFIG = npmrc;
+    this.getRuntimeTempDir();
+    if (this.runtimeNpmrcPath) safeEnv.NPM_CONFIG_USERCONFIG = this.runtimeNpmrcPath;
 
     return applyNonInteractiveEnvDefaults(safeEnv);
   }
@@ -754,18 +756,10 @@ ${ownSockets}
   (remote udp "localhost:*")
 )
 `;
-      if (options.allowLoopbackListen === true) {
-        profile += `
-; Local TCP servers (dev servers, test servers). Egress stays limited to
-; loopback above, but seatbelt matches a (local ... "localhost:*") filter for
-; 0.0.0.0 and LAN addresses too, so this alone does not keep a server off the
-; network: the caller pairs it with LoopbackListenerGuard, which stops a
-; process group that listens on a non-loopback address. TCP only; UDP binds
-; stay denied.
-(allow network-bind (local tcp "localhost:*"))
-(allow network-inbound (local tcp "localhost:*"))
-`;
-      }
+      // Do not grant bind/inbound operations here, even for loopback. Seatbelt
+      // also matches wildcard binds against its local localhost filter, and
+      // a process-group monitor cannot contain descendants that detach.
+      // The inherited kernel denial must remain the authority for all children.
     }
 
     // Allow additional read paths (with validation and escaping)
@@ -920,7 +914,16 @@ ${ownSockets}
 
   private getRuntimeTempDir(): string {
     if (!this.runtimeTempDir) {
-      this.runtimeTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-sandbox-"));
+      const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-sandbox-"));
+      try {
+        // Initialize once, before any child can mutate this directory. Cached
+        // sandboxes must never perform another host write to the exposed npmrc.
+        this.runtimeNpmrcPath = writeSanitizedNpmrc(this.getHomeDir(), process.env, scratch);
+        this.runtimeTempDir = scratch;
+      } catch (error) {
+        fs.rmSync(scratch, { recursive: true, force: true });
+        throw error;
+      }
     }
     return this.runtimeTempDir;
   }

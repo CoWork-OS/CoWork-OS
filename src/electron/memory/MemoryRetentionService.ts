@@ -148,12 +148,23 @@ function isWithin(parent: string, child: string): boolean {
 /** Canonical `<root>/<relativeDir>` when it exists as a real directory inside `<root>/.cowork`. */
 function resolveConfinedDir(rootPath: string, relativeDir: string): string | null {
   const rootReal = realpathOrNull(rootPath);
-  const coworkReal = realpathOrNull(path.join(rootPath, ".cowork"));
-  const dirReal = realpathOrNull(path.join(rootPath, relativeDir));
-  if (!rootReal || !coworkReal || !dirReal) return null;
-  if (!isWithin(rootReal, coworkReal)) return null;
-  if (dirReal !== coworkReal && !isWithin(coworkReal, dirReal)) return null;
-  return dirReal;
+  if (!rootReal) return null;
+  const target = path.resolve(rootReal, relativeDir);
+  const cowork = path.join(rootReal, ".cowork");
+  if (target !== cowork && !isWithin(cowork, target)) return null;
+  // Reject links at every component, including an intermediate targets/*/runs
+  // directory. Checking only a run's Dirent does not constrain its ancestors.
+  let current = rootReal;
+  try {
+    for (const segment of path.relative(rootReal, target).split(path.sep)) {
+      current = path.join(current, segment);
+      const stat = fsSync.lstatSync(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+    }
+    return realpathOrNull(target) === target ? target : null;
+  } catch {
+    return null;
+  }
 }
 
 async function listEntries(dir: string): Promise<fsSync.Dirent[]> {
@@ -460,14 +471,26 @@ export class MemoryRetentionService {
       if (targetsDir && this.canDelete(root, targetsDir)) {
         for (const target of await listEntries(targetsDir)) {
           if (!target.isDirectory()) continue;
-          const targetDir = path.join(targetsDir, target.name);
-          const runsDir = path.join(targetDir, "runs");
-          for (const run of await listEntries(runsDir)) {
+          const targetRelative = path.join(".cowork", "subconscious", "targets", target.name);
+          const targetDir = resolveConfinedDir(root.path, targetRelative);
+          if (!targetDir) continue;
+          const runsRelative = path.join(targetRelative, "runs");
+          const runsDir = resolveConfinedDir(root.path, runsRelative);
+          for (const run of runsDir ? await listEntries(runsDir) : []) {
             // Only real directories; a planted symlink is never followed.
             if (!run.isDirectory()) continue;
-            const runDir = path.join(runsDir, run.name);
+            const runRelative = path.join(runsRelative, run.name);
+            const runDir = resolveConfinedDir(root.path, runRelative);
+            if (!runDir || !this.canDelete(root, runDir)) continue;
             const modified = await mtimeMs(runDir);
             if (modified === null || modified >= cutoff) continue;
+            // Recheck after asynchronous metadata reads, immediately before the
+            // destructive operation, rather than relying on ancestor admission.
+            if (
+              resolveConfinedDir(root.path, runRelative) !== runDir ||
+              !this.canDelete(root, runDir)
+            )
+              continue;
             await fs.rm(runDir, { recursive: true, force: true });
             removed += 1;
           }

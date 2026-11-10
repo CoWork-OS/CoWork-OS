@@ -3,6 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFromUrl } from "../pack-installer";
+// Legacy content fixtures stop at the transport seam. Security transport
+// regressions exercise the real redirect/DNS implementation separately.
+vi.mock("../../security/policy-checked-fetch", () => ({
+  fetchWithPolicyCheckedRedirects: async (
+    url: string,
+    init: RequestInit,
+    options: { onHop?: (url: string) => void },
+  ) => {
+    options.onHop?.(url);
+    return { response: await fetch(url, init), finalUrl: url, chain: [url] };
+  },
+}));
 
 const mocks = vi.hoisted(() => ({
   userData: "",

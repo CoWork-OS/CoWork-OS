@@ -10,7 +10,6 @@ import {
   ApprovalRepository,
   ArtifactRepository,
   ChannelRepository,
-  DeviceProfileRepository,
   InputRequestRepository,
   TaskRepository,
   WorkspaceRepository,
@@ -1081,18 +1080,6 @@ function saveRemoteDevice(
   return device;
 }
 
-function sanitizeDeviceProfile(profile: Record<string, unknown>): Record<string, unknown> {
-  return {
-    deviceId: typeof profile.deviceId === "string" ? profile.deviceId : "",
-    customName: typeof profile.customName === "string" ? profile.customName : null,
-    platform: typeof profile.platform === "string" ? profile.platform : null,
-    modelIdentifier: typeof profile.modelIdentifier === "string" ? profile.modelIdentifier : null,
-    lastSeenAt: typeof profile.lastSeenAt === "number" ? profile.lastSeenAt : null,
-    createdAt: typeof profile.createdAt === "number" ? profile.createdAt : 0,
-    updatedAt: typeof profile.updatedAt === "number" ? profile.updatedAt : 0,
-  };
-}
-
 export interface BrowserDeviceOptions {
   db: Database.Database;
   identity: HostIdentity;
@@ -1114,7 +1101,6 @@ export function createBrowserDeviceDefinitions(options: BrowserDeviceOptions): {
   const approvals = new ApprovalRepository(db);
   const inputs = new InputRequestRepository(db);
   const artifactRepository = new ArtifactRepository(db);
-  const profileRepository = new DeviceProfileRepository(db);
 
   const workspaceSnapshot = async () => {
     const all = await workspaces.findAll();
@@ -1696,29 +1682,6 @@ export function createBrowserDeviceDefinitions(options: BrowserDeviceOptions): {
         }
       },
     },
-    deviceGetProfiles: {
-      capability: "devices.manage",
-      handler: async () => ({
-        ok: true,
-        profiles: (await profileRepository.list()).map((profile) =>
-          sanitizeDeviceProfile(profile as unknown as Record<string, unknown>),
-        ),
-      }),
-    },
-    deviceUpdateProfile: {
-      capability: "devices.manage",
-      mutation: true,
-      minArgs: 2,
-      maxArgs: 2,
-      validate: (args) => parsePositional([ID, DeviceProfileUpdateSchema], args),
-      handler: async ([deviceId, input]) => {
-        const target = deviceId as string;
-        if (!isLocalDevice(target) && !findDevice(getSettings(), target))
-          return invalid("Device was not found.");
-        await profileRepository.upsert(target, input as Record<string, unknown>);
-        return { ok: true };
-      },
-    },
   };
 
   async function runProxyRequest(
@@ -1849,14 +1812,6 @@ const DeviceFilesSchema = z
       !path.split(/[\\/]/).includes("..")
     );
   });
-
-const DeviceProfileUpdateSchema = z
-  .object({
-    customName: z.string().trim().max(128).optional(),
-    platform: z.enum(NODE_PLATFORMS).optional(),
-    modelIdentifier: z.string().trim().max(256).optional(),
-  })
-  .strict();
 
 async function getDiskSummary(
   workspacePath?: string,

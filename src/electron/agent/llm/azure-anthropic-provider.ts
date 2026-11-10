@@ -47,6 +47,7 @@ export class AzureAnthropicProvider implements LLMProvider {
       // Azure serves Anthropic's own models: send thinking/effort per model.
       sendThinkingConfig: true,
       reasoningEffort: config.azureAnthropicReasoningEffort,
+      diagnosticFetch: config.diagnosticFetch,
     });
   }
 

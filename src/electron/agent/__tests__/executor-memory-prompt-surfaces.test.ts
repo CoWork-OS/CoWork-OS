@@ -113,7 +113,7 @@ describe("memory layers for prompt surfaces", () => {
       { surface: "chat", focus: "hello", l0: true, l1Tokens: 200 },
     );
 
-    expect(result).toEqual({ l0: "", l1: "", repo: "" });
+    expect(result).toEqual({ l0: "", l1: "", repo: "", hasEvidence: false });
     expect(build).not.toHaveBeenCalled();
   });
 
@@ -177,6 +177,7 @@ describe("memory layers for prompt surfaces", () => {
     });
     expect(repoBuild).toHaveBeenCalledWith({ workspaceId: "ws-1", botId: null, query: "Prompt" });
     expect(chat.repo).toMatch(/^<cowork_memory_repo>/);
+    expect(chat.hasEvidence).toBe(true);
     expect(build).toHaveBeenCalledWith(expect.objectContaining({ excludeHashes: ["h-tea"] }));
     expect(executor.emitEvent).toHaveBeenCalledWith("memory_used", {
       surface: "memory_repo",

@@ -29,6 +29,7 @@ import {
 } from "../../shared/types";
 import { getCapabilityBundleSecurityService } from "../security/capability-bundle-security";
 import { assertNetworkPolicyAllowed } from "../security/network-policy";
+import { fetchWithPolicyCheckedRedirects } from "../security/policy-checked-fetch";
 
 // Default registry URL - can be overridden via SKILLHUB_REGISTRY env var.
 // When pointing to a GitHub raw URL with a catalog.json, the static catalog mode is used.
@@ -351,7 +352,7 @@ export class SkillRegistry {
         ? `${this.registryUrl}catalog.json`
         : `${this.registryUrl}/catalog.json`;
 
-      const response = await fetch(catalogUrl);
+      const response = await this.fetchWithTimeout(catalogUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch catalog: ${response.status}`);
       }
@@ -377,11 +378,25 @@ export class SkillRegistry {
     }
   }
 
-  private async fetchWithTimeout(url: string): Promise<Response> {
+  private async fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      return await fetch(url, { signal: controller.signal });
+      const { response } = await fetchWithPolicyCheckedRedirects(
+        url,
+        {
+          ...init,
+          signal: init.signal
+            ? AbortSignal.any([init.signal, controller.signal])
+            : controller.signal,
+        },
+        {
+          toolName: "skill_url_install",
+          networkContext: { networkEnabled: true },
+          requirePinnedDestination: true,
+        },
+      );
+      return response;
     } finally {
       clearTimeout(timeout);
     }
@@ -908,7 +923,7 @@ export class SkillRegistry {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       try {
-        const response = await fetch(`${CLAWHUB_CONVEX_URL}/api/${kind}`, {
+        const response = await this.fetchWithTimeout(`${CLAWHUB_CONVEX_URL}/api/${kind}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1185,7 +1200,7 @@ export class SkillRegistry {
     version: string,
   ): Promise<Record<string, string>> {
     const url = `${CLAWHUB_API_URL}/download?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(version)}`;
-    const response = await fetch(url);
+    const response = await this.fetchWithTimeout(url);
     if (!response.ok) {
       throw new Error(`ClawHub download failed with HTTP ${response.status}`);
     }
@@ -1270,7 +1285,7 @@ export class SkillRegistry {
       url.searchParams.set("page", String(page));
       url.searchParams.set("pageSize", String(pageSize));
 
-      const response = await fetch(url.toString());
+      const response = await this.fetchWithTimeout(url.toString());
 
       if (!response.ok) {
         throw new Error(`Registry search failed: ${response.status} ${response.statusText}`);
@@ -1428,7 +1443,7 @@ export class SkillRegistry {
     }
 
     try {
-      const response = await fetch(`${this.registryUrl}/skills/${safeId}`);
+      const response = await this.fetchWithTimeout(`${this.registryUrl}/skills/${safeId}`);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -1481,7 +1496,7 @@ export class SkillRegistry {
           ? `${this.registryUrl}/skills/${safeId}/download?version=${version}`
           : `${this.registryUrl}/skills/${safeId}/download`;
 
-      const response = await fetch(url);
+      const response = await this.fetchWithTimeout(url);
 
       if (!response.ok) {
         throw new Error(`Failed to download skill: ${response.status} ${response.statusText}`);
@@ -1842,32 +1857,6 @@ export class SkillRegistry {
         fs.rmSync(backupDir, { recursive: true, force: true });
       }
     }
-  }
-
-  /**
-   * Update all managed skills
-   */
-  async updateAll(
-    onProgress?: (skillId: string, progress: SkillInstallProgress) => void,
-  ): Promise<{ updated: string[]; failed: string[] }> {
-    const updated: string[] = [];
-    const failed: string[] = [];
-
-    const managedSkills = this.listManagedSkills();
-
-    for (const skill of managedSkills) {
-      const result = await this.update(skill.id, undefined, (progress) => {
-        onProgress?.(skill.id, progress);
-      });
-
-      if (result.success) {
-        updated.push(skill.id);
-      } else {
-        failed.push(skill.id);
-      }
-    }
-
-    return { updated, failed };
   }
 
   /**

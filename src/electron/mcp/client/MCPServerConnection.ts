@@ -63,15 +63,6 @@ const logger = createLogger("MCPServerConnection");
 const OBJECT_MANIFEST_TTL_MS = 6 * 60 * 60 * 1000;
 const OBJECT_MANIFEST_RETRY_MS = 60 * 1000;
 
-export interface MCPServerConnectionEvents {
-  status_changed: (status: MCPConnectionStatus, error?: string) => void;
-  tools_changed: (tools: MCPTool[]) => void;
-  resources_changed: (resources: MCPResource[]) => void;
-  prompts_changed: (prompts: MCPPrompt[]) => void;
-  connector_event: (event: MCPConnectorEvent) => void;
-  error: (error: Error) => void;
-}
-
 export interface MCPConnectorEvent {
   serverId: string;
   serverName: string;
@@ -236,7 +227,9 @@ export class MCPServerConnection extends EventEmitter {
 
   /** Replace the tool list; a cached object manifest belongs to the old one. */
   private setTools(tools: MCPTool[]): void {
-    this.tools = Array.isArray(tools) ? tools : [];
+    this.tools = Array.isArray(tools)
+      ? tools.map((tool) => ({ ...tool, serverToolName: tool.name }))
+      : [];
     this.exposedTools = this.tools.filter((tool) => !isObjectManifestTool(tool));
     this.objectManifest = null;
     this.objectManifestRequest = null;

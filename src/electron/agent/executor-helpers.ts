@@ -19,7 +19,6 @@ import {
   isArtifactGenerationToolName,
   isFileMutationToolName,
 } from "./tool-semantics";
-import { classifyProviderError } from "./llm/provider-error-classifier";
 
 // ===== Custom Error =====
 
@@ -197,20 +196,6 @@ export const INPUT_DEPENDENT_ERROR_PATTERNS = [
   /user denied/i, // User denied an approval request
 ];
 
-// Keywords that imply a step wants image verification.
-export const IMAGE_VERIFICATION_KEYWORDS = [
-  "image",
-  "photo",
-  "photograph",
-  "picture",
-  "illustration",
-  "screenshot",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-];
-
 export const IMAGE_FILE_EXTENSION_REGEX = /\.(png|jpe?g|webp|gif|bmp)$/i;
 
 // Allow a small buffer for file timestamp granularity/clock skew.
@@ -252,18 +237,6 @@ export const COMPACTION_TOOL_RESULT_CLAMP = 2000;
  */
 export function isNonRetryableError(errorMessage: string): boolean {
   return NON_RETRYABLE_ERROR_PATTERNS.some((pattern) => pattern.test(errorMessage));
-}
-
-/**
- * Check if an LLM provider error is non-retryable.
- * For LLM providers, 429/rate limit/too many requests are TRANSIENT — retry with backoff.
- * Only billing/quota/payment errors are non-retryable, including an exhausted
- * quota reported as a 429 ("You exceeded your current quota").
- */
-export function isNonRetryableLLMError(errorMessage: string): boolean {
-  return (
-    classifyProviderError({ message: String(errorMessage || "") }).reason === "quota_exhausted"
-  );
 }
 
 /**

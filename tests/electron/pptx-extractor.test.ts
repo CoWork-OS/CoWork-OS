@@ -21,6 +21,21 @@ async function createTempPptx(slideXml: string): Promise<string> {
   return filePath;
 }
 
+async function buildDeck(
+  name: string,
+  build: (pptx: import("pptxgenjs").default) => void,
+): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-pptx-test-"));
+  tempDirs.push(dir);
+  const filePath = path.join(dir, name);
+  const PptxGenJS = (await import("pptxgenjs")).default;
+  const pptx = new PptxGenJS();
+  pptx.layout = "LAYOUT_WIDE";
+  build(pptx);
+  await pptx.writeFile({ fileName: filePath });
+  return filePath;
+}
+
 describe("pptx-extractor", () => {
   afterEach(async () => {
     await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -44,6 +59,47 @@ describe("pptx-extractor", () => {
     expect(result).toContain("| 11:20–11:35 | Water break |");
     expect(result).toContain("Bring gloves");
     expect(result).not.toContain("[Graphic");
+  });
+
+  it("extracts both tables on a slide with two native tables", async () => {
+    const deckPath = await buildDeck("two-tables.pptx", (pptx) => {
+      const slide = pptx.addSlide();
+      slide.addTable(
+        [
+          ["A1", "B1"],
+          ["A2", "B2"],
+        ],
+        { x: 0.6, y: 0.8, w: 3, h: 1.0 },
+      );
+      slide.addTable(
+        [
+          ["C1", "D1"],
+          ["C2", "D2"],
+        ],
+        { x: 4.0, y: 0.8, w: 3, h: 1.0 },
+      );
+    });
+
+    const content = await extractPptxContentFromFile(deckPath);
+    for (const cell of ["A1", "B1", "A2", "B2", "C1", "D1", "C2", "D2"]) {
+      expect(content).toContain(cell);
+    }
+  });
+
+  it("still renders a chart as a placeholder", async () => {
+    const deckPath = await buildDeck("chart.pptx", (pptx) => {
+      const slide = pptx.addSlide();
+      slide.addText("Revenue chart", { x: 0.6, y: 0.4, w: 6, h: 0.5, fontSize: 24 });
+      slide.addChart(pptx.ChartType.bar, [
+        { name: "Revenue", labels: ["Q1", "Q2"], values: [10, 20] },
+      ]);
+      slide.addText("Chart footnote", { x: 0.6, y: 4.6, w: 6, h: 0.5, fontSize: 14 });
+    });
+
+    const content = await extractPptxContentFromFile(deckPath);
+    expect(content).toContain("Revenue chart");
+    expect(content).toMatch(/\[Chart[^\]]*\]/);
+    expect(content).toContain("Chart footnote");
   });
 
   it.each(["1000000000", "1e9", "9007199254740993"])(

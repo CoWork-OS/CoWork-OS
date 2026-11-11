@@ -10011,11 +10011,12 @@ button.collab-timeline-thought-agent:hover {
 }
 
 /* Stop button in input area: a still ink rounded square while a task runs
-   (no spinner). The button is the 36px send-sized target; the square is the glyph. */
+   (no spinner). The button matches the 34px mic target and the 14px square sits
+   at the same visual weight as the 18px mic glyph and the model label. */
 .stop-btn-simple {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
   padding: 0;
   border: none;
   background: transparent;
@@ -10027,9 +10028,9 @@ button.collab-timeline-thought-agent:hover {
 
 .stop-btn-glyph {
   display: block;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
   background: var(--calm-ink, var(--color-text));
   transition:
     opacity 0.15s ease,

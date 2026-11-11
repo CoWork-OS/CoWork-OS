@@ -10,8 +10,9 @@
  * reason; anything else fails the run.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** Markdown link/image targets that are intentionally unverifiable. Keep short, justify each. */
 const ALLOWLIST = [
@@ -50,20 +51,31 @@ export function slugify(heading) {
   return heading
     .trim()
     .toLowerCase()
-    .replace(/[`*_~\[\]]/g, "")
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/[`*~\[\]]/g, "")
+    .replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, "")
     .trim()
     .replace(/\s/g, "-");
 }
 
 export function headingsOf(source) {
   const slugs = new Set();
+  const nextSuffix = new Map();
   let fenced = false;
   for (const line of source.split("\n")) {
     if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
     if (fenced) continue;
     const heading = /^#{1,6}\s+(.+?)\s*#*$/.exec(line);
-    if (heading) slugs.add(slugify(heading[1]));
+    if (heading) {
+      const base = slugify(heading[1]);
+      let slug = base;
+      let suffix = nextSuffix.get(base) ?? 1;
+      while (slugs.has(slug)) {
+        slug = base + "-" + suffix;
+        suffix += 1;
+      }
+      nextSuffix.set(base, suffix);
+      slugs.add(slug);
+    }
   }
   return slugs;
 }
@@ -83,7 +95,7 @@ export function checkFile(path, source, repoRoot) {
       const [rawPath, fragment] = cleaned.split("#", 2);
       if (!rawPath) {
         // Same-page anchor.
-        if (fragment && !headingsOf(source).has(slugify(decodeURIComponent(fragment)))) {
+        if (fragment && !headingsOf(source).has(decodeURIComponent(fragment).toLowerCase())) {
           errors.push(`${path}:${index + 1}: anchor #${fragment} matches no heading`);
         }
         continue;
@@ -103,7 +115,7 @@ export function checkFile(path, source, repoRoot) {
       }
       if (fragment && /\.md$/i.test(relative)) {
         const targetSource = readFileSync(resolved, "utf8");
-        if (!headingsOf(targetSource).has(slugify(decodeURIComponent(fragment)))) {
+        if (!headingsOf(targetSource).has(decodeURIComponent(fragment).toLowerCase())) {
           errors.push(`${path}:${index + 1}: ${cleaned} matches no heading in ${relative}`);
         }
       }
@@ -119,9 +131,7 @@ export function main() {
     const inScope =
       path === "README.md" ||
       path === "CONTRIBUTING.md" ||
-      path === "docs/getting-started.md".replace("x", "x") ||
-      /^docs\/.+\.md$/i.test(path) ||
-      /^docs\/[^/]+\.md$/i.test(path);
+      /^docs\/.+\.md$/i.test(path);
     if (!inScope) continue;
     errors.push(...checkFile(path, readFileSync(path, "utf8"), repoRoot));
   }
@@ -133,4 +143,5 @@ export function main() {
   console.log("docs link check passed.");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+const entry = process.argv[1];
+if (entry && existsSync(entry) && import.meta.url === pathToFileURL(realpathSync(entry)).href) main();

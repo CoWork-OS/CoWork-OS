@@ -23,6 +23,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { execFileSync } from "node:child_process";
 import { isAccessPathWithin, isProtectedFilesystemPath } from "../../security/access-profile-paths";
 import { HOME_CREDENTIAL_STORE_PATHS } from "../../security/credential-store-paths";
 import { collectPolicyPathEntries } from "./policy-paths";
@@ -86,6 +87,8 @@ const HOME_WRITE_DIRS = [
   "Library/Caches/typescript",
   "Library/Caches/CocoaPods",
   "Library/Caches/deno",
+  "Library/Developer/Xcode/DerivedData",
+  "Library/Caches/com.apple.dt.Xcode",
   "Library/pnpm/store",
   ".cargo/registry",
   ".gradle/caches",
@@ -233,6 +236,35 @@ export interface MacOSToolchainAccessInput {
   workspacePath: string;
   /** Grant cache writes. False for read-only workspaces. */
   allowWrites: boolean;
+  /**
+   * The active developer directory (`xcode-select -p`, or `DEVELOPER_DIR`),
+   * resolved in the main process. Its xcrun shims under /usr/bin load it, so
+   * it must be readable for clang/git/make to work at all.
+   */
+  developerDir?: string;
+}
+
+const COMMAND_LINE_TOOLS_ROOT = "/Library/Developer/CommandLineTools";
+
+/**
+ * The active developer directory the /usr/bin xcrun shims load: DEVELOPER_DIR
+ * when it names an existing directory, else `xcode-select -p`, else the
+ * Command Line Tools default when installed. Resolved outside the sandbox and
+ * passed in through [`MacOSToolchainAccessInput.developerDir`].
+ */
+export function resolveActiveDeveloperDir(env: NodeJS.ProcessEnv): string | undefined {
+  const fromEnv = env.DEVELOPER_DIR;
+  if (fromEnv && isDirectory(fromEnv)) return path.resolve(fromEnv);
+  if (process.platform === "darwin") {
+    try {
+      const selected = execFileSync("xcode-select", ["-p"], { encoding: "utf8" }).trim();
+      if (selected && isDirectory(selected)) return path.resolve(selected);
+    } catch {
+      // No developer tools configured: fall through to the CLT default.
+    }
+  }
+  if (isDirectory(COMMAND_LINE_TOOLS_ROOT)) return COMMAND_LINE_TOOLS_ROOT;
+  return undefined;
 }
 
 function isDirectory(candidate: string): boolean {
@@ -431,6 +463,13 @@ export function resolveMacOSToolchainAccess(
     for (const spelling of resolved) writeDirs.add(spelling);
     return true;
   };
+
+  // The developer tools shims in /usr/bin (clang, git, make, swift) load the
+  // active developer directory and the Command Line Tools default. Grants
+  // stay narrow: the resolved directory and the CLT root when present, never
+  // /Library or /Applications as a whole (#611).
+  addReadDir(input.developerDir);
+  addReadDir(COMMAND_LINE_TOOLS_ROOT);
 
   builtin = true;
   for (const relative of HOME_READ_DIRS) addReadDir(path.join(home, relative));

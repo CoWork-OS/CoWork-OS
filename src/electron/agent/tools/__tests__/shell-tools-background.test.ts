@@ -315,10 +315,14 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
 
   it("redacts secrets in background output", async () => {
     const { shellTools } = newShellTools();
+    // The ready line follows the key on the same stream, so startup returns once the key is
+    // buffered instead of after a fixed window a loaded runner can miss.
     const result = await shellTools.startBackgroundCommand(
-      "printf -- '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n'; sleep 30",
-      { cwd: workspacePath, startupWaitMs: 800 },
+      "printf -- '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n'; echo 'Server listening'; sleep 30",
+      { cwd: workspacePath, startupWaitMs: 10_000 },
     );
+    expect(result).toMatchObject({ success: true, running: true });
+    expect(result.startup_output).toContain("Server listening");
     expect(result.startup_output).toContain("[REDACTED_PRIVATE_KEY]");
     expect(result.startup_output).not.toContain("BEGIN PRIVATE KEY");
   }, 15_000);
@@ -611,11 +615,16 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     const workspace = createWorkspace();
     workspace.permissions.accessNetworkMode = "on-request";
     const tools = new ShellTools(workspace, createDaemon() as unknown as AgentDaemon, taskId);
-    const result = await tools.startBackgroundCommand('printf "%s\\n" "$BUILD_LABEL"; sleep 30', {
-      env: { BUILD_LABEL: "approved-background-build" },
-      startupWaitMs: 200,
-    });
+    // Same ready-line handshake as the redaction test: a 200 ms window races process startup.
+    const result = await tools.startBackgroundCommand(
+      'printf "%s\\n" "$BUILD_LABEL"; echo "Server listening"; sleep 30',
+      {
+        env: { BUILD_LABEL: "approved-background-build" },
+        startupWaitMs: 10_000,
+      },
+    );
     expect(result).toMatchObject({ sandbox: "none", running: true });
+    expect(result.startup_output).toContain("Server listening");
     expect(result.startup_output).toContain("approved-background-build");
   }, 15_000);
 

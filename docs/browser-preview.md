@@ -19,6 +19,15 @@ Put an HTTPS proxy on the host computer in front of the Web Access listener, for
 
 `COWORK_WEB_PUBLIC_ORIGIN` and `COWORK_WEB_TRUSTED_PROXY_ADDRESSES` override the saved address, for proxies on another machine and for headless hosts.
 
+## When a task needs you
+
+In a browser session the tab itself shows when tasks wait on you, so a background tab still says come back. Desktop is unchanged.
+
+- **Tab title and icon:** with tasks waiting, the title reads `(2) CoWork OS` and the tab icon gets a small dot. When a task starts waiting while you are in another tab or app, the title also alternates once a second with the reason, such as `Approval needed · CoWork OS` for one new task or `Needs you · CoWork OS` for several. It stops alternating when you come back, so a task you have already seen and left waiting keeps the count and the dot but doesn't flash. It never alternates when the system asks for reduced motion. The count is the sessions blocked on you (approvals, questions and waiting sessions), not every item in Today. Title and icon return to normal when nothing waits.
+- **Browser notifications (opt in):** open the bell and choose **Turn on** under **Browser notifications**. The browser asks for permission only then, never on load, and a first notification confirms it works. The choice is kept in this browser, not on the host. While you are away from the tab, the app shows a system notification for the same notifications the desktop app alerts on (approvals, questions, pauses that need you, scheduled runs, bot deliveries; an ordinary task finishing does not alert). Clicking one focuses the tab and opens what the bell would open. The text is cut to about 140 characters because it can show on a lock screen.
+
+Limits: notifications need HTTPS or `localhost`; a plain `http://` LAN address can't use them, so open the app through its public HTTPS address. They arrive only while a tab of the app is open (closed tabs get no push), and the feed is polled, so one can arrive a few seconds late. Phones mostly can't use them: iOS Safari doesn't offer notifications to a page outside a home-screen app, and Chrome on Android only lets a service worker show them, which the app doesn't have. The bell says so in both cases; the tab title and icon still work there. If the browser's site settings block notifications, the bell says so; allow them there and reopen the bell.
+
 ## Desktop isolation and local builds
 
 The browser preview must preserve native desktop UI and behavior. Its approval explanation, unavailable-action presentation, sidebar adjustments and browser draft recovery belong only to browser clients. They must not be enabled in desktop merely because `COWORK_WEB_ENABLED=1` is set. That environment variable controls host routes; the browser renderer has a separate explicit identity.

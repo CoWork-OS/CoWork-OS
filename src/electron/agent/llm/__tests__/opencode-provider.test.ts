@@ -117,6 +117,117 @@ describe("OpenCode provider routing", () => {
     });
   });
 
+  describe("x-opencode-session header (issue #889)", () => {
+    const goOptions = {
+      type: "opencode-go" as const,
+      providerName: "OpenCode Go",
+      apiKey: "go-key",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+    };
+
+    function sessionHeaderOf(init: RequestInit | undefined): string | null {
+      return new Headers(init?.headers).get("x-opencode-session");
+    }
+
+    it("sends a stable session header on every Go transport and the connection test", async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith("/messages")) {
+          return responseJson({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" });
+        }
+        if (url.endsWith("/responses")) {
+          return responseJson({
+            output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+            status: "completed",
+          });
+        }
+        if (url.endsWith("/models")) {
+          return responseJson({ data: [{ id: "deepseek-v4-flash" }] });
+        }
+        return responseJson({ choices: [{ message: { role: "assistant", content: "ok" } }] });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = new OpenCodeProvider({ ...goOptions, defaultModel: "deepseek-v4-flash" });
+      expect(provider.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+
+      await provider.testConnection();
+      await provider.createMessage({ ...request, model: "deepseek-v4-flash" });
+      await provider.createMessage({ ...request, model: "deepseek-v4-flash" });
+      await provider.createMessage({ ...request, model: "qwen3.8-max" });
+      await provider.createMessage({ ...request, model: "gpt-5.5" });
+      await provider.getAvailableModels();
+
+      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(urls).toEqual(
+        expect.arrayContaining([
+          "https://opencode.ai/zen/go/v1/chat/completions",
+          "https://opencode.ai/zen/go/v1/messages",
+          "https://opencode.ai/zen/go/v1/responses",
+          "https://opencode.ai/zen/go/v1/models",
+        ]),
+      );
+      const sessions = fetchMock.mock.calls.map((call) => sessionHeaderOf(call[1]));
+      expect(sessions.length).toBeGreaterThanOrEqual(6);
+      expect(new Set(sessions)).toEqual(new Set([provider.sessionId]));
+    });
+
+    it("sends the header on the Messages connection test", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        responseJson({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = new OpenCodeProvider({ ...goOptions, defaultModel: "qwen3.8-max" });
+      await expect(provider.testConnection()).resolves.toEqual({ success: true });
+      expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://opencode.ai/zen/go/v1/messages");
+      expect(sessionHeaderOf(fetchMock.mock.calls[0]?.[1])).toBe(provider.sessionId);
+    });
+
+    it("sends the header through the diagnostic fetch connection test", async () => {
+      const diagnosticFetch = vi.fn().mockResolvedValue(
+        responseJson({ data: [{ id: "deepseek-v4-flash" }] }),
+      );
+      const provider = new OpenCodeProvider({
+        ...goOptions,
+        defaultModel: "deepseek-v4-flash",
+        diagnosticFetch,
+      });
+      await expect(provider.testConnection()).resolves.toEqual({ success: true });
+      expect(sessionHeaderOf(diagnosticFetch.mock.calls[0]?.[1])).toBe(provider.sessionId);
+    });
+
+    it("uses a caller-provided session id and differs between provider instances", () => {
+      const pinned = new OpenCodeProvider({
+        ...goOptions,
+        defaultModel: "deepseek-v4-flash",
+        sessionId: "task-123",
+      });
+      expect(pinned.sessionId).toBe("task-123");
+
+      const a = new OpenCodeProvider({ ...goOptions, defaultModel: "deepseek-v4-flash" });
+      const b = new OpenCodeProvider({ ...goOptions, defaultModel: "deepseek-v4-flash" });
+      expect(a.sessionId).not.toBe(b.sessionId);
+    });
+
+    it("does not send the header to Zen", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        responseJson({ choices: [{ message: { role: "assistant", content: "ok" } }] }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = new OpenCodeProvider({
+        type: "opencode",
+        providerName: "OpenCode Zen",
+        apiKey: "zen-key",
+        baseUrl: "https://opencode.ai/zen/v1",
+        defaultModel: "minimax-m3",
+      });
+      expect(provider.sessionId).toBeUndefined();
+      await provider.createMessage({ ...request, model: "minimax-m3" });
+      expect(sessionHeaderOf(fetchMock.mock.calls[0]?.[1])).toBeNull();
+    });
+  });
+
   it("uses Chat Completions for MiniMax on Zen", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       responseJson({

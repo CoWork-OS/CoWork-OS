@@ -236,8 +236,14 @@ export class OpenAIProvider implements LLMProvider {
     } else if (apiKey) {
       // Use API key - standard OpenAI SDK
       const baseURL = this.openaiBaseUrl;
+      const defaultHeaders = config.openaiDefaultHeaders;
       this.getApiKeyClient = lazyClient(
-        async () => new (await loadOpenAISdk())({ apiKey, ...(baseURL ? { baseURL } : {}) }),
+        async () =>
+          new (await loadOpenAISdk())({
+            apiKey,
+            ...(baseURL ? { baseURL } : {}),
+            ...(defaultHeaders ? { defaultHeaders } : {}),
+          }),
       );
       this.authMethod = "api_key";
       logger.debug("Using API key authentication");

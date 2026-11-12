@@ -53,6 +53,8 @@ export interface LLMProviderConfig {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiResponsesApi?: boolean;
+  /** Extra headers sent on every API-key SDK request (e.g. OpenCode Go session routing). */
+  openaiDefaultHeaders?: Record<string, string>;
   openaiReasoningEffort?: OpenAIReasoningEffort;
   openaiTextVerbosity?: LLMTextVerbosity;
   openaiAccessToken?: string; // OAuth access token

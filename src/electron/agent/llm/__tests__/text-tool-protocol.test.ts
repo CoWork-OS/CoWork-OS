@@ -37,7 +37,7 @@ describe("text tool protocol gating", () => {
   });
 
   it("is on for local model providers and off for first-party cloud providers", () => {
-    for (const type of ["ollama", "openai-compatible", "mlx", "omlx", "hf-agents", "atomic-chat"]) {
+    for (const type of ["ollama", "openai-compatible", "mlx", "omlx", "rapid-mlx", "hf-agents", "atomic-chat"]) {
       expect(isTextToolCallFallbackEnabledByDefault(type)).toBe(true);
     }
     for (const type of [

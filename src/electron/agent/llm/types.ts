@@ -287,6 +287,11 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     maxImageBytes: 20 * 1024 * 1024,
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   },
+  "rapid-mlx": {
+    supportsImages: true,
+    maxImageBytes: 20 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  },
   mlx: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   groq: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   // Text-only default; K3, K2.6 and K2.7 Code take images (see getProviderImageCaps).

@@ -160,11 +160,14 @@ function normalizeBaseUrl(baseUrl: string, providerType?: LLMProviderType): stri
     normalizedBase = trimmedBase.slice(0, -"/models".length);
   }
 
-  // MLX-LM, hf-agents, and oMLX expose the OpenAI-compatible API below /v1. Keep
+  // MLX-LM, hf-agents, oMLX, and Rapid-MLX expose the OpenAI-compatible API below /v1. Keep
   // accepting the legacy localhost:8080 value so existing saved settings do
   // not silently call the wrong endpoint.
   if (
-    (providerType === "mlx" || providerType === "hf-agents" || providerType === "omlx") &&
+    (providerType === "mlx" ||
+      providerType === "hf-agents" ||
+      providerType === "omlx" ||
+      providerType === "rapid-mlx") &&
     !normalizedBase.toLowerCase().endsWith("/v1")
   ) {
     return joinUrl(normalizedBase, "/v1");
@@ -791,7 +794,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = this.getErrorMessage(errorData) || `HTTP ${response.status}`;
-        if (this.isAtomicChatProvider() || this.type === "omlx") {
+        if (this.isAtomicChatProvider() || this.type === "omlx" || this.type === "rapid-mlx") {
           const status: AtomicChatDiscoveryStatus =
             response.status === 401 || response.status === 403
               ? "authentication_rejected"
@@ -847,7 +850,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         ...(models.length === 0 ? { error: "No loaded models were reported." } : {}),
       };
     } catch (error: Any) {
-      if (this.isAtomicChatProvider() || this.type === "omlx") {
+      if (this.isAtomicChatProvider() || this.type === "omlx" || this.type === "rapid-mlx") {
         const status: AtomicChatDiscoveryStatus =
           error instanceof AtomicChatProviderError && error.code === "cancelled"
             ? "cancelled"

@@ -1080,6 +1080,8 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "deepseek",
         "mlx",
         "omlx",
+        "rapid-mlx",
+        "rapid mlx",
         "atomic chat",
         "opencode",
         "lm studio",

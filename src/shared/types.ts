@@ -9216,6 +9216,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "hf-agents",
   "mlx",
   "omlx",
+  "rapid-mlx",
 ] as const;
 
 export const LLM_PROVIDER_TYPES = [
@@ -9231,6 +9232,7 @@ export const LLM_PROVIDER_DISPLAY: Record<string, { name: string; icon: string; 
   bedrock: { name: "Bedrock", icon: "\u{2601}\uFE0F", color: "#ff9900" },
   ollama: { name: "Ollama", icon: "\u{1F999}", color: "#0ea5e9" },
   omlx: { name: "oMLX", icon: "\u{1F9E0}", color: "#14b8a6" },
+  "rapid-mlx": { name: "Rapid-MLX", icon: "\u{26A1}", color: "#f59e0b" },
   mlx: { name: "MLX (Apple Silicon)", icon: "\u{1F9E0}", color: "#8b5cf6" },
   gemini: { name: "Gemini", icon: "\u{2728}", color: "#6366f1" },
   openrouter: { name: "OpenRouter", icon: "\u{1F310}", color: "#8b5cf6" },

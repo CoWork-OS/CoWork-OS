@@ -108,7 +108,7 @@ describe("saved provider credential destination binding", () => {
     expect(JSON.stringify(vi.mocked(fetch).mock.calls)).not.toContain(savedKey);
   });
 
-  it.each(["omlx", "atomic-chat", "kimi-coding"] as const)(
+  it.each(["omlx", "rapid-mlx", "atomic-chat", "kimi-coding"] as const)(
     "binds custom %s discovery and aliases",
     async (provider) => {
       const canonical = provider === "kimi-coding" ? "kimi-code" : provider;

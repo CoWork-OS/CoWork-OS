@@ -347,6 +347,18 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       "Connect to an already-running oMLX server on Apple Silicon. Start oMLX, refresh models, and select a chat model. CoWork does not manage the oMLX server or model downloads.",
   },
   {
+    id: "rapid-mlx",
+    name: "Rapid-MLX",
+    compatibility: "openai",
+    baseUrl: "http://localhost:8000/v1",
+    defaultModel: "",
+    apiKeyLabel: "API Key (optional)",
+    apiKeyPlaceholder: "Enter your Rapid-MLX API key if --api-key is set",
+    apiKeyOptional: true,
+    description:
+      "Connect to an already-running Rapid-MLX server on Apple Silicon (brew install rapid-mlx; rapid-mlx serve <model>). Refresh models and select a chat model. CoWork does not manage the Rapid-MLX server or model downloads.",
+  },
+  {
     id: "mlx",
     name: "MLX (Apple Silicon)",
     compatibility: "openai",

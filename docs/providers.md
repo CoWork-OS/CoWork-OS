@@ -51,7 +51,7 @@ let organizations use existing routing infrastructure while keeping the CoWork w
 
 ### Local models
 
-Ollama, MLX-LM, oMLX, Hugging Face local routes, and the optional Atomic Chat adapter can keep inference on the machine. Cloud routes send
+Ollama, MLX-LM, oMLX, Rapid-MLX, Hugging Face local routes, and the optional Atomic Chat adapter can keep inference on the machine. Cloud routes send
 prompts and authentication data to the configured provider as required to complete requests. See
 the dedicated [MLX-LM Local Inference guide](mlx-lm.md) for Apple Silicon setup, runtime details,
 and troubleshooting. See [Atomic Chat inference](atomic-chat.md) for the inference-only local API
@@ -112,6 +112,7 @@ keys and messaging channel tokens, still need the key itself.
 | Ollama (Local)         | Install Ollama and pull models                                 | No hosted-model usage charge; compute runs locally                                                                 |
 | HuggingFace Local AI   | Install `hf-agents` and run `llama.cpp` locally                | No hosted-model usage charge; compute runs locally                                                                 |
 | oMLX                  | Start oMLX, refresh models, and select a chat model           | No hosted-model usage charge; inference runs on your oMLX server                                                    |
+| Rapid-MLX              | `brew install rapid-mlx`, `rapid-mlx serve <model>`, then refresh models | No hosted-model usage charge; inference runs on your Rapid-MLX server                                     |
 | MLX (Apple Silicon)    | Install `mlx-lm` and use a quantized MLX model                 | No hosted-model usage charge; Apple Silicon compute runs locally                                                   |
 | Atomic Chat (local)    | Start Atomic Chat, then refresh the running `/v1/models` endpoint in Settings | No hosted-model usage charge from CoWork; Atomic Chat's selected backend and any configured upstream service still apply |
 | Groq                   | API key in Settings                                            | Free usage available subject to Groq's current limits; pay-per-token beyond free limits                            |
@@ -258,7 +259,7 @@ Cost estimates, cost budgets and context-window sizes come from a price list gen
 - **Live provider data.** When CoWork lists OpenRouter models, OpenRouter's reported prices and context lengths take precedence.
 - **Optional daily refresh (off by default).** Enable **Refresh model prices and context limits daily** in **Settings > AI & Models > Model Access** to download the models.dev catalogue once a day between releases. It is one anonymous `GET https://models.dev/api.json` with no prompts, usage data or identifiers; set `COWORK_DISABLE_MODEL_METADATA_REFRESH=1` to block it entirely.
 - **Unknown models are not free.** A model without a price shows cost as **Unknown** (or `$x+` when some usage was priced). Usage Insights counts these calls separately, and cost budgets cannot account for them.
-- **Local models** (Ollama, MLX, oMLX, Atomic Chat) and OpenRouter `:free` routes are counted as $0.
+- **Local models** (Ollama, MLX, oMLX, Rapid-MLX, Atomic Chat) and OpenRouter `:free` routes are counted as $0.
 - **Per-task cost:** the task panel's **Cost** section shows spend so far, the cap that applies (the task's own budget or **Settings > System & Security > Safety Limits**), and token counts; on a finished task it is the receipt. Before any usage it shows the typical cost of a task on the selected model, from your own last 30 tasks (computed locally).
 - **Newer Claude tokenizer:** Opus 4.7 and later (including Opus 5.x and Fable) produce up to ~1.35x as many tokens for the same text. Costs use the provider's reported token counts, so they are unaffected; CoWork's own context estimate is scaled so compaction runs early enough.
 
@@ -492,6 +493,46 @@ An HTTP `401` response containing `API key required` confirms the server is reac
 and requires authentication. Enter the key in CoWork before refreshing; it is not a
 missing-model or server-startup problem. After updating CoWork's provider implementation,
 restart CoWork so the desktop backend loads the change.
+
+---
+
+## Rapid-MLX (`rapid-mlx`)
+
+Connect to an already-running Rapid-MLX server, an
+open-source local inference server for Apple Silicon. CoWork talks to its OpenAI-compatible API
+(`/v1/chat/completions` and `/v1/models`). CoWork does not install, start, or stop the server, and
+does not download models.
+
+1. Install and start Rapid-MLX with a model:
+
+   ```bash
+   brew install rapid-mlx
+   rapid-mlx serve qwen3.5-4b-4bit
+   ```
+
+2. Open **Settings > AI & Models > Model Access**, search for **Rapid-MLX**, and select it
+   under **Local models**. You can also find it under **More providers**.
+3. Keep `http://localhost:8000/v1`, or enter your server's URL. A bare server URL also works;
+   CoWork adds `/v1`. Rapid-MLX and oMLX both default to port `8000`, so change one of them if
+   you run both.
+4. Leave **API Key** empty unless you started the server with `--api-key` (or set
+   `RAPID_MLX_API_KEY`). In that case enter the same key; CoWork sends it as a bearer token.
+5. Click **Refresh Models** and select the chat model ID the server reports.
+   Model discovery times out after five seconds and does not replace the saved model selection
+   or cached list when it fails.
+
+Rapid-MLX is treated like the other local providers: tokens are counted as $0, CoWork uses its
+local-model execution profile, and the text tool-call fallback is on by default for models that
+emit tool calls as text. Tool calling needs a model that supports tools, and image input needs a
+vision-language model. Remote server URLs send inference data to that server.
+
+| Error | What to do |
+| --- | --- |
+| API key required or rejected (`401` / `403`) | Enter the key the server was started with (`--api-key` / `RAPID_MLX_API_KEY`), then refresh again. |
+| Server unreachable | Check that `rapid-mlx serve` is running and that the Base URL matches its host and port. |
+| No models reported | Start the server with a model, for example `rapid-mlx serve qwen3.5-4b-4bit`, then refresh again. |
+| Discovery timed out | Check the server's logs, then retry. |
+| Incompatible model list | Check the URL points to the OpenAI-compatible API (`/v1`), not the Anthropic Messages endpoint. |
 
 ## Atomic Chat (Local)
 

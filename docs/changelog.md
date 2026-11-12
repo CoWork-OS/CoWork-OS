@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rapid-MLX local provider**: connect to a running Rapid-MLX server on Apple Silicon (`brew install rapid-mlx`, `rapid-mlx serve <model>`) through its OpenAI-compatible API at `http://localhost:8000/v1`. No API key is needed unless the server was started with `--api-key`. Refresh Models lists what `/v1/models` reports, and usage counts as local ($0). See [Providers](providers.md#rapid-mlx-rapid-mlx).
 - **Camofox browser (opt-in)**: CoWork can drive a [Camofox](https://github.com/jo-inc/camofox-browser) server you run on your Mac when you ask for it (`browser_provider: "camofox"`). Set it up in **Settings > Browser > Camofox**. The server must be on loopback with an access key, and Camofox must browse through CoWork's network-policy proxy with a password only CoWork and Camofox know: every new tab first proves that with a one-time check page, including for 127.0.0.1 and localhost, or CoWork refuses it. Camofox needs a small CoWork plugin for that last part, shown in Settings. Identities are per task by default, or per workspace if you choose. See [Camofox Browser](browser-workbench.md#camofox-browser).
 - **cookies.txt import**: Settings > Browser > Import accepts Netscape `cookies.txt` files. Cookies are saved encrypted in the vault for Camofox (and can also sign in the in-app browser). With your approval each time, `use_saved_cookies` loads a site's saved cookies into a Camofox identity for that task only; values never reach the model.
 

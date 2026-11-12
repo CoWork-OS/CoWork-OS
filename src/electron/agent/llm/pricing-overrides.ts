@@ -59,4 +59,4 @@ export const INTENTIONAL_OVERRIDES: Record<string, string> = {
 };
 
 /** Providers that run on the user's machine and never bill per token. */
-export const LOCAL_PROVIDER_TYPES = new Set(["ollama", "mlx", "omlx", "atomic-chat"]);
+export const LOCAL_PROVIDER_TYPES = new Set(["ollama", "mlx", "omlx", "rapid-mlx", "atomic-chat"]);

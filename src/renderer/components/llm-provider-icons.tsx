@@ -38,6 +38,7 @@ export const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   "hf-agents": <Zap {...S} />,
   mlx: <Sparkles {...S} />,
   omlx: <Sparkles {...S} />,
+  "rapid-mlx": <Zap {...S} />,
 };
 
 /**

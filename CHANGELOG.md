@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rapid-MLX local provider**: connect to a running Rapid-MLX server on Apple Silicon (`brew install rapid-mlx`, `rapid-mlx serve <model>`) through its OpenAI-compatible API at `http://localhost:8000/v1`. No API key is needed unless the server was started with `--api-key`. Refresh Models lists what `/v1/models` reports, and usage counts as local ($0). See [Providers](docs/providers.md#rapid-mlx-rapid-mlx).
+
 ### Fixed
 
 - **English README on npm**: the npm and GitHub Packages pages for 0.5.61 and 0.5.62 showed the Simplified Chinese README, because npm packs every README at the package root and picked that one. The Chinese README moved to `i18n/README.zh-CN.md`, and the release now stops if a package ships any README besides `README.md`.

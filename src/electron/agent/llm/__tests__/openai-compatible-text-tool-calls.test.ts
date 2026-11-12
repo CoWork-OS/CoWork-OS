@@ -80,6 +80,7 @@ describe("OpenAI-compatible text tool-call fallback", () => {
     ["mlx", "http://localhost:8080/v1"],
     ["openai-compatible", "http://localhost:1234/v1"],
     ["omlx", "http://localhost:8000/v1"],
+    ["rapid-mlx", "http://localhost:8000/v1"],
   ] as const)("recovers a text tool call from %s", async (type, baseUrl) => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(completion({ content: TEXT_CALL })));

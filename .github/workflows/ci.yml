@@ -197,8 +197,29 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # Same Electron download cache as Tests (macOS); shard 1 saves it.
+      - name: Resolve Electron version
+        id: electron
+        run: echo "version=$(node -p "require('electron/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Electron download
+        id: electron-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/electron-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+
       - name: Install Electron binary
+        env:
+          electron_config_cache: ${{ runner.temp }}/electron-cache
         run: node node_modules/electron/install.js
+
+      - name: Save Electron download
+        if: github.event_name != 'pull_request' && matrix.shard == 1 && steps.electron-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/electron-cache
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
 
       - name: Install Chromium for browser integration tests
         run: npx playwright install --with-deps chromium
@@ -242,12 +263,58 @@ jobs:
       - name: Run tests
         run: npx vitest run --shard=${{ matrix.shard }}/4
 
+  test-macos-scope:
+    # Decides whether Tests (macOS) runs, on a cheap Linux runner. Pushes to main and
+    # manual runs always run it. Pull requests run it only when they touch what the
+    # macOS-only suites exercise (sandbox-exec profiles, the kernel listener policy, QA
+    # dev servers, background shell processes, macOS app workers) or the test setup.
+    # #878 changed that code with the job skipped and broke six tests on main.
+    name: Tests (macOS) scope
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+
+    steps:
+      # Pull requests list their files through the API, so no checkout is needed.
+      - name: Detect macOS-sensitive changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            macos:
+              - 'src/electron/agent/sandbox/**'
+              - 'src/electron/agent/qa/**'
+              - 'src/electron/agent/tools/shell-tools.ts'
+              - 'src/electron/agent/tools/background-processes.ts'
+              - 'src/electron/agent/tools/__tests__/shell-tools-background*.test.ts'
+              - 'src/electron/security/**'
+              - 'src/electron/admin/policies.ts'
+              - 'src/shared/shell-network.ts'
+              - 'src/electron/applications/**'
+              - 'src/electron/utils/document-generators/latex-compiler.ts'
+              - 'tests/security/**'
+              - 'vitest.config.mts'
+              - '.github/workflows/ci.yml'
+
+      - name: Decide whether to run
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ steps.changes.outputs.macos }}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No macOS-sensitive changes in this pull request; Tests (macOS) is skipped."
+          fi
+
   test-macos:
     # The release workflow runs the suite on macOS too (sandbox-exec, Keychain and slower
     # runners); run it on every push to main (and on manual runs) so macOS-only failures
-    # surface right after merge, not mid-release. Pull requests skip it to keep their CI fast.
+    # surface right after merge, not mid-release. It takes longer than the Linux shards,
+    # so pull requests run it only when test-macos-scope says they need it.
     name: Tests (macOS)
-    if: github.event_name != 'pull_request'
+    needs: [test-macos-scope]
+    if: needs.test-macos-scope.outputs.run == 'true'
     runs-on: macos-latest
 
     steps:
@@ -263,8 +330,32 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # The Electron zip comes from a GitHub release, and a 504 there failed run
+      # 42584233276 before any test ran. Pushes to main save the zip per version; other
+      # runs restore it, and install.js checks it against the checksums.json bundled
+      # in the electron package without touching the network.
+      - name: Resolve Electron version
+        id: electron
+        run: echo "version=$(node -p "require('electron/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Electron download
+        id: electron-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/electron-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+
       - name: Install Electron binary
+        env:
+          electron_config_cache: ${{ runner.temp }}/electron-cache
         run: node node_modules/electron/install.js
+
+      - name: Save Electron download
+        if: github.event_name != 'pull_request' && steps.electron-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/electron-cache
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
 
       - name: Install Chromium for browser integration tests
         run: npx playwright install chromium

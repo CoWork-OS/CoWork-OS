@@ -1,6 +1,6 @@
 # Public Adoption Stats
 
-Generated at: 2026-11-11T10:53:26.021Z
+Generated at: 2026-11-12T11:01:05.868Z
 
 These numbers are acquisition and download-intent signals for CoWork OS. They do **not** measure active users, first launch, successful task completion, model configuration, retention, prompts, files, emails, or any in-app content.
 
@@ -8,42 +8,42 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Metric | Value |
 |---|---:|
-| GitHub stars | 545 |
-| GitHub forks | 100 |
+| GitHub stars | 547 |
+| GitHub forks | 101 |
 | GitHub watchers | 3 |
-| GitHub open issues | 19 |
+| GitHub open issues | 17 |
 | Latest release | v0.5.62 |
 | Latest release date | 2026-10-31 |
-| Installer/server downloads, lifetime | 3,147 |
-| Installer/server downloads, since previous snapshot | 46 |
+| Installer/server downloads, lifetime | 3,191 |
+| Installer/server downloads, since previous snapshot | 44 |
 | npm latest version | 0.5.62 |
-| npm downloads, last day | 12 |
-| npm downloads, last week | 97 |
+| npm downloads, last day | 10 |
+| npm downloads, last week | 78 |
 | npm downloads, last month | 958 |
-| npm downloads, all time | 10,677 |
-| GitHub views, last 14-ish days | 1,966 total / 1,063 unique |
-| GitHub clones, last 14-ish days | 7,657 total / 886 unique |
+| npm downloads, all time | 10,687 |
+| GitHub views, last 14-ish days | 1,907 total / 1,031 unique |
+| GitHub clones, last 14-ish days | 7,675 total / 890 unique |
 
 ## Release Downloads By Platform
 
 | Platform | Lifetime downloads | Delta |
 |---|---:|---:|
-| macos | 1,699 | +31 |
-| server | 156 | +1 |
-| windows | 1,292 | +14 |
+| macos | 1,729 | +30 |
+| server | 157 | +1 |
+| windows | 1,305 | +13 |
 
 ## Recent Release Assets
 
 | Release | Asset | Platform | Downloads | Delta |
 |---|---|---|---:|---:|
-| v0.5.62 | CoWork-OS-0.5.62-arm64-mac.zip | macos | 389 | +21 |
-| v0.5.62 | CoWork-OS-0.5.62-arm64.dmg | macos | 79 | +9 |
+| v0.5.62 | CoWork-OS-0.5.62-arm64-mac.zip | macos | 410 | +21 |
+| v0.5.62 | CoWork-OS-0.5.62-arm64.dmg | macos | 86 | +7 |
 | v0.5.62 | cowork-os-server-linux-x64-v0.5.62.tar.gz | server | 8 | +0 |
-| v0.5.62 | CoWork-OS-Setup-0.5.62.exe | windows | 204 | +14 |
-| v0.5.62 | registry-packages-0.5.62-6f5d21dd5b8bbc20c625d31463ac289fec8692bb.tar.gz | server | 4 | +1 |
-| v0.5.61 | CoWork-OS-0.5.61-arm64-mac.zip | macos | 100 | +1 |
-| v0.5.61 | CoWork-OS-0.5.61-arm64.dmg | macos | 85 | +0 |
-| v0.5.61 | cowork-os-server-linux-x64-v0.5.61.tar.gz | server | 10 | +0 |
+| v0.5.62 | CoWork-OS-Setup-0.5.62.exe | windows | 217 | +13 |
+| v0.5.62 | registry-packages-0.5.62-6f5d21dd5b8bbc20c625d31463ac289fec8692bb.tar.gz | server | 4 | +0 |
+| v0.5.61 | CoWork-OS-0.5.61-arm64-mac.zip | macos | 100 | +0 |
+| v0.5.61 | CoWork-OS-0.5.61-arm64.dmg | macos | 86 | +1 |
+| v0.5.61 | cowork-os-server-linux-x64-v0.5.61.tar.gz | server | 11 | +1 |
 | v0.5.61 | CoWork-OS-Setup-0.5.61.exe | windows | 229 | +0 |
 | v0.5.61 | registry-packages-0.5.61-b753cb10d1c74a755d2efed3e8643ee78833f0bf.tar.gz | server | 17 | +0 |
 | v0.5.60 | CoWork-OS-0.5.60-arm64-mac.zip | macos | 34 | +0 |
@@ -52,7 +52,7 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 | v0.5.60 | CoWork-OS-Setup-0.5.60.exe | windows | 76 | +0 |
 | v0.5.60 | registry-packages-0.5.60-3691bae3604ac0781a1f3f9ff0a5ad0120c0b0eb.tar.gz | server | 12 | +0 |
 | v0.5.54 | CoWork-OS-0.5.54-arm64-mac.zip | macos | 31 | +0 |
-| v0.5.54 | CoWork-OS-0.5.54-arm64.dmg | macos | 67 | +0 |
+| v0.5.54 | CoWork-OS-0.5.54-arm64.dmg | macos | 68 | +1 |
 | v0.5.54 | cowork-os-server-linux-x64-v0.5.54.tar.gz | server | 10 | +0 |
 | v0.5.54 | CoWork-OS-Setup-0.5.54.exe | windows | 139 | +0 |
 | v0.5.54 | registry-packages-0.5.54-2e9ee97cf27035aa37189f8ff52a46aac8307e79.tar.gz | server | 16 | +0 |
@@ -61,31 +61,31 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | Google | 307 | 254 |
-| 2 | github.com | 222 | 156 |
-| 3 | aocr.org | 49 | 49 |
-| 4 | Bing | 21 | 20 |
-| 5 | Baidu | 11 | 10 |
-| 6 | t.co | 6 | 6 |
-| 7 | search.brave.com | 5 | 4 |
-| 8 | yandex.ru | 5 | 4 |
-| 9 | coworkosapp.com | 3 | 3 |
-| 10 | DuckDuckGo | 2 | 2 |
+| 1 | Google | 308 | 253 |
+| 2 | github.com | 219 | 152 |
+| 3 | aocr.org | 43 | 43 |
+| 4 | Bing | 22 | 21 |
+| 5 | Baidu | 9 | 9 |
+| 6 | t.co | 7 | 7 |
+| 7 | search.brave.com | 4 | 3 |
+| 8 | coworkosapp.com | 3 | 3 |
+| 9 | ecosia.org | 3 | 3 |
+| 10 | yandex.ru | 3 | 3 |
 
 ## Top GitHub Paths
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | /CoWork-OS/CoWork-OS | 448 | 328 |
-| 2 | /cowork-os/cowork-os | 328 | 284 |
-| 3 | /CoWork-OS/CoWork-OS/blob/main/i18n/README.zh-CN.md | 98 | 71 |
-| 4 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/readme-today.webp | 53 | 39 |
-| 5 | /CoWork-OS/CoWork-OS/releases | 47 | 28 |
-| 6 | /CoWork-OS/CoWork-OS/issues | 36 | 26 |
-| 7 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.62 | 31 | 29 |
-| 8 | /CoWork-OS/CoWork-OS/tree/main | 25 | 19 |
+| 1 | /CoWork-OS/CoWork-OS | 451 | 333 |
+| 2 | /cowork-os/cowork-os | 330 | 278 |
+| 3 | /CoWork-OS/CoWork-OS/blob/main/i18n/README.zh-CN.md | 102 | 73 |
+| 4 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/readme-today.webp | 49 | 37 |
+| 5 | /CoWork-OS/CoWork-OS/releases | 48 | 28 |
+| 6 | /CoWork-OS/CoWork-OS/issues | 40 | 28 |
+| 7 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.62 | 33 | 30 |
+| 8 | /CoWork-OS/CoWork-OS/tree/main | 23 | 17 |
 | 9 | /CoWork-OS/CoWork-OS/discussions | 21 | 8 |
-| 10 | /CoWork-OS/CoWork-OS/blob/main/docs/getting-started.md | 19 | 17 |
+| 10 | /CoWork-OS/CoWork-OS/blob/main/docs/getting-started.md | 18 | 17 |
 
 ## Data Policy
 

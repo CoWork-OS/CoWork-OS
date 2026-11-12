@@ -1638,6 +1638,8 @@ Access CoWork OS from any web browser — no Electron desktop app required.
 
 A preview of the browser application now exists, without full desktop parity. Turn it on in **Settings > Web Access > Full app in the browser** (or `COWORK_WEB_ENABLED=1` on a headless host), then use **Open in browser** or `cowork web`; see [Browser application preview](browser-preview.md).
 
+In the browser app, the tab title and icon show how many sessions wait on you, and opt-in **Browser notifications** (in the bell) alert you while you are in another tab and open the task when clicked. They need HTTPS or localhost and an open tab; see [When a task needs you](browser-preview.md#when-a-task-needs-you).
+
 ---
 
 ## WebSocket Control Plane

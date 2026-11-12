@@ -17,7 +17,8 @@ import {
 } from "lucide-react";
 import type { AttentionItem } from "../../shared/attention";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
-import { hasHostMethods } from "../host/browser-capabilities";
+import { hasHostMethods, isBrowserHost } from "../host/browser-capabilities";
+import { useBrowserNotificationPreference } from "../hooks/useBrowserNotifications";
 import {
   groupNotifications,
   type NotificationGroup,
@@ -148,6 +149,47 @@ export function NotificationMarkdownPreview({
       >
         {normalizeMarkdownForCollab(text)}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+/** Browser sessions only: opt in to system notifications for this browser. */
+function BrowserNotificationsRow() {
+  const { state, enabled, turnOn, turnOff } = useBrowserNotificationPreference();
+  let note: string;
+  let action: ReactNode = null;
+  if (state === "unsupported") {
+    note = "This browser doesn't support notifications.";
+  } else if (state === "insecure") {
+    note = "Needs HTTPS or localhost. Open the app through its HTTPS address.";
+  } else if (state === "denied") {
+    note = "Blocked in this browser's site settings.";
+  } else if (enabled) {
+    note = "On. Only while this tab is open.";
+    action = (
+      <button type="button" className="notif-panel-text-btn" onClick={turnOff}>
+        Turn off
+      </button>
+    );
+  } else {
+    note = "Alerts when you're in another tab or app.";
+    action = (
+      <button
+        type="button"
+        className="notif-panel-text-btn notif-browser-alerts-on"
+        onClick={turnOn}
+      >
+        Turn on
+      </button>
+    );
+  }
+  return (
+    <div className="notif-browser-alerts">
+      <div className="notif-browser-alerts-text">
+        <span className="notif-browser-alerts-title">Browser notifications</span>
+        <span className="notif-browser-alerts-note">{note}</span>
+      </div>
+      {action}
     </div>
   );
 }
@@ -548,6 +590,7 @@ export function NotificationPanel({
                 ))
               )}
             </div>
+            {isBrowserHost() && <BrowserNotificationsRow />}
           </div>,
         )}
     </div>

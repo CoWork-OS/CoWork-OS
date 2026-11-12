@@ -34,6 +34,8 @@ import { useTaskDuration } from "./hooks/useTaskDuration";
 import { useComposerDraft } from "./hooks/useComposerDraft";
 import { useThreadModelSelection } from "./hooks/useThreadModelSelection";
 import { useAttentionSnapshot } from "./hooks/useAttentionSnapshot";
+import { useBrowserTabAttention } from "./hooks/useBrowserTabAttention";
+import { useBrowserNotifications } from "./hooks/useBrowserNotifications";
 import { attentionWaitingByTask, type AttentionItem } from "../shared/attention";
 import { ArrowLeft, ArrowRight, Globe, Moon, PanelTop, SquareTerminal, Sun } from "lucide-react";
 import { TitleBarMoreMenu } from "./components/TitleBarMoreMenu";
@@ -2429,6 +2431,12 @@ export function App() {
     if (!same) attentionWaitingRef.current = next;
     return attentionWaitingRef.current;
   }, [attentionSnapshot.items]);
+  // Browser sessions only: the tab title and favicon show how many sessions wait on you.
+  useBrowserTabAttention({
+    queueWaiting: attentionWaiting,
+    fromQueue: attentionSnapshot.fromQueue,
+    tasks,
+  });
   const selectedBotConversationProjection = useMemo(
     () =>
       selectedTask?.agentConfig?.botConversation && !remoteTaskView
@@ -8304,6 +8312,8 @@ export function App() {
     },
     [openTaskById],
   );
+  // Browser sessions only: opt-in system notifications that open what the bell would.
+  useBrowserNotifications(handleNotificationClick);
   const canShowNotifications =
     !isBrowserHost ||
     (hasHostCapability("notifications.read") && hasHostCapability("notifications.manage"));

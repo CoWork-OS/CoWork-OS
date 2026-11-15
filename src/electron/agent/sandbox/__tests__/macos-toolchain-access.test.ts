@@ -293,7 +293,11 @@ describe("developer directory access (#611)", () => {
       expect(access.readDirs).toContain("/Library/Developer/CommandLineTools");
     }
     for (const dir of access.readDirs) {
-      expect(dir === "/Library/Developer/CommandLineTools" || dir.startsWith(clt) || !dir.startsWith("/Library")).toBe(true);
+      expect(
+        dir === "/Library/Developer/CommandLineTools" ||
+          dir.startsWith(clt) ||
+          !dir.startsWith("/Library"),
+      ).toBe(true);
       expect(dir).not.toBe("/Library");
       expect(dir).not.toBe("/Applications");
     }
@@ -304,11 +308,8 @@ describe("developer directory access (#611)", () => {
 
   it("grants Xcode build caches only when writes are allowed", () => {
     const writable = resolve({ allowWrites: true, developerDir: undefined });
-    expect(writable.writeDirs.some((dir) => dir.endsWith("Library/Developer/Xcode/DerivedData"))).toBe(
-      fs.existsSync("/Library/Developer") || true,
-    );
     expect(
-      writable.writeDirs.some((dir) => dir.includes("DerivedData")),
+      writable.writeDirs.some((dir) => dir.endsWith("Library/Developer/Xcode/DerivedData")),
     ).toBe(true);
 
     const readonly = resolve({ allowWrites: false, developerDir: undefined });
@@ -326,10 +327,7 @@ describe("developer directory access (#611)", () => {
     const fallback = resolveActiveDeveloperDir({
       DEVELOPER_DIR: path.join(base, "missing"),
     } as NodeJS.ProcessEnv);
-    if (fs.existsSync("/Library/Developer/CommandLineTools")) {
-      expect(fallback).toBe("/Library/Developer/CommandLineTools");
-    } else {
-      expect(fallback).toBeUndefined();
-    }
+    expect(fallback).not.toBe(path.resolve(path.join(base, "missing")));
+    if (fallback !== undefined) expect(fs.statSync(fallback).isDirectory()).toBe(true);
   });
 });

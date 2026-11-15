@@ -255,16 +255,30 @@ const COMMAND_LINE_TOOLS_ROOT = "/Library/Developer/CommandLineTools";
 export function resolveActiveDeveloperDir(env: NodeJS.ProcessEnv): string | undefined {
   const fromEnv = env.DEVELOPER_DIR;
   if (fromEnv && isDirectory(fromEnv)) return path.resolve(fromEnv);
-  if (process.platform === "darwin") {
+  const selected = selectedDeveloperDir();
+  if (selected && isDirectory(selected)) return path.resolve(selected);
+  if (isDirectory(COMMAND_LINE_TOOLS_ROOT)) return COMMAND_LINE_TOOLS_ROOT;
+  return undefined;
+}
+
+// `xcode-select -p` runs synchronously on the main process, so ask once per
+// process instead of on every sandboxed command. A switch with
+// `xcode-select -s` takes effect after a restart; DEVELOPER_DIR still wins.
+let selectedDeveloperDirCache: { value: string | undefined } | undefined;
+function selectedDeveloperDir(): string | undefined {
+  if (process.platform !== "darwin") return undefined;
+  if (!selectedDeveloperDirCache) {
+    let value: string | undefined;
     try {
-      const selected = execFileSync("xcode-select", ["-p"], { encoding: "utf8" }).trim();
-      if (selected && isDirectory(selected)) return path.resolve(selected);
+      value =
+        execFileSync("xcode-select", ["-p"], { encoding: "utf8", timeout: 5_000 }).trim() ||
+        undefined;
     } catch {
       // No developer tools configured: fall through to the CLT default.
     }
+    selectedDeveloperDirCache = { value };
   }
-  if (isDirectory(COMMAND_LINE_TOOLS_ROOT)) return COMMAND_LINE_TOOLS_ROOT;
-  return undefined;
+  return selectedDeveloperDirCache.value;
 }
 
 function isDirectory(candidate: string): boolean {

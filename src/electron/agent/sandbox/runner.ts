@@ -442,6 +442,7 @@ export class SandboxRunner {
   (subpath "/Library/Frameworks")
   (subpath "/Applications/Xcode.app")
   (subpath "/Library/Developer/CommandLineTools")
+  (literal "/Library/Preferences/com.apple.dt.Xcode.plist")
   (subpath "/private/var/db")
   (subpath "/private/var/select")
 ${[...workspaceAncestors].map((ancestor) => `  (literal "${escapeSandboxProfileString(ancestor)}")`).join("\n")}

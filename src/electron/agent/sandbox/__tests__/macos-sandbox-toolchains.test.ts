@@ -169,6 +169,37 @@ describe.skipIf(process.platform !== "darwin")("macOS sandbox developer toolchai
     expect(fs.existsSync(path.join(home, ".ssh/authorized_keys"))).toBe(false);
   }, 60_000);
 
+  // /usr/bin/clang and /usr/bin/git are xcrun shims: they load the active
+  // developer directory, which on most non-iOS Macs is the Command Line
+  // Tools rather than /Applications/Xcode.app (#611). DEVELOPER_DIR pins the
+  // shims to the Command Line Tools even where Xcode is selected; a full Xcode
+  // developer directory additionally runs xcodebuild, which this does not cover.
+  it.skipIf(!fs.existsSync("/Library/Developer/CommandLineTools"))(
+    "runs the Command Line Tools shims under the sandbox",
+    async () => {
+      const scratch = path.join(workspace.path, "clt-probe");
+      fs.mkdirSync(scratch, { recursive: true });
+      fs.writeFileSync(
+        path.join(scratch, "hello.c"),
+        '#include <stdio.h>\nint main() { puts("clt-ok"); return 0; }\n',
+      );
+      for (const command of [
+        "/usr/bin/clang --version",
+        `/usr/bin/clang -o ${scratch}/hello ${scratch}/hello.c && ${scratch}/hello`,
+        "/usr/bin/git --version",
+        "/usr/bin/make --version >/dev/null",
+      ]) {
+        const result = await run(`DEVELOPER_DIR=/Library/Developer/CommandLineTools ${command}`);
+        expect(result.exitCode, `${command}: ${result.stderr}`).toBe(0);
+      }
+      expect(fs.readFileSync(path.join(scratch, "hello")).subarray(0, 4)).toEqual(
+        Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
+      );
+      const ran = await run(`${scratch}/hello`);
+      expect(ran.stdout).toContain("clt-ok");
+    },
+  );
+
   it("finds toolchains installed under $HOME and reads git and TLS configuration", async () => {
     const result = await run(
       "fake-cargo && cat ~/.gitconfig >/dev/null && cat /private/etc/ssl/openssl.cnf >/dev/null && /usr/bin/curl -sS -o /dev/null file:///private/etc/hosts && echo all-ok",

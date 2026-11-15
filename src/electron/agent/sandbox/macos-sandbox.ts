@@ -36,6 +36,7 @@ import {
 import { applyNonInteractiveEnvDefaults } from "./non-interactive-env";
 import {
   macOSToolchainProfileRules,
+  resolveActiveDeveloperDir,
   resolveMacOSToolchainAccess,
   writeSanitizedNpmrc,
   type MacOSToolchainAccess,
@@ -511,6 +512,7 @@ export class MacOSSandbox implements ISandbox {
       env: process.env,
       workspacePath: this.workspace.path,
       allowWrites: permissions.write === true && permissions.accessSandboxMode !== "read-only",
+      developerDir: resolveActiveDeveloperDir(process.env),
     });
     if (!privateDocumentWorkspace) return access;
     return {
@@ -554,6 +556,11 @@ export class MacOSSandbox implements ISandbox {
     safeEnv.TERM = "xterm-256color";
     safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
     safeEnv.TMPDIR = this.getRuntimeTempDirIfScoped();
+    // The /usr/bin xcrun shims (clang, git, make) cache tool lookups in the
+    // per-user Darwin temp directory, not TMPDIR, and fail when the sandbox
+    // denies writing there. Point the cache at the sandbox's own temp
+    // directory, which the profile already allows writing.
+    safeEnv.xcrun_db = path.join(safeEnv.TMPDIR, "xcrun_db");
     safeEnv.PATH = toolchain.path;
 
     // The user's npmrc keeps registry, proxy and script settings, but its
@@ -621,6 +628,8 @@ export class MacOSSandbox implements ISandbox {
   (subpath "/System")
   (subpath "/Library/Frameworks")
   (subpath "/Applications/Xcode.app")
+  (subpath "/Library/Developer/CommandLineTools")
+  (literal "/Library/Preferences/com.apple.dt.Xcode.plist")
   (subpath "/private/var/db")
   (subpath "/private/var/select")
 ${workspaceAncestorRules}

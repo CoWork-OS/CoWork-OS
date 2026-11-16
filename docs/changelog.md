@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Browser app: sign-ins survive a restart**: a browser signed in to the full app in a browser stays signed in when CoWork restarts. Through the public HTTPS address it is signed out after 30 days without use, or 90 days after signing in (before: 30 minutes idle and 24 hours at most). On this computer over `http://127.0.0.1` those shorter limits stay. The host keeps only a hash of each session cookie, in its encrypted settings. **Sign out all browsers**, turning the app off and changing its public address still end every sign-in. After a restart an open tab reloads itself once; file, artifact and terminal handles from before the restart stop working. See [Browser application preview](browser-preview.md).
+
 ## [0.5.63] - 2026-11-15
 
 See [Release Notes 0.5.63](release-notes-0.5.63.md) for highlights, upgrade notes and qualification limits.

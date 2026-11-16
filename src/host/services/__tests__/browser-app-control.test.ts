@@ -18,6 +18,7 @@ function fakeApplication(overrides: Partial<Record<keyof WebApplication, unknown
     getPublicOrigin: vi.fn(() => null),
     countSessions: vi.fn(() => 2),
     revokeSessions: vi.fn(() => 2),
+    hasUnsavedSignOuts: vi.fn(() => false),
     createPairingCode: vi.fn(() => ({ code: "a".repeat(32), expiresAt: 1_000 })),
     ...overrides,
   } as unknown as WebApplication;
@@ -92,6 +93,14 @@ describe("browser app Control Plane methods", () => {
     const { access } = setup(application);
     expect(getBrowserAppStatus(access)).toMatchObject({ remote: true, signedInBrowsers: 2 });
     expect(signOutBrowserApp(access)).toEqual({ signedOut: 2 });
+    expect(application.revokeSessions).toHaveBeenCalledWith();
+  });
+
+  it("says so when a sign-out could not be saved, instead of reporting success", () => {
+    const application = fakeApplication({ hasUnsavedSignOuts: vi.fn(() => true) });
+    const { access } = setup(application);
+    expect(() => signOutBrowserApp(access)).toThrow("could not save");
+    // The browsers are signed out in this process either way.
     expect(application.revokeSessions).toHaveBeenCalledWith();
   });
 });

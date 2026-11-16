@@ -181,3 +181,80 @@ describe("BrowserHostTransport", () => {
     transport.close();
   });
 });
+
+describe("BrowserHostTransport after a host restart", () => {
+  function refusedTicket(): Response {
+    return new Response(JSON.stringify({ error: { code: "FORBIDDEN" } }), { status: 403 });
+  }
+
+  function bootstrapResponse(generation: string): Response {
+    return new Response(JSON.stringify({ ...session, host: { ...session.host, generation } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("asks for a reload when the sign-in outlived the host restart", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(refusedTicket())
+      .mockResolvedValueOnce(bootstrapResponse("generation-after-restart"));
+    vi.stubGlobal("fetch", fetchMock);
+    const states: string[] = [];
+    const transport = new BrowserHostTransport(session);
+    transport.onState((state) => states.push(state));
+
+    await transport.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(transport.connectionState).toBe("host_restarted");
+    expect(states).toEqual(["connecting", "host_restarted"]);
+    // The second request is the cookie-only bootstrap; nothing is retried after it.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/session/bootstrap");
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ credentials: "same-origin" });
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    transport.close();
+  });
+
+  it("keeps retrying a refused ticket while the same host process is running", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(refusedTicket())
+      .mockResolvedValueOnce(bootstrapResponse(session.host.generation))
+      .mockResolvedValueOnce(ticketResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const transport = new BrowserHostTransport(session);
+
+    await transport.start();
+    expect(transport.connectionState).toBe("disconnected");
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    transport.close();
+  });
+
+  it("requires signing in again when the restarted host no longer knows the browser", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const unauthenticated = () =>
+      new Response(JSON.stringify({ error: { code: "UNAUTHENTICATED" } }), { status: 401 });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(refusedTicket())
+      .mockResolvedValueOnce(unauthenticated())
+      .mockResolvedValue(unauthenticated());
+    vi.stubGlobal("fetch", fetchMock);
+    const transport = new BrowserHostTransport(session);
+
+    await transport.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(transport.connectionState).toBe("reauth_required");
+    transport.close();
+  });
+});

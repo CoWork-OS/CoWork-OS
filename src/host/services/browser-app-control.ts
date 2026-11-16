@@ -85,7 +85,14 @@ export function getBrowserAppStatus(access: BrowserAppAccess): BrowserAppStatus 
 export function signOutBrowserApp(access: BrowserAppAccess): { signedOut: number } {
   const application = access.getApplication();
   if (!application?.enabled) return { signedOut: 0 };
-  return { signedOut: application.revokeSessions() };
+  const signedOut = application.revokeSessions();
+  if (application.hasUnsavedSignOuts()) {
+    // Said plainly, because a restart before the write lands would undo the sign-out.
+    throw new Error(
+      "Browsers were signed out, but CoWork OS could not save that. Sign out again before restarting CoWork OS.",
+    );
+  }
+  return { signedOut };
 }
 
 interface AdminScopedClient {

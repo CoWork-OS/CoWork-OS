@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { WEB_API_VERSION, type WebSessionBootstrap } from "../shared/host-api/contracts";
 import { BROWSER_APP_SIGN_IN_PARAM, readBrowserAppSignInCode } from "../shared/browser-app-link";
 import { installBrowserHostBridge } from "../renderer/host/browser-host-bridge";
+import { allowHostRestartReload, tabSessionStorage } from "./host-restart-reload";
 import { BrowserHostTransport, webEndpoint } from "./transport";
 import "../renderer/react-refresh-ignored-exports";
 import "../renderer/styles/index.css";
@@ -180,6 +181,22 @@ function BrowserEntry() {
         if (connectionState === "version_mismatch") {
           disposeActiveBridge(activeBridge);
           setState({ kind: "version_mismatch" });
+          return;
+        }
+        if (connectionState === "host_restarted") {
+          // The sign-in outlived the host restart, but this page's handles did not. Loading
+          // again signs in with the same cookie; unsent composer text is kept in the browser.
+          disposeActiveBridge(activeBridge);
+          if (allowHostRestartReload(tabSessionStorage())) {
+            setState({ kind: "loading", message: "CoWork OS restarted. Reloading…" });
+            window.location.reload();
+          } else {
+            // Restarting over and over: stop reloading and let the user reconnect.
+            setState({
+              kind: "error",
+              message: "CoWork OS restarted several times in a row. Retry when it has settled.",
+            });
+          }
           return;
         }
         if (connectionState === "connected" && !appMounted && !importingApp) {

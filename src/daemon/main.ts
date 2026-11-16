@@ -89,6 +89,7 @@ import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/as
 import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
 import { createWebHostIdentity } from "../host/web/host-identity";
 import { createBrowserHostApplication } from "../host/services/browser-host-application";
+import { forgetStoredBrowserSessions } from "../host/services/browser-session-store";
 import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
 import {
   loopbackListenerOrigin,
@@ -939,6 +940,9 @@ async function main(): Promise<void> {
         console.error("[Daemon] Browser app failed to start:", error);
       }
     }
+  } else {
+    // Turning the browser app off signs its browsers out, here by starting without it.
+    forgetStoredBrowserSessions("node");
   }
 
   let shutdownPromise: Promise<void> | undefined;

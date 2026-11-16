@@ -5,6 +5,7 @@ import http from "http";
 import path from "path";
 import type { Duplex } from "stream";
 import { WebSocket, WebSocketServer } from "ws";
+import type { PersistedWebSession, WebSessionStore } from "./session-store";
 import {
   WEB_API_PATH,
   WEB_API_VERSION,
@@ -24,8 +25,20 @@ import {
 } from "../../shared/host-api/contracts";
 
 const DEFAULT_PAIRING_TTL_MS = 90_000;
-const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60_000;
-const DEFAULT_SESSION_MAX_TTL_MS = 24 * 60 * 60_000;
+// Through the public HTTPS address a browser stays signed in while it is used at least once
+// every 30 days, and for 90 days at most. That is the other-device case: signing in again
+// needs a link from the host, so a short idle limit would lock out a phone that was put down.
+const REMOTE_SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60_000;
+const REMOTE_SESSION_MAX_TTL_MS = 90 * 24 * 60 * 60_000;
+// On this computer (plain http on loopback) the limits stay short. Browsers send a cookie to
+// every port of a host, so any other local web server the browser visits is shown this one,
+// and a new link is one click away here.
+const LOOPBACK_SESSION_IDLE_TTL_MS = 30 * 60_000;
+const LOOPBACK_SESSION_MAX_TTL_MS = 24 * 60 * 60_000;
+/** How stale a stored last-used time may get before it is written again. */
+const DEFAULT_SESSION_PERSIST_INTERVAL_MS = 10 * 60_000;
+/** How far ahead of the clock a stored time may be and still be restored. */
+const RESTORE_CLOCK_SKEW_MS = 5 * 60_000;
 const DEFAULT_WS_TICKET_TTL_MS = 30_000;
 const DEFAULT_MAX_REQUEST_BYTES = 256 * 1024;
 const DEFAULT_REQUEST_BODY_TIMEOUT_MS = 15_000;
@@ -114,10 +127,17 @@ export interface WebApplicationOptions {
   ) => Promise<boolean>;
   onSessionRevoked?: (sessionId: string) => void;
   onClose?: () => void;
+  /**
+   * Durable storage for sign-ins, so they outlive a host restart. Without it every sign-in
+   * ends with the process.
+   */
+  sessionStore?: WebSessionStore;
   appVersion?: string;
   pairingTtlMs?: number;
   sessionIdleTtlMs?: number;
   sessionMaxTtlMs?: number;
+  /** How stale a stored last-used time may get before it is written again. */
+  sessionPersistIntervalMs?: number;
   wsTicketTtlMs?: number;
   maxRequestBytes?: number;
   /** Absolute deadline for reading JSON request bodies, including pairing requests. */
@@ -156,6 +176,13 @@ interface PairingRecord {
 }
 
 interface SessionRecord {
+  /** SHA-256 of the cookie value; the map key and the only form of the cookie kept. */
+  key: string;
+  /**
+   * Names this session to the host services, which scope handles, receipts and jobs by it.
+   * Random for each process and never the cookie value, so nothing issued before a restart
+   * matches the session restored after it.
+   */
   id: string;
   audience: string;
   installationId: string;
@@ -165,6 +192,8 @@ interface SessionRecord {
   createdAt: number;
   lastUsedAt: number;
   expiresAt: number;
+  /** The last-used time the store holds, or 0 when the store has no record of it. */
+  storedLastUsedAt: number;
 }
 
 interface TicketRecord {
@@ -196,7 +225,14 @@ export class WebApplication {
   private readonly tickets = new Map<string, TicketRecord>();
   private readonly pairingAttempts = new Map<string, PairingAttemptRecord>();
   private readonly mounts = new Map<string, WebApplicationMount>();
-  private readonly cookieSalt = crypto.randomBytes(16).toString("hex");
+  /**
+   * Sign-outs the store has not recorded yet, because a write failed. They are retried on
+   * every later store call and never restored, so a failed write cannot undo a sign-out
+   * while this process runs.
+   */
+  private readonly unforgottenKeys = new Set<string>();
+  /** Listeners whose whole sign-out is still unrecorded; `null` stands for all of them. */
+  private readonly unforgottenAudiences = new Set<string | null>();
   private readonly webDirectory: string;
   private readonly deployment: WebDeploymentPolicy;
   private readonly publicOrigin: URL | null;
@@ -248,13 +284,20 @@ export class WebApplication {
     this.assertListenerBinding(options.listenerHost);
     const mount = new WebApplicationMount(this, options);
     this.mounts.set(options.audience, mount);
+    this.restoreSessions(options.audience);
     return mount;
   }
 
-  /** Internal mount helpers kept explicit so the listener adapter has no access to auth state. */
+  /**
+   * Internal mount helpers kept explicit so the listener adapter has no access to auth state.
+   *
+   * The name is the same on every start, so a browser's cookie is still read after a host
+   * restart. It differs by installation, listener and host kind: cookies ignore the port, so
+   * two hosts on one machine would otherwise overwrite each other's.
+   */
   createMountCookieName(audience: string): string {
     const identity = this.options.getHostIdentity();
-    const cookieHash = hash(`${identity.installationId}:${audience}:${this.cookieSalt}`).slice(
+    const cookieHash = hash(`${identity.installationId}:${audience}:${identity.runtime}`).slice(
       0,
       24,
     );
@@ -313,7 +356,8 @@ export class WebApplication {
   }
 
   /**
-   * Revoke browser authority after a local host action or listener shutdown.
+   * Sign browsers out for good after a local host action: the sign-ins are ended here and
+   * forgotten in the store, so they do not come back after a restart.
    * Returns how many signed-in sessions were ended.
    */
   revokeSessions(audience?: string): number {
@@ -322,27 +366,51 @@ export class WebApplication {
     let revoked = 0;
     for (const [key, session] of this.sessions) {
       if (!audience || session.audience === audience) {
-        this.revokeSession(key);
+        this.endSession(key);
         revoked += 1;
       }
     }
-    for (const [key, ticket] of this.tickets) {
-      if (!audience || ticket.audience === audience) this.tickets.delete(key);
-    }
-    for (const [key, pairing] of this.pairingCodes) {
-      if (!audience || pairing.audience === audience) this.pairingCodes.delete(key);
-    }
-    for (const key of this.pairingAttempts.keys()) {
-      if (!audience || key.startsWith(`${audience}:`)) this.pairingAttempts.delete(key);
-    }
+    this.dropTransientAuthority(audience);
+    // One write also forgets sign-ins this process never loaded (a listener that is off).
+    this.forgetStoredSessions(audience);
     return revoked;
   }
 
-  /** Close every mounted WebSocket server and invalidate in-memory authority. */
+  /**
+   * Whether a sign-out is still waiting to be written to the store. The browsers are signed
+   * out in this process either way; until the write lands, a host restart could bring the
+   * sign-in back. Calling `revokeSessions` again retries it.
+   */
+  hasUnsavedSignOuts(): boolean {
+    return !this.retryForgets();
+  }
+
+  /**
+   * End the sessions of a listener that is stopping, or of all listeners, without forgetting
+   * the sign-ins: a host restart or a listener restart restores them. Sockets close and every
+   * handle issued to those sessions is revoked, as on sign-out.
+   */
+  suspendSessions(audience?: string): void {
+    const stillValid: SessionRecord[] = [];
+    const now = Date.now();
+    for (const [key, session] of this.sessions) {
+      if (audience && session.audience !== audience) continue;
+      if (!this.isExpired(session, now)) stillValid.push(session);
+      this.endSession(key);
+    }
+    this.dropTransientAuthority(audience);
+    // Their last-used times are written once here instead of on every request.
+    this.touchStoredSessions(stillValid);
+  }
+
+  /**
+   * Close every mounted WebSocket server and invalidate in-memory authority. Stored sign-ins
+   * are kept, so this is what a host shutdown calls; `revokeSessions` is the sign-out.
+   */
   async close(): Promise<void> {
     const mounts = [...this.mounts.values()];
     await Promise.all(mounts.map((mount) => mount.close()));
-    this.revokeSessions();
+    this.suspendSessions();
     this.options.onClose?.();
   }
 
@@ -544,8 +612,8 @@ export class WebApplication {
           404,
         );
       this.consumePairingCode(audience, pairingCode, security.remoteAddress);
-      const session = this.createSession(audience);
-      const setCookie = this.serializeSessionCookie(mount.cookieName, session.id, security.secure);
+      const { session, cookieValue } = this.createSession(audience);
+      const setCookie = this.serializeSessionCookie(mount.cookieName, cookieValue, security.secure);
       writeJson(
         res,
         200,
@@ -597,7 +665,7 @@ export class WebApplication {
       if (error || !session)
         throw error || new WebApplicationError("UNAUTHENTICATED", "Authentication required.", 401);
       this.requireCsrf(req, session);
-      this.revokeSession(hash(session.id));
+      this.revokeSession(session.key);
       writeJson(
         res,
         200,
@@ -1096,16 +1164,18 @@ export class WebApplication {
     throw new WebApplicationError("UNAUTHENTICATED", "Invalid or expired pairing code.", 401);
   }
 
-  private createSession(audience: string): SessionRecord {
+  private createSession(audience: string): { session: SessionRecord; cookieValue: string } {
     this.pruneExpiredRecords();
     if (this.sessions.size >= MAX_SESSIONS) {
       throw new WebApplicationError("RATE_LIMITED", "Too many active browser sessions.", 429, true);
     }
     const identity = this.options.getHostIdentity();
-    const id = crypto.randomBytes(32).toString("base64url");
+    // Only the browser holds this value; the host keeps its hash.
+    const cookieValue = crypto.randomBytes(32).toString("base64url");
     const now = Date.now();
     const session: SessionRecord = {
-      id,
+      key: hash(cookieValue),
+      id: newSessionScopeId(),
       audience,
       installationId: identity.installationId,
       profileId: identity.profileId,
@@ -1113,10 +1183,192 @@ export class WebApplication {
       csrfToken: crypto.randomBytes(32).toString("base64url"),
       createdAt: now,
       lastUsedAt: now,
-      expiresAt: now + (this.options.sessionMaxTtlMs ?? DEFAULT_SESSION_MAX_TTL_MS),
+      expiresAt: now + this.sessionMaxTtlMs(),
+      storedLastUsedAt: 0,
     };
-    this.sessions.set(hash(id), session);
-    return session;
+    this.sessions.set(session.key, session);
+    const store = this.options.sessionStore;
+    if (store) {
+      this.retryForgets();
+      try {
+        store.add(this.toPersistedSession(session));
+        session.storedLastUsedAt = now;
+      } catch (error) {
+        // The sign-in still works; it just ends with this process.
+        this.log("[BrowserWeb] Could not store a browser sign-in:", describeError(error));
+      }
+    }
+    return { session, cookieValue };
+  }
+
+  private toPersistedSession(session: SessionRecord): PersistedWebSession {
+    return {
+      key: session.key,
+      audience: session.audience,
+      installationId: session.installationId,
+      profileId: session.profileId,
+      runtime: this.options.getHostIdentity().runtime,
+      deployment: this.deploymentFingerprint(),
+      createdAt: session.createdAt,
+      lastUsedAt: session.lastUsedAt,
+      expiresAt: session.expiresAt,
+    };
+  }
+
+  /** Where browsers reach this host. A sign-in made at one address is not valid at another. */
+  private deploymentFingerprint(): string {
+    return this.publicOrigin ? `https-proxy:${this.publicOrigin.origin}` : "loopback";
+  }
+
+  private isExpired(session: Pick<SessionRecord, "lastUsedAt" | "expiresAt">, now: number) {
+    return session.expiresAt <= now || now - session.lastUsedAt > this.sessionIdleTtlMs();
+  }
+
+  /** How long a sign-in may go unused. "Sign out all browsers" ends every sign-in sooner. */
+  private sessionIdleTtlMs(): number {
+    return (
+      this.options.sessionIdleTtlMs ??
+      (this.publicOrigin ? REMOTE_SESSION_IDLE_TTL_MS : LOOPBACK_SESSION_IDLE_TTL_MS)
+    );
+  }
+
+  /** How long a sign-in may last in all, however often it is used. */
+  private sessionMaxTtlMs(): number {
+    return (
+      this.options.sessionMaxTtlMs ??
+      (this.publicOrigin ? REMOTE_SESSION_MAX_TTL_MS : LOOPBACK_SESSION_MAX_TTL_MS)
+    );
+  }
+
+  /**
+   * Bring back the sign-ins stored for a listener that is starting. Each one is bound to
+   * this process: a new generation, a new CSRF token and a new scope id, so WebSocket
+   * tickets and file, artifact and terminal handles from before the restart stay invalid.
+   */
+  private restoreSessions(audience: string): void {
+    const store = this.options.sessionStore;
+    if (!store) return;
+    this.retryForgets();
+    let stored: PersistedWebSession[];
+    try {
+      stored = store.load();
+    } catch (error) {
+      this.log("[BrowserWeb] Could not read stored browser sign-ins:", describeError(error));
+      return;
+    }
+    const identity = this.options.getHostIdentity();
+    const deployment = this.deploymentFingerprint();
+    const now = Date.now();
+    const discard: string[] = [];
+    for (const record of stored) {
+      if (record.audience !== audience || record.runtime !== identity.runtime) continue;
+      if (this.sessions.has(record.key)) continue;
+      // A sign-out the store has not recorded yet still stands.
+      if (this.isForgetPending(record)) continue;
+      const usable =
+        record.installationId === identity.installationId &&
+        record.profileId === identity.profileId &&
+        record.deployment === deployment &&
+        // A clock set back must not extend a sign-in; a small correction is tolerated.
+        record.createdAt <= now + RESTORE_CLOCK_SKEW_MS &&
+        record.lastUsedAt <= now + RESTORE_CLOCK_SKEW_MS &&
+        record.expiresAt <= record.createdAt + this.sessionMaxTtlMs() &&
+        !this.isExpired(record, now);
+      if (!usable) {
+        discard.push(record.key);
+        continue;
+      }
+      // Over the cap: left stored, for a later start that has room.
+      if (this.sessions.size >= MAX_SESSIONS) continue;
+      this.sessions.set(record.key, {
+        key: record.key,
+        id: newSessionScopeId(),
+        audience,
+        installationId: identity.installationId,
+        profileId: identity.profileId,
+        generation: identity.generation,
+        csrfToken: crypto.randomBytes(32).toString("base64url"),
+        createdAt: record.createdAt,
+        lastUsedAt: record.lastUsedAt,
+        expiresAt: record.expiresAt,
+        storedLastUsedAt: record.lastUsedAt,
+      });
+    }
+    this.removeStoredSessions(discard);
+  }
+
+  private removeStoredSessions(keys: string[]): void {
+    if (!this.options.sessionStore || keys.length === 0) return;
+    for (const key of keys) this.unforgottenKeys.add(key);
+    this.retryForgets();
+  }
+
+  private forgetStoredSessions(audience?: string): void {
+    if (!this.options.sessionStore) return;
+    this.unforgottenAudiences.add(audience ?? null);
+    this.retryForgets();
+  }
+
+  private isForgetPending(record: Pick<PersistedWebSession, "key" | "audience">): boolean {
+    return (
+      this.unforgottenKeys.has(record.key) ||
+      this.unforgottenAudiences.has(null) ||
+      this.unforgottenAudiences.has(record.audience)
+    );
+  }
+
+  /**
+   * Write every sign-out the store has not recorded. Whatever fails stays queued and is
+   * tried again on the next store call, so one failed write does not lose a sign-out.
+   * Returns whether the store now agrees with this process.
+   */
+  private retryForgets(): boolean {
+    const store = this.options.sessionStore;
+    if (!store) return true;
+    // Removing entries while iterating a Set is safe; removed ones are simply not visited.
+    for (const audience of this.unforgottenAudiences) {
+      try {
+        store.clear(audience ?? undefined);
+        this.unforgottenAudiences.delete(audience);
+        if (audience === null) {
+          this.unforgottenAudiences.clear();
+          this.unforgottenKeys.clear();
+        }
+      } catch (error) {
+        this.log("[BrowserWeb] Could not forget browser sign-ins:", describeError(error));
+      }
+    }
+    if (this.unforgottenKeys.size > 0) {
+      try {
+        store.remove([...this.unforgottenKeys]);
+        this.unforgottenKeys.clear();
+      } catch (error) {
+        this.log("[BrowserWeb] Could not forget a browser sign-in:", describeError(error));
+      }
+    }
+    return this.unforgottenKeys.size === 0 && this.unforgottenAudiences.size === 0;
+  }
+
+  private touchStoredSessions(sessions: SessionRecord[]): void {
+    const store = this.options.sessionStore;
+    const changed = sessions.filter((session) => session.lastUsedAt > session.storedLastUsedAt);
+    if (!store) return;
+    this.retryForgets();
+    if (changed.length === 0) return;
+    try {
+      store.touch(changed.map(({ key, lastUsedAt }) => ({ key, lastUsedAt })));
+    } catch (error) {
+      this.log("[BrowserWeb] Could not update a browser sign-in:", describeError(error));
+    }
+    // Also after a failure, so a store that cannot be written is not retried on every request.
+    for (const session of changed) session.storedLastUsedAt = session.lastUsedAt;
+  }
+
+  /** Record that a session was just used, writing it through only once in a while. */
+  private markSessionUsed(session: SessionRecord, now: number): void {
+    session.lastUsedAt = now;
+    const interval = this.options.sessionPersistIntervalMs ?? DEFAULT_SESSION_PERSIST_INTERVAL_MS;
+    if (now - session.storedLastUsedAt >= interval) this.touchStoredSessions([session]);
   }
 
   private createTicket(
@@ -1138,7 +1390,7 @@ export class WebApplication {
     const expiresAt = Date.now() + (this.options.wsTicketTtlMs ?? DEFAULT_WS_TICKET_TTL_MS);
     this.tickets.set(hash(value), {
       audience,
-      sessionKey: hash(session.id),
+      sessionKey: session.key,
       installationId: identity.installationId,
       profileId: identity.profileId,
       generation: identity.generation,
@@ -1158,7 +1410,7 @@ export class WebApplication {
     if (
       !record ||
       record.audience !== audience ||
-      record.sessionKey !== hash(session.id) ||
+      record.sessionKey !== session.key ||
       record.expiresAt <= Date.now()
     ) {
       return null;
@@ -1190,10 +1442,7 @@ export class WebApplication {
     }
 
     const now = Date.now();
-    if (
-      now - session.lastUsedAt > (this.options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS) ||
-      now >= session.expiresAt
-    ) {
+    if (this.isExpired(session, now)) {
       this.revokeSession(key);
       return { error: new WebApplicationError("UNAUTHENTICATED", "Session expired.", 401) };
     }
@@ -1203,7 +1452,7 @@ export class WebApplication {
       this.revokeSession(key);
       return { error: asWebError(error) };
     }
-    session.lastUsedAt = now;
+    this.markSessionUsed(session, now);
     return { session };
   }
 
@@ -1222,14 +1471,11 @@ export class WebApplication {
   }
 
   private assertActiveSession(session: SessionRecord): void {
-    const key = hash(session.id);
+    const key = session.key;
     const now = Date.now();
-    if (
-      this.sessions.get(key) !== session ||
-      session.expiresAt <= now ||
-      now - session.lastUsedAt > (this.options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS)
-    ) {
-      this.revokeSession(key);
+    if (this.sessions.get(key) !== session || this.isExpired(session, now)) {
+      // Only this session is ended: a newer one under the same key is left alone.
+      if (this.sessions.get(key) === session) this.revokeSession(key);
       throw new WebApplicationError("UNAUTHENTICATED", "Session expired.", 401);
     }
     try {
@@ -1238,7 +1484,7 @@ export class WebApplication {
       this.revokeSession(key);
       throw error;
     }
-    session.lastUsedAt = now;
+    this.markSessionUsed(session, now);
   }
 
   private requestContext(
@@ -1257,7 +1503,7 @@ export class WebApplication {
       "Path=/",
       "HttpOnly",
       "SameSite=Strict",
-      `Max-Age=${Math.floor((this.options.sessionMaxTtlMs ?? DEFAULT_SESSION_MAX_TTL_MS) / 1000)}`,
+      `Max-Age=${Math.floor(this.sessionMaxTtlMs() / 1000)}`,
       ...(secure ? ["Secure"] : []),
     ].join("; ");
   }
@@ -1273,15 +1519,35 @@ export class WebApplication {
     ].join("; ");
   }
 
+  /** End one session for good: here, and in the store so a restart does not bring it back. */
   private revokeSession(sessionKey: string): void {
+    if (this.endSession(sessionKey)) this.removeStoredSessions([sessionKey]);
+  }
+
+  /** End one session in this process: its handles, tickets and sockets. The store is left. */
+  private endSession(sessionKey: string): boolean {
     const session = this.sessions.get(sessionKey);
-    if (!session) return;
+    if (!session) return false;
     this.sessions.delete(sessionKey);
     this.options.onSessionRevoked?.(session.id);
     for (const [ticketKey, ticket] of this.tickets) {
       if (ticket.sessionKey === sessionKey) this.tickets.delete(ticketKey);
     }
     this.mounts.get(session.audience)?.closeSessionSockets(session.id);
+    return true;
+  }
+
+  /** Tickets, pairing codes and attempt counters never outlive the listener they belong to. */
+  private dropTransientAuthority(audience?: string): void {
+    for (const [key, ticket] of this.tickets) {
+      if (!audience || ticket.audience === audience) this.tickets.delete(key);
+    }
+    for (const [key, pairing] of this.pairingCodes) {
+      if (!audience || pairing.audience === audience) this.pairingCodes.delete(key);
+    }
+    for (const key of this.pairingAttempts.keys()) {
+      if (!audience || key.startsWith(`${audience}:`)) this.pairingAttempts.delete(key);
+    }
   }
 
   private pruneExpiredRecords(): void {
@@ -1289,13 +1555,11 @@ export class WebApplication {
     for (const [key, value] of this.pairingCodes)
       if (value.expiresAt <= now) this.pairingCodes.delete(key);
     for (const [key, value] of this.tickets) if (value.expiresAt <= now) this.tickets.delete(key);
+    const expired: string[] = [];
     for (const [key, value] of this.sessions) {
-      if (
-        value.expiresAt <= now ||
-        now - value.lastUsedAt > (this.options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS)
-      )
-        this.revokeSession(key);
+      if (this.isExpired(value, now) && this.endSession(key)) expired.push(key);
     }
+    this.removeStoredSessions(expired);
     for (const [key, value] of this.pairingAttempts) {
       if (now - value.startedAt >= PAIRING_ATTEMPT_WINDOW_MS) this.pairingAttempts.delete(key);
     }
@@ -1415,10 +1679,14 @@ export class WebApplicationMount {
     );
   }
 
+  /**
+   * Stop serving this listener. Its sessions end in this process but the sign-ins stay
+   * stored, so they return when the listener or the host starts again.
+   */
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.app.revokeSessions(this.audience);
+    this.app.suspendSessions(this.audience);
     this.app.unregisterMount(this.audience, this);
     for (const ws of this.sockets.keys()) ws.close(1001, "Browser listener stopped");
     this.sockets.clear();
@@ -1662,6 +1930,16 @@ function isValidMethodName(value: unknown): value is string {
 
 function hash(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+/** A per-process name for a session; unrelated to its cookie. */
+function newSessionScopeId(): string {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+/** An error's kind for the log, without its message: storage errors can quote stored data. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
 }
 
 function timingSafeEqualString(left: string, right: string): boolean {

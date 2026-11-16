@@ -26,6 +26,8 @@ export type BrowserConnectionState =
   | "connected"
   | "disconnected"
   | "reauth_required"
+  /** The host restarted and this browser is still signed in; the page must load again. */
+  | "host_restarted"
   | "version_mismatch"
   | "closed";
 
@@ -211,6 +213,20 @@ export class BrowserHostTransport {
         retryable: false,
       });
     }
+    if (ticketResponse.status === 403) {
+      const restarted = await this.hostRestarted();
+      if (this.stopped) return;
+      if (restarted) {
+        // Still signed in, but everything this page holds (its CSRF token, its file and
+        // terminal handles) belongs to the host process that ended.
+        this.setState("host_restarted");
+        throw new WebTransportError({
+          code: "STALE_HOST",
+          message: "The CoWork host restarted. Reloading its current state.",
+          retryable: false,
+        });
+      }
+    }
     if (!ticketResponse.ok) {
       throw new WebTransportError({
         code: "HOST_UNAVAILABLE",
@@ -289,6 +305,29 @@ export class BrowserHostTransport {
         this.scheduleReconnect();
       });
     });
+  }
+
+  /**
+   * Whether the host that answers now is a later start of the one this page signed in to.
+   * A restarted host keeps the sign-in but issues a new CSRF token, so the ticket request
+   * is refused; its session bootstrap then names a different generation.
+   */
+  private async hostRestarted(): Promise<boolean> {
+    try {
+      const response = await fetch(webEndpoint("session/bootstrap"), {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) return false;
+      const current = (await response.json()) as unknown;
+      if (!isRecord(current) || !isRecord(current.host)) return false;
+      return (
+        typeof current.host.generation === "string" &&
+        current.host.generation !== this.session.host.generation
+      );
+    } catch {
+      return false;
+    }
   }
 
   private handleMessage(raw: unknown, socket: WebSocket): void {
@@ -381,6 +420,7 @@ export class BrowserHostTransport {
       this.stopped ||
       this.retryTimer ||
       this.state === "reauth_required" ||
+      this.state === "host_restarted" ||
       this.state === "version_mismatch"
     ) {
       return;
@@ -398,7 +438,12 @@ export class BrowserHostTransport {
   }
 
   private handleConnectionFailure(error: unknown): void {
-    if (this.stopped || this.state === "reauth_required" || this.state === "version_mismatch") {
+    if (
+      this.stopped ||
+      this.state === "reauth_required" ||
+      this.state === "host_restarted" ||
+      this.state === "version_mismatch"
+    ) {
       return;
     }
     this.setState("disconnected");

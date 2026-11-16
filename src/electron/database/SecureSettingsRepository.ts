@@ -177,6 +177,9 @@ export type SettingsCategory =
   | "browser-vault"
   // Settings > Browser (search engine, downloads, agent permissions, developer mode).
   | "browser"
+  // Browser app sign-ins that outlive a host restart: a hash of each session cookie, never
+  // the cookie value (src/host/services/browser-session-store.ts).
+  | "browser-sessions"
   // Computer Use backend that drives a Cua Space; holds its bearer token.
   | "cua-space"
   // Opt-in Camofox browser provider (loopback server); holds its access and API keys.

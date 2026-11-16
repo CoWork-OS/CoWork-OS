@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -19,6 +20,7 @@ import {
   type WebApplicationOptions,
   type WebDeploymentPolicy,
 } from "../WebApplication";
+import type { PersistedWebSession, WebSessionStore } from "../session-store";
 import { readBrowserAppSignInCode } from "../../../shared/browser-app-link";
 import {
   createBrowserAppSignInLink,
@@ -51,6 +53,11 @@ async function createHost(
     pairingTtlMs?: number;
     requestBodyTimeoutMs?: number;
     sessionIdleTtlMs?: number;
+    sessionMaxTtlMs?: number;
+    sessionPersistIntervalMs?: number;
+    sessionStore?: WebSessionStore;
+    identity?: Partial<HostIdentity>;
+    log?: WebApplicationOptions["log"];
     methods?: WebApplicationOptions["methods"];
     handleWorkspaceFileDownload?: WebApplicationOptions["handleWorkspaceFileDownload"];
     handleWorkspaceFileUpload?: WebApplicationOptions["handleWorkspaceFileUpload"];
@@ -76,6 +83,7 @@ async function createHost(
     runtime: "node",
     platform: "linux",
     appVersion: "1.2.3",
+    ...options.identity,
   };
   const capabilities = Object.fromEntries(
     HOST_CAPABILITIES.map((name) => [name, { available: true }]),
@@ -107,6 +115,10 @@ async function createHost(
     pairingTtlMs: options.pairingTtlMs,
     requestBodyTimeoutMs: options.requestBodyTimeoutMs,
     sessionIdleTtlMs: options.sessionIdleTtlMs,
+    sessionMaxTtlMs: options.sessionMaxTtlMs,
+    sessionPersistIntervalMs: options.sessionPersistIntervalMs,
+    sessionStore: options.sessionStore,
+    log: options.log,
   });
   const server = http.createServer((req, res) => {
     void mount.handleRequest(req, res).then((handled) => {
@@ -893,6 +905,8 @@ describe("WebApplication host core", () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers["set-cookie"]?.[0]).toMatch(/^__Host-cw_/);
+    // Through the public HTTPS address a sign-in may last 90 days.
+    expect(response.headers["set-cookie"]?.[0]).toContain(`Max-Age=${90 * 24 * 60 * 60}`);
     expect(response.headers["set-cookie"]?.[0]).toContain("Secure");
   });
 
@@ -1148,5 +1162,444 @@ describe("WebApplication browser app controls", () => {
     expect(() => createBrowserAppSignInLink(access)).toThrow("Nothing is serving the browser app.");
     expect(getBrowserAppStatus(access)).toMatchObject({ enabled: true, signedInBrowsers: 0 });
     expect(getBrowserAppStatus(access).appUrl).toBeUndefined();
+  });
+});
+
+const DAY_MS = 24 * 60 * 60_000;
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** A store that lives for the test and counts its writes, standing in for encrypted settings. */
+function memoryStore(initial: PersistedWebSession[] = []) {
+  let records = initial.map((record) => ({ ...record }));
+  const writes = { add: 0, touch: 0, remove: 0, clear: 0 };
+  const store: WebSessionStore = {
+    load: () => records.map((record) => ({ ...record })),
+    add(session) {
+      writes.add += 1;
+      records = [...records.filter((record) => record.key !== session.key), { ...session }];
+    },
+    touch(updates) {
+      writes.touch += 1;
+      records = records.map((record) => {
+        const update = updates.find((entry) => entry.key === record.key);
+        return update ? { ...record, lastUsedAt: update.lastUsedAt } : record;
+      });
+    },
+    remove(keys) {
+      writes.remove += 1;
+      records = records.filter((record) => !keys.includes(record.key));
+    },
+    clear(audience) {
+      writes.clear += 1;
+      records = audience === undefined ? [] : records.filter((r) => r.audience !== audience);
+    },
+  };
+  return { store, writes, records: () => records };
+}
+
+/** A stored sign-in for the test host, and the cookie a browser would present for it. */
+function storedSignIn(
+  name: string,
+  overrides: Partial<PersistedWebSession> = {},
+): { record: PersistedWebSession; cookieValue: string } {
+  const cookieValue = `${name}-${"x".repeat(40)}`.slice(0, 43);
+  const now = Date.now();
+  return {
+    cookieValue,
+    record: {
+      key: sha256(cookieValue),
+      audience: "test-browser",
+      installationId: "opaque-web-installation",
+      profileId: "profile-alpha",
+      runtime: "node",
+      deployment: "loopback",
+      createdAt: now - 60 * 60_000,
+      lastUsedAt: now - 60_000,
+      expiresAt: now + 23 * 60 * 60_000,
+      ...overrides,
+    },
+  };
+}
+
+function bootstrap(host: TestHost, cookie: string) {
+  return request(host, { path: `${WEB_API_PATH}/session/bootstrap`, headers: { Cookie: cookie } });
+}
+
+function wsTicket(host: TestHost, cookie: string, csrfToken: string) {
+  return request(host, {
+    path: `${WEB_API_PATH}/session/ws-ticket`,
+    method: "POST",
+    headers: { Origin: host.origin, Cookie: cookie, "X-CoWork-CSRF": csrfToken },
+  });
+}
+
+describe("WebApplication sign-ins across a host restart", () => {
+  it("keeps a browser signed in after a restart, bound to the new process", async () => {
+    const contexts: Array<{ sessionId: string; generation: string }> = [];
+    const download: WebApplicationOptions["handleWorkspaceFileDownload"] = async (
+      context,
+      _req,
+      res,
+    ) => {
+      contexts.push({ sessionId: context.sessionId, generation: context.identity.generation });
+      res.writeHead(204);
+      res.end();
+      return true;
+    };
+    const callDownload = (host: TestHost, cookie: string, csrfToken: string) =>
+      request(host, {
+        path: WEB_WORKSPACE_FILE_DOWNLOAD_PATH,
+        method: "POST",
+        headers: {
+          Origin: host.origin,
+          Cookie: cookie,
+          "X-CoWork-CSRF": csrfToken,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+    const { store, records } = memoryStore();
+
+    const first = await createHost({ sessionStore: store, handleWorkspaceFileDownload: download });
+    const session = await pair(first);
+    const cookieValue = session.cookie.slice(session.cookie.indexOf("=") + 1);
+    expect((await callDownload(first, session.cookie, session.csrfToken)).status).toBe(204);
+
+    // The store holds a hash of the cookie and nothing a browser could present.
+    expect(records()).toHaveLength(1);
+    expect(records()[0].key).toBe(sha256(cookieValue));
+    const stored = JSON.stringify(records());
+    expect(stored).not.toContain(cookieValue);
+    expect(stored).not.toContain(session.csrfToken);
+    expect(stored).not.toContain(contexts[0].sessionId);
+
+    await first.close();
+    expect(first.app.countSessions()).toBe(0);
+    expect(records()).toHaveLength(1);
+
+    const second = await createHost({
+      sessionStore: store,
+      identity: { generation: "generation-two" },
+      handleWorkspaceFileDownload: download,
+    });
+    expect(second.app.countSessions()).toBe(1);
+    const restored = await bootstrap(second, session.cookie);
+    expect(restored.status).toBe(200);
+    const body = JSON.parse(restored.body);
+    expect(body.host.generation).toBe("generation-two");
+    expect(body.csrfToken).not.toBe(session.csrfToken);
+
+    // The page that was open before the restart holds the old CSRF token: refused.
+    expect((await wsTicket(second, session.cookie, session.csrfToken)).status).toBe(403);
+    expect((await wsTicket(second, session.cookie, body.csrfToken)).status).toBe(200);
+
+    // Host services scope handles by session id and generation. Both are new, so a file,
+    // artifact or terminal handle issued before the restart matches nothing after it.
+    expect((await callDownload(second, session.cookie, body.csrfToken)).status).toBe(204);
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1].sessionId).not.toBe(contexts[0].sessionId);
+    expect(contexts[1].generation).toBe("generation-two");
+    for (const context of contexts) expect(context.sessionId).not.toBe(cookieValue);
+
+    // The cookie keeps its name, so the browser sends it to the restarted host.
+    expect((await pair(second)).cookieName).toBe(session.cookieName);
+  });
+
+  it("refuses a WebSocket ticket from before the restart", async () => {
+    const { store } = memoryStore();
+    const first = await createHost({ sessionStore: store });
+    const code = first.app.createPairingCode("test-browser").code;
+    const paired = await request(first, {
+      path: `${WEB_API_PATH}/session/pair`,
+      method: "POST",
+      headers: { Origin: first.origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const setCookie = paired.headers["set-cookie"]?.[0] ?? "";
+    // On this computer the limits stay short: 24 hours in all.
+    expect(setCookie).toContain(`Max-Age=${24 * 60 * 60}`);
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Strict");
+    const cookie = setCookie.split(";")[0];
+    const issued = await wsTicket(first, cookie, JSON.parse(paired.body).csrfToken);
+    const { ticket } = JSON.parse(issued.body);
+    await first.close();
+
+    const second = await createHost({
+      sessionStore: store,
+      identity: { generation: "generation-two" },
+    });
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${second.port}${WEB_API_PATH}/ws`,
+      ["cowork-web-v1", `cowork-ticket.${ticket}`],
+      { headers: { Origin: second.origin, Cookie: cookie } },
+    );
+    const outcome = await new Promise<string>((resolve) => {
+      socket.once("open", () => resolve("open"));
+      socket.once("error", (error) => resolve(String(error)));
+    });
+    socket.terminate();
+    expect(outcome).toContain("401");
+  });
+
+  it("does not restore sign-ins that expired, or belong to another host, while it was down", async () => {
+    const now = Date.now();
+    const good = storedSignIn("good");
+    const idle = storedSignIn("idle", { lastUsedAt: now - 31 * 60_000 });
+    const tooOld = storedSignIn("tooold", { createdAt: now - 91 * DAY_MS, expiresAt: now - 1 });
+    const stretched = storedSignIn("stretched", { expiresAt: now + 400 * DAY_MS });
+    const future = storedSignIn("future", { lastUsedAt: now + DAY_MS });
+    const otherInstall = storedSignIn("install", { installationId: "another-installation" });
+    const otherProfile = storedSignIn("profile", { profileId: "profile-beta" });
+    const otherAddress = storedSignIn("address", {
+      deployment: "https-proxy:https://cowork.example",
+    });
+    const otherRuntime = storedSignIn("runtime", { runtime: "electron" });
+    const otherListener = storedSignIn("listener", { audience: "another-listener" });
+    const all = [
+      good,
+      idle,
+      tooOld,
+      stretched,
+      future,
+      otherInstall,
+      otherProfile,
+      otherAddress,
+      otherRuntime,
+      otherListener,
+    ];
+    const { store, records } = memoryStore(all.map((entry) => entry.record));
+
+    const host = await createHost({ sessionStore: store });
+    const cookieName = (await pair(host)).cookieName;
+    const statusOf = async (entry: { cookieValue: string }) =>
+      (await bootstrap(host, `${cookieName}=${entry.cookieValue}`)).status;
+
+    expect(await statusOf(good)).toBe(200);
+    for (const entry of all.slice(1)) expect(await statusOf(entry)).toBe(401);
+
+    // Unusable sign-ins for this listener are forgotten. Another kind of host and another
+    // listener keep theirs: this host cannot judge them.
+    const keys = records().map((record) => record.key);
+    expect(keys).toContain(good.record.key);
+    expect(keys).toContain(otherRuntime.record.key);
+    expect(keys).toContain(otherListener.record.key);
+    for (const entry of [idle, tooOld, stretched, future, otherInstall, otherProfile, otherAddress])
+      expect(keys).not.toContain(entry.record.key);
+  });
+
+  it("forgets every sign-in on Sign out all browsers, including a stopped listener's", async () => {
+    const stopped = storedSignIn("stopped", { audience: "another-listener" });
+    const { store, records } = memoryStore([stopped.record]);
+    const first = await createHost({ sessionStore: store });
+    const session = await pair(first);
+    expect(records()).toHaveLength(2);
+
+    expect(first.app.revokeSessions()).toBe(1);
+    expect(records()).toHaveLength(0);
+    expect((await bootstrap(first, session.cookie)).status).toBe(401);
+    await first.close();
+
+    const second = await createHost({ sessionStore: store });
+    expect(second.app.countSessions()).toBe(0);
+    expect((await bootstrap(second, session.cookie)).status).toBe(401);
+  });
+
+  it("forgets a browser's own sign-out and an expired session", async () => {
+    const { store, records } = memoryStore();
+    const host = await createHost({ sessionStore: store, sessionIdleTtlMs: 40 });
+    const session = await pair(host);
+    const loggedOut = await request(host, {
+      path: `${WEB_API_PATH}/session/logout`,
+      method: "POST",
+      headers: { Origin: host.origin, Cookie: session.cookie, "X-CoWork-CSRF": session.csrfToken },
+    });
+    expect(loggedOut.status).toBe(200);
+    expect(records()).toHaveLength(0);
+
+    const idle = await pair(host);
+    expect(records()).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect((await bootstrap(host, idle.cookie)).status).toBe(401);
+    expect(records()).toHaveLength(0);
+  });
+
+  it("keeps sign-ins when a listener stops and restores them when it starts again", async () => {
+    const revoked: string[] = [];
+    const { store, records } = memoryStore();
+    const host = await createHost({
+      sessionStore: store,
+      onSessionRevoked: (sessionId) => revoked.push(sessionId),
+    });
+    await pair(host);
+    await host.close();
+
+    // The stopped listener's sessions end here, with their handles, but stay stored.
+    expect(host.app.countSessions()).toBe(0);
+    expect(revoked).toHaveLength(1);
+    expect(records()).toHaveLength(1);
+
+    const again = host.app.mount({
+      audience: "test-browser",
+      listenerHost: "127.0.0.1",
+      getListenerPort: () => undefined,
+    });
+    expect(host.app.countSessions("test-browser")).toBe(1);
+    await again.close();
+    expect(records()).toHaveLength(1);
+  });
+
+  it("refuses a cookie that is not the one that was issued", async () => {
+    const { store, records } = memoryStore();
+    const first = await createHost({ sessionStore: store });
+    const session = await pair(first);
+    await first.close();
+    const second = await createHost({ sessionStore: store });
+
+    // The stored hash is not a credential, and neither is a guess.
+    const storedKey = records()[0].key;
+    expect((await bootstrap(second, `${session.cookieName}=${storedKey}`)).status).toBe(401);
+    const guess = `${session.cookie.slice(0, -1)}${session.cookie.endsWith("A") ? "B" : "A"}`;
+    expect((await bootstrap(second, guess)).status).toBe(401);
+    expect((await bootstrap(second, session.cookie)).status).toBe(200);
+  });
+
+  it("writes the last-used time at most once per interval, and once more when it stops", async () => {
+    const { store, writes, records } = memoryStore();
+    const host = await createHost({ sessionStore: store, sessionPersistIntervalMs: 60_000 });
+    const session = await pair(host);
+    const createdAt = records()[0].lastUsedAt;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    for (let index = 0; index < 5; index += 1) await bootstrap(host, session.cookie);
+    expect(writes.touch).toBe(0);
+    expect(records()[0].lastUsedAt).toBe(createdAt);
+
+    await host.close();
+    expect(writes.touch).toBe(1);
+    expect(records()[0].lastUsedAt).toBeGreaterThan(createdAt);
+
+    // With no interval, every use is written through.
+    const eager = await createHost({ sessionStore: store, sessionPersistIntervalMs: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    await bootstrap(eager, session.cookie);
+    expect(writes.touch).toBe(2);
+  });
+
+  it("keeps a sign-in for 30 days of disuse through the HTTPS address, not on this computer", async () => {
+    const now = Date.now();
+    const lifetime = { createdAt: now - 40 * DAY_MS, lastUsedAt: now - 20 * DAY_MS };
+    const remote = storedSignIn("remote", {
+      ...lifetime,
+      expiresAt: now + 50 * DAY_MS,
+      deployment: "https-proxy:https://browser.example",
+    });
+    const tooIdle = storedSignIn("tooidle", {
+      ...remote.record,
+      key: sha256("another-cookie"),
+      lastUsedAt: now - 31 * DAY_MS,
+    });
+    const local = storedSignIn("local", { ...lifetime, expiresAt: now + 50 * DAY_MS });
+    const { store, records } = memoryStore([remote.record, tooIdle.record, local.record]);
+
+    const proxied = await createHost({
+      sessionStore: store,
+      deployment: {
+        mode: "https-proxy",
+        publicOrigin: "https://browser.example",
+        trustedProxyAddresses: ["127.0.0.1"],
+      },
+    });
+    expect(proxied.app.countSessions()).toBe(1);
+    await proxied.close();
+
+    // The same age of sign-in is far past the limits of a host reached over loopback.
+    const loopback = await createHost({ sessionStore: store });
+    expect(loopback.app.countSessions()).toBe(0);
+    // And a sign-in made at another address is forgotten: the address change signs it out.
+    expect(records()).toEqual([]);
+  });
+
+  it("retries a sign-out the store did not record, and never restores it meanwhile", async () => {
+    const { store, records } = memoryStore();
+    let failRemovals = true;
+    const flaky: WebSessionStore = {
+      ...store,
+      remove(keys) {
+        if (failRemovals) throw new Error("database is locked");
+        store.remove(keys);
+      },
+      clear(audience) {
+        if (failRemovals) throw new Error("database is locked");
+        store.clear(audience);
+      },
+    };
+    const host = await createHost({ sessionStore: flaky });
+    const access: BrowserAppAccess = {
+      getApplication: () => host.app,
+      resolveListener: () => ({ origin: host.origin, audience: "test-browser" }),
+      offMessage: "off",
+      noListenerMessage: "no listener",
+    };
+    const session = await pair(host);
+    const loggedOut = await request(host, {
+      path: `${WEB_API_PATH}/session/logout`,
+      method: "POST",
+      headers: { Origin: host.origin, Cookie: session.cookie, "X-CoWork-CSRF": session.csrfToken },
+    });
+    expect(loggedOut.status).toBe(200);
+
+    // The write failed, so the record is still stored, but this host will not honour it.
+    expect(records()).toHaveLength(1);
+    expect(host.app.hasUnsavedSignOuts()).toBe(true);
+    await host.close();
+    const remounted = host.app.mount({
+      audience: "test-browser",
+      listenerHost: "127.0.0.1",
+      getListenerPort: () => undefined,
+    });
+    expect(host.app.countSessions()).toBe(0);
+
+    // Sign out all says so instead of reporting a sign-out that a restart could undo.
+    expect(() => signOutBrowserApp(access)).toThrow("could not save");
+    expect(records()).toHaveLength(1);
+
+    // Once the store works again, the next store call records every pending sign-out.
+    failRemovals = false;
+    expect(signOutBrowserApp(access)).toEqual({ signedOut: 0 });
+    expect(records()).toHaveLength(0);
+    expect(host.app.hasUnsavedSignOuts()).toBe(false);
+    await remounted.close();
+  });
+
+  it("still signs browsers in when the store fails, and logs no stored detail", async () => {
+    const log = vi.fn();
+    const failing: WebSessionStore = {
+      load: () => {
+        throw new Error("cannot read secret-detail");
+      },
+      add: () => {
+        throw new Error("cannot write secret-detail");
+      },
+      touch: () => {
+        throw new Error("cannot write secret-detail");
+      },
+      remove: () => {
+        throw new Error("cannot write secret-detail");
+      },
+      clear: () => {
+        throw new Error("cannot write secret-detail");
+      },
+    };
+    const host = await createHost({ sessionStore: failing, log, sessionPersistIntervalMs: 0 });
+    const session = await pair(host);
+    expect((await bootstrap(host, session.cookie)).status).toBe(200);
+    expect(host.app.revokeSessions()).toBe(1);
+    expect((await bootstrap(host, session.cookie)).status).toBe(401);
+
+    expect(log).toHaveBeenCalled();
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret-detail");
   });
 });

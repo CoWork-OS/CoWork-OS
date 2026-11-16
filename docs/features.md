@@ -1640,6 +1640,8 @@ A preview of the browser application now exists, without full desktop parity. Tu
 
 In the browser app, the tab title and icon show how many sessions wait on you, and opt-in **Browser notifications** (in the bell) alert you while you are in another tab and open the task when clicked. They need HTTPS or localhost and an open tab; see [When a task needs you](browser-preview.md#when-a-task-needs-you).
 
+A signed-in browser stays signed in across restarts: through the public HTTPS address for 30 days after its last use and 90 days at most, on this computer for 24 hours at most. **Sign out all browsers** in Settings > Web Access, or `cowork web sign-out`, ends every sign-in.
+
 ---
 
 ## WebSocket Control Plane

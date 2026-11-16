@@ -263,6 +263,7 @@ import {
   type BrowserAppAccess,
   type BrowserAppListener,
 } from "../host/services/browser-app-control";
+import { forgetStoredBrowserSessions } from "../host/services/browser-session-store";
 import {
   desktopBrowserAppDeployment,
   isDesktopBrowserAppEnabled,
@@ -495,6 +496,8 @@ async function attachBrowserWebApplicationNow(webAccessServer?: WebAccessServer)
     // Turning the app off or changing where browsers reach it ends every browser sign-in.
     if (browserWebApplication && (!enabled || deploymentKey !== browserWebDeploymentKey)) {
       const previous = browserWebApplication;
+      // A sign-out, not a pause: closing alone keeps sign-ins stored for the next start.
+      previous.revokeSessions();
       browserWebApplication = null;
       browserWebDeploymentKey = null;
       if (controlPlane) await setListenerBrowserApp(controlPlane, null);
@@ -502,7 +505,12 @@ async function attachBrowserWebApplicationNow(webAccessServer?: WebAccessServer)
       await previous.close();
     }
     browserWebApplicationError = undefined;
-    if (!enabled) return;
+    if (!enabled) {
+      // Off means signed out, also when it was turned off while the app was not running.
+      // Only with the saved settings in hand: the defaults used before they load say "off".
+      if (webAccess) forgetStoredBrowserSessions("electron");
+      return;
+    }
 
     if (!browserWebApplication) {
       // Loaded only when browser web access is enabled; most desktop runs never need them.

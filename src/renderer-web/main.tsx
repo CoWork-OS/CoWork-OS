@@ -1267,6 +1267,8 @@ function connectionLabel(connection: BrowserConnectionState): string {
       return "Reconnecting";
     case "reauth_required":
       return "Sign in again";
+    case "host_restarted":
+      return "Reloading";
     case "version_mismatch":
       return "Update required";
     case "closed":

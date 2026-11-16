@@ -364,6 +364,10 @@ export const WebAccessSettingsPanel: React.FC = () => {
                     )}
                     {actionError && <p role="alert">{actionError}</p>}
                     <p className="settings-hint">
+                      A browser stays signed in across restarts: for 30 days after its last use
+                      through the public HTTPS address, and up to 24 hours on this computer.
+                    </p>
+                    <p className="settings-hint">
                       From a terminal on this computer, <code>cowork web</code> opens it too.
                     </p>
                   </div>

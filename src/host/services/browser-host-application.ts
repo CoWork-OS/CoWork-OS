@@ -81,6 +81,7 @@ import { createBrowserQueueDefinitions } from "./browser-queue-methods";
 import { createBrowserDeviceDefinitions } from "./browser-device-methods";
 import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 import { createBrowserNotificationDefinitions } from "./browser-notification-methods";
+import { createHostBrowserSessionStore } from "./browser-session-store";
 import { createBrowserAttentionDefinitions } from "./browser-attention-methods";
 import type { AttentionSnapshot } from "../../shared/attention";
 import { createBrowserReportDefinitions } from "./browser-report-methods";
@@ -527,6 +528,8 @@ export function createBrowserHostApplication(
       desktop.revokeSession(sessionId);
       providerSignIn.revokeSession(sessionId);
     },
+    // Sign-ins outlive a host restart: only a hash of each cookie is kept, encrypted.
+    sessionStore: createHostBrowserSessionStore(),
     onClose: () => {
       workspaceFiles.dispose();
       browserArtifacts.dispose();

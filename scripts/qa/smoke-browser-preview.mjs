@@ -2602,8 +2602,9 @@ async function main() {
     );
     assert.equal(sideChatReplay.id, sideChat.id, "Side-chat replay created another task");
 
-    // A page refresh preserves the in-memory paired session. A process restart
-    // deliberately invalidates those cookies, so recovery continues after re-pairing.
+    // A page refresh keeps the paired session and its CSRF token. A process restart keeps
+    // the sign-in but nothing else: the restored session has a new CSRF token and belongs
+    // to a new host generation.
     const refreshedSession = await fetch(`${base}/api/web/v1/session/bootstrap`, {
       headers: { Cookie: cookie, Origin: base },
     });
@@ -2646,10 +2647,22 @@ async function main() {
     token = electronHost
       ? await waitForElectronReady(child, { base, port, profile })
       : await waitForReady(child);
-    const stalePrimarySession = await fetch(`${base}/api/web/v1/session/bootstrap`, {
+    const restoredPrimarySession = await fetch(`${base}/api/web/v1/session/bootstrap`, {
       headers: { Cookie: cookie, Origin: base },
     });
-    assert.equal(stalePrimarySession.status, 401, "Host restart should require a fresh browser pairing");
+    assert.equal(restoredPrimarySession.status, 200, "Host restart should keep the browser signed in");
+    const restoredPrimary = await restoredPrimarySession.json();
+    assert.notEqual(restoredPrimary.csrfToken, session.csrfToken, "Restart should issue a new CSRF token");
+    assert.notEqual(
+      restoredPrimary.host.generation,
+      session.host.generation,
+      "Restart should start a new host generation",
+    );
+    const staleCsrfTicket = await fetch(`${base}/api/web/v1/session/ws-ticket`, {
+      method: "POST",
+      headers: { Cookie: cookie, Origin: base, "X-CoWork-CSRF": session.csrfToken },
+    });
+    assert.equal(staleCsrfTicket.status, 403, "The CSRF token from before the restart must be refused");
     ({ cookie, session } = await pairBrowserSession({ base, port, token, manifest }));
     secondaryBrowserSession = await pairBrowserSession({ base, port, token, manifest });
 

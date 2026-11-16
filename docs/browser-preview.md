@@ -11,7 +11,14 @@ In the desktop app, turn it on in **Settings > Web Access**: enable Web Access, 
 
 A sign-in link is the app's address with a one-use pairing code in the fragment: `<origin>/app/#pair=<code>`. Browsers never send the fragment to the server, and the page removes it from the address bar before redeeming it. The code works once and expires after 90 seconds.
 
-**Sign out all browsers** in Settings, or `cowork web sign-out`, ends every browser session at once, and their sockets and terminals close with them. Turning the app off or changing its public address does the same. Browser sessions live in host memory, so restarting the host also signs browsers out; open a new link to sign in again.
+**Sign out all browsers** in Settings, or `cowork web sign-out`, ends every browser session at once, and their sockets and terminals close with them. Turning the app off or changing its public address does the same.
+
+A browser stays signed in across host restarts. How long depends on how it reaches the host:
+
+- **Through the public HTTPS address** (another device): signed out after 30 days without use, or 90 days after it signed in, whichever comes first.
+- **On this computer** (`http://127.0.0.1`): signed out after 30 minutes without use, or 24 hours after it signed in. Browsers send a cookie to every port of a host, so another local web server the browser visits is shown this one; a new link is one click away here.
+
+Open a new link to sign in again. The host keeps only a hash of each session cookie, in its encrypted settings, so a copy of that store cannot be used to sign in. Everything else ends with the host process: after a restart an open tab reloads itself once (and stops after three reloads in a minute, leaving a Retry button), and file, artifact and terminal handles from before the restart no longer work. Restarting only the Web Access or Control Plane listener keeps sign-ins too. If the host cannot save a sign-out, **Sign out all browsers** says so instead of reporting success; sign out again before restarting. Signing out all browsers also forgets the sign-ins of a headless daemon sharing the same profile.
 
 ## Other devices
 
@@ -74,7 +81,7 @@ Choosing a host folder uses a host folder picker in place of the native folder d
 
 ## Checking shared controls
 
-After rebuilding or restarting the host, reload `/app/`; a host restart requires a new pairing code. Use a disposable profile for testing changes.
+After rebuilding the host, reload `/app/`. A restarted host keeps browsers signed in, and an open tab reloads itself when it reconnects. Use a disposable profile for testing changes.
 
 1. Open Settings → AI & Models. Check the configured provider, choose a model, test its connection, and save. A real model task requires valid host credentials or a reachable local model.
 2. Open Notifications. Confirm host notices appear, use Mark all read, then Clear all. The browser only shows notices associated with readable workspaces.
@@ -87,7 +94,7 @@ After rebuilding or restarting the host, reload `/app/`; a host restart requires
 9. Open Personality, save the assistant name, leave the screen, and verify the name is retained. Open Devices and check that the fleet view loads; task controls require a saved, connected device.
 10. Open an authorized task, expand its side panel, and open the terminal. Type a harmless command, check output, reconnect, then test Stop, Close tab, and New tab. The terminal requires a task whose current access profile permits shell use; the host chooses the workspace-root directory.
 11. Open Settings → Skills. Check that Skill Store status loads, search the catalog, and open a result. Open Feature Packs → QA & Testing and confirm its Commands, Skills and Agents tabs show host-backed details. Disable the test pack, reload, check the saved state, then restore it. Repeat for an individual skill. Required or quarantined packs must respect their restrictions. Installation and import controls must explain their availability instead of failing silently.
-12. Open Settings → Automations → Task Queue. Note the original limits, change one value, save, and confirm the saved status. Reopen the tab and verify the value; restart the disposable host, pair again, and verify it remains saved. Restore the original limits and save. Load or save failures must appear in the page instead of showing defaults or a false success.
+12. Open Settings → Automations → Task Queue. Note the original limits, change one value, save, and confirm the saved status. Reopen the tab and verify the value; restart the disposable host, let the tab reload, and verify it remains saved. Restore the original limits and save. Load or save failures must appear in the page instead of showing defaults or a false success.
 13. Open Git Changes in a disposable Git-backed workspace. Stage one changed file, unstage it, stage it again, and commit with a message. Confirm unrelated unstaged files remain outside the commit. Refresh between actions; a stale revision must prompt a refresh, and retrying the same operation must not create a duplicate commit. Browser commits skip repository hooks.
 
 14. Open Settings → Memory in a disposable project. In What CoWork knows, add a fact, pin it, then delete it. In Settings, change Keep history for, leave and return to confirm the saved value, then restore it. Use Import → From another assistant to paste a disposable memory; confirm Import complete stays visible and the imported record persists after closing. Switch workspaces while data loads and verify only the selected workspace's settings appear. Workspace deletion controls should explain missing delete permission; a permission rejection must never appear as successful deletion.

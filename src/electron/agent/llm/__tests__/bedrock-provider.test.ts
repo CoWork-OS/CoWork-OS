@@ -522,4 +522,118 @@ describe("BedrockProvider usage", () => {
       cacheWriteTokens: 500,
     });
   });
+
+  // ---- Extended thinking (#610) ----------------------------------------------------
+
+  it("sends thinking through additionalModelRequestFields for Claude with an effort set", async () => {
+    const provider = new BedrockProvider({ ...config, anthropicReasoningEffort: "medium" });
+    await provider.createMessage({
+      model: config.model,
+      maxTokens: 1024,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(capturedConverseInput.additionalModelRequestFields).toBeDefined();
+    const fields = capturedConverseInput.additionalModelRequestFields;
+    // Budget-mode thinking arrives as { thinking: { type, budget_tokens } } with
+    // a positive budget; adaptive as { thinking: { type: "adaptive" } }.
+    expect(fields.thinking?.type).toMatch(/^(enabled|adaptive)$/);
+    if (fields.thinking?.type === "enabled") {
+      expect(fields.thinking.budget_tokens).toBeGreaterThan(0);
+    }
+    // The thinking budget is additive: maxTokens grows past the request's own.
+    expect(capturedConverseInput.inferenceConfig.maxTokens).toBeGreaterThan(1024);
+  });
+
+  it("sends no thinking fields for non-Claude Bedrock models", async () => {
+    const provider = new BedrockProvider({
+      ...config,
+      model: "us.amazon.nova-pro-v1",
+      anthropicReasoningEffort: "high",
+    });
+    await provider.createMessage({
+      model: "us.amazon.nova-pro-v1",
+      maxTokens: 1024,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(capturedConverseInput.additionalModelRequestFields).toBeUndefined();
+  });
+
+  it("maps Converse reasoningContent blocks to reasoning items and replays them on the next turn", async () => {
+    const provider = new BedrockProvider(config);
+    const send = (await (provider as Any).getRuntime()).client.send;
+    send.mockResolvedValueOnce({
+      output: {
+        message: {
+          content: [
+            { reasoningContent: { reasoningText: "thinking hard", signature: "sig-1" } },
+            { reasoningContent: { redactedContent: "opaque" } },
+            { text: "answer" },
+          ],
+        },
+      },
+      stopReason: "end_turn",
+      usage: {},
+    });
+    const first = await provider.createMessage({
+      model: config.model,
+      maxTokens: 1024,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(first.reasoning).toHaveLength(2);
+    expect(first.reasoning?.[0].format).toBe("anthropic");
+    expect(first.reasoning?.[0].model).toContain("claude");
+    const data = first.reasoning?.[0].data as Any;
+    expect(data.block).toEqual({ type: "thinking", thinking: "thinking hard", signature: "sig-1" });
+    const second = first.reasoning?.[1];
+    expect(second && (second.data as Any).block.type).toBe("redacted_thinking");
+
+    // Second turn replays the thinking blocks on the assistant message.
+    capturedConverseInput = null;
+    await provider.createMessage({
+      model: config.model,
+      maxTokens: 1024,
+      system: "system",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: [{ type: "text", text: "answer" }], reasoning: first.reasoning },
+        { role: "user", content: "again" },
+      ],
+    });
+    const sentBlocks = capturedConverseInput.messages[1].content;
+    expect(sentBlocks.some((b: Any) => b.reasoningContent)).toBe(true);
+  });
+
+  it("retries without thinking fields when the endpoint rejects them, and remembers per model", async () => {
+    const provider = new BedrockProvider({ ...config, anthropicReasoningEffort: "high" });
+    const send = (await (provider as Any).getRuntime()).client.send;
+    send
+      .mockRejectedValueOnce(
+        new Error("ValidationException: Unexpected field 'thinking' in additionalModelRequestFields"),
+      )
+      .mockResolvedValueOnce({
+        output: { message: { content: [{ text: "fallback ok" }] } },
+        stopReason: "end_turn",
+        usage: {},
+      });
+    const first = await provider.createMessage({
+      model: config.model,
+      maxTokens: 1024,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(first.content).toEqual([{ type: "text", text: "fallback ok" }]);
+    // Second call sends no thinking fields at all.
+    capturedConverseInput = null;
+    await provider.createMessage({
+      model: config.model,
+      maxTokens: 1024,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(capturedConverseInput.additionalModelRequestFields).toBeUndefined();
+    expect(send).toHaveBeenCalledTimes(3);
+  });
 });

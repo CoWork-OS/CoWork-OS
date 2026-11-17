@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 import type { WebRequestContext } from "../../web/WebApplication";
 const mailbox = vi.hoisted(() => ({
+  listThreads: vi.fn(async () => []),
   getThread: vi.fn(async () => ({
     id: "thread",
     attachments: [{ name: "report.txt", localPath: "/private/report.txt" }],
@@ -49,6 +50,16 @@ const context = {
 } as WebRequestContext;
 
 describe("browser mailbox adapter", () => {
+  it("forwards the Work topic to the same mailbox query as desktop", async () => {
+    const service = new BrowserDesktopRpcService(
+      createBrowserMailboxDefinitions({} as Database.Database).definitions,
+    );
+    const method = service.methods()["desktop.listMailboxThreads"];
+    const query = { domainCategory: "work", limit: 40 };
+    await method.handler(context, method.validateParams!({ args: [query] }));
+    expect(mailbox.listThreads).toHaveBeenCalledWith(query);
+  });
+
   it("returns attachment metadata without exposing host file paths", async () => {
     const service = new BrowserDesktopRpcService(
       createBrowserMailboxDefinitions({} as Database.Database).definitions,

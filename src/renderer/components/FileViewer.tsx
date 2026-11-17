@@ -16,6 +16,7 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { FileViewerResult } from "../../electron/preload";
+import { buildFileViewerMarkdownComponents } from "./file-viewer-markdown";
 
 if (!hljs.getLanguage("typescript")) {
   hljs.registerLanguage("bash", bash);
@@ -266,7 +267,9 @@ function JsonNode({ value, name, depth, defaultOpen }: JsonNodeProps) {
   );
 }
 
-export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps) {
+export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }: FileViewerProps) {
+  const [fileHistory, setFileHistory] = useState([initialFilePath]);
+  const filePath = fileHistory[fileHistory.length - 1];
   const [loading, setLoading] = useState(true);
   const [fileData, setFileData] = useState<FileViewerData | null>(null);
   const [videoPlaybackUrl, setVideoPlaybackUrl] = useState<string | null>(null);
@@ -280,28 +283,50 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   const agentContext = useAgentContext();
   const copyTimerRef = useRef<number | null>(null);
 
-  // Load file on mount
   useEffect(() => {
+    setFileHistory([initialFilePath]);
+  }, [initialFilePath, workspacePath]);
+
+  // Ignore stale reads when navigating quickly or closing the viewer.
+  useEffect(() => {
+    let cancelled = false;
     const loadFile = async () => {
       setLoading(true);
+      setFileData(null);
       setError(null);
       try {
         const result = await window.electronAPI.readFileForViewer(filePath, workspacePath, {
           includePdfBase64: true,
         });
+        if (cancelled) return;
         if (result.success && result.data) {
           setFileData(result.data);
         } else {
           setError(result.error || "Failed to load file");
         }
       } catch (err: Any) {
-        setError(err.message || "Failed to load file");
+        if (!cancelled) setError(err.message || "Failed to load file");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     loadFile();
+    return () => {
+      cancelled = true;
+    };
   }, [filePath, workspacePath]);
+
+  const markdownComponents = useMemo(
+    () =>
+      buildFileViewerMarkdownComponents({
+        filePath: fileData?.path || filePath,
+        onOpenFile: (target) => setFileHistory((history) => [...history, target]),
+        onOpenExternal: (url) => window.electronAPI.openExternal(url),
+        onError: (cause) =>
+          setError(cause instanceof Error ? cause.message : "Could not open this link."),
+      }),
+    [fileData?.path, filePath],
+  );
 
   // Images render in ImageLightbox, which handles its own keyboard shortcuts.
   const showImageLightbox =
@@ -530,7 +555,9 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
       case "markdown":
         return (
           <div className="file-viewer-markdown markdown-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{fileData.content || ""}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {fileData.content || ""}
+            </ReactMarkdown>
           </div>
         );
 
@@ -895,6 +922,15 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
             </div>
           </div>
           <div className="file-viewer-actions">
+            {fileHistory.length > 1 && (
+              <button
+                className="file-viewer-action-btn"
+                onClick={() => setFileHistory((history) => history.slice(0, -1))}
+                aria-label="Back to previous file"
+              >
+                Back
+              </button>
+            )}
             {showJsonRawToggle && (
               <button
                 className={`file-viewer-action-btn ${jsonRaw ? "is-active" : ""}`}

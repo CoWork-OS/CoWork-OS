@@ -415,8 +415,7 @@ export function ConnectorProfileView({
                 </p>
               )}
               <p className="cm-profile-trust-warning">
-                Only use connectors from developers you trust. Anthropic does not control these
-                tools.
+                Only use connectors from developers you trust.
               </p>
             </div>
           )}

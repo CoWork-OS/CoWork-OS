@@ -49,10 +49,10 @@ import {
   MailboxAutomationRecord,
   MailboxClientState,
   MailboxCommitment,
-  MailboxDomainCategory,
   MailboxForwardRecipe,
   MailboxDigestSnapshot,
   MailboxConditionOperator,
+  type MailboxListThreadsInput,
   MailboxMissionControlHandoffPreview,
   MailboxMissionControlHandoffRecord,
   MailboxPriorityBand,
@@ -126,7 +126,7 @@ function latestMailboxAskStepEvents(events: MailboxAskRunEvent[]): MailboxAskRun
 
 type FocusFilter = "unread" | "needsReply" | "queue" | "commitments" | null;
 type ThreadMailboxView = MailboxThreadMailboxView;
-type DomainFilter = MailboxDomainCategory | "all" | "work";
+type DomainFilter = NonNullable<MailboxListThreadsInput["domainCategory"]>;
 type AskInboxRun = {
   runId: string;
   query: string;
@@ -1000,19 +1000,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       "threads",
       () => JSON.stringify(filtersRef.current) === filterKey,
     );
-    const workDomains: MailboxDomainCategory[] = [
-      "customer",
-      "hiring",
-      "approvals",
-      "ops",
-      "finance",
-    ];
     const list = await window.electronAPI.listMailboxThreads({
       accountId: nextAccountId !== ALL_MAILBOX_ACCOUNTS_FILTER ? nextAccountId : undefined,
       query: expectedFilters.query,
       category: expectedFilters.category,
-      domainCategory:
-        nextDomainFilter !== "all" && nextDomainFilter !== "work" ? nextDomainFilter : undefined,
+      domainCategory: nextDomainFilter,
       mailboxView: nextMailboxView,
       unreadOnly: nextFocus === "unread" ? true : undefined,
       needsReply: nextFocus === "needsReply" ? true : undefined,
@@ -1023,15 +1015,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
     if (!isCurrent()) return;
     setThreadListAtLimit(list.length === 40);
-    const filteredList =
-      nextDomainFilter === "work"
-        ? list.filter((thread) => workDomains.includes(thread.domainCategory))
-        : list;
     if (nextFocus !== "unread" && unreadFilterRetainedThreadRef.current) {
       setUnreadFilterRetainedThread(null);
     }
     const nextThreads = retainSelectedThreadInUnreadList(
-      filteredList,
+      list,
       unreadFilterRetainedThreadRef.current,
       selectedThreadIdRef.current,
       nextFocus,

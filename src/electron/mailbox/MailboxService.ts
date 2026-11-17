@@ -4875,7 +4875,9 @@ export class MailboxService {
       conditions.push("todayBucket");
       values.push(input.todayBucket);
     }
-    if (input.domainCategory && input.domainCategory !== "all") {
+    if (input.domainCategory === "work") {
+      conditions.push("workDomains");
+    } else if (input.domainCategory && input.domainCategory !== "all") {
       conditions.push("domainCategory");
       values.push(input.domainCategory);
     }

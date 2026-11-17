@@ -70,7 +70,7 @@ function setup(options: { maxLiveViews?: number; driving?: boolean } = {}) {
     getWindow: () => window,
     WebContentsView: FakeView as Any,
     prepareSession: vi.fn(() => session),
-    attachGuest: vi.fn(() => calls.push("attach")),
+    attachGuest: vi.fn((_contents: Any) => calls.push("attach")),
     register: vi.fn(async () => {
       calls.push("register");
     }),
@@ -89,6 +89,26 @@ function setup(options: { maxLiveViews?: number; driving?: boolean } = {}) {
 }
 
 describe("BrowserTabViewHost", () => {
+  it("keeps a tab usable when pinch-zoom setup rejects after its render frame is replaced", async () => {
+    const { host, deps, key, open } = setup();
+    const zoomSetup = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("Render frame was disposed before WebFrameMain could be accessed"),
+      );
+    deps.attachGuest.mockImplementationOnce((contents) => {
+      contents.setVisualZoomLevelLimits = zoomSetup;
+      return 0;
+    });
+
+    const state = await open("a");
+    // Let rejected native promises settle; Vitest also fails on unhandled rejections.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(zoomSetup).toHaveBeenCalledWith(1, 3);
+    expect(state.reused).toBe(false);
+    expect(host.load(key("a"), "https://example.com/")).toBe(true);
+  });
+
   it("registers and guards a view before anything loads, then reattaches it", async () => {
     const { host, children, calls, key, open } = setup();
     const state = await open("a");

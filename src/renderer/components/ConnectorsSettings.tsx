@@ -1179,7 +1179,11 @@ export function ConnectorsSettings({
   }
 
   const connectedCount = connectorRows.filter((r) => r.status?.status === "connected").length;
-  const availableCount = connectorRows.filter((r) => r.status?.status !== "connected").length;
+  // Native setup entries are also shown in All and Available, so include them
+  // in those catalog totals alongside the MCP connectors.
+  const allCount = connectorRows.length + INTEGRATIONS.length;
+  const availableCount =
+    connectorRows.filter((r) => r.status?.status !== "connected").length + INTEGRATIONS.length;
   const normalizedSearchQuery = normalizeConnectorSearch(searchQuery);
 
   const filteredRows = connectorRows
@@ -1223,7 +1227,7 @@ export function ConnectorsSettings({
         <div className="cm-filter-tabs" role="tablist">
           {(
             [
-              { key: "all", label: "All", count: connectorRows.length },
+              { key: "all", label: "All", count: allCount },
               { key: "connected", label: "Connected", count: connectedCount },
               { key: "available", label: "Available", count: availableCount },
             ] as const

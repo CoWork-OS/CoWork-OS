@@ -7,6 +7,10 @@ import { UsageInsightsService } from "../../electron/reports/UsageInsightsServic
 import type { Workspace } from "../../shared/types";
 import type { BrowserDesktopDefinitions } from "./browser-desktop-rpc";
 import { WebApplicationError } from "../web/WebApplication";
+import {
+  parseUsageInsightsDateRange,
+  type UsageInsightsDateRange,
+} from "../../shared/usageInsightsDates";
 
 const WORKSPACE_ID = z.string().trim().min(1).max(128);
 const PERIOD_DAYS = z.number().finite().optional();
@@ -49,16 +53,22 @@ export function createBrowserReportDefinitions({
     getUsageInsights: {
       capability: "tasks.read",
       minArgs: 1,
-      maxArgs: 2,
+      maxArgs: 3,
       validate: (args) => {
         const workspaceId = WORKSPACE_ID.safeParse(args[0]);
         const periodDays = PERIOD_DAYS.safeParse(args[1]);
         if (!workspaceId.success || !periodDays.success) {
           throw new WebApplicationError("INVALID_REQUEST", "Invalid report request.", 400);
         }
-        return [workspaceId.data, periodDays.data];
+        let range: UsageInsightsDateRange | undefined;
+        try {
+          range = parseUsageInsightsDateRange(args[2]);
+        } catch {
+          throw new WebApplicationError("INVALID_REQUEST", "Invalid report date range.", 400);
+        }
+        return [workspaceId.data, periodDays.data, range];
       },
-      handler: async ([rawWorkspaceId, rawPeriodDays]) => {
+      handler: async ([rawWorkspaceId, rawPeriodDays, rawRange]) => {
         const workspaceId = await requireReportScope(rawWorkspaceId as string);
         const periodDays = Math.min(
           Math.max(Math.round((rawPeriodDays as number | undefined) ?? 7), 1),
@@ -66,9 +76,10 @@ export function createBrowserReportDefinitions({
         );
         const service = new UsageInsightsService(db);
         const reader = await getReportingReader();
+        const range = rawRange as UsageInsightsDateRange | undefined;
         return reader
-          ? service.generateInReader(reader, workspaceId, periodDays)
-          : service.generate(workspaceId, periodDays);
+          ? service.generateInReader(reader, workspaceId, periodDays, { range })
+          : service.generate(workspaceId, periodDays, range);
       },
     },
     getUsageInsightsEarliest: {

@@ -146,6 +146,99 @@ function defaultMockDb(overrides: {
 }
 
 describe("UsageInsightsService", () => {
+  it.each(["raw", "fast", "duringBackfill"] as const)(
+    "honors historical boundaries with the %s report plan",
+    (kind) => {
+      const service = new UsageInsightsService(defaultMockDb({}) as never);
+      const range = {
+        startMs: new Date(2026, 10, 10, 0, 0, 0, 0).getTime(),
+        endMs: new Date(2026, 10, 11, 23, 59, 59, 999).getTime(),
+      };
+      const plan =
+        kind === "duringBackfill"
+          ? {
+              kind,
+              watermarks: {
+                taskWatermarkMs: range.endMs,
+                eventWatermarkMs: range.endMs,
+                llmWatermarkMs: range.endMs,
+              },
+            }
+          : kind === "raw"
+            ? { kind, canonical: false }
+            : { kind };
+      const report = service.generateWithPlan("ws-1", 2, plan, Date.now(), range);
+      expect(report.periodStart).toBe(range.startMs);
+      expect(report.periodEnd).toBe(range.endMs);
+      expect(report.requestsByDay.map((row) => row.dateKey)).toEqual(["2026-11-10", "2026-11-11"]);
+    },
+  );
+
+  it("preserves the explicit range when using the reporting reader", async () => {
+    const service = new UsageInsightsService(defaultMockDb({}) as never);
+    const execute = vi.fn(async () => ({}));
+    const range = { startMs: 1_000, endMs: 2_000 };
+    await service.generateInReader({ execute } as never, "ws-1", 1, { range });
+    expect(execute).toHaveBeenCalledWith(
+      "usage.generateReport",
+      expect.objectContaining({ range }),
+      expect.anything(),
+    );
+  });
+
+  it.each([false, true])(
+    "keeps equal-length historical ranges separate in the cache (reader: %s)",
+    async (useReader) => {
+      const db = defaultMockDb({});
+      const service = new UsageInsightsService(db as never);
+      const cache = new Map();
+      const projector = {
+        isForDatabase: (candidate: unknown) => candidate === db,
+        warm: vi.fn(),
+        flushPendingRefreshesAsync: async () => {},
+        isBackfillComplete: () => true,
+        getCacheVersion: () => 1,
+        getCachedReport: (key: string) => cache.get(key),
+        setCachedReport: (key: string, value: unknown) => cache.set(key, value),
+      };
+      const spy = vi
+        .spyOn(UsageInsightsProjector, "getIfInitialized")
+        .mockReturnValue(projector as never);
+      const execute = vi.fn(async (_command, args) =>
+        service.generateWithPlan(
+          args.workspaceId,
+          args.periodDays,
+          args.plan,
+          Date.now(),
+          args.range,
+        ),
+      );
+      const first = {
+        startMs: new Date(2026, 10, 10).getTime(),
+        endMs: new Date(2026, 10, 10, 23, 59, 59, 999).getTime(),
+      };
+      const second = {
+        startMs: new Date(2026, 10, 11).getTime(),
+        endMs: new Date(2026, 10, 11, 23, 59, 59, 999).getTime(),
+      };
+      const generate = (range: typeof first) =>
+        useReader
+          ? service.generateInReader({ execute } as never, "ws-1", 1, { range })
+          : service.generate("ws-1", 1, range);
+      try {
+        const a = await generate(first);
+        const b = await generate(second);
+        expect(a.periodStart).toBe(first.startMs);
+        expect(b.periodStart).toBe(second.startMs);
+        expect(await generate(first)).toBe(a);
+        expect(cache.size).toBe(2);
+        if (useReader) expect(execute).toHaveBeenCalledTimes(2);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+
   afterEach(async () => {
     await UsageInsightsProjector.shutdown();
     (UsageInsightsProjector as unknown as { instance: unknown }).instance = null;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Globe2, Trash2 } from "lucide-react";
 import type {
   BrowserAgentPermission,
@@ -93,11 +93,21 @@ function SelectField<T extends string>({
   options: Array<{ value: T; label: string }>;
   onChange: (value: T) => void;
 }) {
+  const id = useId();
   return (
     <div className="settings-field">
-      <label>{label}</label>
-      {description && <p className="settings-description">{description}</p>}
-      <select value={value} onChange={(event) => onChange(event.target.value as T)}>
+      <label htmlFor={id}>{label}</label>
+      {description && (
+        <p className="settings-description" id={`${id}-description`}>
+          {description}
+        </p>
+      )}
+      <select
+        id={id}
+        aria-describedby={description ? `${id}-description` : undefined}
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+      >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -125,7 +135,14 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
   const [profileId, setProfileId] = useState(workspaceId || "");
   const [historyQuery, setHistoryQuery] = useState("");
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const [historyResult, setHistoryResult] = useState<{
+    key: string;
+    entries: HistoryEntry[] | null;
+  }>();
+  const query = historyQuery.trim();
+  const historyKey = JSON.stringify([profileId, query, historyRevision]);
+  const history = historyResult?.key === historyKey ? historyResult.entries : undefined;
   const [permissions, setPermissions] = useState<BrowserSitePermissionEntry[]>([]);
   const [notice, setNotice] = useState("");
 
@@ -145,17 +162,28 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
       .catch(() => undefined);
   }, []);
 
-  const loadHistory = useCallback(async () => {
+  useEffect(() => {
     if (!profileId) return;
-    const entries = await window.electronAPI
-      .listBrowserHistory?.({
-        workspaceId: profileId,
-        limit: 100,
-        query: historyQuery || undefined,
-      })
-      .catch(() => []);
-    setHistory((entries || []) as HistoryEntry[]);
-  }, [historyQuery, profileId]);
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      let entries: HistoryEntry[] | null = null;
+      try {
+        entries =
+          (await window.electronAPI.listBrowserHistory?.({
+            workspaceId: profileId,
+            limit: 100,
+            query: query || undefined,
+          })) ?? null;
+      } catch {
+        // Keep load failures distinct from an empty history.
+      }
+      if (!cancelled) setHistoryResult({ key: historyKey, entries });
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [historyKey, profileId, query]);
 
   const loadPermissions = useCallback(async () => {
     if (!profileId) return;
@@ -164,11 +192,6 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
       .catch(() => []);
     setPermissions(entries || []);
   }, [profileId]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadHistory(), 150);
-    return () => window.clearTimeout(timer);
-  }, [loadHistory]);
 
   useEffect(() => {
     void loadPermissions();
@@ -332,18 +355,33 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
                 if (!window.confirm("Clear all browsing history for this workspace?")) return;
                 void window.electronAPI
                   .clearBrowserHistory?.({ workspaceId: profileId })
-                  .then(() => {
+                  .then(({ success }) => {
+                    if (!success) throw new Error("Browsing history was not cleared.");
                     showNotice("History cleared");
-                    void loadHistory();
-                  });
+                    setHistoryRevision((revision) => revision + 1);
+                  })
+                  .catch(() => showNotice("Could not clear browsing history."));
               }}
             >
               Clear history
             </button>
           </div>
-          <ul className="browser-settings-list">
-            {history.length === 0 && <li className="browser-settings-empty">No pages yet.</li>}
-            {history.map((entry) => (
+          <ul
+            className="browser-settings-list"
+            aria-busy={Boolean(profileId && history === undefined)}
+          >
+            {!history?.length && (
+              <li className="browser-settings-empty">
+                {history === null
+                  ? "Could not load browsing history."
+                  : history === undefined && profileId
+                    ? "Loading browsing history…"
+                    : query
+                      ? "No matching pages."
+                      : "No pages yet."}
+              </li>
+            )}
+            {history?.map((entry) => (
               <li key={entry.id}>
                 <span className="browser-settings-list-main" title={entry.url}>
                   <strong>{entry.title || entry.url}</strong>
@@ -358,7 +396,11 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
                   onClick={() =>
                     void window.electronAPI
                       .removeBrowserHistory?.({ workspaceId: profileId, ids: [entry.id] })
-                      .then(() => void loadHistory())
+                      .then(({ success }) => {
+                        if (!success) throw new Error("Browsing history entry was not removed.");
+                        setHistoryRevision((revision) => revision + 1);
+                      })
+                      .catch(() => showNotice("Could not remove the page from browsing history."))
                   }
                 >
                   <Trash2 size={13} aria-hidden="true" />

@@ -12,6 +12,10 @@ import {
 } from "recharts";
 import { messageFeedbackReasonLabel } from "../../shared/message-feedback-reasons";
 import type { Workspace } from "../../shared/types";
+import {
+  usageInsightsDayCount,
+  usageInsightsRangeFromDates,
+} from "../../shared/usageInsightsDates";
 import { formatUsageCount } from "./usageInsightsFormatting";
 import { UsageInsightsLlmSection } from "./UsageInsightsLlmSection";
 import { UsageInsightsOverview } from "./UsageInsightsOverview";
@@ -284,11 +288,6 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function daysBetween(start: string, end: string): number {
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  return Math.max(1, Math.round(ms / 86_400_000));
-}
-
 function isValidWorkspaceId(id: string | undefined): id is string {
   return !!id && (id === ALL_WORKSPACES || !id.startsWith("__temp_workspace__"));
 }
@@ -320,10 +319,18 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const requestSeqRef = useRef(0);
   const overviewRequestSeqRef = useRef(0);
 
-  const periodDays = useMemo(
-    () => (selectedPreset === "custom" ? daysBetween(customStart, customEnd) : selectedPreset),
-    [selectedPreset, customStart, customEnd],
+  const customRange = useMemo(
+    () => usageInsightsRangeFromDates(customStart, customEnd),
+    [customStart, customEnd],
   );
+  const range = selectedPreset === "custom" ? customRange : undefined;
+  const invalidCustomRange = selectedPreset === "custom" && !customRange;
+  const periodDays =
+    selectedPreset === "custom"
+      ? customRange
+        ? usageInsightsDayCount(customRange)
+        : 1
+      : selectedPreset;
 
   const visiblePresets = useMemo(
     () => getVisibleUsageInsightsPeriodPresets(dataAgeDays),
@@ -365,7 +372,11 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const load = useCallback(async () => {
     if (!isValidWorkspaceId(workspaceId)) return;
     const requestId = ++requestSeqRef.current;
-    const cacheKey = `${workspaceId}|${periodDays}`;
+    if (invalidCustomRange) {
+      setLoading(false);
+      return;
+    }
+    const cacheKey = `${workspaceId}|${periodDays}|${range?.startMs ?? ""}|${range?.endMs ?? ""}`;
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
       setData(cached);
@@ -373,7 +384,11 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     setLoading(!cached);
     setError(null);
     try {
-      const result = await window.electronAPI.getUsageInsights(workspaceId, periodDays);
+      const result = await window.electronAPI.getUsageInsights(
+        workspaceId,
+        periodDays,
+        range ?? undefined,
+      );
       cacheRef.current.set(cacheKey, result);
       if (requestSeqRef.current !== requestId) return;
       setData(result);
@@ -385,7 +400,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
         setLoading(false);
       }
     }
-  }, [workspaceId, periodDays]);
+  }, [workspaceId, periodDays, range, invalidCustomRange]);
 
   const loadOverview = useCallback(async () => {
     if (!isValidWorkspaceId(workspaceId)) return;
@@ -720,10 +735,14 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                         <button
                           type="button"
                           className="insights-period-btn active insights-custom-picker-apply"
+                          disabled={invalidCustomRange}
                           onClick={() => setShowCustomPicker(false)}
                         >
                           Apply
                         </button>
+                        {invalidCustomRange && (
+                          <p role="alert">Choose valid dates covering at most 365 days.</p>
+                        )}
                       </div>
                     )}
                   </div>

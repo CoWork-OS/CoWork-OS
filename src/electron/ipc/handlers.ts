@@ -112,6 +112,7 @@ import mime from "mime-types";
 import { z } from "zod";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { resolveImageOcrChars, runOcrFromImagePath, shouldRunImageOcr } from "./image-viewer-ocr";
+import { parseUsageInsightsDateRange } from "../../shared/usageInsightsDates";
 import { resolveRealPathWithinWorkspace } from "./viewer-path-security";
 import { buildWebPagePreviewFromPath } from "../utils/web-preview";
 import {
@@ -10469,21 +10470,23 @@ export async function setupIpcHandlers(
   // Usage Insights
   ipcMain.handle(
     IPC_CHANNELS.USAGE_INSIGHTS_GET,
-    async (_, workspaceId: string, periodDays?: number) => {
+    async (_, workspaceId: string, periodDays?: number, rawRange?: unknown) => {
       checkRateLimit(IPC_CHANNELS.USAGE_INSIGHTS_GET);
       // Allow "__all__" sentinel for cross-workspace aggregation
       const validatedWorkspaceId =
         workspaceId === "__all__" ? null : validateInput(UUIDSchema, workspaceId, "workspace ID");
       // Clamp period to a reasonable range to prevent excessive DB scans
       const clampedPeriod = Math.min(Math.max(Math.round(periodDays ?? 7), 1), 365);
+      const range = parseUsageInsightsDateRange(rawRange);
       const { UsageInsightsService } = await import("../reports/UsageInsightsService");
       const service = new UsageInsightsService(db);
       // DB4: with the reporting reader the scans run off the main thread; a reader
       // failure rejects this call rather than returning an empty or host-computed report.
       const { getReportingReader } = await import("../database/async/runtime");
       const reader = await getReportingReader();
-      if (reader) return service.generateInReader(reader, validatedWorkspaceId, clampedPeriod);
-      return service.generate(validatedWorkspaceId, clampedPeriod);
+      if (reader)
+        return service.generateInReader(reader, validatedWorkspaceId, clampedPeriod, { range });
+      return service.generate(validatedWorkspaceId, clampedPeriod, range);
     },
   );
 

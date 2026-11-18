@@ -13,6 +13,7 @@ export const ANTHROPIC_TURN_CONTEXT_BETA = "mid-conversation-system-clear-at-202
 // Exact documented families, not a version >= check: Sonnet 5 lacks this feature.
 // https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages
 const SUPPORTED_MODELS = new Set([
+  "claude-fable-5-2",
   "claude-fable-5-1",
   "claude-mythos-5-1",
   "claude-fable-5",

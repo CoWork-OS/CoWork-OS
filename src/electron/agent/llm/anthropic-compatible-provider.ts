@@ -21,6 +21,8 @@ import {
   normalizeSystemBlocks,
 } from "./prompt-cache";
 import { isOpenCodeGoBaseUrl, normalizeOpenCodeGoModelId } from "./opencode-go-routing";
+import { isFable52Model } from "../../../shared/anthropic-model-capabilities";
+import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";
 import { ensureNoTrailingAssistantPrefill } from "./assistant-prefill";
 import {
   anthropicReasoningFromResponse,
@@ -248,16 +250,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       const model = this.normalizeModelForEndpoint(this.defaultModel);
       const response = await (this.diagnosticFetch ?? fetch)(this.messagesUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-version": ANTHROPIC_VERSION,
-          ...(this.apiKey
-            ? {
-                "x-api-key": this.apiKey,
-                Authorization: `Bearer ${this.apiKey}`,
-              }
-            : {}),
-        },
+        headers: this.getMessageHeaders(),
         body: JSON.stringify({
           model,
           max_tokens: 10,
@@ -281,6 +274,22 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         error: error.message || `Failed to connect to ${this.providerName} API`,
       };
     }
+  }
+
+  private getMessageHeaders(usesTurnContext = false): Record<string, string> {
+    const isOpenRouter = this.type === "openrouter";
+    return {
+      "Content-Type": "application/json",
+      "anthropic-version": ANTHROPIC_VERSION,
+      ...(isOpenRouter ? getOpenRouterAttributionHeaders() : {}),
+      ...(usesTurnContext ? { "anthropic-beta": ANTHROPIC_TURN_CONTEXT_BETA } : {}),
+      ...(this.apiKey
+        ? {
+            ...(!isOpenRouter ? { "x-api-key": this.apiKey } : {}),
+            Authorization: `Bearer ${this.apiKey}`,
+          }
+        : {}),
+    };
   }
 
   async getAvailableModels(): Promise<Array<{ id: string; name: string }>> {
@@ -413,11 +422,18 @@ export class AnthropicCompatibleProvider implements LLMProvider {
           args.request.promptCache?.mode === "anthropic_explicit") &&
         !this.turnContextRejectedModels.has(args.model),
     });
+    const effort = args.request.reasoningEffort || this.reasoningEffort;
+    const foundryEffort =
+      this.type === "azure-anthropic" &&
+      isFable52Model(args.model) &&
+      (effort === "max" || effort === "ultra" || effort === "extra_high")
+        ? "xhigh"
+        : effort;
     let plan = args.thinking.sendConfig
       ? planAnthropicThinking({
           model: args.model,
           maxTokens: args.request.maxTokens,
-          effort: args.request.reasoningEffort || this.reasoningEffort,
+          effort: foundryEffort,
         })
       : { maxTokens: args.request.maxTokens };
     if (plan.thinking?.type === "enabled" && !trailingToolTurnStartsWithThinking(replay.messages)) {
@@ -429,25 +445,22 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     }
     const usedThinking = replay.replayedBlocks > 0 || Boolean(plan.thinking || plan.outputConfig);
     const messages = this.buildMessagesPayload(replay.messages, args.promptCache);
+    const isOpenRouter = this.type === "openrouter";
     const response = await fetch(this.messagesUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": ANTHROPIC_VERSION,
-        ...(replay.usesTurnContext ? { "anthropic-beta": ANTHROPIC_TURN_CONTEXT_BETA } : {}),
-        ...(this.apiKey
-          ? {
-              "x-api-key": this.apiKey,
-              Authorization: `Bearer ${this.apiKey}`,
-            }
-          : {}),
-      },
+      headers: this.getMessageHeaders(replay.usesTurnContext),
       body: JSON.stringify({
         model: args.model,
         max_tokens: plan.maxTokens,
         system: this.buildSystemPayload(replay.systemRequest, args.promptCache),
         messages,
         ...(args.tools && { tools: args.tools }),
+        ...(args.tools?.length && args.request.toolChoice === "none" && isFable52Model(args.model)
+          ? { tool_choice: { type: "none" } }
+          : {}),
+        ...(isOpenRouter && args.promptCache?.cacheKey
+          ? { session_id: args.promptCache.cacheKey }
+          : {}),
         ...(plan.thinking && { thinking: plan.thinking }),
         ...(plan.outputConfig && { output_config: plan.outputConfig }),
         ...(args.promptCache?.mode === "anthropic_auto"

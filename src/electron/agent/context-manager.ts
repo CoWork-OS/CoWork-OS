@@ -6,6 +6,7 @@ import {
 } from "./llm";
 import { estimateImageTokens } from "./llm/image-utils";
 import { getModelContextWindow } from "../../shared/model-metadata";
+import { isGpt62Model } from "../../shared/llm-provider-catalog";
 import { PINNED_CONTEXT_OPEN_TAGS } from "./pinned-context-blocks";
 import {
   OMITTED_ITEMS_NOTICE_RE,
@@ -108,7 +109,7 @@ function inferModelLimit(modelKey: string): number | null {
   const key = modelKey.toLowerCase().trim();
   if (!key) return null;
 
-  if (/gpt-6(?:\.1)?-(?:astra|sol|terra|luna)/.test(key)) return 1_050_000;
+  if (/gpt-6(?:\.[12])?-(?:astra|sol|terra|luna)/.test(key)) return 1_050_000;
 
   // Claude first: the catalogue lists Sonnet 4.5's beta 1M window, which CoWork does not enable.
   const claudeLimit = inferClaudeLimit(key);
@@ -1084,6 +1085,7 @@ export function getTokenizerInflation(modelKey: string): number {
 export class ContextManager {
   private modelKey: string;
   private maxTokens: number;
+  private maxInputTokens: number;
   private tokenizerInflation: number;
   private contextWindowLimit?: () => number | undefined;
 
@@ -1097,6 +1099,8 @@ export class ContextManager {
   ) {
     this.modelKey = modelKey;
     this.maxTokens = MODEL_LIMITS[modelKey] || inferModelLimit(modelKey) || MODEL_LIMITS.default;
+    // GPT-6.2 publishes distinct context and input limits.
+    this.maxInputTokens = isGpt62Model(modelKey) ? 922_000 : Infinity;
     this.tokenizerInflation = getTokenizerInflation(modelKey);
     this.contextWindowLimit = opts?.contextWindowLimit;
   }
@@ -1114,9 +1118,10 @@ export class ContextManager {
    */
   getAvailableTokens(systemPromptTokens: number = 0): number {
     return (
-      Math.floor(this.getContextWindowTokens() / this.tokenizerInflation) -
-      RESERVED_TOKENS -
-      systemPromptTokens
+      Math.min(
+        Math.floor(this.getContextWindowTokens() / this.tokenizerInflation) - RESERVED_TOKENS,
+        Math.floor(this.maxInputTokens / this.tokenizerInflation),
+      ) - systemPromptTokens
     );
   }
 

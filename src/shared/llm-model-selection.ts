@@ -1,7 +1,9 @@
 import {
   getAnthropicDefaultReasoningEffort,
   getAnthropicReasoningEffortOptions,
+  isFable52Model,
 } from "./anthropic-model-capabilities";
+import { isGpt62Model } from "./llm-provider-catalog";
 import type { LLMModelInfo, LLMProviderType, LLMReasoningEffort } from "./types";
 
 export const LLM_REASONING_EFFORT_OPTIONS: Array<{
@@ -68,7 +70,17 @@ export function getLlmModelReasoningEfforts(
   if (!providerType || !modelKey?.trim()) return [];
 
   if (isAnthropicThinkingProvider(providerType)) {
-    return getAnthropicReasoningEffortOptions(modelKey);
+    const efforts = getAnthropicReasoningEffortOptions(modelKey);
+    return providerType === "azure-anthropic" && isFable52Model(modelKey)
+      ? efforts.filter((effort) => effort !== "max")
+      : efforts;
+  }
+
+  if (
+    isGpt62Model(modelKey) &&
+    ["openai", "azure", "openrouter", "opencode"].includes(providerType)
+  ) {
+    return GPT_6_ASTRA_API_REASONING_EFFORTS;
   }
 
   const normalizedModelKey = modelKey

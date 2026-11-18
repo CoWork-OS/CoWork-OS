@@ -1,5 +1,6 @@
 import type { LLMProviderType } from "./types";
 import { KIMI_CODE_MODEL_IDS, KIMI_CURRENT_MODEL_IDS, KIMI_DEFAULT_MODEL } from "./kimi-models";
+import { modelIdCandidates } from "./model-metadata";
 
 export type ProviderCompatibility = "openai" | "anthropic";
 
@@ -44,6 +45,29 @@ const ZAI_KNOWN_MODELS = [
   "glm-4.5-air",
 ];
 
+export const GPT_6_2_MODELS = [
+  {
+    id: "gpt-6.2-astra",
+    name: "GPT-6.2 Astra",
+    description: "Complex reasoning, coding, and professional work",
+  },
+  {
+    id: "gpt-6.2-sol",
+    name: "GPT-6.2 Sol",
+    description: "Efficient coding and everyday agent workflows",
+  },
+] as const;
+
+export function isGpt62Model(model: string): boolean {
+  return modelIdCandidates(model).some((id) => GPT_6_2_MODELS.some((entry) => entry.id === id));
+}
+
+export const FABLE_5_2_MODEL = {
+  id: "claude-fable-5-2",
+  name: "Claude Fable 5.2",
+  description: "Demanding reasoning and long-running agent workflows",
+} as const;
+
 export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     id: "opencode",
@@ -52,6 +76,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     baseUrl: "https://opencode.ai/zen/v1",
     defaultModel: "gpt-5.5",
     knownModels: [
+      ...GPT_6_2_MODELS.map(({ id }) => id),
       "gpt-6-astra",
       "gpt-6.1-terra",
       "gpt-5.6-sol",
@@ -63,6 +88,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       "gpt-5.3-codex",
       "grok-4.6",
       "grok-4.5",
+      FABLE_5_2_MODEL.id,
       "claude-sonnet-4-6",
       "claude-opus-4-6",
       "qwen3.7-max",

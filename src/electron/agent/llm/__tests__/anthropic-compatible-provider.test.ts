@@ -599,6 +599,47 @@ describe("Anthropic-compatible thinking", () => {
     expect(body).not.toHaveProperty("tool_choice");
   });
 
+  it("uses Foundry's xhigh effort and returns a Fable 5.2 tool result", async () => {
+    const model = "claude-fable-5-2";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse(toolTurn, "tool_use"))
+      .mockResolvedValueOnce(okResponse([{ type: "text", text: "done" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = azureProvider("max");
+    const request: LLMRequest = {
+      model,
+      maxTokens: 16_000,
+      messages: [{ role: "user", content: "Read a.ts" }],
+      tools: [{ name: "read_file", description: "Read fixture", input_schema: { type: "object" } }],
+    };
+    const first = await provider.createMessage(request);
+    await provider.createMessage({
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: "assistant", content: first.content, reasoning: first.reasoning },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tool-1", content: "fixture" }],
+        },
+      ],
+    });
+    const [firstRequest, secondRequest] = sentBodies(fetchMock);
+    expect(firstRequest).toMatchObject({
+      model,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "xhigh" },
+    });
+    expect(secondRequest.messages.slice(1)).toEqual([
+      { role: "assistant", content: toolTurn },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tool-1", content: "fixture" }],
+      },
+    ]);
+  });
+
   it("sends no thinking parameters to generic Anthropic-compatible endpoints", async () => {
     const fetchMock = vi.fn(async () => okResponse([{ type: "text", text: "ok" }]));
     vi.stubGlobal("fetch", fetchMock);

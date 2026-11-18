@@ -93,6 +93,8 @@ import {
   CUSTOM_PROVIDER_MAP,
   GEMINI_DEFAULT_MODEL,
   OPENROUTER_DEFAULT_MODEL_ID,
+  GPT_6_2_MODELS,
+  isGpt62Model,
 } from "../../shared/llm-provider-catalog";
 import { KIMI_DEFAULT_MODEL } from "../../shared/kimi-models";
 import {
@@ -3389,7 +3391,7 @@ export function Settings({
   const loadOpenAIModels = async (apiKey?: string) => {
     try {
       setLoadingOpenAIModels(true);
-      const models = await window.electronAPI.getOpenAIModels(apiKey || openaiApiKey);
+      const models = await window.electronAPI.getOpenAIModels(apiKey);
       setOpenaiModels(models || []);
       // If we got models and no model is selected yet, select the first one
       // (Don't override custom model IDs that may not be in the list.)
@@ -6823,6 +6825,11 @@ export function Settings({
                   <SearchableSelect
                     options={[
                       ...openaiModels,
+                      ...(openaiAuthMethod === "oauth" && openaiOAuthVariant === "siwc"
+                        ? []
+                        : GPT_6_2_MODELS.filter(
+                            ({ id }) => !openaiModels.some((model) => model.id === id),
+                          )),
                       ...(openaiModels.some((model) => model.id === "gpt-6.1-terra")
                         ? []
                         : [
@@ -6978,13 +6985,13 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Deployment Names</h3>
                   <p className="settings-description">
-                    Enter one or more deployment names (one per line). For GPT-6 Sol or Luna, use
-                    the names of deployments available in your Azure resource. These appear in the
-                    model selector.
+                    Enter the deployment names from your Azure resource, one per line. For GPT-6.2,
+                    use deployments named gpt-6.2-astra or gpt-6.2-sol to enable model-specific
+                    controls.
                   </p>
                   <textarea
                     className="settings-input"
-                    placeholder="gpt-6-sol\ngpt-6-luna"
+                    placeholder={"gpt-6.2-astra\ngpt-6.2-sol"}
                     rows={3}
                     value={azureDeploymentsText}
                     onChange={(e) => setAzureDeploymentsText(e.target.value)}
@@ -7033,7 +7040,9 @@ export function Settings({
                       setAzureReasoningEffort(e.target.value as AzureReasoningEffort)
                     }
                   >
-                    {AZURE_REASONING_EFFORT_OPTIONS.map((option) => (
+                    {AZURE_REASONING_EFFORT_OPTIONS.filter(
+                      (option) => option.value !== "none" || !isGpt62Model(azureDeployment),
+                    ).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
@@ -7084,7 +7093,7 @@ export function Settings({
                   </p>
                   <textarea
                     className="settings-input"
-                    placeholder="claude-opus-4-6\nclaude-sonnet-4-6"
+                    placeholder={"claude-opus-4-6\nclaude-fable-5-2"}
                     rows={3}
                     value={azureAnthropicDeploymentsText}
                     onChange={(e) => setAzureAnthropicDeploymentsText(e.target.value)}

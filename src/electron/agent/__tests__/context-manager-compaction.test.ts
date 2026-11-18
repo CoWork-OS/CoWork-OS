@@ -90,7 +90,7 @@ describe("ContextManager.compactMessagesWithMeta", () => {
     expect(limit("glm-5.3")).toBe(1_000_000);
     expect(limit("deepseek-v4-flash")).toBe(1_048_576);
     expect(limit("minimax-m2.7")).toBe(204_800);
-    expect(limit("minimax/minimax-m2.7")).toBe(204_800);
+    expect(limit("minimax/minimax-m2.7")).toBe(196_608);
     expect(limit("gemini-3.5-flash")).toBe(1_048_576);
   });
 

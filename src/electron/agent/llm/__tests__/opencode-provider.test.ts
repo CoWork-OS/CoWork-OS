@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-go-provider";
 import { getOpenCodeModelTransport, isOpenCodeBaseUrl } from "../opencode-go-routing";
+import type { LLMRequest } from "../types";
 
 const request = {
   model: "",
@@ -34,6 +35,66 @@ describe("OpenCode provider routing", () => {
     expect(getOpenCodeModelTransport("deepseek-v4-flash", "go")).toBe("chat_completions");
     expect(getOpenCodeModelTransport("minimax-m3", "zen")).toBe("chat_completions");
     expect(getOpenCodeModelTransport("minimax-m3", "go")).toBe("messages");
+  });
+
+  it.each([
+    ["gpt-6.2-astra", "openai/v1/responses"],
+    ["gpt-6.2-sol", "openai/v1/responses"],
+    ["claude-fable-5-2", "anthropic/v1/messages"],
+  ])("uses the documented endpoint for Zen tool calls with %s", async (model, path) => {
+    const isMessages = path.endsWith("/messages");
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      Response.json(
+        isMessages
+          ? {
+              stop_reason: "tool_use",
+              content: [{ type: "tool_use", id: "call_1", name: "lookup", input: {} }],
+            }
+          : {
+              status: "completed",
+              output: [
+                { type: "function_call", call_id: "call_1", name: "lookup", arguments: "{}" },
+              ],
+            },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OpenCodeProvider({
+      type: "opencode",
+      providerName: "OpenCode Zen",
+      apiKey: "zen-key",
+      baseUrl: "https://opencode.ai/zen/v1",
+      defaultModel: "gpt-5.5",
+    });
+    const toolRequest: LLMRequest = {
+      ...request,
+      model,
+      tools: [{ name: "lookup", description: "Read fixture", input_schema: { type: "object" } }],
+    };
+    const first = await provider.createMessage(toolRequest);
+    expect(first.content).toEqual([{ type: "tool_use", id: "call_1", name: "lookup", input: {} }]);
+    await provider.createMessage({
+      ...toolRequest,
+      messages: [
+        ...toolRequest.messages,
+        { role: "assistant", content: first.content },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call_1", content: "fixture" }],
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `https://opencode.ai/inference/${path}`,
+      `https://opencode.ai/inference/${path}`,
+    ]);
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.model).toBe(model);
+    expect(isMessages ? body.messages.at(-1).content[0] : body.input.at(-1)).toMatchObject(
+      isMessages
+        ? { type: "tool_result", tool_use_id: "call_1", content: "fixture" }
+        : { type: "function_call_output", call_id: "call_1", output: "fixture" },
+    );
   });
 
   it("uses the Zen Responses endpoint for GPT models", async () => {

@@ -114,49 +114,86 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
     expect(body.reasoning).toEqual({ effort: "max" });
   });
 
-  it("streams from the public Responses API and returns the completed response", async () => {
-    responsesCreateMock.mockResolvedValue(
-      streamOf([
-        { type: "response.created", response: { id: "resp_1" } },
-        {
-          type: "response.completed",
-          response: {
-            output: [
-              { type: "message", content: [{ type: "output_text", text: "Hello!" }] },
-              {
-                type: "function_call",
-                namespace: "cowork",
-                call_id: "call_2",
-                name: "read_file",
-                arguments: '{"path":"b"}',
-              },
-            ],
-            usage: { input_tokens: 4, output_tokens: 2 },
+  it.each(["gpt-6-astra", "gpt-6.2-astra", "gpt-6.2-sol"])(
+    "streams a function call and sends its namespaced result for %s",
+    async (model) => {
+      responsesCreateMock.mockResolvedValueOnce(
+        streamOf([
+          { type: "response.created", response: { id: "resp_1" } },
+          {
+            type: "response.completed",
+            response: {
+              output: [
+                { type: "message", content: [{ type: "output_text", text: "Hello!" }] },
+                {
+                  type: "function_call",
+                  namespace: "cowork",
+                  call_id: "call_2",
+                  name: "read_file",
+                  arguments: '{"path":"b"}',
+                },
+              ],
+              usage: { input_tokens: 4, output_tokens: 2 },
+            },
           },
-        },
-      ]),
-    );
-    const provider = new OpenAIProvider(makeConfig());
+        ]),
+      );
+      const provider = new OpenAIProvider(makeConfig());
 
-    const response = await provider.createMessage(makeRequest());
+      const request = makeRequest({ model });
+      const response = await provider.createMessage(request);
 
-    expect(openAIConstructorMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        apiKey: "siwc-access",
-        baseURL: "https://api.openai.com/v1",
-        maxRetries: 0,
-      }),
-    );
-    expect(getAccessTokenMock).toHaveBeenCalledWith(
-      "oaiapp_test",
-      expect.objectContaining({ refresh_token: "siwc-refresh" }),
-    );
-    expect(response.content).toEqual([
-      { type: "text", text: "Hello!" },
-      { type: "tool_use", id: "call_2", name: "read_file", input: { path: "b" } },
-    ]);
-    expect(response.stopReason).toBe("tool_use");
-  });
+      expect(openAIConstructorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiKey: "siwc-access",
+          baseURL: "https://api.openai.com/v1",
+          maxRetries: 0,
+        }),
+      );
+      expect(getAccessTokenMock).toHaveBeenCalledWith(
+        "oaiapp_test",
+        expect.objectContaining({ refresh_token: "siwc-refresh" }),
+      );
+      expect(response.content).toEqual([
+        { type: "text", text: "Hello!" },
+        { type: "tool_use", id: "call_2", name: "read_file", input: { path: "b" } },
+      ]);
+      expect(response.stopReason).toBe("tool_use");
+      expect(responsesCreateMock.mock.calls[0][0].model).toBe(model);
+      responsesCreateMock.mockResolvedValueOnce(
+        streamOf([
+          {
+            type: "response.completed",
+            response: {
+              output: [{ type: "message", content: [{ type: "output_text", text: "Done" }] }],
+            },
+          },
+        ]),
+      );
+      await provider.createMessage({
+        ...request,
+        messages: [
+          ...request.messages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "call_2", content: "fixture" }],
+          },
+        ],
+      });
+      expect(responsesCreateMock.mock.calls[1][0]).toMatchObject({
+        model,
+        input: expect.arrayContaining([
+          expect.objectContaining({
+            type: "function_call_output",
+            call_id: "call_2",
+            namespace: "cowork",
+            output: "fixture",
+          }),
+        ]),
+      });
+    },
+  );
 
   it("rebuilds output from streamed items when response.completed omits it", async () => {
     responsesCreateMock.mockResolvedValue(
@@ -305,6 +342,8 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
             models: [
               { slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list" },
               { slug: "gpt-6-astra", display_name: "GPT-6 Astra", visibility: "list" },
+              { slug: "gpt-6.2-sol", display_name: "GPT-6.2 Sol", visibility: "list" },
+              { slug: "gpt-6.2-astra", visibility: "hide" },
               { slug: "gpt-reserve", display_name: "Reserve", visibility: "hide" },
             ],
           }),
@@ -316,11 +355,14 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
       const models = await new OpenAIProvider(makeConfig()).getAvailableModels();
       expect(models.map((model) => model.id)).toEqual([
         "gpt-6-astra",
+        "gpt-6.2-sol",
         "gpt-6.1-sol",
         "gpt-6.1-terra",
         "gpt-5.5",
       ]);
-      expect(models[1].description).toContain("not in OpenAI's list");
+      expect(models.find(({ id }) => id === "gpt-6.1-sol")?.description).toContain(
+        "not in OpenAI's list",
+      );
     } finally {
       vi.unstubAllGlobals();
     }

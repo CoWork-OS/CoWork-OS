@@ -8,6 +8,15 @@ import {
 import type { LLMMessage } from "../llm";
 
 describe("ContextManager.compactMessagesWithMeta", () => {
+  it.each(["gpt-6.2-astra", "openai-codex/gpt-6.2-sol@high", "openai/gpt-6.2-sol"])(
+    "keeps %s prompts within the model's published input cap",
+    (model) => {
+      const manager = new ContextManager(model);
+      expect(manager.getModelTokenLimit()).toBe(1_050_000);
+      expect(manager.getAvailableTokens(1_000)).toBe(921_000);
+    },
+  );
+
   it("uses Astra's documented long context window", () => {
     expect(new ContextManager("gpt-6.1-sol").getModelTokenLimit()).toBe(1_050_000);
     expect(new ContextManager("openai-codex/gpt-6.1-sol@fast").getModelTokenLimit()).toBe(

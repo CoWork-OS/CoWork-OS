@@ -40,6 +40,68 @@ describe("BedrockProvider", () => {
     vi.clearAllMocks();
   });
 
+  it("returns a tool result to the selected Fable 5.2 global profile", async () => {
+    const model = "global.anthropic.claude-fable-5-2";
+    const provider = new BedrockProvider({ ...config, model });
+    const send = (await (provider as Any).getRuntime()).client.send;
+    send.mockResolvedValueOnce({
+      output: {
+        message: {
+          content: [
+            { reasoningContent: { reasoningText: { text: "", signature: "signed-thinking" } } },
+            {
+              toolUse: { toolUseId: "tool_1", name: "lookup", input: {} },
+            },
+          ],
+        },
+      },
+      stopReason: "tool_use",
+    });
+    const request: LLMRequest = {
+      model,
+      maxTokens: 200_000,
+      reasoningEffort: "high",
+      messages: [{ role: "user", content: "Check the fixture" }],
+      tools: [{ name: "lookup", description: "Read fixture", input_schema: { type: "object" } }],
+    };
+    const first = await provider.createMessage(request);
+    expect(first.stopReason).toBe("tool_use");
+    expect(send.mock.calls[0][0].input).toMatchObject({
+      modelId: model,
+      inferenceConfig: { maxTokens: 128_000 },
+      additionalModelRequestFields: {
+        thinking: { type: "adaptive" },
+        output_config: { effort: "high" },
+      },
+      toolConfig: {
+        tools: [expect.objectContaining({ toolSpec: expect.objectContaining({ name: "lookup" }) })],
+      },
+    });
+
+    const continuation: LLMRequest = {
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: "assistant", content: first.content, reasoning: first.reasoning },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tool_1", content: "fixture" }],
+        },
+      ],
+    };
+    await provider.createMessage(continuation);
+    expect(capturedConverseInput.messages[1].content[0]).toMatchObject({
+      reasoningContent: { reasoningText: { text: "", signature: "signed-thinking" } },
+    });
+    expect(capturedConverseInput.modelId).toBe(model);
+    expect(capturedConverseInput.messages.at(-1).content[0].toolResult).toMatchObject({
+      toolUseId: "tool_1",
+      content: [{ text: "fixture" }],
+    });
+    await provider.createMessage({ ...continuation, system: "Changed instructions" });
+    expect(capturedConverseInput.messages[1].content[0]).toHaveProperty("toolUse");
+  });
+
   it("does not retry a cache-related backend error when no cache controls were sent", async () => {
     const provider = new BedrockProvider(config);
     const send = (await (provider as Any).getRuntime()).client.send;

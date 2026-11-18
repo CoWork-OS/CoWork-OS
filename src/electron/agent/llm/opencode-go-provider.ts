@@ -1,11 +1,13 @@
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
 import { OpenAIProvider } from "./openai-provider";
+import { FABLE_5_2_MODEL, isGpt62Model } from "../../../shared/llm-provider-catalog";
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse } from "./types";
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
   getOpenCodeModelTransport,
   isOpenCodeGoBaseUrl,
+  isOpenCodeZenBaseUrl,
   normalizeOpenCodeGoAnthropicBaseUrl,
   normalizeOpenCodeGoModelId,
   type OpenCodeProduct,
@@ -26,6 +28,8 @@ export class OpenCodeProvider implements LLMProvider {
   private openaiProvider: OpenAICompatibleProvider;
   private anthropicProvider: AnthropicCompatibleProvider;
   private responsesProvider: OpenAIProvider;
+  private zenGpt62Provider?: OpenAIProvider;
+  private zenFable52Provider?: AnthropicCompatibleProvider;
   private product: OpenCodeProduct;
   private diagnosticFetch?: ProviderDiagnosticFetch;
 
@@ -43,34 +47,43 @@ export class OpenCodeProvider implements LLMProvider {
       baseUrl,
       defaultModel: normalizeOpenCodeGoModelId(options.defaultModel),
     });
-    this.responsesProvider = new OpenAIProvider({
+    const responsesConfig = {
       type: "openai",
       model: normalizeOpenCodeGoModelId(options.defaultModel),
       openaiApiKey: options.apiKey,
       openaiBaseUrl: baseUrl,
       openaiResponsesApi: true,
-    });
+    } as const;
+    this.responsesProvider = new OpenAIProvider(responsesConfig);
+    if (isOpenCodeZenBaseUrl(baseUrl)) {
+      this.zenGpt62Provider = new OpenAIProvider({
+        ...responsesConfig,
+        openaiBaseUrl: "https://opencode.ai/inference/openai/v1",
+      });
+      this.zenFable52Provider = new AnthropicCompatibleProvider({
+        ...options,
+        defaultModel: FABLE_5_2_MODEL.id,
+        baseUrl: "https://opencode.ai/inference/anthropic/v1",
+        sendThinkingConfig: true,
+      });
+    }
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    const model = request.model || this.defaultModel;
-    const normalizedModel = normalizeOpenCodeGoModelId(model);
-    switch (getOpenCodeModelTransport(normalizedModel, this.product)) {
+    const model = normalizeOpenCodeGoModelId(request.model || this.defaultModel);
+    return this.getModelProvider(model).createMessage({ ...request, model });
+  }
+
+  private getModelProvider(model: string): LLMProvider {
+    if (this.zenGpt62Provider && isGpt62Model(model)) return this.zenGpt62Provider;
+    if (this.zenFable52Provider && model === FABLE_5_2_MODEL.id) return this.zenFable52Provider;
+    switch (getOpenCodeModelTransport(model, this.product)) {
       case "responses":
-        return this.responsesProvider.createMessage({
-          ...request,
-          model: normalizedModel,
-        });
+        return this.responsesProvider;
       case "messages":
-        return this.anthropicProvider.createMessage({
-          ...request,
-          model: normalizedModel,
-        });
+        return this.anthropicProvider;
       default:
-        return this.openaiProvider.createMessage({
-          ...request,
-          model: normalizedModel,
-        });
+        return this.openaiProvider;
     }
   }
 
@@ -83,14 +96,7 @@ export class OpenCodeProvider implements LLMProvider {
         ? { success: true }
         : { success: false, error: "Provider model discovery failed or returned no models." };
     }
-    switch (getOpenCodeModelTransport(this.defaultModel, this.product)) {
-      case "responses":
-        return this.responsesProvider.testConnection();
-      case "messages":
-        return this.anthropicProvider.testConnection();
-      default:
-        return this.openaiProvider.testConnection();
-    }
+    return this.getModelProvider(normalizeOpenCodeGoModelId(this.defaultModel)).testConnection();
   }
 
   async getAvailableModels(): Promise<Array<{ id: string; name: string }>> {

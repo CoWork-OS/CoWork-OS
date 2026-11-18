@@ -579,14 +579,24 @@ describe("AnthropicProvider", () => {
       return { provider, messages };
     }
 
-    it("replays the exact thinking blocks before tool_use in the next tool-loop request", async () => {
-      const { provider, messages } = await runFirstToolRound("claude-opus-4-8");
+    it.each(["claude-opus-4-8", "claude-fable-5-2"])(
+      "replays signed thinking before the tool result with %s",
+      async (model) => {
+        const { provider, messages } = await runFirstToolRound(model);
 
-      await provider.createMessage({ ...makeRequest(), model: "claude-opus-4-8", messages });
+        await provider.createMessage({ ...makeRequest(), model, messages });
 
-      expect(sentPayload(1).messages[1]).toEqual({ role: "assistant", content: firstTurnContent });
-      expect(sentPayload(1).messages[2].content[0].type).toBe("tool_result");
-    });
+        expect(sentPayload(1)).toMatchObject({ model, thinking: { type: "adaptive" } });
+        expect(sentPayload(1).messages[1]).toEqual({
+          role: "assistant",
+          content: firstTurnContent,
+        });
+        expect(sentPayload(1).messages[2].content[0]).toMatchObject({
+          type: "tool_result",
+          tool_use_id: "tool-1",
+        });
+      },
+    );
 
     it("replays thinking blocks under explicit prompt caching without marking them", async () => {
       const { provider, messages } = await runFirstToolRound("claude-opus-4-8");
@@ -627,14 +637,18 @@ describe("AnthropicProvider", () => {
       });
     });
 
-    it("strips the blocks when history before them was edited", async () => {
-      const { provider, messages } = await runFirstToolRound("claude-opus-4-8");
-      messages[0] = { role: "user", content: "Read a.ts (edited reminder)" };
+    it.each(["claude-opus-4-8", "claude-fable-5-2"])(
+      "drops the signed thinking block for %s after a prefix edit",
+      async (model) => {
+        const { provider, messages } = await runFirstToolRound(model);
+        messages[0] = { role: "user", content: "Read a.ts (edited reminder)" };
 
-      await provider.createMessage({ ...makeRequest(), model: "claude-opus-4-8", messages });
+        await provider.createMessage({ ...makeRequest(), model, messages });
 
-      expect(JSON.stringify(sentPayload(1))).not.toContain("sig-1");
-    });
+        expect(JSON.stringify(sentPayload(1))).not.toContain("sig-1");
+        expect(sentPayload(1).messages[1].content).toContainEqual(firstTurnContent.at(-1));
+      },
+    );
 
     it("keeps compacted turns whole and drops blocks whose earlier turns were removed", async () => {
       const { provider, messages } = await runFirstToolRound("claude-opus-4-8");

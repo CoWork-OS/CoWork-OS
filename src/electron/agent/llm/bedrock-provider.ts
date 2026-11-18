@@ -7,6 +7,13 @@ import type {
   ToolInputSchema,
   StopReason,
 } from "@aws-sdk/client-bedrock-runtime";
+import { isFable52Model } from "../../../shared/anthropic-model-capabilities";
+import {
+  anthropicReasoningFromResponse,
+  anthropicThinkingPrefixSeed,
+  applyAnthropicThinkingReplay,
+  planAnthropicThinking,
+} from "./anthropic-thinking";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -92,15 +99,47 @@ export class BedrockProvider implements LLMProvider {
       requestedCache && shortCacheOnly ? { ...requestedCache, ttl: "5m" as const } : requestedCache;
     const toolNameMap = request.tools?.length ? this.buildToolNameMap(request.tools) : undefined;
     const preparedMessages = this.prepareMessagesForConverse(request.messages);
-    const messages = this.convertMessages(preparedMessages, toolNameMap, promptCache);
+    const resolvedModelId = await this.resolveModelId(request.model);
+    const isFable52 = isFable52Model(resolvedModelId);
+    const convertedMessages = this.convertMessages(
+      preparedMessages,
+      toolNameMap,
+      isFable52 ? undefined : promptCache,
+    );
     const system = this.convertSystem(request.system, request.systemBlocks, promptCache);
     const toolConfig =
       request.tools && request.tools.length > 0
         ? this.convertTools(request.tools, toolNameMap, isNova ? undefined : promptCache)
         : undefined;
 
-    const resolvedModelId = await this.resolveModelId(request.model);
-    const clampedMaxTokens = this.clampToKnownOutputLimit(resolvedModelId, request.maxTokens);
+    // Hash the same prefix that Claude saw, leaving cache markers out of the hash.
+    // The shared replay code binds each signed block to its provider, model and prefix.
+    const replay = isFable52
+      ? applyAnthropicThinkingReplay({
+          messages: preparedMessages,
+          converted: convertedMessages,
+          model: resolvedModelId,
+          provider: this.type,
+          seed: anthropicThinkingPrefixSeed(
+            normalizeSystemBlocks(request.system, request.systemBlocks).map(({ text }) => text),
+            toolConfig?.tools?.filter((tool) => tool.toolSpec !== undefined),
+          ),
+          replay: true,
+        })
+      : undefined;
+    const messages = replay ? this.toConverseThinkingMessages(replay.messages) : convertedMessages;
+    if (replay) this.addMessageCachePoint(messages, promptCache);
+    const plan = isFable52
+      ? planAnthropicThinking({
+          model: resolvedModelId,
+          effort: request.reasoningEffort,
+          maxTokens: request.maxTokens,
+        })
+      : undefined;
+    const clampedMaxTokens = this.clampToKnownOutputLimit(
+      resolvedModelId,
+      plan?.maxTokens ?? request.maxTokens,
+    );
     const { sdk, client } = await this.getRuntime();
     const command = new sdk.ConverseCommand({
       modelId: resolvedModelId,
@@ -109,6 +148,12 @@ export class BedrockProvider implements LLMProvider {
       inferenceConfig: {
         maxTokens: clampedMaxTokens,
       },
+      ...(plan && {
+        additionalModelRequestFields: {
+          ...(plan.thinking && { thinking: { type: "adaptive" } }),
+          ...(plan.outputConfig && { output_config: plan.outputConfig }),
+        },
+      }),
       ...(toolConfig && { toolConfig }),
     });
 
@@ -124,7 +169,11 @@ export class BedrockProvider implements LLMProvider {
         // Pass abort signal to allow cancellation
         request.signal ? { abortSignal: request.signal } : undefined,
       );
-      return this.convertResponse(response, toolNameMap);
+      return this.convertResponse(
+        response,
+        toolNameMap,
+        replay && { model: resolvedModelId, prefixHash: replay.prefixHash },
+      );
     } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
@@ -137,7 +186,10 @@ export class BedrockProvider implements LLMProvider {
 
       // If Bedrock rejects the requested model for on-demand invocation, automatically
       // retry with an inference profile that the user has access to (when available).
-      if (lower.includes("inference profile") || lower.includes("on-demand throughput")) {
+      if (
+        !isFable52 &&
+        (lower.includes("inference profile") || lower.includes("on-demand throughput"))
+      ) {
         const fallback = await this.resolveInferenceProfileFallback(request.model);
         if (fallback && fallback !== resolvedModelId) {
           console.log(`${logTag} Retrying with inference profile: ${fallback}`);
@@ -255,7 +307,7 @@ export class BedrockProvider implements LLMProvider {
     if (cached) return cached;
 
     // If it's already an inference profile ID/ARN, use as-is.
-    if (trimmed.startsWith("us.") || trimmed.startsWith("arn:")) {
+    if (/^(?:us|eu|apac|au|jp|ca|global|us-gov)\./.test(trimmed) || trimmed.startsWith("arn:")) {
       this.resolvedModelCache.set(trimmed, trimmed);
       return trimmed;
     }
@@ -281,6 +333,7 @@ export class BedrockProvider implements LLMProvider {
     if (profiles.length === 0) return null;
 
     const token = this.extractModelToken(requestedModel);
+    const exactModelOnly = isFable52Model(requestedModel);
     let best: { id: string; score: number; tokenMatchRank: number } | null = null;
     let sawTokenCompatibleProfile = false;
 
@@ -297,7 +350,7 @@ export class BedrockProvider implements LLMProvider {
           if (arnToken === token) {
             tokenMatchRank = Math.max(tokenMatchRank, 2);
             score += 100;
-          } else if (arnToken.includes(token) || token.includes(arnToken)) {
+          } else if (!exactModelOnly && (arnToken.includes(token) || token.includes(arnToken))) {
             tokenMatchRank = Math.max(tokenMatchRank, 1);
             score += 30;
           }
@@ -408,7 +461,7 @@ export class BedrockProvider implements LLMProvider {
       }
     }
 
-    if (s.startsWith("anthropic.")) s = s.slice("anthropic.".length);
+    s = s.replace(/^(?:(?:us|eu|apac|au|jp|ca|global|us-gov)\.)?anthropic\./, "");
 
     // Drop trailing :N.
     s = s.replace(/:\d+$/, "");
@@ -440,7 +493,7 @@ export class BedrockProvider implements LLMProvider {
     // Claude 3.5: 8192 output tokens
     { pattern: /claude-3-5-sonnet/i, limit: 8192 },
     { pattern: /claude-3-5-haiku/i, limit: 8192 },
-    // Claude 4+ models: higher limits — don't clamp (128K+ supported)
+    { pattern: /claude-fable-5-2/i, limit: 128_000 },
   ];
 
   private clampToKnownOutputLimit(resolvedModel: string, requestedMaxTokens: number): number {
@@ -546,7 +599,11 @@ export class BedrockProvider implements LLMProvider {
     messages: LLMMessage[];
     mergedTurns: number;
   } {
-    type Normalized = { role: "user" | "assistant"; blocks: Any[] };
+    type Normalized = {
+      role: "user" | "assistant";
+      blocks: Any[];
+      reasoning?: LLMMessage["reasoning"];
+    };
 
     const merged: Normalized[] = [];
     let mergedTurns = 0;
@@ -562,7 +619,7 @@ export class BedrockProvider implements LLMProvider {
         mergedTurns++;
         continue;
       }
-      merged.push({ role: msg.role, blocks: [...blocks] });
+      merged.push({ role: msg.role, blocks: [...blocks], reasoning: msg.reasoning });
     }
 
     return {
@@ -570,6 +627,7 @@ export class BedrockProvider implements LLMProvider {
       messages: merged.map((msg) => ({
         role: msg.role,
         content: this.blocksToMessageContent(msg.blocks),
+        ...(msg.reasoning && { reasoning: msg.reasoning }),
       })),
     };
   }
@@ -613,6 +671,7 @@ export class BedrockProvider implements LLMProvider {
       });
 
       out[i] = {
+        ...message,
         role: "assistant",
         content: this.blocksToMessageContent(repaired),
       };
@@ -734,7 +793,7 @@ export class BedrockProvider implements LLMProvider {
     messages: LLMMessage[],
     toolNameMap?: ToolNameMap,
     promptCache?: LLMRequest["promptCache"],
-  ): Message[] {
+  ): Array<{ role: LLMMessage["role"]; content: ContentBlock[] }> {
     const result = messages.map((msg) => {
       const content: ContentBlock[] = [];
 
@@ -780,14 +839,46 @@ export class BedrockProvider implements LLMProvider {
       };
     });
 
+    this.addMessageCachePoint(result, promptCache);
+    return result;
+  }
+
+  private addMessageCachePoint(messages: Message[], promptCache?: LLMRequest["promptCache"]): void {
     if (this.isPromptCacheEnabled(promptCache)) {
-      const lastUserMessage = [...result].reverse().find((message) => message.role === "user");
+      const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
       if (lastUserMessage) {
-        lastUserMessage.content.push(this.buildCachePoint(promptCache?.ttl));
+        lastUserMessage.content?.push(this.buildCachePoint(promptCache?.ttl));
       }
     }
+  }
 
-    return result;
+  private toConverseThinkingMessages(messages: Message[]): Message[] {
+    return messages.map((message) => ({
+      ...message,
+      content: message.content?.map((content) => {
+        const block = content as ContentBlock & {
+          type?: "thinking" | "redacted_thinking";
+          thinking?: string;
+          signature?: string;
+          data?: string;
+        };
+        if (block.type === "thinking") {
+          return {
+            reasoningContent: {
+              reasoningText: { text: block.thinking, signature: block.signature },
+            },
+          };
+        }
+        if (block.type === "redacted_thinking" && block.data) {
+          return {
+            reasoningContent: {
+              redactedContent: new Uint8Array(Buffer.from(block.data, "base64")),
+            },
+          };
+        }
+        return content;
+      }),
+    }));
   }
 
   private convertTools(
@@ -824,8 +915,13 @@ export class BedrockProvider implements LLMProvider {
     };
   }
 
-  private convertResponse(response: Any, toolNameMap?: ToolNameMap): LLMResponse {
+  private convertResponse(
+    response: Any,
+    toolNameMap?: ToolNameMap,
+    replay?: { model: string; prefixHash: string },
+  ): LLMResponse {
     const content: LLMContent[] = [];
+    const thinkingResponseBlocks: unknown[] = [];
 
     if (response.output?.message?.content) {
       for (const block of response.output.message.content) {
@@ -834,6 +930,7 @@ export class BedrockProvider implements LLMProvider {
             type: "text",
             text: block.text,
           });
+          if (replay) thinkingResponseBlocks.push({ type: "text" });
         } else if (block.toolUse) {
           const mappedName =
             toolNameMap?.fromProvider.get(block.toolUse.name) || block.toolUse.name;
@@ -843,9 +940,27 @@ export class BedrockProvider implements LLMProvider {
             name: mappedName,
             input: block.toolUse.input,
           });
+          if (replay) thinkingResponseBlocks.push({ type: "tool_use" });
+        } else if (replay && block.reasoningContent?.reasoningText) {
+          const { text, signature } = block.reasoningContent.reasoningText;
+          thinkingResponseBlocks.push({ type: "thinking", thinking: text, signature });
+        } else if (replay && block.reasoningContent?.redactedContent) {
+          thinkingResponseBlocks.push({
+            type: "redacted_thinking",
+            data: Buffer.from(block.reasoningContent.redactedContent).toString("base64"),
+          });
         }
       }
     }
+    const reasoning = replay
+      ? anthropicReasoningFromResponse({
+          ...replay,
+          provider: this.type,
+          content: thinkingResponseBlocks,
+          visibleContent: this.convertMessages([{ role: "assistant", content }], toolNameMap)[0]
+            .content,
+        })
+      : [];
 
     const cacheWriteTokens = Number(response.usage?.cacheWriteInputTokens || 0);
     const cacheWriteTtl =
@@ -857,6 +972,7 @@ export class BedrockProvider implements LLMProvider {
     const cacheReadTokens = Number(response.usage?.cacheReadInputTokens || 0);
     return {
       content,
+      ...(reasoning.length > 0 && { reasoning }),
       stopReason: this.mapStopReason(response.stopReason),
       usage: response.usage
         ? {

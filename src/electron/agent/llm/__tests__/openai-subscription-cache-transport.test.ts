@@ -23,7 +23,12 @@ vi.mock("../pi-ai-loader", () => ({
     // mocked complete() implementation. Only its destination is a local fixture.
     const sdk = await import("@earendil-works/pi-ai/compat");
     return {
-      getModels: () => [{ ...sdk.getModels("openai-codex")[0], id: "gpt-5.4", baseUrl }],
+      getModels: () =>
+        ["gpt-5.4", "gpt-6.2-astra", "gpt-6.2-sol"].map((id) => ({
+          ...sdk.getModels("openai-codex")[0],
+          id,
+          baseUrl,
+        })),
       complete: sdk.complete,
     };
   },
@@ -83,14 +88,23 @@ describe("ChatGPT subscription prompt caching through the installed transport", 
         res.end(JSON.stringify({ error: { message: "Unsupported parameter: prompt_cache_key" } }));
         return;
       }
-      const item = {
-        type: "message",
-        id: "msg_fixture",
-        role: "assistant",
-        phase: "final_answer",
-        status: "completed",
-        content: [{ type: "output_text", text: "ok", annotations: [] }],
-      };
+      const replyWithToolCall = body.model.startsWith("gpt-6.2-") && requests.length === 1;
+      const item = replyWithToolCall
+        ? {
+            type: "function_call",
+            id: "fc_fixture",
+            call_id: "call_fixture",
+            name: "lookup",
+            arguments: "{}",
+          }
+        : {
+            type: "message",
+            id: "msg_fixture",
+            role: "assistant",
+            phase: "final_answer",
+            status: "completed",
+            content: [{ type: "output_text", text: "ok", annotations: [] }],
+          };
       const response = {
         id: "resp_fixture",
         status: "completed",
@@ -103,14 +117,34 @@ describe("ChatGPT subscription prompt caching through the installed transport", 
       };
       const events = [
         { type: "response.created", response: { id: response.id, status: "in_progress" } },
-        { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
-        {
-          type: "response.content_part.added",
-          output_index: 0,
-          content_index: 0,
-          part: { type: "output_text", text: "", annotations: [] },
-        },
-        { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "ok" },
+        ...(replyWithToolCall
+          ? [
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { ...item, arguments: "" },
+              },
+              { type: "response.function_call_arguments.delta", output_index: 0, delta: "{}" },
+            ]
+          : [
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { ...item, content: [] },
+              },
+              {
+                type: "response.content_part.added",
+                output_index: 0,
+                content_index: 0,
+                part: { type: "output_text", text: "", annotations: [] },
+              },
+              {
+                type: "response.output_text.delta",
+                output_index: 0,
+                content_index: 0,
+                delta: "ok",
+              },
+            ]),
         { type: "response.output_item.done", output_index: 0, item },
         { type: "response.completed", response },
       ];
@@ -129,6 +163,47 @@ describe("ChatGPT subscription prompt caching through the installed transport", 
       server.close((error) => (error ? reject(error) : resolve())),
     );
   });
+
+  it.each(["gpt-6.2-astra", "gpt-6.2-sol"])(
+    "round-trips a %s tool call over the Codex SSE transport",
+    async (model) => {
+      const provider = createProvider();
+      const request = {
+        ...makeRequest("Read the fixture", [{ role: "user", content: "Read the fixture" }]),
+        model,
+      };
+      const first = await provider.createMessage(request);
+      expect(first.stopReason).toBe("tool_use");
+      expect(first.content).toEqual([
+        {
+          type: "tool_use",
+          id: "call_fixture|fc_fixture",
+          name: "lookup",
+          input: {},
+        },
+      ]);
+      const final = await provider.createMessage({
+        ...request,
+        messages: [
+          ...request.messages,
+          { role: "assistant", content: first.content },
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "call_fixture|fc_fixture", content: "fixture" },
+            ],
+          },
+        ],
+      });
+      expect(final.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(requests.map(({ body }) => body.model)).toEqual([model, model]);
+      expect(requests[1].body.input).toContainEqual({
+        type: "function_call_output",
+        call_id: "call_fixture",
+        output: "fixture",
+      });
+    },
+  );
 
   it("preserves the wire history and routing key as context changes and reports cache reads/writes once", async () => {
     const provider = createProvider();

@@ -27,6 +27,32 @@ export const PRICING_OVERRIDES: Record<string, ModelPricing> = {
       cacheWritePer1M: 5,
     },
   },
+  "gpt-6.2-astra": {
+    inputPer1M: 8,
+    outputPer1M: 40,
+    cachedInputPer1M: 0.4,
+    cacheWritePer1M: 10,
+    longContext: {
+      thresholdTokens: 272_000,
+      inputPer1M: 16,
+      outputPer1M: 60,
+      cachedInputPer1M: 0.8,
+      cacheWritePer1M: 20,
+    },
+  },
+  "gpt-6.2-sol": {
+    inputPer1M: 2,
+    outputPer1M: 10,
+    cachedInputPer1M: 0.1,
+    cacheWritePer1M: 2.5,
+    longContext: {
+      thresholdTokens: 272_000,
+      inputPer1M: 4,
+      outputPer1M: 15,
+      cachedInputPer1M: 0.2,
+      cacheWritePer1M: 5,
+    },
+  },
   // Retired Anthropic models (list prices at retirement).
   "claude-sonnet-4": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
   "claude-3-5-sonnet": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
@@ -54,6 +80,8 @@ export const PRICING_OVERRIDES: Record<string, ModelPricing> = {
 /** Overrides that intentionally shadow a catalogue price, with the reason. */
 export const INTENTIONAL_OVERRIDES: Record<string, string> = {
   "gpt-6.1-sol": "official launch pricing until the bundled catalogue includes this model",
+  "gpt-6.2-astra": "official standard and long-context pricing",
+  "gpt-6.2-sol": "official standard and long-context pricing",
   "gemini-2.5-flash-image": "billed per image by calculateImageCost()",
   "gemini-3-pro-image-preview": "billed per image by calculateImageCost()",
 };

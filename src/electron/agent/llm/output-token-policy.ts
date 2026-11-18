@@ -133,6 +133,7 @@ function isOpenAIReasoningModel(modelId: string): boolean {
     .replace(/^(?:openai-codex|openai)\//, "")
     .split("@", 1)[0];
   return (
+    /^gpt-6\.2-(?:astra|sol)(?:-\d{4}-\d{2}-\d{2})?$/.test(normalized) ||
     normalized === "gpt-6-astra" ||
     normalized === "gpt-6.1-sol" ||
     normalized === "gpt-6.1-terra" ||
@@ -146,6 +147,7 @@ function isOpenAIReasoningModel(modelId: string): boolean {
 }
 
 const OPENAI_OUTPUT_LIMITS: Array<{ pattern: RegExp; limit: number }> = [
+  { pattern: /(?:^|[/:])gpt-6\.2-(?:astra|sol)(?:-\d{4}-\d{2}-\d{2})?(?:@|$)/i, limit: 128_000 },
   { pattern: /(?:^|[/:])gpt-6-astra(?:@|$)/i, limit: 128_000 },
   { pattern: /(?:^|[/:])gpt-6(?:\.1)?-(?:sol|terra|luna)(?:@|$)/i, limit: 128_000 },
 ];

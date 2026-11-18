@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OPENROUTER_DEFAULT_MODEL, OpenRouterProvider } from "../openrouter-provider";
+import type { LLMRequest } from "../types";
 
 function countCacheMarkers(messages: Any[]): number {
   return messages.reduce((count, message) => {
@@ -19,6 +20,127 @@ describe("OpenRouterProvider attribution headers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["openai/gpt-6.2-astra", "openai/gpt-6.2-sol"])(
+    "sends a tool result back to the same OpenRouter model %s",
+    async (model) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            choices: [
+              {
+                finish_reason: "tool_calls",
+                message: {
+                  tool_calls: [
+                    {
+                      type: "function",
+                      id: "call_1",
+                      function: { name: "lookup", arguments: "{}" },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            choices: [{ finish_reason: "stop", message: { content: "Done" } }],
+          }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const provider = new OpenRouterProvider({
+        type: "openrouter",
+        model,
+        openrouterApiKey: "test-key",
+      });
+      const request: LLMRequest = {
+        model,
+        maxTokens: 128,
+        messages: [{ role: "user", content: "Check the fixture" }],
+        tools: [{ name: "lookup", description: "Read fixture", input_schema: { type: "object" } }],
+      };
+
+      const first = await provider.createMessage(request);
+      expect(first.stopReason).toBe("tool_use");
+      await provider.createMessage({
+        ...request,
+        messages: [
+          ...request.messages,
+          { role: "assistant", content: first.content },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "call_1", content: "fixture" }],
+          },
+        ],
+      });
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+        model,
+        tools: [expect.objectContaining({ function: expect.objectContaining({ name: "lookup" }) })],
+      });
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+        model,
+        messages: expect.arrayContaining([
+          { role: "tool", tool_call_id: "call_1", content: "fixture" },
+        ]),
+      });
+    },
+  );
+
+  it("replays Fable 5.2 thinking and tool results through OpenRouter Messages", async () => {
+    const model = "anthropic/claude-fable-5.2";
+    const thinking = { type: "thinking", thinking: "", signature: "signed-thinking" };
+    const toolCall = { type: "tool_use", id: "call_1", name: "lookup", input: {} };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ content: [thinking, toolCall], stop_reason: "tool_use" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ content: [{ type: "text", text: "Done" }], stop_reason: "end_turn" }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model,
+      openrouterApiKey: "test-key",
+    });
+    const request: LLMRequest = {
+      model,
+      maxTokens: 128,
+      messages: [{ role: "user", content: "Check the fixture" }],
+      tools: [{ name: "lookup", description: "Read fixture", input_schema: { type: "object" } }],
+    };
+
+    const first = await provider.createMessage(request);
+    expect(first.content).toEqual([toolCall]);
+    const toolResult = { type: "tool_result" as const, tool_use_id: "call_1", content: "fixture" };
+    await provider.createMessage({
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: "assistant", content: first.content, reasoning: first.reasoning },
+        { role: "user", content: [toolResult] },
+      ],
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://openrouter.ai/api/v1/messages",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-key",
+          "X-OpenRouter-Title": "CoWork OS",
+        }),
+      }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+      model,
+      messages: expect.arrayContaining([
+        { role: "assistant", content: [thinking, toolCall] },
+        { role: "user", content: [toolResult] },
+      ]),
+    });
   });
 
   it("sends default attribution headers on chat completions", async () => {

@@ -63,6 +63,66 @@ function createStreamingResponse(chunks: string[]) {
 }
 
 describe("AzureOpenAIProvider", () => {
+  it.each(["gpt-6.2-astra", "gpt-6.2-sol"])(
+    "uses Responses for a %s deployment's tool round trip",
+    async (model) => {
+      mockFetch
+        .mockResolvedValueOnce(
+          createOkResponse({
+            status: "completed",
+            output: [{ type: "function_call", name: "lookup", call_id: "call_1", arguments: "{}" }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          createOkResponse({
+            status: "completed",
+            output: [{ type: "message", content: [{ type: "output_text", text: "Done" }] }],
+          }),
+        );
+      const provider = new AzureOpenAIProvider({
+        ...baseConfig,
+        azureDeployment: model,
+        azureReasoningEffort: "none",
+      });
+      const request: Parameters<typeof provider.createMessage>[0] = {
+        model,
+        maxTokens: 128,
+        messages: [{ role: "user", content: "Check the fixture" }],
+        tools: [{ name: "lookup", description: "Read fixture", input_schema: { type: "object" } }],
+      };
+
+      const first = await provider.createMessage(request);
+      expect(first.stopReason).toBe("tool_use");
+      await provider.createMessage({
+        ...request,
+        messages: [
+          ...request.messages,
+          { role: "assistant", content: first.content },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "call_1", content: "ok" }],
+          },
+        ],
+      });
+
+      expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+        "https://example.openai.azure.com/openai/v1/responses",
+        "https://example.openai.azure.com/openai/v1/responses",
+      ]);
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+        model,
+        reasoning: { effort: "low" },
+        tools: [expect.objectContaining({ name: "lookup" })],
+      });
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
+        model,
+        input: expect.arrayContaining([
+          { type: "function_call_output", call_id: "call_1", output: "ok" },
+        ]),
+      });
+    },
+  );
+
   it.each(["gpt-6-sol", "gpt-6-luna", "my deployment"])(
     "routes a %s deployment through Responses with max reasoning",
     async (model) => {

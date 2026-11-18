@@ -17,6 +17,7 @@ import type {
   HumanInputPolicy,
   MoaPreset,
 } from "../../../shared/types";
+import { FABLE_5_2_MODEL } from "../../../shared/llm-provider-catalog";
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 
 export type { LLMProviderType, AzureReasoningEffort, OpenAIReasoningEffort, LLMTextVerbosity };
@@ -546,6 +547,11 @@ export const MODELS = {
     bedrock: "us.anthropic.claude-3-5-haiku-20241022-v1:0",
     displayName: "Haiku 3.5",
   },
+  [FABLE_5_2_MODEL.id]: {
+    anthropic: FABLE_5_2_MODEL.id,
+    bedrock: "global.anthropic.claude-fable-5-2",
+    displayName: FABLE_5_2_MODEL.name,
+  },
 } as const;
 
 const RETIRED_ANTHROPIC_MODEL_IDS: Record<string, string> = {
@@ -644,6 +650,21 @@ export const OPENROUTER_MODELS = {
     id: "anthropic/claude-opus-4.6",
     displayName: "Claude Opus 4.6",
     description: "Anthropic's most capable model",
+  },
+  "anthropic/claude-fable-5.2": {
+    id: "anthropic/claude-fable-5.2",
+    displayName: FABLE_5_2_MODEL.name,
+    description: FABLE_5_2_MODEL.description,
+  },
+  "openai/gpt-6.2-astra": {
+    id: "openai/gpt-6.2-astra",
+    displayName: "GPT-6.2 Astra",
+    description: "Complex reasoning, coding, and professional work",
+  },
+  "openai/gpt-6.2-sol": {
+    id: "openai/gpt-6.2-sol",
+    displayName: "GPT-6.2 Sol",
+    description: "Efficient coding and everyday agent workflows",
   },
   "openai/gpt-6.1-terra": {
     id: "openai/gpt-6.1-terra",

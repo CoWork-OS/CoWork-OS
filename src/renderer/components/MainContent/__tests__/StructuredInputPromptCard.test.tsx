@@ -9,7 +9,10 @@ import {
   splitApprovalQuestion,
   StructuredInputPromptCard,
 } from "../StructuredInputPromptCard";
-import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../../../shared/approval-draft-presentation";
+import {
+  ASSISTANT_APPROVAL_QUESTION_ID,
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+} from "../../../../shared/approval-draft-presentation";
 import type { InputRequest } from "../../../../shared/types";
 
 function request(
@@ -187,5 +190,53 @@ describe("replyFieldEnterAction", () => {
     expect(replyFieldEnterAction({ ...enter, shiftKey: true }, true, true)).toBeNull();
     expect(replyFieldEnterAction({ ...enter, isComposing: true }, true, true)).toBeNull();
     expect(replyFieldEnterAction({ key: "a", shiftKey: false }, true, true)).toBeNull();
+  });
+});
+
+describe("StructuredInputPromptCard calendar action card", () => {
+  it("draws the event and names the buttons for what they do", () => {
+    const base = request(ASSISTANT_APPROVAL_QUESTION_ID, ["Deny", "Always allow", "Allow once"]);
+    base.questions[0].question = "Create a Google Calendar event. Do you want CoWork to continue?";
+    base.questions[0].actionCard = {
+      kind: "calendar_event",
+      provider: "google_calendar",
+      operation: "create",
+      title: "Proposal review with Sophie",
+      start: { dateTime: "2026-11-17T09:30:00Z" },
+      end: { dateTime: "2026-11-17T09:50:00Z" },
+      attendees: ["Sophie Laurent"],
+      attendeesOmitted: 0,
+    };
+    const html = renderToStaticMarkup(
+      createElement(StructuredInputPromptCard, {
+        request: base,
+        onSubmit: vi.fn(),
+        onDismiss: vi.fn(),
+      }),
+    );
+    expect(html).toContain("Proposal review with Sophie");
+    expect(html).toContain("Sophie Laurent");
+    expect(html).toContain(">Send invite<");
+    expect(html).toContain(">Don&#x27;t send<");
+    // A broader grant keeps its own words.
+    expect(html).toContain(">Always allow<");
+    expect(html).not.toContain(">Allow once<");
+  });
+
+  it("ignores a malformed card and falls back to the plain approval row", () => {
+    const base = request(ASSISTANT_APPROVAL_QUESTION_ID, ["Deny", "Allow once"]);
+    base.questions[0].question = "Create a Google Calendar event. Do you want CoWork to continue?";
+    (base.questions[0] as unknown as Record<string, unknown>).actionCard = {
+      kind: "calendar_event",
+    };
+    const html = renderToStaticMarkup(
+      createElement(StructuredInputPromptCard, {
+        request: base,
+        onSubmit: vi.fn(),
+        onDismiss: vi.fn(),
+      }),
+    );
+    expect(html).toContain(">Allow once<");
+    expect(html).not.toContain("approval-action-card");
   });
 });

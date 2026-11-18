@@ -34,6 +34,8 @@ import { CliAgentFrame } from "../CliAgentFrame";
 import { resolveCliAgentType } from "../../../shared/cli-agent-detection";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { AutoMailComposeFrame, MailComposeFrame } from "../MailComposeFrame";
+import { ApprovalActionCard } from "../ApprovalActionCard/ApprovalActionCard";
+import { normalizeApprovalActionCard } from "../../../shared/approval-action-card";
 import { MemoryUsedAffordance } from "../memory/MemoryUsedAffordance";
 import { type AgentContext } from "../../hooks/useAgentContext";
 import {
@@ -2692,6 +2694,31 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 const agentMessageProtocolReceipt = isBotConversation
                   ? parseAgentMessageProtocolResult(messageText)
                   : null;
+                // An answered calendar approval stays in the conversation as the event and the
+                // decision, in place of the plain "You chose: Allow once" line.
+                const answeredActionCard =
+                  event.payload?.source === "structured_input_selection"
+                    ? normalizeApprovalActionCard(event.payload?.actionCard)
+                    : undefined;
+                if (answeredActionCard) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      <div className="chat-message assistant-message">
+                        <ApprovalActionCard
+                          card={answeredActionCard}
+                          state={
+                            event.payload?.actionCardApproved === true ? "approved" : "declined"
+                          }
+                          reply={
+                            typeof event.payload?.actionCardReply === "string"
+                              ? event.payload.actionCardReply
+                              : undefined
+                          }
+                        />
+                      </div>
+                    </Fragment>
+                  );
+                }
                 const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
                 const inlineFrames = getTaskEventInlineFrames(event);
                 const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);

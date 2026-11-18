@@ -1499,6 +1499,11 @@ export interface EvidenceRef {
   sourceUrlOrPath: string;
   snippet?: string;
   capturedAt: number;
+  /** For a citation: its [N], title, the tool that read it and the connector it came from. */
+  citationIndex?: number;
+  title?: string;
+  sourceTool?: string;
+  sourceLabel?: string;
 }
 
 export type ToolType =

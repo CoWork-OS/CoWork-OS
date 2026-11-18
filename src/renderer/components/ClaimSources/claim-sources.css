@@ -1,0 +1,135 @@
+/* "Google Calendar · 3 sources ›" under a paragraph or list that cites sources. */
+.claim-sources {
+  margin: -2px 0 12px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.claim-sources-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 8px 2px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.claim-sources-toggle:hover,
+.claim-sources-toggle:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.claim-sources-icons {
+  display: inline-flex;
+}
+
+.claim-sources-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+.claim-sources-icons .claim-sources-icon + .claim-sources-icon {
+  margin-left: -5px;
+  box-shadow: 0 0 0 1.5px var(--color-bg-primary);
+}
+
+.claim-sources-label {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claim-sources-count::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+.claim-sources-chevron {
+  flex: none;
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.claim-sources[data-open="true"] .claim-sources-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .claim-sources-chevron {
+    transition: none;
+  }
+}
+
+.claim-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claim-sources-list li {
+  margin: 0;
+  padding: 0;
+}
+
+.claim-sources-list li::marker {
+  content: none;
+}
+
+.claim-sources-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.claim-sources-item:hover,
+.claim-sources-item:focus-visible {
+  background: var(--color-bg-hover);
+}
+
+.claim-sources-index {
+  min-width: 16px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.claim-sources-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claim-sources-origin {
+  flex: none;
+  margin-left: auto;
+  color: var(--color-text-secondary);
+}

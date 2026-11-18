@@ -28,6 +28,7 @@ import {
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { CitationBadge } from "./CitationPanel";
+import { ClaimSources, type ClaimSource } from "./ClaimSources/ClaimSources";
 import { MarkdownImagePreview } from "./MarkdownImagePreview";
 import { useFileActionMenu } from "./FileActionMenu";
 import { LazyHighlightedCodeBlock } from "./lazy-renderers";
@@ -66,6 +67,8 @@ type MarkdownComponentsOptions = {
     domain: string;
     accessedAt: number;
     sourceTool: string;
+    /** The connector a source came from ("Google Calendar"); absent for web pages. */
+    sourceLabel?: string;
   }>;
 };
 
@@ -648,6 +651,26 @@ const CITATION_REF_REGEX = /\[(\d+)\]/g;
 
 /** Set inside a rendered link so inline `code` in its label is not turned into a second chip. */
 const InsideMarkdownLinkContext = createContext(false);
+/** Inside a list, whose sources row goes after the whole list, not after each item. */
+const InsideMarkdownListContext = createContext(false);
+
+/** The sources a block cites by [N], in first-cited order, each once. */
+export function citedSourcesInText<T extends { index: number }>(
+  text: string,
+  citationMap: ReadonlyMap<number, T>,
+): T[] {
+  const cited: T[] = [];
+  const seen = new Set<number>();
+  for (const match of text.matchAll(/\[(\d+)\]/g)) {
+    const index = Number(match[1]);
+    const citation = citationMap.get(index);
+    if (citation && !seen.has(index)) {
+      seen.add(index);
+      cited.push(citation);
+    }
+  }
+  return cited;
+}
 
 /** `[title](#terminal/<tab id>)`: a chip that opens that tab of the task's terminal panel. */
 function MarkdownTerminalLink({ tabId, children }: { tabId: string; children?: ReactNode }) {
@@ -990,6 +1013,47 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
     });
   };
 
+  // The sources behind a claim go right under it: after a paragraph, or after a whole list.
+  const claimSourcesFor = (children: ReactNode): ClaimSource[] =>
+    citationMap.size === 0 ? [] : citedSourcesInText(getTextContent(children), citationMap);
+
+  const MarkdownParagraph = ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) => {
+    const insideList = useContext(InsideMarkdownListContext);
+    const paragraph = <p {...props}>{replaceCitationsInChildren(children)}</p>;
+    const sources = insideList ? [] : claimSourcesFor(children);
+    if (sources.length === 0) return paragraph;
+    return (
+      <>
+        {paragraph}
+        <ClaimSources sources={sources} />
+      </>
+    );
+  };
+
+  const renderList = (Tag: "ul" | "ol") =>
+    function MarkdownList({
+      children,
+      node: _node,
+      ...props
+    }: HTMLAttributes<HTMLElement> & {
+      node?: unknown;
+    }) {
+      const insideList = useContext(InsideMarkdownListContext);
+      const list = (
+        <InsideMarkdownListContext.Provider value>
+          <Tag {...(props as HTMLAttributes<HTMLUListElement & HTMLOListElement>)}>{children}</Tag>
+        </InsideMarkdownListContext.Provider>
+      );
+      const sources = insideList ? [] : claimSourcesFor(children);
+      if (sources.length === 0) return list;
+      return (
+        <>
+          {list}
+          <ClaimSources sources={sources} />
+        </>
+      );
+    };
+
   const MarkdownCode = (props: CodeBlockProps) => {
     const insideLink = useContext(InsideMarkdownLinkContext);
     const isBlock = /(?:^|\s)language-/.test(props.className || "");
@@ -1024,9 +1088,9 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
         workspacePath={workspacePath}
       />
     ),
-    p: ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) => (
-      <p {...props}>{replaceCitationsInChildren(children)}</p>
-    ),
+    p: MarkdownParagraph,
+    ul: renderList("ul"),
+    ol: renderList("ol"),
     li: ({ children, ...props }: LiHTMLAttributes<HTMLLIElement>) => (
       <li {...props}>{replaceCitationsInChildren(children)}</li>
     ),

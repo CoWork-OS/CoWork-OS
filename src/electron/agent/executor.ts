@@ -4111,6 +4111,12 @@ export class TaskExecutor {
                 ? entry.source.trim()
                 : "";
           if (!sourceUrlOrPath) return null;
+          const text = (value: unknown, max: number) =>
+            typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
+          const title = text(entry.title, 300);
+          const sourceTool = text(entry.sourceTool, 80);
+          const sourceLabel = text(entry.sourceLabel, 80);
+          // The renderer numbers badges from these, so keep each source's [N] and title.
           return {
             evidenceId: `citation-${index + 1}`,
             sourceType: "url",
@@ -4122,6 +4128,12 @@ export class TaskExecutor {
                   ? entry.title
                   : undefined,
             capturedAt: Date.now(),
+            ...(Number.isSafeInteger(entry.index) && Number(entry.index) > 0
+              ? { citationIndex: Number(entry.index) }
+              : {}),
+            ...(title ? { title } : {}),
+            ...(sourceTool ? { sourceTool } : {}),
+            ...(sourceLabel ? { sourceLabel } : {}),
           };
         })
         .filter((entry): entry is EvidenceRef => entry !== null);

@@ -157,15 +157,15 @@ Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-r
 
 | Signal | Current | All time |
 |---|---:|---:|
-| GitHub stars | 552 | n/a |
+| GitHub stars | 553 | n/a |
 | GitHub forks | 101 | n/a |
-| Installer/server downloads | 3,508 | 3,508 |
-| Download delta | +3 | n/a |
-| npm downloads | 280 (last week) | 10,945 |
-| GitHub views, last 14-ish days | 1,899 total / 979 unique | n/a |
-| GitHub clones, last 14-ish days | 5,197 total / 861 unique | n/a |
+| Installer/server downloads | 3,560 | 3,560 |
+| Download delta | +52 | n/a |
+| npm downloads | 280 (last week) | 10,986 |
+| GitHub views, last 14-ish days | 1,621 total / 846 unique | n/a |
+| GitHub clones, last 14-ish days | 4,494 total / 763 unique | n/a |
 
-Generated 2026-11-17T11:47:30.190Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
+Generated 2026-11-18T11:36:37.054Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
 <!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
 
 ## License

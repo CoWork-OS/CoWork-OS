@@ -6,6 +6,10 @@ import {
   type UsageReportPlan,
 } from "../../reports/UsageInsightsService";
 import { InvalidCommandArgumentsError } from "./command-errors";
+import {
+  parseUsageInsightsDateRange,
+  type UsageInsightsDateRange,
+} from "../../../shared/usageInsightsDates";
 
 /**
  * Usage insights commands for the database worker and the reporting reader (async
@@ -165,6 +169,7 @@ export const USAGE_COMMANDS = {
         plan: UsageReportPlan;
         /** Pins the period end; defaults to now. */
         nowMs?: number;
+        range?: UsageInsightsDateRange;
       },
     ): UsageInsights {
       const args = requireObject(rawArgs);
@@ -189,6 +194,7 @@ export const USAGE_COMMANDS = {
         periodDays,
         requirePlan(args.plan),
         (args.nowMs as number | undefined) ?? Date.now(),
+        parseUsageInsightsDateRange(args.range),
       );
     },
   },

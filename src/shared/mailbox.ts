@@ -894,7 +894,7 @@ export interface MailboxListThreadsInput {
   query?: string;
   category?: MailboxThreadCategory | "all";
   todayBucket?: MailboxTodayBucket | "all";
-  domainCategory?: MailboxDomainCategory | "all";
+  domainCategory?: MailboxDomainCategory | "all" | "work";
   mailboxView?: MailboxThreadMailboxView;
   folderId?: string;
   labelId?: string;

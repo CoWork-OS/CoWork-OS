@@ -254,7 +254,9 @@ export class BrowserTabViewHost {
     this.deps.guard(contents);
     try {
       // Trackpad pinch zoom, as in Chrome.
-      void contents.setVisualZoomLevelLimits?.(1, 3);
+      // Electron can reject asynchronously when the tab's render frame is
+      // replaced during startup. Optional pinch zoom must not leak a rejection.
+      void Promise.resolve(contents.setVisualZoomLevelLimits?.(1, 3)).catch(() => undefined);
     } catch {
       // Not supported: keep the default.
     }

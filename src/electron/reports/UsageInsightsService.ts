@@ -11,7 +11,7 @@ import {
   type InterventionCounts,
 } from "./awu-outcomes";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
-import { usageLocalDateKey } from "../../shared/usageInsightsDates";
+import { usageLocalDateKey, type UsageInsightsDateRange } from "../../shared/usageInsightsDates";
 import { UsageInsightsProjector } from "./UsageInsightsProjector";
 import { providerLogPayloadAt, routingPayloadAt } from "./usage-sql";
 import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../agent/llm/pricing";
@@ -955,29 +955,49 @@ export class UsageInsightsService {
     return row?.earliest ?? null;
   }
 
-  generate(workspaceId: string | null, periodDays = 7): UsageInsights {
+  generate(
+    workspaceId: string | null,
+    periodDays = 7,
+    range?: UsageInsightsDateRange,
+  ): UsageInsights {
     const candidateProjector = UsageInsightsProjector.getIfInitialized();
     const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
     if (projector) {
       projector.warm();
-      const cacheKey = `${workspaceId || "__all__"}|${periodDays}|jev-ledger-v1`;
+      const cacheKey = `${workspaceId || "__all__"}|${periodDays}|${range ? `${range.startMs}|${range.endMs}|` : ""}jev-ledger-v1`;
       const cached = projector.getCachedReport<UsageInsights>(cacheKey);
       if (cached) {
         return cached;
       }
 
       if (projector.isBackfillComplete()) {
-        const result = this.generateFast(workspaceId, periodDays);
+        const result = this.generateFast(workspaceId, periodDays, range?.endMs, range?.startMs);
+        if (range) result.generatedAt = Date.now();
         projector.setCachedReport(cacheKey, result);
         return result;
       }
 
-      const result = this.generateDuringBackfill(workspaceId, periodDays, projector);
+      const result = this.generateDuringBackfill(
+        workspaceId,
+        periodDays,
+        projector,
+        range?.endMs,
+        range?.startMs,
+      );
+      if (range) result.generatedAt = Date.now();
       projector.setCachedReport(cacheKey, result);
       return result;
     }
 
-    return this.generateRawWindow(workspaceId, periodDays);
+    const result = this.generateRawWindow(
+      workspaceId,
+      periodDays,
+      undefined,
+      range?.endMs,
+      range?.startMs,
+    );
+    if (range) result.generatedAt = Date.now();
+    return result;
   }
 
   /**
@@ -989,20 +1009,21 @@ export class UsageInsightsService {
     reader: DatabaseClient,
     workspaceId: string | null,
     periodDays = 7,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; range?: UsageInsightsDateRange } = {},
   ): Promise<UsageInsights> {
     const candidateProjector = UsageInsightsProjector.getIfInitialized();
     const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
     if (!projector) {
       return reader.execute(
         "usage.generateReport",
-        { workspaceId, periodDays, plan: { kind: "raw", canonical: false } },
+        { workspaceId, periodDays, plan: { kind: "raw", canonical: false }, range: options.range },
         { signal: options.signal },
       );
     }
     projector.warm();
     await projector.flushPendingRefreshesAsync();
-    const cacheKey = `${workspaceId || "__all__"}|${periodDays}|jev-ledger-v1`;
+    const range = options.range;
+    const cacheKey = `${workspaceId || "__all__"}|${periodDays}|${range ? `${range.startMs}|${range.endMs}|` : ""}jev-ledger-v1`;
     const cached = projector.getCachedReport<UsageInsights>(cacheKey);
     if (cached) return cached;
     const version = projector.getCacheVersion();
@@ -1011,7 +1032,7 @@ export class UsageInsightsService {
       : { kind: "duringBackfill", watermarks: projector.getWatermarks() };
     const result = await reader.execute(
       "usage.generateReport",
-      { workspaceId, periodDays, plan },
+      { workspaceId, periodDays, plan, range },
       { signal: options.signal },
     );
     projector.setCachedReport(cacheKey, result, version);
@@ -1027,12 +1048,25 @@ export class UsageInsightsService {
     periodDays: number,
     plan: UsageReportPlan,
     nowMs = Date.now(),
+    range?: UsageInsightsDateRange,
   ): UsageInsights {
-    if (plan.kind === "fast") return this.generateFast(workspaceId, periodDays, nowMs);
-    if (plan.kind === "duringBackfill") {
-      return this.generateDuringBackfill(workspaceId, periodDays, plan.watermarks, nowMs);
+    const end = range?.endMs ?? nowMs;
+    let result: UsageInsights;
+    if (plan.kind === "fast")
+      result = this.generateFast(workspaceId, periodDays, end, range?.startMs);
+    else if (plan.kind === "duringBackfill") {
+      result = this.generateDuringBackfill(
+        workspaceId,
+        periodDays,
+        plan.watermarks,
+        end,
+        range?.startMs,
+      );
+    } else {
+      result = this.generateRawWindow(workspaceId, periodDays, plan.canonical, end, range?.startMs);
     }
-    return this.generateRawWindow(workspaceId, periodDays, plan.canonical, nowMs);
+    if (range) result.generatedAt = Date.now();
+    return result;
   }
 
   private generateDuringBackfill(
@@ -1042,8 +1076,8 @@ export class UsageInsightsService {
       | UsageInsightsProjector
       | Extract<UsageReportPlan, { kind: "duringBackfill" }>["watermarks"],
     now = Date.now(),
+    periodStart = now - periodDays * 24 * 60 * 60 * 1000,
   ): UsageInsights {
-    const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
     const { taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } =
       source instanceof UsageInsightsProjector ? source.getWatermarks() : source;
@@ -1051,7 +1085,7 @@ export class UsageInsightsService {
       taskWatermarkMs > 0 && eventWatermarkMs > 0 ? Math.min(taskWatermarkMs, eventWatermarkMs) : 0;
 
     if (llmWatermarkMs <= 0 && nonLlmWatermarkMs <= 0) {
-      return this.generateRawWindow(workspaceId, periodDays, undefined, now);
+      return this.generateRawWindow(workspaceId, periodDays, undefined, now, periodStart);
     }
 
     const nonLlm =
@@ -1159,8 +1193,8 @@ export class UsageInsightsService {
     periodDays = 7,
     canonical?: boolean,
     now = Date.now(),
+    periodStart = now - periodDays * 24 * 60 * 60 * 1000,
   ): UsageInsights {
-    const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
     const candidateProjector =
       canonical === undefined ? UsageInsightsProjector.getIfInitialized() : null;
@@ -1247,8 +1281,8 @@ export class UsageInsightsService {
     workspaceId: string | null,
     periodDays = 7,
     now = Date.now(),
+    periodStart = now - periodDays * 24 * 60 * 60 * 1000,
   ): UsageInsights {
-    const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
 
     const nonLlm = this.readNonLlmAccumulatorFast(workspaceId, periodStart, periodEnd);

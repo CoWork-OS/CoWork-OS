@@ -4807,8 +4807,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_SAVE_SETTINGS, settings),
 
   // Usage Insights
-  getUsageInsights: (workspaceId: string, periodDays?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.USAGE_INSIGHTS_GET, workspaceId, periodDays),
+  getUsageInsights: (
+    workspaceId: string,
+    periodDays?: number,
+    range?: import("../shared/usageInsightsDates").UsageInsightsDateRange,
+  ) => ipcRenderer.invoke(IPC_CHANNELS.USAGE_INSIGHTS_GET, workspaceId, periodDays, range),
 
   getUsageInsightsEarliest: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.USAGE_INSIGHTS_EARLIEST, workspaceId),
@@ -8622,7 +8625,11 @@ export interface ElectronAPI {
   saveWorktreeSettings: (settings: Any) => Promise<{ success: boolean; error?: string }>;
 
   // Usage Insights
-  getUsageInsights: (workspaceId: string, periodDays?: number) => Promise<Any>;
+  getUsageInsights: (
+    workspaceId: string,
+    periodDays?: number,
+    range?: import("../shared/usageInsightsDates").UsageInsightsDateRange,
+  ) => Promise<Any>;
   getUsageInsightsEarliest: (workspaceId: string) => Promise<number | null>;
 
   // CoWork Pulse

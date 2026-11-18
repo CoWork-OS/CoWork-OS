@@ -41,6 +41,7 @@ const threadQuery = z
         "ops",
         "personal",
         "other",
+        "work",
         "all",
       ])
       .optional(),

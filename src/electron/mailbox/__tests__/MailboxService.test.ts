@@ -1093,6 +1093,39 @@ describeWithSqlite("MailboxService", () => {
     expect(detail?.research?.nextSteps?.length).toBeGreaterThan(0);
   });
 
+  it("finds work threads older than the first page of unrelated mail", async () => {
+    db.prepare("UPDATE mailbox_threads SET domain_category = 'customer' WHERE id = ?").run(
+      "gmail-thread:alpha",
+    );
+    const insert = db.prepare(`
+      INSERT INTO mailbox_threads
+        (id, account_id, provider_thread_id, provider, subject, snippet, participants_json,
+         labels_json, category, domain_category, last_message_at, created_at, updated_at)
+      SELECT ?, account_id, ?, provider, 'Newer newsletter', '', '[]', '[]',
+             'other', 'newsletters', ?, created_at, updated_at
+      FROM mailbox_threads WHERE id = 'gmail-thread:alpha'
+    `);
+    for (let index = 0; index < 40; index++) {
+      insert.run(`newsletter:${index}`, `newsletter:${index}`, now + index + 1);
+    }
+
+    const firstPage = await service.listThreads({
+      mailboxView: "all",
+      sortBy: "recent",
+      limit: 40,
+    });
+    expect(firstPage).toHaveLength(40);
+    expect(firstPage.map((thread) => thread.id)).not.toContain("gmail-thread:alpha");
+
+    const work = await service.listThreads({
+      mailboxView: "all",
+      sortBy: "recent",
+      domainCategory: "work",
+      limit: 40,
+    });
+    expect(work.map((thread) => thread.id)).toEqual(["gmail-thread:alpha"]);
+  });
+
   it("filters Today/domain buckets and includes attachment metadata in mailbox search", async () => {
     db.prepare(
       `UPDATE mailbox_threads

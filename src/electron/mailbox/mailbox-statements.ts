@@ -88,6 +88,7 @@ const THREAD_LIST_CONDITIONS: Readonly<
   category: "category = ?",
   todayBucket: "today_bucket = ?",
   domainCategory: "domain_category = ?",
+  workDomains: "domain_category IN ('customer', 'hiring', 'approvals', 'ops', 'finance')",
   folder: "(labels_json LIKE ? OR metadata_json LIKE ?)",
   label: "(labels_json LIKE ? OR metadata_json LIKE ?)",
   scheduledOnly: `EXISTS (

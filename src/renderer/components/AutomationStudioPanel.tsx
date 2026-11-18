@@ -926,7 +926,9 @@ export default function AutomationStudioPanel({
 
   async function testFlow() {
     setBusy("test");
+    setError(null);
     setNotice(null);
+    setTestResult(null);
     try {
       const sample = JSON.parse(sampleJson) as Record<string, unknown>;
       const result = (await window.electronAPI.testRoutineWorkflow({

@@ -32,7 +32,7 @@ import { GeminiProvider } from "./gemini-provider";
 import { OPENROUTER_DEFAULT_MODEL, OpenRouterProvider } from "./openrouter-provider";
 import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";
 import { getClientIdentityHeaders } from "./client-identity";
-import { OpenAIProvider } from "./openai-provider";
+import { CHATGPT_SUBSCRIPTION_MODEL_IDS, OpenAIProvider } from "./openai-provider";
 import { getOpenAISiwcClientId } from "./openai-siwc-oauth";
 import { AzureOpenAIProvider } from "./azure-openai-provider";
 import { AzureAnthropicProvider } from "./azure-anthropic-provider";
@@ -57,7 +57,10 @@ import {
   CUSTOM_PROVIDER_CATALOG,
   CUSTOM_PROVIDER_MAP,
   CUSTOM_PROVIDER_IDS,
+  FABLE_5_2_MODEL,
   GEMINI_DEFAULT_MODEL,
+  GPT_6_2_MODELS,
+  isGpt62Model,
   KIMI_CODE_CHINA_BASE_URL,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
@@ -106,26 +109,7 @@ export interface OpenRouterImageModel {
   description: string;
   supported_parameters: Record<string, Any>;
 }
-const OPENAI_OAUTH_SUPPORTED_MODELS = new Set([
-  "gpt-6-astra",
-  "gpt-6.1-sol",
-  "gpt-6.1-terra",
-  "gpt-6-sol",
-  "gpt-6-luna",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.4-nano",
-  "gpt-5.3-codex-spark",
-  "gpt-5.3-codex",
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.1",
-  "gpt-5.1-codex-max",
-]);
+const OPENAI_OAUTH_SUPPORTED_MODELS = new Set<string>(CHATGPT_SUBSCRIPTION_MODEL_IDS);
 const CUSTOM_PROVIDER_ALIASES: Partial<Record<LLMProviderType, LLMProviderType>> = {
   "kimi-coding": "kimi-code",
 };
@@ -3112,13 +3096,18 @@ export class LLMProviderFactory {
                 displayName: value.displayName,
                 description: value.description,
               }));
-        const terra = OPENROUTER_MODELS["openai/gpt-6.1-terra"];
-        if (!modelList.some((model) => model.key === terra.id)) {
-          modelList = [
-            ...modelList,
-            { key: terra.id, displayName: terra.displayName, description: terra.description },
-          ];
-        }
+        const releaseModels = [
+          OPENROUTER_MODELS["openai/gpt-6.1-terra"],
+          OPENROUTER_MODELS["openai/gpt-6.2-astra"],
+          OPENROUTER_MODELS["openai/gpt-6.2-sol"],
+          OPENROUTER_MODELS["anthropic/claude-fable-5.2"],
+        ];
+        modelList = [
+          ...modelList,
+          ...releaseModels
+            .filter(({ id }) => !modelList.some(({ key }) => key === id))
+            .map(({ id, displayName, description }) => ({ key: id, displayName, description })),
+        ];
         return {
           currentModel,
           models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
@@ -3142,20 +3131,28 @@ export class LLMProviderFactory {
       }
 
       case "openai": {
+        const authMethod = resolveOpenAIAuthMethod(settings.openai);
+        const hasPlanCatalog = authMethod === "oauth" && settings.openai?.oauthVariant === "siwc";
         const currentModel =
           normalizeOpenAIModelForAuth(
             settings.openai?.model,
-            resolveOpenAIAuthMethod(settings.openai),
+            authMethod,
             settings.openai?.chatgptPlanType,
           ) || "gpt-6-astra";
+        const gpt62Models = GPT_6_2_MODELS.map(({ id, name, description }) => ({
+          key: id,
+          displayName: name,
+          description,
+        }));
         const defaultOpenAIModels =
-          resolveOpenAIAuthMethod(settings.openai) === "oauth"
+          authMethod === "oauth"
             ? [
                 {
                   key: "gpt-6-astra",
                   displayName: "GPT-6 Astra",
                   description: "GPT-6 Astra for ChatGPT subscription access",
                 },
+                ...gpt62Models,
                 {
                   key: "gpt-6.1-sol",
                   displayName: "GPT-6.1 Sol",
@@ -3223,6 +3220,7 @@ export class LLMProviderFactory {
                   displayName: "GPT-6 Astra",
                   description: "Flagship model for complex reasoning and coding",
                 },
+                ...gpt62Models,
                 {
                   key: "gpt-6.1-sol",
                   displayName: "GPT-6.1 Sol",
@@ -3279,8 +3277,10 @@ export class LLMProviderFactory {
           cachedModels && cachedModels.length > 0
             ? [
                 ...defaultOpenAIModels
-                  .filter((model) =>
-                    ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"].includes(model.key),
+                  .filter(
+                    ({ key }) =>
+                      ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"].includes(key) ||
+                      (!hasPlanCatalog && isGpt62Model(key)),
                   )
                   .filter((model) => !cachedModels.some((cached) => cached.key === model.key)),
                 ...cachedModels,
@@ -3357,7 +3357,7 @@ export class LLMProviderFactory {
 
       case "anthropic": {
         const currentModel = normalizeAnthropicModelKey(settings.modelKey);
-        const modelList =
+        let modelList =
           settings.cachedAnthropicModels && settings.cachedAnthropicModels.length > 0
             ? settings.cachedAnthropicModels.filter(
                 (model) => !isRetiredAnthropicModelReference(model.key),
@@ -3394,6 +3394,16 @@ export class LLMProviderFactory {
                   description: "Older Claude 4 model",
                 },
               ];
+        if (!modelList.some(({ key }) => key === FABLE_5_2_MODEL.id)) {
+          modelList = [
+            ...modelList,
+            {
+              key: FABLE_5_2_MODEL.id,
+              displayName: FABLE_5_2_MODEL.name,
+              description: FABLE_5_2_MODEL.description,
+            },
+          ];
+        }
         return {
           currentModel,
           models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
@@ -3781,7 +3791,7 @@ export class LLMProviderFactory {
 
     // Extract model family and version from whatever remains.
     // Handles both "Family Version" (Opus 4.6) and "Version Family" (3.5 Sonnet).
-    const families = ["Opus", "Sonnet", "Haiku"];
+    const families = ["Opus", "Sonnet", "Haiku", "Fable"];
     let family = "";
     let version = "";
 
@@ -3826,14 +3836,14 @@ export class LLMProviderFactory {
     //  [region.]anthropic.claude-<family>-<version>[-date][-vN:M]
     //  [region.]anthropic.claude-<version>-<family>[-date][-vN:M]
     const idMatch = raw.match(
-      /^(?:(us|eu|ap[\w-]*|sa)\.)?anthropic\.claude-(.+?)(?:-\d{8,})?(?:-v\d+:\d+)?$/i,
+      /^(?:(us|eu|ap[\w-]*|sa|global)\.)?anthropic\.claude-(.+?)(?:-\d{8,})?(?:-v\d+:\d+)?$/i,
     );
     if (!idMatch) return null;
 
-    const regionPrefix = idMatch[1]?.toUpperCase() || "";
+    const regionPrefix = idMatch[1]?.toUpperCase().replace(/^GLOBAL$/, "GL") || "";
     const slug = idMatch[2]; // e.g. "opus-4-5", "3-5-sonnet", "sonnet-4-6"
 
-    const families = ["opus", "sonnet", "haiku"];
+    const families = ["opus", "sonnet", "haiku", "fable"];
     let family = "";
     let version = "";
 
@@ -3883,11 +3893,14 @@ export class LLMProviderFactory {
       id: value.bedrock,
       name: value.displayName,
       provider: "Anthropic",
-      description: key.includes("opus")
-        ? "Most capable for complex tasks (inference profile)"
-        : key.includes("sonnet")
-          ? "Balanced performance and speed (inference profile)"
-          : "Fast and efficient (inference profile)",
+      description:
+        key === FABLE_5_2_MODEL.id
+          ? FABLE_5_2_MODEL.description
+          : key.includes("opus")
+            ? "Most capable for complex tasks (inference profile)"
+            : key.includes("sonnet")
+              ? "Balanced performance and speed (inference profile)"
+              : "Fast and efficient (inference profile)",
     }));
 
     try {
@@ -4160,6 +4173,11 @@ export class LLMProviderFactory {
         displayName: "Sonnet 4",
         description: "Older Claude 4 model",
       },
+      {
+        id: FABLE_5_2_MODEL.id,
+        displayName: FABLE_5_2_MODEL.name,
+        description: FABLE_5_2_MODEL.description,
+      },
     ];
 
     const cachedModels = settings.cachedAnthropicModels
@@ -4261,6 +4279,16 @@ export class LLMProviderFactory {
         id: "anthropic/claude-opus-4.6",
         name: "Claude Opus 4.6",
         context_length: 1000000,
+      },
+      ...GPT_6_2_MODELS.map(({ id, name }) => ({
+        id: `openai/${id}`,
+        name,
+        context_length: 1_050_000,
+      })),
+      {
+        id: OPENROUTER_MODELS["anthropic/claude-fable-5.2"].id,
+        name: FABLE_5_2_MODEL.name,
+        context_length: 1_000_000,
       },
       { id: "openai/gpt-6.1-terra", name: "GPT-6.1 Terra", context_length: 1_050_000 },
       { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 },
@@ -4398,7 +4426,11 @@ export class LLMProviderFactory {
     const settings = this.loadSettings();
     // Normalize empty strings to undefined
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = await resolveSecretValue(normalizedApiKey || settings.openai?.apiKey);
+    const useSubscription =
+      !normalizedApiKey && resolveOpenAIAuthMethod(settings.openai) === "oauth";
+    const key = useSubscription
+      ? undefined
+      : await resolveSecretValue(normalizedApiKey || settings.openai?.apiKey);
     // Check for OAuth access token if no API key
     const accessToken = settings.openai?.accessToken;
     const refreshToken = settings.openai?.refreshToken;
@@ -4409,6 +4441,7 @@ export class LLMProviderFactory {
         name: "GPT-6 Astra",
         description: "Flagship model for complex reasoning and coding",
       },
+      ...GPT_6_2_MODELS,
       {
         id: "gpt-6.1-sol",
         name: "GPT-6.1 Sol",
@@ -4446,7 +4479,7 @@ export class LLMProviderFactory {
     ];
 
     // For OAuth users, use pi-ai SDK's model list directly
-    if (accessToken && refreshToken && !key) {
+    if (useSubscription && accessToken && refreshToken) {
       logger.debug("Using OpenAI OAuth - fetching models from pi-ai SDK...");
       try {
         const provider = new OpenAIProvider({
@@ -4463,99 +4496,7 @@ export class LLMProviderFactory {
         return models;
       } catch (error) {
         logger.error("Failed to get OpenAI models from pi-ai SDK:", error);
-        // Return ChatGPT-specific defaults for OAuth users
-        return [
-          {
-            id: "gpt-6-astra",
-            name: "GPT-6 Astra",
-            description: "GPT-6 Astra for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-6.1-sol",
-            name: "GPT-6.1 Sol",
-            description: "GPT-6.1 Sol for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-6.1-terra",
-            name: "GPT-6.1 Terra",
-            description: "GPT-6.1 Terra for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-6-sol",
-            name: "GPT-6 Sol",
-            description: "GPT-6 Sol for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-6-luna",
-            name: "GPT-6 Luna",
-            description: "GPT-6 Luna for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.6-sol",
-            name: "GPT-5.6 Sol",
-            description: "GPT-5.6 Sol for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.6-terra",
-            name: "GPT-5.6 Terra",
-            description: "GPT-5.6 Terra for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.6-luna",
-            name: "GPT-5.6 Luna",
-            description: "GPT-5.6 Luna for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.5",
-            name: "GPT-5.5",
-            description: "Latest ChatGPT/Codex subscription model",
-          },
-          {
-            id: "gpt-5.4",
-            name: "GPT-5.4",
-            description: "Current Codex model for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.4-mini",
-            name: "GPT-5.4 Mini",
-            description: "Fast GPT-5.4 model for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.4-nano",
-            name: "GPT-5.4 Nano",
-            description: "Fastest GPT-5.4 model for ChatGPT subscription access",
-          },
-          {
-            id: "gpt-5.3-codex-spark",
-            name: "GPT-5.3 Codex Spark",
-            description: "Entitlement-dependent Codex Spark model",
-          },
-          {
-            id: "gpt-5.1-codex-max",
-            name: "GPT-5.1 Codex Max",
-            description: "Maximum capability for complex tasks",
-          },
-          {
-            id: "gpt-5.1",
-            name: "GPT-5.1",
-            description: "Balanced performance and capability",
-          },
-          {
-            id: "gpt-5.2-codex",
-            name: "GPT-5.2 Codex",
-            description: "Advanced reasoning model",
-          },
-          {
-            id: "gpt-5.3-codex",
-            name: "GPT-5.3 Codex",
-            description: "Advanced reasoning model",
-          },
-          {
-            id: "gpt-5.2",
-            name: "GPT-5.2",
-            description: "Most advanced reasoning",
-          },
-        ];
+        return OpenAIProvider.getDefaultCodexModels();
       }
     }
 

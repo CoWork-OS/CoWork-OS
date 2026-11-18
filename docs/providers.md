@@ -212,7 +212,7 @@ CoWork OS enables prompt caching by default in `auto` mode for supported model r
 - **Bedrock Claude/Nova and Pi-backed Claude/OpenAI routes**: CoWork forwards provider-native cache retention controls and preserves cache-read/cache-write usage in telemetry. Pi keeps every system block when caching is off or rejected, preserves SDK-owned authentication instructions, and surfaces failed requests for normal error handling. Bedrock only retries cache compatibility errors when cache controls were sent. Nova uses system/message checkpoints with its supported short TTL; tool checkpoints and long TTLs remain Claude-specific where supported.
 - **Gemini and DeepSeek**: Their upstream implicit caches operate automatically. CoWork records Gemini's `cachedContentTokenCount` and DeepSeek's `prompt_cache_hit_tokens` as cached input tokens, including through the shared compatible-provider adapters where applicable.
 
-Claude's scoped-context path uses the `mid-conversation-system-clear-at-2026-08-21` beta and is limited to the [documented supporting models](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages): Fable 5/5.1, Mythos 5/5.1, Opus 4.8/5/5.5, Sonnet 5.5, and Haiku 5.5. Sonnet 5 and older unsupported models keep the complete global system prompt. Cleared context remains byte-for-byte in the request history and costs no input tokens. On the request that clears it, Claude may reprocess the latest assistant reply; the reusable prefix ends at the user turn preceding that context. Stable system instructions and tools must still match, and compaction or history edits intentionally invalidate affected replay metadata.
+Claude's scoped-context path uses the `mid-conversation-system-clear-at-2026-08-21` beta on [documented Messages API routes](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages). It supports Fable 5, 5.1, and 5.2, Mythos 5 and 5.1, Opus 4.8, 5, and 5.5, Sonnet 5.5, and Haiku 5.5. Cleared context remains byte-for-byte in the request history and costs no input tokens. On the request that clears it, Claude may reprocess the latest assistant reply. The reusable prefix ends at the user turn preceding that context. Stable system instructions and tools must still match, and compaction or history edits invalidate affected replay metadata.
 
 Routes that still use one global system field, including Bedrock Converse, Pi-backed Claude, OpenRouter Claude, Gemini, and unsupported compatible gateways, reuse the stable system prefix. Reusing later conversation history also requires the preceding system text to remain unchanged. Current turn instructions retain their system priority on these routes.
 
@@ -627,6 +627,8 @@ For prompt caching, OpenRouter Claude routes use explicit Anthropic-style cache 
 
 After sign-in, CoWork reads your plan and suggests a model: GPT-6 Luna (`gpt-6-luna`) on the Free and Go plans, and GPT-6 Astra (`gpt-6-astra`) on paid plans. The built-in catalog also includes GPT-6 Sol (`gpt-6-sol`), GPT-6.1 Sol (`gpt-6.1-sol`) and the earlier GPT-5.x models. The signed-in account and OpenAI backend remain the source of truth for which models and controls are actually available.
 
+GPT-6.2 Astra (`gpt-6.2-astra`) and GPT-6.2 Sol (`gpt-6.2-sol`) are optional selections. Use **Refresh Models** to check availability for your ChatGPT account. The models are also available through the OpenAI API, OpenRouter, and OpenCode Zen. On Azure OpenAI, add your Azure deployment names in **Model Access**. Using the model IDs as deployment names lets CoWork select the Responses endpoint and display the corresponding reasoning controls. Both models require reasoning.
+
 Reasoning effort is a request control, not a separate model ID. Choose the
 model first, then set its effort from either:
 
@@ -644,6 +646,12 @@ Model and effort availability remains account-, plan-, and entitlement-dependent
 If a model is listed locally but the ChatGPT backend rejects it, refresh the
 model list, confirm the signed-in account has access, or select an available
 model/effort combination.
+
+---
+
+## Claude Fable 5.2
+
+Select `claude-fable-5-2` on Anthropic or OpenCode Zen, or use `anthropic/claude-fable-5.2` on OpenRouter. For Azure Anthropic, add the Foundry deployment name in **Model Access**. In Bedrock, pick an available Fable 5.2 inference profile, such as `global.anthropic.claude-fable-5-2` or `us.anthropic.claude-fable-5-2`. Fable 5.2 uses adaptive thinking. Review your provider's retention terms before using it with sensitive data. [Anthropic data retention requirements](https://platform.claude.com/docs/en/models/fable-5-2/migration-guide)
 
 ---
 

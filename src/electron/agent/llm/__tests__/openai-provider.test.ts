@@ -65,50 +65,75 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
-  it("returns and replays encrypted reasoning within the current turn", async () => {
-    responsesCreateMock.mockResolvedValue({
-      model: "gpt-5.5",
-      output: [
-        { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc-1" },
-        { type: "function_call", call_id: "call_1", name: "lookup", arguments: "{}" },
-      ],
-      usage: { input_tokens: 10, output_tokens: 5 },
-    });
-    const provider = new OpenAIProvider({
-      type: "openai",
-      model: "gpt-5.5",
-      openaiApiKey: "sk-test",
-      openaiReasoningEffort: "high",
-    });
+  it.each(["gpt-5.5", "gpt-6.2-astra", "gpt-6.2-sol"])(
+    "round-trips a tool call and encrypted reasoning with %s",
+    async (model) => {
+      responsesCreateMock.mockResolvedValue({
+        model,
+        output: [
+          { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc-1" },
+          { type: "function_call", call_id: "call_1", name: "lookup", arguments: "{}" },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+      const provider = new OpenAIProvider({
+        type: "openai",
+        model,
+        openaiApiKey: "sk-test",
+        openaiReasoningEffort: "high",
+      });
 
-    const first = await provider.createMessage({
-      model: "gpt-5.5",
-      maxTokens: 64,
-      messages: [{ role: "user", content: "check status" }],
-    });
-    expect(responsesCreateMock.mock.calls[0][0].include).toEqual(["reasoning.encrypted_content"]);
-    expect(first.reasoning).toHaveLength(1);
+      const tool = {
+        name: "lookup",
+        description: "Look up a status",
+        input_schema: { type: "object" as const },
+      };
+      const first = await provider.createMessage({
+        model,
+        maxTokens: 64,
+        tools: [tool],
+        messages: [{ role: "user", content: "check status" }],
+      });
+      expect(responsesCreateMock.mock.calls[0][0].include).toEqual(["reasoning.encrypted_content"]);
+      expect(first.stopReason).toBe("tool_use");
+      expect(first.reasoning).toHaveLength(1);
+      expect(responsesCreateMock.mock.calls[0][0]).toMatchObject({
+        model,
+        reasoning: { effort: "high" },
+        tools: [expect.objectContaining({ type: "function", name: "lookup" })],
+      });
 
-    await provider.createMessage({
-      model: "gpt-5.5",
-      maxTokens: 64,
-      messages: [
-        { role: "user", content: "check status" },
-        { role: "assistant", content: first.content, reasoning: first.reasoning },
-        { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "ok" }] },
-      ],
-    });
-    const replayed = responsesCreateMock.mock.calls[1][0].input;
-    expect(replayed).toContainEqual({
-      type: "reasoning",
-      id: "rs_1",
-      summary: [],
-      encrypted_content: "enc-1",
-    });
-    expect(replayed.findIndex((item: Any) => item.type === "reasoning")).toBeLessThan(
-      replayed.findIndex((item: Any) => item.type === "function_call"),
-    );
-  });
+      await provider.createMessage({
+        model,
+        maxTokens: 64,
+        tools: [tool],
+        messages: [
+          { role: "user", content: "check status" },
+          { role: "assistant", content: first.content, reasoning: first.reasoning },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "call_1", content: "ok" }],
+          },
+        ],
+      });
+      expect(responsesCreateMock.mock.calls[1][0].model).toBe(model);
+      const replayed = responsesCreateMock.mock.calls[1][0].input;
+      expect(replayed).toContainEqual({
+        type: "function_call_output",
+        call_id: "call_1",
+        output: "ok",
+      });
+      expect(replayed).toContainEqual({
+        type: "reasoning",
+        id: "rs_1",
+        summary: [],
+        encrypted_content: "enc-1",
+      });
+      expect(replayed.findIndex((item: Any) => item.type === "reasoning")).toBeLessThan(
+        replayed.findIndex((item: Any) => item.type === "function_call"),
+      );
+    },
+  );
 
   it("uses Responses API with reasoning, verbosity, tools, prompt cache, and replayed phase for API-key GPT-5 models", async () => {
     responsesCreateMock.mockResolvedValue({
@@ -1088,6 +1113,8 @@ describe("OpenAIProvider structured errors", () => {
   });
 
   it.each([
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
     "gpt-6-astra",
     "gpt-6.1-sol",
     "gpt-6.1-terra",
@@ -1492,8 +1519,10 @@ describe("OpenAIProvider structured errors", () => {
 
     const models = await provider.getAvailableModels();
 
-    expect(models.slice(0, 8).map((model) => model.id)).toEqual([
+    expect(models.slice(0, 10).map((model) => model.id)).toEqual([
       "gpt-6-astra",
+      "gpt-6.2-astra",
+      "gpt-6.2-sol",
       "gpt-6.1-sol",
       "gpt-6.1-terra",
       "gpt-6-sol",

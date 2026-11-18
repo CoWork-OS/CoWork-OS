@@ -100,6 +100,9 @@ describe("catalogue prices for current models", () => {
     ["claude-opus-5-5", 4, 20],
     ["claude-sonnet-5", 2, 10],
     ["claude-fable-5-1", 10, 50],
+    ["claude-fable-5-2", 8, 40],
+    ["gpt-6.2-astra", 8, 40],
+    ["gpt-6.2-sol", 2, 10],
     ["claude-opus-4-6", 5, 25],
     ["claude-opus-4-5-20251101", 5, 25],
     ["claude-haiku-4-5", 1, 5],
@@ -142,5 +145,12 @@ describe("catalogue prices for current models", () => {
   it("applies catalogue long-context tiers to the whole request", () => {
     expect(calculateCost("gpt-6-astra", 300_000, 100_000)).toBeCloseTo(0.3 * 20 + 0.1 * 75, 8);
     expect(calculateCost("gpt-6-astra", 200_000, 100_000)).toBeCloseTo(0.2 * 10 + 0.1 * 50, 8);
+  });
+
+  it.each([
+    ["gpt-6.2-astra", 16, 60],
+    ["gpt-6.2-sol", 4, 15],
+  ] as const)("prices %s long-context requests at published rates", (model, input, output) => {
+    expect(calculateCost(model, 300_000, 100_000)).toBeCloseTo(0.3 * input + 0.1 * output);
   });
 });

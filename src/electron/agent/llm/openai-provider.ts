@@ -30,6 +30,7 @@ import {
 } from "./types";
 import { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
 import { OpenAISiwcError, OpenAISiwcOAuth, SIWC_RESOURCE, siwcFetch } from "./openai-siwc-oauth";
+import { GPT_6_2_MODELS, isGpt62Model } from "../../../shared/llm-provider-catalog";
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
 import {
@@ -61,8 +62,9 @@ const DEFAULT_CODEX_MODEL = "gpt-6-astra";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const OPENAI_CODEX_API = "openai-codex-responses";
 const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
-const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
+export const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-6-astra",
+  ...GPT_6_2_MODELS.map(({ id }) => id),
   "gpt-6.1-sol",
   "gpt-6.1-terra",
   "gpt-6-sol",
@@ -420,11 +422,15 @@ export class OpenAIProvider implements LLMProvider {
   private getOpenAIReasoningEffort(request: LLMRequest): OpenAIReasoningEffort | undefined {
     const configured = request.reasoningEffort || this.openaiReasoningEffort || "medium";
     if (
-      this.normalizeCodexModelId(request.model || this.model).toLowerCase() === "gpt-6.1-sol" &&
-      configured === "none"
+      configured === "none" &&
+      (this.normalizeCodexModelId(request.model || this.model).toLowerCase() === "gpt-6.1-sol" ||
+        isGpt62Model(request.model || this.model))
     ) {
       return "low";
     }
+    // GPT-6.2 Ultrafast is a separate service tier. Keep reasoning at Max for
+    // older saved settings without implicitly requesting a premium tier.
+    if (configured === "ultra" && isGpt62Model(request.model || this.model)) return "max";
     // The public API exposes Astra's highest setting as `max`; `ultra` is
     // reserved for the ChatGPT subscription compatibility backend. SIWC uses the
     // public API even though it authenticates with OAuth.
@@ -1279,10 +1285,10 @@ export class OpenAIProvider implements LLMProvider {
           return models.sort((a, b) => priority(a.id) - priority(b.id));
         }
         logger.warn("Sign in with ChatGPT returned no listable models; using built-in defaults.");
-        return this.getDefaultCodexModels();
+        return OpenAIProvider.getDefaultCodexModels();
       } catch (error) {
         logger.error("Failed to list Sign in with ChatGPT models; using built-in defaults:", error);
-        return this.getDefaultCodexModels();
+        return OpenAIProvider.getDefaultCodexModels();
       }
     }
 
@@ -1322,11 +1328,11 @@ export class OpenAIProvider implements LLMProvider {
         });
 
         logger.debug(`Found ${models.length} models via pi-ai SDK`);
-        return models.length > 0 ? models : this.getDefaultCodexModels();
+        return models.length > 0 ? models : OpenAIProvider.getDefaultCodexModels();
       } catch (error) {
         logger.error("Failed to get models from pi-ai SDK:", error);
         // Return defaults on error
-        return this.getDefaultCodexModels();
+        return OpenAIProvider.getDefaultCodexModels();
       }
     }
 
@@ -1354,7 +1360,7 @@ export class OpenAIProvider implements LLMProvider {
               if (id === "gpt-6.1-terra") return -4;
               if (id === "gpt-6-astra") return -3;
               if (id === "gpt-6-sol") return -2;
-              if (id === "gpt-6-luna") return -1;
+              if (id === "gpt-6-luna" || isGpt62Model(id)) return -1;
               if (id.includes("gpt-4o")) return 0;
               if (id.includes("gpt-4")) return 1;
               if (id.includes("gpt-3.5")) return 2;
@@ -1381,6 +1387,7 @@ export class OpenAIProvider implements LLMProvider {
         name: "GPT-6 Astra",
         description: "Flagship model for complex reasoning and coding",
       },
+      ...GPT_6_2_MODELS,
       {
         id: "gpt-6.1-sol",
         name: "GPT-6.1 Sol",
@@ -1402,13 +1409,14 @@ export class OpenAIProvider implements LLMProvider {
     ];
   }
 
-  private getDefaultCodexModels(): Array<{ id: string; name: string; description: string }> {
+  static getDefaultCodexModels(): Array<{ id: string; name: string; description: string }> {
     return [
       {
         id: "gpt-6-astra",
         name: "GPT-6 Astra",
         description: "GPT-6 Astra for ChatGPT subscription access",
       },
+      ...GPT_6_2_MODELS,
       {
         id: "gpt-6.1-sol",
         name: "GPT-6.1 Sol",
@@ -1482,6 +1490,8 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private formatModelName(modelId: string): string {
+    const gpt62 = GPT_6_2_MODELS.find(({ id }) => id === modelId);
+    if (gpt62) return gpt62.name;
     // Format model ID to display name
     if (modelId === "gpt-4o") return "GPT-4o";
     if (modelId === "gpt-4o-mini") return "GPT-4o Mini";
@@ -1533,6 +1543,8 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId.includes("o3")) return "Next generation reasoning";
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra for ChatGPT subscription access";
+    const gpt62 = GPT_6_2_MODELS.find(({ id }) => id === modelId);
+    if (gpt62) return gpt62.description;
     if (modelId === "gpt-6.1-sol") return "Complex coding and professional work";
     if (modelId === "gpt-6.1-terra") return "Visual reasoning, computer use, and writing";
     if (modelId === "gpt-6-sol") return "GPT-6 Sol for ChatGPT subscription access";

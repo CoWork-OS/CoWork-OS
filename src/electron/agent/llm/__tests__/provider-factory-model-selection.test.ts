@@ -165,6 +165,69 @@ describe("LLMProviderFactory model status", () => {
     expect(LLMProviderFactory.getConfigStatus().currentModel).toBe("gpt-6-luna");
   });
 
+  it.each(["gpt-6.2-astra", "gpt-6.2-sol"])(
+    "keeps %s selected when reloading ChatGPT subscription settings",
+    (model) => {
+      const settings: LLMSettings = {
+        providerType: "openai",
+        modelKey: "gpt-6-astra",
+        openai: { authMethod: "oauth", model: "gpt-6-astra", chatgptPlanType: "plus" },
+        cachedOpenAIModels: [{ key: "gpt-6-astra", displayName: "GPT-6 Astra", description: "" }],
+      };
+      const initial = LLMProviderFactory.getProviderModelStatus(settings);
+      expect(initial.currentModel).toBe("gpt-6-astra");
+      expect(initial.models.find(({ key }) => key === model)?.reasoningEfforts).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ]);
+
+      const saved = LLMProviderFactory.applyModelSelection(settings, model);
+      const reloaded = LLMProviderFactory.getProviderModelStatus(JSON.parse(JSON.stringify(saved)));
+      expect(saved.openai?.model).toBe(model);
+      expect(reloaded.currentModel).toBe(model);
+      expect(reloaded.models.filter(({ key }) => key === model)).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ["openai", "gpt-6-astra", "gpt-6.2-astra"],
+    ["openai", "gpt-6-astra", "gpt-6.2-sol"],
+    ["azure", "gpt-6-sol", "gpt-6.2-astra"],
+    ["azure", "gpt-6-sol", "gpt-6.2-sol"],
+    ["anthropic", "opus-4-6", "claude-fable-5-2"],
+    ["azure-anthropic", "claude-opus-4-6", "claude-fable-5-2"],
+    ["bedrock", "anthropic.claude-opus-4-6", "global.anthropic.claude-fable-5-2"],
+    ["openrouter", OPENROUTER_DEFAULT_MODEL, "anthropic/claude-fable-5.2"],
+    ["openrouter", OPENROUTER_DEFAULT_MODEL, "openai/gpt-6.2-astra"],
+    ["openrouter", OPENROUTER_DEFAULT_MODEL, "openai/gpt-6.2-sol"],
+    ["opencode", "gpt-5.5", "claude-fable-5-2"],
+    ["opencode", "gpt-5.5", "gpt-6.2-astra"],
+    ["opencode", "gpt-5.5", "gpt-6.2-sol"],
+  ] as const)(
+    "selects a new model on %s with %s as the existing choice",
+    (providerType, current, model) => {
+      const settings = LLMProviderFactory.applyModelSelection(
+        {
+          providerType,
+          modelKey: current,
+          ...(providerType === "azure" && { azure: { deployments: [current, model] } }),
+          ...(providerType === "azure-anthropic" && {
+            azureAnthropic: { deployments: [current, model] },
+          }),
+        },
+        current,
+      );
+      const initial = LLMProviderFactory.getProviderModelStatus(settings);
+      expect(initial.currentModel).toBe(current);
+      expect(initial.models.some(({ key }) => key === model)).toBe(true);
+      const changed = LLMProviderFactory.applyModelSelection(settings, model);
+      expect(LLMProviderFactory.getProviderModelStatus(changed).currentModel).toBe(model);
+    },
+  );
+
   it("adds new GPT-6 choices to a stored OpenAI model cache without duplicating entries", () => {
     const settings: LLMSettings = {
       providerType: "openai",
@@ -354,7 +417,7 @@ describe("LLMProviderFactory model status", () => {
     const status = LLMProviderFactory.getConfigStatus();
 
     expect(status.currentModel).toBe("haiku-4-5");
-    expect(status.models.map((model) => model.key)).toEqual(["haiku-4-5"]);
+    expect(status.models.map((model) => model.key)).toEqual(["haiku-4-5", "claude-fable-5-2"]);
   });
 
   it("normalizes stale OpenAI API model settings for ChatGPT OAuth", () => {

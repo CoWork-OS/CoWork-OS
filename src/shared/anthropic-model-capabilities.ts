@@ -90,6 +90,7 @@ function budgetRow(maxOutputTokens: number, efforts: readonly AnthropicEffort[] 
 }
 
 const FAMILY_CAPABILITIES: Record<string, CapabilityRow> = {
+  "fable-5-2": ALWAYS_THINKING,
   "fable-5-1": ALWAYS_THINKING,
   "mythos-5-1": ALWAYS_THINKING,
   // Fable 5 still accepts forced tool_choice; thinking makes it moot (only auto is sent).
@@ -131,6 +132,10 @@ export function getAnthropicModelCapabilities(
     if (!futureFamily && FUTURE_GENERATION.test(family)) futureFamily = family;
   }
   return futureFamily ? { family: futureFamily, ...ALWAYS_THINKING } : null;
+}
+
+export function isFable52Model(modelId: string): boolean {
+  return getAnthropicModelCapabilities(modelId)?.family === "fable-5-2";
 }
 
 /**

@@ -1,3 +1,4 @@
+import { isGpt62Model } from "../../../shared/llm-provider-catalog";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -83,9 +84,10 @@ export class AzureOpenAIProvider implements LLMProvider {
     this.reasoningEffort = config.azureReasoningEffort?.trim() as AzureReasoningEffort | undefined;
   }
 
-  private getReasoningEffort(): AzureRequestReasoningEffort | undefined {
+  private getReasoningEffort(model = this.deployment): AzureRequestReasoningEffort | undefined {
     switch (this.reasoningEffort) {
       case "none":
+        return isGpt62Model(model) ? "low" : "none";
       case "low":
       case "medium":
       case "high":
@@ -129,7 +131,12 @@ export class AzureOpenAIProvider implements LLMProvider {
   }
 
   private requiresResponsesApi(model: string): boolean {
-    return model === "gpt-6-sol" || model === "gpt-6-luna" || model === "gpt-6.1-terra";
+    return (
+      isGpt62Model(model) ||
+      model === "gpt-6-sol" ||
+      model === "gpt-6-luna" ||
+      model === "gpt-6.1-terra"
+    );
   }
 
   private isMaxTokensUnsupported(errorData: Any): boolean {
@@ -145,7 +152,8 @@ export class AzureOpenAIProvider implements LLMProvider {
       (/\/v1\/responses/i.test(message) &&
         (/\/v1\/chat\/completions/i.test(message) ||
           /chat completions?/i.test(message) ||
-          /please use/i.test(message)))
+          /please use/i.test(message))) ||
+      (/tool call|function call/i.test(message) && /responses(?: api| endpoint)/i.test(message))
     );
   }
 
@@ -1100,7 +1108,9 @@ export class AzureOpenAIProvider implements LLMProvider {
   }
 
   async createMessage(originalRequest: LLMRequest): Promise<LLMResponse> {
-    const requestedReasoningEffort = this.getReasoningEffort();
+    const requestedReasoningEffort = this.getReasoningEffort(
+      originalRequest.model || this.deployment,
+    );
     // With reasoning configured, hidden reasoning counts against the output cap;
     // keep small caps from being spent entirely before any text is produced.
     const request: LLMRequest = requestedReasoningEffort

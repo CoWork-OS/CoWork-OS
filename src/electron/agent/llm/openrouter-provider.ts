@@ -1,4 +1,7 @@
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
+import { isGpt62Model } from "../../../shared/llm-provider-catalog";
+import { isFable52Model } from "../../../shared/anthropic-model-capabilities";
+import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -118,6 +121,7 @@ export class OpenRouterProvider implements LLMProvider {
   private apiKey: string;
   private baseUrl: string;
   private defaultModel: string;
+  private fableProvider: AnthropicCompatibleProvider;
   private paretoMinCodingScore?: number;
   private modelImageSupport = new Map<string, boolean>();
   private modelCatalogLoaded = false;
@@ -136,6 +140,15 @@ export class OpenRouterProvider implements LLMProvider {
     this.apiKey = apiKey;
     this.baseUrl = config.openrouterBaseUrl || "https://openrouter.ai/api/v1";
     this.defaultModel = config.model || OPENROUTER_DEFAULT_MODEL;
+    this.fableProvider = new AnthropicCompatibleProvider({
+      type: "openrouter",
+      providerName: "OpenRouter",
+      baseUrl: this.baseUrl,
+      apiKey,
+      defaultModel: this.defaultModel,
+      diagnosticFetch: this.diagnosticFetch,
+      sendThinkingConfig: true,
+    });
     this.paretoMinCodingScore = normalizeParetoMinCodingScore(
       config.openrouterParetoMinCodingScore,
     );
@@ -149,6 +162,10 @@ export class OpenRouterProvider implements LLMProvider {
         : request.promptCache?.mode === "disabled"
           ? undefined
           : request.promptCache;
+    // Messages preserves Claude's signed thinking across tool rounds.
+    if (isFable52Model(model)) {
+      return this.fableProvider.createMessage({ ...request, model, promptCache });
+    }
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
     const hasInlineImages = this.hasInlineImages(request.messages);
     if (hasInlineImages) {
@@ -158,6 +175,12 @@ export class OpenRouterProvider implements LLMProvider {
       }
     }
     const messages = this.convertMessages(request, promptCache);
+    const reasoningEffort =
+      request.reasoningEffort === "none"
+        ? "low"
+        : request.reasoningEffort === "ultra"
+          ? "max"
+          : request.reasoningEffort;
 
     try {
       logger.debug(`Calling API with model: ${model}`);
@@ -165,6 +188,7 @@ export class OpenRouterProvider implements LLMProvider {
         model,
         messages,
         maxTokens: request.maxTokens,
+        reasoningEffort: isGpt62Model(model) ? reasoningEffort : undefined,
         tools,
         toolChoice: request.toolChoice,
         promptCache,
@@ -212,6 +236,7 @@ export class OpenRouterProvider implements LLMProvider {
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
+    if (isFable52Model(this.defaultModel)) return this.fableProvider.testConnection();
     try {
       const response = await (this.diagnosticFetch ?? fetch)(`${this.baseUrl}/chat/completions`, {
         method: "POST",
@@ -416,6 +441,7 @@ export class OpenRouterProvider implements LLMProvider {
       };
     }>;
     toolChoice?: LLMRequest["toolChoice"];
+    reasoningEffort?: LLMRequest["reasoningEffort"];
     promptCache?: LLMRequest["promptCache"];
     signal?: AbortSignal;
   }): Promise<Any> {
@@ -430,6 +456,7 @@ export class OpenRouterProvider implements LLMProvider {
         model: params.model,
         messages: params.messages,
         max_tokens: params.maxTokens,
+        ...(params.reasoningEffort ? { reasoning: { effort: params.reasoningEffort } } : {}),
         ...(params.promptCache?.cacheKey &&
         (params.promptCache.mode === "openrouter_implicit" ||
           params.promptCache.mode === "anthropic_explicit")
@@ -676,6 +703,7 @@ export class OpenRouterProvider implements LLMProvider {
       case "tool_calls":
         return "tool_use";
       case "content_filter":
+      case "refusal":
         return "refusal";
       default:
         return "end_turn";

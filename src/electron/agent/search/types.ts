@@ -153,10 +153,17 @@ export const SEARCH_PROVIDER_INFO = {
   },
   google: {
     displayName: "Google Custom Search",
-    description: "Official Google Search API",
+    description: "Google's Custom Search JSON API (closed to new customers)",
     supportedTypes: ["web", "images"] as SearchType[],
     envVars: ["GOOGLE_API_KEY", "GOOGLE_SEARCH_ENGINE_ID"],
-    signupUrl: "https://developers.google.com/custom-search/v1/introduction",
+    signupUrl: "https://developers.google.com/custom-search/v1/overview",
+    // Google closed the API to new customers and ends it on 1 January 2027
+    // (https://developers.google.com/custom-search/v1/overview). Tracked in #914.
+    retirement: {
+      endsOn: "2027-01-01",
+      notice:
+        "Google no longer offers the Custom Search JSON API to new customers and shuts it down on 1 January 2027. Your saved key keeps working until then. Set up another provider and choose it as primary or fallback before that date.",
+    },
   },
   searxng: {
     displayName: "SearXNG",

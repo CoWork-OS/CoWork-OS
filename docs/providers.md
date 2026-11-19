@@ -736,11 +736,13 @@ Multi-provider web search for research tasks with automatic retry and fallback. 
 | **Exa**                  | Web, News         | Required                | Semantic search and research-heavy retrieval |
 | **Brave Search**         | Web, News, Images | Required                | Privacy-focused                              |
 | **SerpAPI**              | Web, News, Images | Required                | Google results                               |
-| **Google Custom Search** | Web, Images       | Required                | Direct Google integration                    |
+| **Google Custom Search** | Web, Images       | Required                | Existing setups only; ends 1 Jan 2027        |
 
 DuckDuckGo is always available as the last-resort fallback. When paid providers are configured, they are tried first in the configured order, with DuckDuckGo only used if all others fail. Search settings also support explicit primary/fallback ordering and provider cooldown behavior after repeated failures.
 
 Configure paid providers in **Settings** > **Web Search**.
+
+Google closed the Custom Search JSON API to new customers and shuts it down on 1 January 2027 ([Google's notice](https://developers.google.com/custom-search/v1/overview)). Settings no longer offers it for new setups. A saved Google key keeps working until then, with a warning; set up another provider as primary or fallback before that date (tracked in #914).
 
 ## Setup in Settings
 

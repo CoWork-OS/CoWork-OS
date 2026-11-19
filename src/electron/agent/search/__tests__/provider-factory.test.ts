@@ -324,6 +324,23 @@ describe("SearchProviderFactory", () => {
         allowPrivate: true,
       });
     });
+
+    it("marks Google Custom Search as ending on 1 January 2027 (#914)", () => {
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "google",
+        fallbackProvider: null,
+        google: { apiKey: "key", searchEngineId: "engine" },
+      });
+
+      const providers = SearchProviderFactory.getConfigStatus().providers;
+      const google = providers.find((provider) => provider.type === "google");
+
+      expect(google).toMatchObject({ configured: true, retirement: { endsOn: "2027-01-01" } });
+      expect(google?.retirement?.notice).toMatch(/1 January 2027/);
+      expect(providers.filter((provider) => provider.retirement).map((p) => p.type)).toEqual([
+        "google",
+      ]);
+    });
   });
 
   describe("provider execution order", () => {

@@ -439,7 +439,7 @@ The app connects to these services based on your configuration:
 | Exa                  | `api.exa.ai`                  | Web/news search (API key required)    |
 | Brave Search         | `api.search.brave.com`        | Web search (API key required)         |
 | SerpAPI              | `serpapi.com`                 | Web search (API key required)         |
-| Google Custom Search | `customsearch.googleapis.com` | Web search (API key required)         |
+| Google Custom Search | `www.googleapis.com`          | Web search (existing keys; ends 2027) |
 
 ### Other Connections
 

@@ -113,7 +113,7 @@ See [Release Notes 0.5.60](release-notes-0.5.60.md).
 - [x] Tavily (AI-optimized)
 - [x] Brave Search
 - [x] SerpAPI (Google results)
-- [x] Google Custom Search
+- [x] Google Custom Search (closed to new setups; Google ends the API on 1 Jan 2027, #914)
 - [x] Primary + fallback provider support
 - [x] web_search tool always available (DuckDuckGo ensures zero-config search)
 - [x] Located: `src/electron/agent/search/`

@@ -10480,12 +10480,22 @@ export interface SharePointConnectionTestResult {
   userId?: string;
 }
 
+/** A provider whose upstream service is closing. */
+export interface SearchProviderRetirement {
+  /** ISO date the upstream service stops working. */
+  endsOn: string;
+  /** Plain-English notice shown to users who still have it set up. */
+  notice: string;
+}
+
 export interface SearchProviderInfo {
   type: SearchProviderType;
   name: string;
   description: string;
   configured: boolean;
   supportedTypes: SearchType[];
+  /** Set when the provider is closing: hidden from new setups, kept for existing ones. */
+  retirement?: SearchProviderRetirement;
 }
 
 export interface SearchConfigStatus {

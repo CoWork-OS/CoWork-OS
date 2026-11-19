@@ -1223,7 +1223,7 @@ Multi-provider web search with automatic fallback. DuckDuckGo is built-in and re
 | **Exa**                  | Web, News         | Required     | Semantic search and research-heavy retrieval |
 | **Brave Search**         | Web, News, Images | Required     | Privacy-focused                              |
 | **SerpAPI**              | Web, News, Images | Required     | Google results                               |
-| **Google Custom Search** | Web, Images       | Required     | Direct Google integration                    |
+| **Google Custom Search** | Web, Images       | Required     | Existing setups only; ends 1 Jan 2027        |
 
 Paid providers are tried first in configured order. DuckDuckGo is automatically appended as the last-resort fallback. Includes retry with exponential backoff, provider cooldowns, and explicit primary/fallback ordering in Settings.
 

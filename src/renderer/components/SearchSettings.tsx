@@ -1,5 +1,16 @@
 import { useState, useEffect } from "react";
-import { SearchProviderType, SearchConfigStatus } from "../../shared/types";
+import { SearchProviderType, SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
+
+/** A closing provider stays visible only for people who already set it up. */
+export function isProviderOffered(provider: SearchProviderInfo): boolean {
+  return !provider.retirement || provider.configured;
+}
+
+export function formatEndDate(isoDate: string): string {
+  const date = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
 
 interface SearchSettingsProps {
   onStatusChange?: (configured: boolean) => void;
@@ -46,11 +57,12 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setFallbackProvider(status.fallbackProvider);
       setSearxngBaseUrl(status.searxng.baseUrl || "");
       setSearxngAllowPrivate(status.searxng.allowPrivate);
+      const offered = status.providers.filter(isProviderOffered);
       setActiveProvider((prev) => {
-        if (prev && status.providers.some((provider) => provider.type === prev)) {
+        if (prev && offered.some((provider) => provider.type === prev)) {
           return prev;
         }
-        return status.primaryProvider ?? status.providers[0]?.type ?? null;
+        return status.primaryProvider ?? offered[0]?.type ?? null;
       });
       onStatusChange?.(status.isConfigured);
     } catch (error) {
@@ -115,8 +127,8 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
   const configuredProviders =
     configStatus?.providers.filter((p) => p.configured && p.type !== "duckduckgo") || [];
   const hasMultipleProviders = configuredProviders.length > 1;
-  const activeProviderConfig =
-    configStatus?.providers.find((p) => p.type === activeProvider) || null;
+  const offeredProviders = configStatus?.providers.filter(isProviderOffered) || [];
+  const activeProviderConfig = offeredProviders.find((p) => p.type === activeProvider) || null;
 
   if (loading) {
     return <div className="settings-loading">Loading search settings...</div>;
@@ -132,7 +144,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
         </p>
 
         <div className="llm-provider-tabs">
-          {configStatus?.providers.map((provider) => (
+          {offeredProviders.map((provider) => (
             <button
               key={provider.type}
               className={`llm-provider-tab ${activeProvider === provider.type ? "active" : ""}`}
@@ -151,6 +163,11 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
           <div className="settings-card provider-config-panel">
             <div className="provider-config-form">
               <p className="provider-description">{activeProviderConfig.description}</p>
+              {activeProviderConfig.retirement && (
+                <p className="settings-hint warning" role="note">
+                  {activeProviderConfig.retirement.notice}
+                </p>
+              )}
               <p className="provider-types">
                 Supports: {activeProviderConfig.supportedTypes.join(", ")}
               </p>
@@ -259,13 +276,13 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                       onChange={(e) => setGoogleSearchEngineId(e.target.value)}
                     />
                     <p className="settings-hint">
-                      Get your credentials from{" "}
+                      Uses the key and Search Engine ID you already have.{" "}
                       <a
-                        href="https://developers.google.com/custom-search/v1/introduction"
+                        href="https://developers.google.com/custom-search/v1/overview"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        Google Custom Search
+                        Google&apos;s notice
                       </a>
                     </p>
                   </div>
@@ -386,6 +403,11 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                     <span className="provider-types">
                       Supports: {provider.supportedTypes.join(", ")}
                     </span>
+                    {provider.retirement && (
+                      <span className="settings-hint warning">
+                        Ends {formatEndDate(provider.retirement.endsOn)}
+                      </span>
+                    )}
                   </div>
                 </label>
               ))}
@@ -433,6 +455,11 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                         <span className="provider-types">
                           Supports: {provider.supportedTypes.join(", ")}
                         </span>
+                        {provider.retirement && (
+                          <span className="settings-hint warning">
+                            Ends {formatEndDate(provider.retirement.endsOn)}
+                          </span>
+                        )}
                       </div>
                     </label>
                   ))}

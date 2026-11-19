@@ -9215,6 +9215,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "mistral",
   "github-copilot",
   "nano-gpt",
+  "qwencloud",
   "qwen-portal",
   "minimax",
   "minimax-portal",

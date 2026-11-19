@@ -1,5 +1,10 @@
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse, LLMProviderError } from "./types";
+import {
+  GEMINI_NEON_MODEL,
+  isGeminiNeonModel,
+  isQwen4MaxModel,
+} from "../../../shared/llm-provider-catalog";
 import { getProviderImageCaps } from "./image-utils";
 import { reasoningFromChatCompletionMessage } from "./reasoning-replay";
 import { unreachableEndpointMessage } from "./unreachable-endpoint-message";
@@ -479,8 +484,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
         request.model || this.defaultModel,
         deadline.signal,
       );
+      const isNeon = isGeminiNeonModel(model);
+      const isVertexNeon = this.type === "google-vertex" && isNeon;
+      const isQwenCloudMax = this.type === "qwencloud" && isQwen4MaxModel(model);
+      const effort = request.reasoningEffort;
       const supportsImages = getProviderImageCaps(this.type, model).supportsImages;
-      const replaysReasoningContent = this.replaysReasoningContent(model);
+      const replaysReasoningContent = isQwenCloudMax || this.replaysReasoningContent(model);
       const toolSupportKey = nativeToolSupportKey(this.type, this.normalizedBaseUrl, model);
       const useTextProtocol =
         this.textToolCallFallback && areNativeToolsUnsupported(toolSupportKey);
@@ -489,6 +498,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         : toOpenAICompatibleMessages(request.messages, request.system, {
             supportsImages,
             systemBlocks: request.systemBlocks,
+            replayVertexThoughtSignatures: isVertexNeon,
             ...(replaysReasoningContent ? { replayReasoningContentForModel: model } : {}),
           });
       const tools =
@@ -496,7 +506,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
           ? toOpenAICompatibleTools(request.tools, this.getToolOptions(model))
           : undefined;
       const outputTokenField = this.getOutputTokenField(model);
-      const maxOutputTokens = this.getMaxOutputTokens(model, request.maxTokens);
+      const maxOutputTokens = isNeon
+        ? Math.min(request.maxTokens, GEMINI_NEON_MODEL.maxOutputTokens)
+        : this.getMaxOutputTokens(model, request.maxTokens);
       console.log(`[${this.providerName}] Calling API with model: ${model}`);
 
       const headers: Record<string, string> = {
@@ -513,6 +525,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
           messages,
           [outputTokenField]: maxOutputTokens,
           ...(this.isAtomicChatProvider() ? { stream: false } : {}),
+          ...(isQwenCloudMax && effort === "none" ? { enable_thinking: false } : {}),
+          ...(isQwenCloudMax && effort && effort !== "none"
+            ? { reasoning_effort: effort === "ultra" || effort === "max" ? "xhigh" : effort }
+            : {}),
           ...(tools && tools.length > 0
             ? {
                 tools,
@@ -599,7 +615,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
         this.observeResponse(model, request, data);
       }
 
-      const result = fromOpenAICompatibleResponse(data);
+      const result = fromOpenAICompatibleResponse(data, {
+        captureVertexThoughtSignatures: isVertexNeon,
+      });
       if (replaysReasoningContent) {
         const reasoning = reasoningFromChatCompletionMessage(data?.choices?.[0]?.message, model);
         if (reasoning.length > 0) result.reasoning = reasoning;
@@ -701,7 +719,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
         body: JSON.stringify({
           model,
           messages: [{ role: "user", content: "Hi" }],
-          [outputTokenField]: 10,
+          [outputTokenField]: isGeminiNeonModel(model) || isQwen4MaxModel(model) ? 1_024 : 10,
+          ...(this.type === "qwencloud" && isQwen4MaxModel(model)
+            ? { enable_thinking: false }
+            : {}),
           ...(this.isAtomicChatProvider() ? { stream: false } : {}),
         }),
         ...(deadline.signal ? { signal: deadline.signal } : {}),

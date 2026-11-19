@@ -1,7 +1,13 @@
+import { GeminiProvider } from "./gemini-provider";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
 import { OpenAIProvider } from "./openai-provider";
-import { FABLE_5_2_MODEL, isGpt62Model } from "../../../shared/llm-provider-catalog";
+import {
+  FABLE_5_2_MODEL,
+  GEMINI_NEON_MODEL,
+  QWEN4_MAX_MODEL,
+  isGpt62Model,
+} from "../../../shared/llm-provider-catalog";
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse } from "./types";
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
@@ -28,6 +34,8 @@ export class OpenCodeProvider implements LLMProvider {
   private openaiProvider: OpenAICompatibleProvider;
   private anthropicProvider: AnthropicCompatibleProvider;
   private responsesProvider: OpenAIProvider;
+  private zenNeonProvider?: GeminiProvider;
+  private goQwen4Provider?: AnthropicCompatibleProvider;
   private zenGpt62Provider?: OpenAIProvider;
   private zenFable52Provider?: AnthropicCompatibleProvider;
   private product: OpenCodeProduct;
@@ -55,7 +63,19 @@ export class OpenCodeProvider implements LLMProvider {
       openaiResponsesApi: true,
     } as const;
     this.responsesProvider = new OpenAIProvider(responsesConfig);
+    if (this.product === "go") {
+      this.goQwen4Provider = new AnthropicCompatibleProvider({
+        ...options,
+        defaultModel: QWEN4_MAX_MODEL.id,
+        baseUrl: "https://opencode.ai/inference/go/anthropic/v1",
+      });
+    }
     if (isOpenCodeZenBaseUrl(baseUrl)) {
+      if (options.apiKey)
+        this.zenNeonProvider = new GeminiProvider(
+          { type: "gemini", model: GEMINI_NEON_MODEL.id, geminiApiKey: options.apiKey },
+          { baseUrl: "https://opencode.ai/inference/google" },
+        );
       this.zenGpt62Provider = new OpenAIProvider({
         ...responsesConfig,
         openaiBaseUrl: "https://opencode.ai/inference/openai/v1",
@@ -75,6 +95,8 @@ export class OpenCodeProvider implements LLMProvider {
   }
 
   private getModelProvider(model: string): LLMProvider {
+    if (this.zenNeonProvider && model === GEMINI_NEON_MODEL.id) return this.zenNeonProvider;
+    if (this.goQwen4Provider && model === QWEN4_MAX_MODEL.id) return this.goQwen4Provider;
     if (this.zenGpt62Provider && isGpt62Model(model)) return this.zenGpt62Provider;
     if (this.zenFable52Provider && model === FABLE_5_2_MODEL.id) return this.zenFable52Provider;
     switch (getOpenCodeModelTransport(model, this.product)) {
@@ -100,10 +122,13 @@ export class OpenCodeProvider implements LLMProvider {
   }
 
   async getAvailableModels(): Promise<Array<{ id: string; name: string }>> {
-    // OpenCode's Gemini entries use the Google Generative AI surface, which is
-    // intentionally not advertised until CoWork has a matching adapter.
+    // Neon uses the Google GenerateContent endpoint in the Zen catalog.
     const models = await this.openaiProvider.getAvailableModels();
-    return models.filter((model) => !model.id.toLowerCase().startsWith("gemini-"));
+    return models.filter(
+      ({ id }) =>
+        !id.toLowerCase().startsWith("gemini-") ||
+        (this.product === "zen" && id === GEMINI_NEON_MODEL.id),
+    );
   }
 }
 

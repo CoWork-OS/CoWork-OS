@@ -525,7 +525,26 @@ budgets and local admission control without changing the permission model.
 1. Get API key from [Google AI Studio](https://aistudio.google.com/apikey)
 2. Configure in **Settings** > **Google Gemini**
 
-Models: `gemini-2.5-flash` (default, fast), `gemini-2.5-pro` (most capable)
+Models include `gemini-2.5-flash` (default), `gemini-2.5-pro`, and
+`gemini-4-neon` (multimodal reasoning and tool use).
+
+Gemini 4 Neon also appears as `google/gemini-4-neon` on Google Vertex,
+OpenRouter, and Vercel AI Gateway, and as `gemini-4-neon` on OpenCode Zen,
+Venice AI, and GitHub Copilot. For Google Vertex, use a Vertex OpenAI-compatible
+base URL and a Google Cloud access token.
+
+---
+
+## QwenCloud
+
+Select **QwenCloud** under **Settings > AI & Models** and enter a
+[QwenCloud pay-as-you-go API key](https://docs.qwencloud.com/developer-guides/getting-started/latest-model).
+The prefilled base URL uses Singapore. If your key belongs to another region,
+enter the matching base URL. The model ID is `qwen4-max`.
+
+Qwen4-Max also appears as `qwen4-max` on OpenCode Go, `qwen/qwen4-max` on
+OpenRouter and NanoGPT, `alibaba/qwen4-max` on Vercel AI Gateway, and
+`qwen-4-max` on Venice AI.
 
 ---
 

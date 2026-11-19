@@ -2599,3 +2599,26 @@ button.collab-agent-summary-row:hover {
   background: color-mix(in srgb, var(--color-warning, #d97706) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-warning, #d97706) 45%, transparent);
 }
+
+/* Workspace: what this conversation can reach; used items read stronger. */
+.right-panel .workspace-scope-item:not(.is-used) .cli-context-key {
+  color: var(--color-text-secondary);
+}
+
+/* The folder row leads with its icon, like the connector rows. */
+.right-panel .workspace-scope-folder {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.workspace-scope-used {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.workspace-scope-more {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}

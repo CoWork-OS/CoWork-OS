@@ -266,7 +266,8 @@ export function setupPluginPackHandlers(): void {
       const skillLoader = getCustomSkillLoader();
       await skillLoader.initialize();
       const allSkills = skillLoader.listTaskSkills();
-      for (const s of allSkills.slice(0, 50)) {
+      // All of them: the Workspace section shows the count of skills a conversation can apply.
+      for (const s of allSkills) {
         skills.push({
           id: s.id,
           name: s.name,

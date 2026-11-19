@@ -102,6 +102,7 @@ import { AgentGlyph, type AgentGlyphState } from "./AgentGlyph";
 import { assignAgentGlyphs, getAgentGlyphForSeed } from "../utils/agent-glyphs";
 import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
 import { scrollBehavior } from "../utils/motion";
+import { buildWorkspaceScope, type WorkspaceScope } from "../../shared/workspace-scope";
 import "./right-panel.css";
 
 /**
@@ -933,6 +934,14 @@ function getActiveContextSignature(
   ].join("::");
 }
 
+function getWorkspaceScopeSignature(scope: WorkspaceScope): string {
+  return [
+    scope.connectors.map((c) => `${c.id}:${c.name}:${c.icon}:${c.used ? 1 : 0}`).join("|"),
+    scope.usedSkills.join("|"),
+    String(scope.otherSkillCount),
+  ].join("::");
+}
+
 function getToolUsageSignature(toolUsage: ToolUsage[]): string {
   return toolUsage.map((tool) => `${tool.name}:${tool.count}:${tool.lastUsed}`).join("|");
 }
@@ -1373,30 +1382,33 @@ const FolderSection = memo(
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
-const ActiveContextSection = memo(
-  function ActiveContextSection({
+/**
+ * What this conversation can reach, shown from the start: its folder, the connectors it may
+ * call and the skills it may apply. Ones it has used so far are marked "Used".
+ */
+const WorkspaceSection = memo(
+  function WorkspaceSection({
     visible,
     expanded,
-    connectedActiveConnectors,
+    scope,
+    workspace,
     toggleSection,
     rendererPerfLoggingEnabled,
   }: {
     visible: boolean;
     expanded: boolean;
-    connectedActiveConnectors: {
-      id: string;
-      name: string;
-      icon: string;
-      status: string;
-      tools: string[];
-    }[];
+    scope: WorkspaceScope;
+    workspace: Workspace | null;
     toggleSection: () => void;
     rendererPerfLoggingEnabled: boolean;
   }) {
-    if (!visible || connectedActiveConnectors.length === 0) return null;
-    recordRendererRender("RightPanel.section", "activeContext", rendererPerfLoggingEnabled);
+    const folder = workspace?.path && !workspace.isTemp ? workspace : null;
+    const hasSkills = scope.usedSkills.length > 0 || scope.otherSkillCount > 0;
+    if (!visible || (!folder && scope.connectors.length === 0 && !hasSkills)) return null;
+    recordRendererRender("RightPanel.section", "workspace", rendererPerfLoggingEnabled);
+    const usedConnectorCount = scope.connectors.filter((connector) => connector.used).length;
     return (
-      <div className="right-panel-section cli-section">
+      <div className="right-panel-section cli-section workspace-scope-section">
         <button
           type="button"
           className="cli-section-header"
@@ -1405,10 +1417,17 @@ const ActiveContextSection = memo(
         >
           <span className="cli-section-prompt">&gt;</span>
           <span className="cli-section-title">
-            <span className="terminal-only">ACTIVE</span>
-            <span className="modern-only">Active Context</span>
+            <span className="terminal-only">WORKSPACE</span>
+            <span className="modern-only">Workspace</span>
           </span>
-          <span className="cli-active-context-badge">{connectedActiveConnectors.length}</span>
+          {scope.connectors.length > 0 && (
+            <span
+              className="cli-active-context-badge"
+              title={`${usedConnectorCount} of ${scope.connectors.length} connectors used`}
+            >
+              {scope.connectors.length}
+            </span>
+          )}
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
             <span className="modern-only cli-section-chevron">
@@ -1419,29 +1438,72 @@ const ActiveContextSection = memo(
         {expanded && (
           <div className="cli-section-content">
             <div className="cli-context-list">
-              <div className="cli-context-group">
-                <div className="cli-context-label">
-                  <span className="terminal-only"># connectors:</span>
-                  <span className="modern-only">Connectors</span>
+              {folder && (
+                <div className="cli-context-group">
+                  <div className="cli-context-label">
+                    <span className="terminal-only"># folder:</span>
+                    <span className="modern-only">Folder</span>
+                  </div>
+                  <div className="cli-context-item workspace-scope-folder" title={folder.path}>
+                    <span className="cli-active-context-icon">
+                      <FolderOpen size={14} />
+                    </span>
+                    <span className="cli-context-key">{folder.name}</span>
+                  </div>
                 </div>
-                <div className="cli-active-context-scroll">
-                  {connectedActiveConnectors.map((connector) => {
-                    const ConnectorIcon = resolveConnectorLucideIcon(
-                      connector.name,
-                      connector.icon,
-                    );
-                    return (
-                      <div key={connector.id} className="cli-context-item">
-                        <span className="cli-active-context-icon">
-                          <ConnectorIcon size={14} />
-                        </span>
-                        <span className="cli-context-key">{connector.name}</span>
-                        <span className="cli-active-context-status connected" />
-                      </div>
-                    );
-                  })}
+              )}
+              {scope.connectors.length > 0 && (
+                <div className="cli-context-group">
+                  <div className="cli-context-label">
+                    <span className="terminal-only"># connectors:</span>
+                    <span className="modern-only">Connectors</span>
+                  </div>
+                  <div className="cli-active-context-scroll">
+                    {scope.connectors.map((connector) => {
+                      const ConnectorIcon = resolveConnectorLucideIcon(
+                        connector.name,
+                        connector.icon,
+                      );
+                      return (
+                        <div
+                          key={connector.id}
+                          className={`cli-context-item workspace-scope-item${connector.used ? " is-used" : ""}`}
+                        >
+                          <span className="cli-active-context-icon">
+                            <ConnectorIcon size={14} />
+                          </span>
+                          <span className="cli-context-key">{connector.name}</span>
+                          {connector.used && <span className="workspace-scope-used">Used</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
+              {hasSkills && (
+                <div className="cli-context-group">
+                  <div className="cli-context-label">
+                    <span className="terminal-only"># skills:</span>
+                    <span className="modern-only">Skills</span>
+                  </div>
+                  {scope.usedSkills.map((skill, index) => (
+                    <div
+                      key={`${skill}-${index}`}
+                      className="cli-context-item workspace-scope-item is-used"
+                    >
+                      <span className="cli-context-key">{skill}</span>
+                      <span className="workspace-scope-used">Used</span>
+                    </div>
+                  ))}
+                  {scope.otherSkillCount > 0 && (
+                    <div className="workspace-scope-more">
+                      {scope.usedSkills.length > 0
+                        ? `${scope.otherSkillCount} more available`
+                        : `${scope.otherSkillCount} ${scope.otherSkillCount === 1 ? "skill" : "skills"} available`}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1451,8 +1513,10 @@ const ActiveContextSection = memo(
   (prev, next) =>
     prev.visible === next.visible &&
     prev.expanded === next.expanded &&
-    getConnectorsSignature(prev.connectedActiveConnectors) ===
-      getConnectorsSignature(next.connectedActiveConnectors) &&
+    prev.workspace?.path === next.workspace?.path &&
+    prev.workspace?.name === next.workspace?.name &&
+    prev.workspace?.isTemp === next.workspace?.isTemp &&
+    getWorkspaceScopeSignature(prev.scope) === getWorkspaceScopeSignature(next.scope) &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
@@ -1460,7 +1524,6 @@ const ContextSection = memo(
   function ContextSection({
     visible,
     expanded,
-    usedSkills,
     toolUsage,
     referencedFiles,
     workspace,
@@ -1471,7 +1534,6 @@ const ContextSection = memo(
   }: {
     visible: boolean;
     expanded: boolean;
-    usedSkills: string[];
     toolUsage: ToolUsage[];
     referencedFiles: string[];
     workspace: Workspace | null;
@@ -1505,19 +1567,6 @@ const ContextSection = memo(
         {expanded && (
           <div className="cli-section-content">
             <div className="cli-context-list">
-              {usedSkills.length > 0 && (
-                <div className="cli-context-group">
-                  <div className="cli-context-label">
-                    <span className="terminal-only"># skills_used:</span>
-                    <span className="modern-only">Skills used</span>
-                  </div>
-                  {usedSkills.map((skill, index) => (
-                    <div key={`${skill}-${index}`} className="cli-context-item">
-                      <span className="cli-context-key">{skill}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
               {toolUsage.length > 0 && (
                 <div className="cli-context-group">
                   <div className="cli-context-label">
@@ -1568,7 +1617,6 @@ const ContextSection = memo(
     prev.workspace?.path === next.workspace?.path &&
     prev.workspace?.name === next.workspace?.name &&
     prev.contextTitleText === next.contextTitleText &&
-    getStringListSignature(prev.usedSkills) === getStringListSignature(next.usedSkills) &&
     getToolUsageSignature(prev.toolUsage) === getToolUsageSignature(next.toolUsage) &&
     getStringListSignature(prev.referencedFiles) === getStringListSignature(next.referencedFiles) &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
@@ -1857,7 +1905,7 @@ function RightPanelComponent({
     collaborativeAgents: true,
     cost: true,
     folder: true,
-    activeContext: true,
+    workspace: true,
     context: true,
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
@@ -2251,14 +2299,17 @@ function RightPanelComponent({
     });
     return names;
   }, [events, sharedTaskEventUi]);
-  const connectedActiveConnectors = useMemo(
+  const taskAllowedTools = task?.agentConfig?.allowedTools;
+  const workspaceScope = useMemo(
     () =>
-      activeContext?.connectors.filter(
-        (connector) =>
-          connector.status === "connected" &&
-          connector.tools.some((toolName) => usedToolNames.has(toolName)),
-      ) || [],
-    [activeContext, usedToolNames],
+      buildWorkspaceScope({
+        connectors: activeContext?.connectors || [],
+        skills: activeContext?.skills || [],
+        usedToolNames,
+        usedSkills,
+        allowedTools: taskAllowedTools,
+      }),
+    [activeContext, usedToolNames, usedSkills, taskAllowedTools],
   );
   const isLiveExecutionMode =
     task?.status === "executing" || (task?.status === "completed" && hasActiveChildren);
@@ -2274,26 +2325,20 @@ function RightPanelComponent({
     files,
     isLiveExecutionMode ? deferredFilesSignature : filesSignature,
   );
-  const connectorsSignature = useMemo(
-    () => getConnectorsSignature(connectedActiveConnectors),
-    [connectedActiveConnectors],
+  const workspaceScopeSignature = useMemo(
+    () => getWorkspaceScopeSignature(workspaceScope),
+    [workspaceScope],
   );
-  const deferredConnectorsSignature = useDeferredValue(connectorsSignature);
-  const stableConnectedActiveConnectors = useStableSnapshotBySignature(
-    connectedActiveConnectors,
-    isLiveExecutionMode ? deferredConnectorsSignature : connectorsSignature,
+  const deferredWorkspaceScopeSignature = useDeferredValue(workspaceScopeSignature);
+  const stableWorkspaceScope = useStableSnapshotBySignature(
+    workspaceScope,
+    isLiveExecutionMode ? deferredWorkspaceScopeSignature : workspaceScopeSignature,
   );
   const toolUsageSignature = useMemo(() => getToolUsageSignature(toolUsage), [toolUsage]);
   const deferredToolUsageSignature = useDeferredValue(toolUsageSignature);
   const stableToolUsage = useStableSnapshotBySignature(
     toolUsage,
     isLiveExecutionMode ? deferredToolUsageSignature : toolUsageSignature,
-  );
-  const usedSkillsSignature = useMemo(() => getStringListSignature(usedSkills), [usedSkills]);
-  const deferredUsedSkillsSignature = useDeferredValue(usedSkillsSignature);
-  const stableUsedSkills = useStableSnapshotBySignature(
-    usedSkills,
-    isLiveExecutionMode ? deferredUsedSkillsSignature : usedSkillsSignature,
   );
   const referencedFilesSignature = useMemo(
     () => getStringListSignature(referencedFiles),
@@ -2362,10 +2407,8 @@ function RightPanelComponent({
   const showCostSection =
     costReceiptEnabled && Boolean(task) && (taskCostSummary.hasUsage || taskCostEstimate !== null);
   const showFolderSection = stableFiles.length > 0;
-  const showActiveContextSection =
-    stableConnectedActiveConnectors.length > 0 && !isLiveExecutionMode;
-  const showContextSection =
-    stableUsedSkills.length > 0 || stableToolUsage.length > 0 || stableReferencedFiles.length > 0;
+  const showWorkspaceSection = Boolean(task);
+  const showContextSection = stableToolUsage.length > 0 || stableReferencedFiles.length > 0;
   const fallbackProgressText = useMemo(() => {
     const activeChecklistItem = stableChecklistState?.items.find(
       (item) => item.status === "in_progress",
@@ -2605,18 +2648,18 @@ function RightPanelComponent({
         getFileActionSymbol={getFileActionSymbol}
       />
 
-      <ActiveContextSection
-        visible={showActiveContextSection}
-        expanded={expandedSections.activeContext}
-        connectedActiveConnectors={stableConnectedActiveConnectors}
-        toggleSection={() => toggleSection("activeContext")}
+      <WorkspaceSection
+        visible={showWorkspaceSection}
+        expanded={expandedSections.workspace}
+        scope={stableWorkspaceScope}
+        workspace={workspace}
+        toggleSection={() => toggleSection("workspace")}
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
       />
 
       <ContextSection
         visible={showContextSection}
         expanded={expandedSections.context}
-        usedSkills={stableUsedSkills}
         toolUsage={stableToolUsage}
         referencedFiles={stableReferencedFiles}
         workspace={workspace}

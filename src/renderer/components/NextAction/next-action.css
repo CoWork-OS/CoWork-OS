@@ -1,6 +1,9 @@
-/* The suggested next step under an answer: one outlined pill that sends its own label. */
+/* Suggested next steps under an answer: outlined pills that send their own labels. The
+   most likely one leads with the send glyph and a stronger fill. */
 .next-action {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 14px;
 }
 
@@ -12,7 +15,7 @@
   padding: 7px 14px 7px 10px;
   border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  background: transparent;
   color: var(--color-text-primary);
   font: inherit;
   font-family: var(--font-ui);
@@ -25,6 +28,15 @@
     background 0.15s var(--ease-out),
     border-color 0.15s var(--ease-out),
     transform 0.15s var(--ease-out);
+}
+
+.next-action-button:not(.is-primary) {
+  padding-left: 14px;
+  border-color: var(--color-border);
+}
+
+.next-action-button.is-primary {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
 }
 
 .next-action-button:hover:not(:disabled) {

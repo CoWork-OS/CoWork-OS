@@ -295,7 +295,7 @@
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
-    "langium": "4.4.0",
+    "langium": "4.4.2",
     "oxfmt": "^0.79.0",
     "oxlint": "^1.47.0",
     "twilio": "^6.1.1",

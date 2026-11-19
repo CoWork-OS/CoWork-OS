@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NEXT_ACTION_MAX_CHARS,
+  NEXT_ACTION_MAX_STEPS,
   normalizeNextAction,
   splitNextAction,
   withoutNextAction,
@@ -14,40 +15,60 @@ describe("splitNextAction", () => {
     const message = `Sophie is free Tuesday at 9:30.\n\n${fence("Find 20 minutes with Sophie this week")}\n`;
     expect(splitNextAction(message)).toEqual({
       body: "Sophie is free Tuesday at 9:30.",
-      next: "Find 20 minutes with Sophie this week",
+      steps: ["Find 20 minutes with Sophie this week"],
     });
   });
 
   it("leaves messages without a block untouched", () => {
     const message = "Plain answer.\n\n```ts\nconst a = 1;\n```";
-    expect(splitNextAction(message)).toEqual({ body: message, next: null });
+    expect(splitNextAction(message)).toEqual({ body: message, steps: [] });
   });
 
   it("drops a block that is not last, but never shows it as text", () => {
     const message = `${fence("Book it")}\n\nMore prose after it.`;
-    expect(splitNextAction(message)).toEqual({ body: "More prose after it.", next: null });
+    expect(splitNextAction(message)).toEqual({ body: "More prose after it.", steps: [] });
   });
 
   it("uses only the last of several blocks", () => {
     const message = `${fence("First idea")}\nAnswer.\n${fence("Second idea")}`;
-    expect(splitNextAction(message)).toEqual({ body: "Answer.", next: "Second idea" });
+    expect(splitNextAction(message)).toEqual({ body: "Answer.", steps: ["Second idea"] });
   });
 
   it("hides an unfinished block while the answer streams", () => {
     expect(splitNextAction("Answer.\n```cowork-next\nFind ti")).toEqual({
       body: "Answer.",
-      next: null,
+      steps: [],
     });
   });
 
   it("refuses empty or overlong text", () => {
-    expect(splitNextAction(`Answer.\n${fence("   ")}`).next).toBeNull();
-    expect(splitNextAction(`Answer.\n${fence("x".repeat(NEXT_ACTION_MAX_CHARS + 1))}`).next).toBe(
-      null,
-    );
+    expect(splitNextAction(`Answer.\n${fence("   ")}`).steps).toEqual([]);
     expect(
-      splitNextAction(`Answer.\n${fence("x".repeat(NEXT_ACTION_MAX_CHARS))}`).next,
+      splitNextAction(`Answer.\n${fence("x".repeat(NEXT_ACTION_MAX_CHARS + 1))}`).steps,
+    ).toEqual([]);
+    expect(
+      splitNextAction(`Answer.\n${fence("x".repeat(NEXT_ACTION_MAX_CHARS))}`).steps[0],
     ).toHaveLength(NEXT_ACTION_MAX_CHARS);
+  });
+
+  it("offers one step per line, at most three, most likely first", () => {
+    const block = fence(
+      [
+        "Find 20 minutes with Sophie this week",
+        "- Draft the follow-up to Sophie",
+        "",
+        "find 20 minutes with sophie this week",
+        "x".repeat(NEXT_ACTION_MAX_CHARS + 1),
+        "2. Move the review to Friday",
+        "Open the Acme account",
+      ].join("\n"),
+    );
+    expect(splitNextAction(`Answer.\n${block}`).steps).toEqual([
+      "Find 20 minutes with Sophie this week",
+      "Draft the follow-up to Sophie",
+      "Move the review to Friday",
+    ]);
+    expect(NEXT_ACTION_MAX_STEPS).toBe(3);
   });
 });
 

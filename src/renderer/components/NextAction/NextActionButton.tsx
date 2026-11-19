@@ -3,8 +3,8 @@ import { ArrowUp } from "lucide-react";
 import "./next-action.css";
 
 /**
- * The suggested next step under an answer (a ```cowork-next block): one button whose label
- * is the whole message it sends. It shows only under the newest reply of a conversation
+ * The suggested next steps under an answer (a ```cowork-next block): up to three buttons,
+ * each labelled with the whole message it sends; the most likely one leads. It shows only under the newest reply of a conversation
  * that is waiting for the user, so an old suggestion never fires into a later context.
  */
 export type NextActionScope = {
@@ -22,41 +22,45 @@ export const NextActionContext = createContext<NextActionScope | null>(null);
  */
 export const NEXT_ACTION_ARM_DELAY_MS = 700;
 
-export function NextActionButton({ text, messageKey }: { text: string; messageKey?: string }) {
+export function NextActions({ steps, messageKey }: { steps: string[]; messageKey?: string }) {
   const scope = useContext(NextActionContext);
   const active = Boolean(scope && messageKey && scope.activeMessageKey === messageKey);
   const shownAtRef = useRef(0);
-  const [sending, setSending] = useState(false);
+  const [sendingText, setSendingText] = useState<string | null>(null);
 
   useEffect(() => {
     if (active) shownAtRef.current = Date.now();
   }, [active]);
 
-  if (!scope || !active) return null;
+  if (!scope || !active || steps.length === 0) return null;
 
-  const handleClick = async () => {
-    if (sending || Date.now() - shownAtRef.current < NEXT_ACTION_ARM_DELAY_MS) return;
-    setSending(true);
+  const handleClick = async (text: string) => {
+    if (sendingText !== null || Date.now() - shownAtRef.current < NEXT_ACTION_ARM_DELAY_MS) return;
+    setSendingText(text);
     try {
       await scope.send(text);
     } catch {
-      // Not sent (no conversation, or the send was refused): offer it again.
-      setSending(false);
+      // Not sent (no conversation, or the send was refused): offer them again.
+      setSendingText(null);
     }
   };
 
   return (
-    <div className="next-action">
-      <button
-        type="button"
-        className="next-action-button"
-        disabled={sending}
-        title="Sends this as your message"
-        onClick={() => void handleClick()}
-      >
-        <ArrowUp className="next-action-icon" aria-hidden="true" />
-        <span className="next-action-text">{text}</span>
-      </button>
+    <div className="next-action" role="group" aria-label="Suggested next steps">
+      {steps.map((text, index) => (
+        <button
+          key={text}
+          type="button"
+          className={`next-action-button${index === 0 ? " is-primary" : ""}`}
+          disabled={sendingText !== null}
+          aria-busy={sendingText === text || undefined}
+          title="Sends this as your message"
+          onClick={() => void handleClick(text)}
+        >
+          {index === 0 && <ArrowUp className="next-action-icon" aria-hidden="true" />}
+          <span className="next-action-text">{text}</span>
+        </button>
+      ))}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { CircleArrowUp, Ellipsis, Pin, PinOff, RotateCcw, Settings } from "lucid
 import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
 import { useInboxUnreadCount } from "../../hooks/useInboxUnreadCount";
 import { useDismissable } from "../calm/useDismissable";
+import { useMenuKeyboard } from "../calm/useMenuKeyboard";
 import {
   getSidebarRailLayout,
   getSidebarRailShortcutTargets,
@@ -192,6 +193,7 @@ function SidebarRailComponent({
   const moreRef = useRef<HTMLDivElement>(null);
   const closeMore = useCallback(() => setMoreOpen(false), []);
   useDismissable(moreRef, moreOpen, closeMore);
+  useMenuKeyboard(moreRef, moreOpen, closeMore);
   const mac = useMemo(isMacPlatform, []);
 
   const layout = useMemo(
@@ -365,14 +367,11 @@ function SidebarRailComponent({
                     </button>
                     <button
                       type="button"
+                      role="menuitemcheckbox"
                       className={`sidebar-rail-pin${pinned ? " pinned" : ""}`}
                       onClick={() => handleTogglePin(destination.id)}
-                      aria-pressed={pinned}
-                      aria-label={
-                        pinned
-                          ? `Unpin ${destination.label} from the sidebar`
-                          : `Pin ${destination.label} to the sidebar`
-                      }
+                      aria-checked={pinned}
+                      aria-label={`Pin ${destination.label} to the sidebar`}
                       title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
                     >
                       {pinned ? <PinOff size={14} /> : <Pin size={14} />}

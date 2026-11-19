@@ -428,6 +428,19 @@ export class BrowserTabViewHost {
     this.layout({ taskId, sessionId, tabId: null, bounds: null });
   }
 
+  /** Release the window's native surfaces when the app document that positioned them goes away. */
+  detachAll(): void {
+    const contentView = this.deps.getWindow()?.contentView;
+    if (!contentView) return;
+    for (const record of this.records.values()) {
+      if (contentView.children.includes(record.view)) {
+        record.view.setVisible(false);
+        contentView.removeChildView(record.view);
+      }
+      record.visible = false;
+    }
+  }
+
   /** A still image of the page, shown under renderer overlays while the view is hidden. */
   async capture(key: BrowserTabViewKey): Promise<string | null> {
     const record = this.get(key);

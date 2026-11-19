@@ -16,7 +16,11 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { FileViewerResult } from "../../electron/preload";
-import { buildFileViewerMarkdownComponents } from "./file-viewer-markdown";
+import {
+  addFilePreviewHeadingFragments,
+  buildFileViewerMarkdownComponents,
+  focusFilePreviewFragment,
+} from "./file-viewer-markdown";
 
 if (!hljs.getLanguage("typescript")) {
   hljs.registerLanguage("bash", bash);
@@ -58,6 +62,8 @@ interface FileViewerProps {
   workspacePath?: string;
   onClose: () => void;
 }
+
+type FilePreviewLocation = { path: string; fragment?: string };
 
 const formatSize = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "";
@@ -268,12 +274,16 @@ function JsonNode({ value, name, depth, defaultOpen }: JsonNodeProps) {
 }
 
 export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }: FileViewerProps) {
-  const [fileHistory, setFileHistory] = useState([initialFilePath]);
-  const filePath = fileHistory[fileHistory.length - 1];
+  const [fileHistory, setFileHistory] = useState<FilePreviewLocation[]>([
+    { path: initialFilePath },
+  ]);
+  const { path: filePath, fragment } = fileHistory[fileHistory.length - 1];
   const [loading, setLoading] = useState(true);
-  const [fileData, setFileData] = useState<FileViewerData | null>(null);
+  const [loadedFile, setLoadedFile] = useState<{ path: string; data: FileViewerData } | null>(null);
+  const fileData = loadedFile?.path === filePath ? loadedFile.data : null;
   const [videoPlaybackUrl, setVideoPlaybackUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
     null,
   );
@@ -282,9 +292,10 @@ export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }
   const [copyFlash, setCopyFlash] = useState(false);
   const agentContext = useAgentContext();
   const copyTimerRef = useRef<number | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setFileHistory([initialFilePath]);
+    setFileHistory([{ path: initialFilePath }]);
   }, [initialFilePath, workspacePath]);
 
   // Ignore stale reads when navigating quickly or closing the viewer.
@@ -292,15 +303,16 @@ export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }
     let cancelled = false;
     const loadFile = async () => {
       setLoading(true);
-      setFileData(null);
+      setLoadedFile(null);
       setError(null);
+      setLinkError(null);
       try {
         const result = await window.electronAPI.readFileForViewer(filePath, workspacePath, {
           includePdfBase64: true,
         });
         if (cancelled) return;
         if (result.success && result.data) {
-          setFileData(result.data);
+          setLoadedFile({ path: filePath, data: result.data });
         } else {
           setError(result.error || "Failed to load file");
         }
@@ -316,14 +328,30 @@ export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }
     };
   }, [filePath, workspacePath]);
 
+  useEffect(() => {
+    if (fragment && fileData && contentRef.current) {
+      focusFilePreviewFragment(contentRef.current, fragment);
+    }
+  }, [fragment, fileData]);
+
   const markdownComponents = useMemo(
     () =>
       buildFileViewerMarkdownComponents({
         filePath: fileData?.path || filePath,
-        onOpenFile: (target) => setFileHistory((history) => [...history, target]),
-        onOpenExternal: (url) => window.electronAPI.openExternal(url),
+        onOpenFile: (path, fragment) => {
+          setLinkError(null);
+          setFileHistory((history) => [...history, { path, fragment }]);
+        },
+        onOpenFragment: (value) => {
+          setLinkError(null);
+          if (contentRef.current) focusFilePreviewFragment(contentRef.current, value);
+        },
+        onOpenExternal: (url) => {
+          setLinkError(null);
+          return window.electronAPI.openExternal(url);
+        },
         onError: (cause) =>
-          setError(cause instanceof Error ? cause.message : "Could not open this link."),
+          setLinkError(cause instanceof Error ? cause.message : "Could not open this link."),
       }),
     [fileData?.path, filePath],
   );
@@ -555,7 +583,11 @@ export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }
       case "markdown":
         return (
           <div className="file-viewer-markdown markdown-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[addFilePreviewHeadingFragments]}
+              components={markdownComponents}
+            >
               {fileData.content || ""}
             </ReactMarkdown>
           </div>
@@ -989,7 +1021,7 @@ export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }
           </div>
         </div>
 
-        <div className="file-viewer-content">
+        <div className="file-viewer-content" ref={contentRef}>
           {loading && (
             <div className="file-viewer-loading">
               <div className="file-viewer-spinner"></div>
@@ -1017,6 +1049,7 @@ export function FileViewer({ filePath: initialFilePath, workspacePath, onClose }
             </div>
           )}
 
+          {linkError && <p role="alert">{linkError}</p>}
           {!loading && !error && renderContent()}
         </div>
       </ModalDialog>

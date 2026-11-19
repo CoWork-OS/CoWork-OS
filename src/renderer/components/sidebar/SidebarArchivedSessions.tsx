@@ -4,7 +4,7 @@ import type { Task, Workspace } from "../../../shared/types";
 import { isTempWorkspaceId } from "../../../shared/types";
 import "./sidebar-archived.css";
 
-/** Archived sessions loaded per request. The view says so when there are more. */
+/** Number of archive task rows revealed at a time. */
 export const ARCHIVED_SESSION_LOAD = 200;
 
 // Same exclusions as the main session list: side chats and managed-agent
@@ -72,6 +72,7 @@ function matchesArchivedSearch(task: Task, title: string, normalizedSearch: stri
 export interface SidebarArchivedSessionsViewProps {
   sessions: Task[];
   loading: boolean;
+  loadingMore: boolean;
   loadError: string | null;
   hasMore: boolean;
   normalizedSearch: string;
@@ -81,6 +82,7 @@ export interface SidebarArchivedSessionsViewProps {
   actionError: string | null;
   titleFor: (task: Task) => string;
   onClose: () => void;
+  onLoadMore: () => void;
   onUnarchive: (task: Task) => void;
   onOpenRestored: (taskId: string) => void;
 }
@@ -89,6 +91,7 @@ export interface SidebarArchivedSessionsViewProps {
 export function SidebarArchivedSessionsView({
   sessions,
   loading,
+  loadingMore,
   loadError,
   hasMore,
   normalizedSearch,
@@ -98,6 +101,7 @@ export function SidebarArchivedSessionsView({
   actionError,
   titleFor,
   onClose,
+  onLoadMore,
   onUnarchive,
   onOpenRestored,
 }: SidebarArchivedSessionsViewProps) {
@@ -159,9 +163,11 @@ export function SidebarArchivedSessionsView({
                 : "No archived sessions"}
             </p>
             <span>
-              {normalizedSearch && sessions.length > 0
-                ? "Try a different title or session ID."
-                : "Sessions you archive stay here until you unarchive them."}
+              {hasMore
+                ? "Load older archived sessions to search more history."
+                : normalizedSearch && sessions.length > 0
+                  ? "Try a different title or session ID."
+                  : "Sessions you archive stay here until you unarchive them."}
             </span>
           </div>
         )
@@ -194,7 +200,7 @@ export function SidebarArchivedSessionsView({
                   type="button"
                   className="sidebar-archived-row-action"
                   onClick={() => onUnarchive(task)}
-                  disabled={restoringTaskId !== null}
+                  disabled={restoringTaskId !== null || loadingMore}
                   aria-label={`Unarchive ${title}`}
                   aria-busy={restoring || undefined}
                   title={restoring ? "Restoring…" : "Unarchive"}
@@ -204,12 +210,17 @@ export function SidebarArchivedSessionsView({
               </li>
             );
           })}
-          {hasMore && (
-            <li className="sidebar-archived-more">
-              Showing the {ARCHIVED_SESSION_LOAD} most recently archived sessions.
-            </li>
-          )}
         </ul>
+      )}
+      {hasMore && (
+        <button
+          type="button"
+          className="sidebar-archived-more"
+          disabled={loadingMore || restoringTaskId !== null}
+          onClick={onLoadMore}
+        >
+          {loadingMore ? "Loading older archived sessions…" : "Load older archived sessions"}
+        </button>
       )}
     </section>
   );
@@ -235,6 +246,8 @@ export function SidebarArchivedSessions({
 }: SidebarArchivedSessionsProps) {
   const [sessions, setSessions] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadedLimit, setLoadedLimit] = useState(ARCHIVED_SESSION_LOAD);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [restoringTaskId, setRestoringTaskId] = useState<string | null>(null);
@@ -249,31 +262,34 @@ export function SidebarArchivedSessions({
     };
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (limit = ARCHIVED_SESSION_LOAD) => {
     const listSidebarTasks = window.electronAPI?.listSidebarTasks;
     if (!listSidebarTasks) {
       setLoading(false);
       setLoadError("Archived sessions are not available here.");
       return;
     }
-    setLoading(true);
+    const setPending = limit === ARCHIVED_SESSION_LOAD ? setLoading : setLoadingMore;
+    setPending(true);
     setLoadError(null);
     try {
       const page = (await listSidebarTasks({
-        limit: ARCHIVED_SESSION_LOAD + 1,
+        // Re-read the visible prefix so a session restored between requests cannot shift the next page.
+        limit: limit + 1,
         offset: 0,
         archivedSessionsOnly: true,
         excludeBotConversations: true,
         excludeSources: ARCHIVED_EXCLUDED_SOURCES,
       })) as Task[];
       if (!mountedRef.current) return;
-      setHasMore(page.length > ARCHIVED_SESSION_LOAD);
-      setSessions(collapseArchivedSessions(page.slice(0, ARCHIVED_SESSION_LOAD)));
+      setLoadedLimit(limit);
+      setHasMore(page.length > limit);
+      setSessions(collapseArchivedSessions(page.slice(0, limit)));
     } catch (error) {
       console.error("Failed to load archived sessions:", error);
       if (mountedRef.current) setLoadError("Archived sessions could not be loaded.");
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current) setPending(false);
     }
   }, []);
 
@@ -317,6 +333,7 @@ export function SidebarArchivedSessions({
     <SidebarArchivedSessionsView
       sessions={sessions}
       loading={loading}
+      loadingMore={loadingMore}
       loadError={loadError}
       hasMore={hasMore}
       normalizedSearch={normalizedSearch}
@@ -326,6 +343,7 @@ export function SidebarArchivedSessions({
       actionError={actionError}
       titleFor={titleFor}
       onClose={onClose}
+      onLoadMore={() => void load(loadedLimit + ARCHIVED_SESSION_LOAD)}
       onUnarchive={(task) => void handleUnarchive(task)}
       onOpenRestored={onOpenRestored}
     />

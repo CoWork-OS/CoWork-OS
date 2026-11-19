@@ -69,6 +69,7 @@ import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
 import { useIsCalmTheme } from "../hooks/useIsCalmTheme";
 import { BUILD_FOCUS_COMPOSER_EVENT } from "./calm/build-events";
+import { bindMenuKeyboard, useMenuKeyboard } from "./calm/useMenuKeyboard";
 import type { SidebarDestinationId, SidebarPanelTab } from "./sidebar/sidebar-destinations";
 import "./sidebar/sidebar-panel.css";
 import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
@@ -1008,6 +1009,12 @@ function SidebarComponent({
   const menuRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const workspaceSectionMenuRef = useRef<HTMLDivElement>(null);
+  const closeWorkspaceMenu = useCallback(() => {
+    setWorkspaceMenuOpenId((current) => (current === workspaceMenuOpenId ? null : current));
+  }, [workspaceMenuOpenId]);
+  const closeWorkspaceSectionMenu = useCallback(() => setWorkspaceSectionMenuOpen(false), []);
+  useMenuKeyboard(workspaceMenuRef, workspaceMenuOpenId !== null, closeWorkspaceMenu);
+  useMenuKeyboard(workspaceSectionMenuRef, workspaceSectionMenuOpen, closeWorkspaceSectionMenu);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
   const sessionSearchInputRef = useRef<HTMLInputElement>(null);
@@ -2058,9 +2065,11 @@ function SidebarComponent({
       ),
     });
     const closeOnMove = () => setMenuOpenTaskId(null);
+    const unbindKeyboard = bindMenuKeyboard(menu, button, closeOnMove, true);
     window.addEventListener("scroll", closeOnMove, true);
     window.addEventListener("resize", closeOnMove);
     return () => {
+      unbindKeyboard();
       window.removeEventListener("scroll", closeOnMove, true);
       window.removeEventListener("resize", closeOnMove);
     };
@@ -2078,73 +2087,6 @@ function SidebarComponent({
     e.stopPropagation();
     setWorkspaceMenuOpenId(null);
     setMenuOpenTaskId(menuOpenTaskId === taskId ? null : taskId);
-  };
-
-  const focusMenuButton = (taskId: string) => {
-    const button = menuButtonRef.current.get(taskId);
-    if (button) {
-      button.focus();
-    }
-  };
-
-  const focusFirstMenuItem = () => {
-    const menu = menuRef.current;
-    const first = menu?.querySelector<HTMLButtonElement>("button[data-menu-option]");
-    first?.focus();
-  };
-
-  const focusMenuItem = (offset: 1 | -1) => {
-    const menu = menuRef.current;
-    if (!menu) return;
-
-    const options = Array.from(
-      menu.querySelectorAll<HTMLButtonElement>("button[data-menu-option]"),
-    );
-    if (options.length === 0) return;
-
-    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
-    const nextIndex = (currentIndex + offset + options.length) % options.length;
-    const next = options[nextIndex];
-    next?.focus();
-  };
-
-  const closeMenu = (taskId: string) => {
-    setMenuOpenTaskId(null);
-    focusMenuButton(taskId);
-  };
-
-  const handleMenuButtonKeyDown = (e: React.KeyboardEvent, taskId: string) => {
-    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
-      e.preventDefault();
-      const nextOpen = menuOpenTaskId === taskId ? null : taskId;
-      setMenuOpenTaskId(nextOpen);
-      if (nextOpen) {
-        requestAnimationFrame(() => focusFirstMenuItem());
-      }
-      return;
-    }
-
-    if (e.key === "Escape") {
-      closeMenu(taskId);
-    }
-  };
-
-  const handleMenuItemKeyDown = (e: React.KeyboardEvent, taskId: string) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      focusMenuItem(1);
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      focusMenuItem(-1);
-      return;
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeMenu(taskId);
-      return;
-    }
   };
 
   const handleRenameClick = (e: React.MouseEvent, task: Task) => {
@@ -2552,7 +2494,13 @@ function SidebarComponent({
           aria-controls={`task-menu-${task.id}`}
           aria-label={`Session actions for ${sessionTitle}`}
           onClick={(e) => handleMenuToggle(e, task.id)}
-          onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" && menuOpenTaskId !== task.id) {
+              event.preventDefault();
+              setWorkspaceMenuOpenId(null);
+              setMenuOpenTaskId(task.id);
+            }
+          }}
           ref={(el) => {
             if (el) {
               menuButtonRef.current.set(task.id, el);
@@ -2581,19 +2529,7 @@ function SidebarComponent({
                 role="menuitem"
                 data-menu-option="rename"
                 disabled={!hasHostMethod("renameTask")}
-                onMouseDown={(e) => {
-                  if (e.button === 0) {
-                    e.preventDefault();
-                    handleRenameClick(e as unknown as React.MouseEvent, task);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleRenameClick(e as unknown as React.MouseEvent, task);
-                  }
-                  handleMenuItemKeyDown(e, task.id);
-                }}
+                onClick={(event) => handleRenameClick(event, task)}
               >
                 <Pencil size={16} />
                 <span>Rename</span>
@@ -2604,19 +2540,7 @@ function SidebarComponent({
                 role="menuitem"
                 data-menu-option="pin"
                 disabled={!hasHostMethod("toggleTaskPin")}
-                onMouseDown={(e) => {
-                  if (e.button === 0) {
-                    e.preventDefault();
-                    handlePinClick(e as unknown as React.MouseEvent, task);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handlePinClick(e as unknown as React.MouseEvent, task);
-                  }
-                  handleMenuItemKeyDown(e, task.id);
-                }}
+                onClick={(event) => void handlePinClick(event, task)}
               >
                 {task.pinned ? <PinOff size={16} /> : <Pin size={16} />}
                 <span>{task.pinned ? "Unpin" : "Pin"}</span>
@@ -2629,19 +2553,7 @@ function SidebarComponent({
                 data-menu-option="archive"
                 disabled={!hasHostMethod("archiveTask") || archiveBlockedByRunningWork}
                 title={archiveBlockedByRunningWork ? ARCHIVE_RUNNING_HINT : undefined}
-                onMouseDown={(e) => {
-                  if (e.button === 0) {
-                    e.preventDefault();
-                    handleArchiveClick(e as unknown as React.MouseEvent, task.id);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleArchiveClick(e as unknown as React.MouseEvent, task.id);
-                  }
-                  handleMenuItemKeyDown(e, task.id);
-                }}
+                onClick={(event) => void handleArchiveClick(event, task.id)}
               >
                 <Archive size={16} />
                 <span>Archive</span>
@@ -2845,7 +2757,6 @@ function SidebarComponent({
 
     return (
       <div
-        ref={workspaceMenuRef}
         className="task-item-menu sidebar-workspace-menu"
         role="menu"
         aria-label={`${getWorkspaceLabel(candidate)} project actions`}
@@ -3093,7 +3004,10 @@ function SidebarComponent({
                 <span className="sidebar-workspace-current-dot" aria-label="Current project" />
               )}
             </button>
-            <div className="sidebar-workspace-actions">
+            <div
+              className="sidebar-workspace-actions"
+              ref={workspaceMenuOpen ? workspaceMenuRef : undefined}
+            >
               <button
                 type="button"
                 className="sidebar-workspace-more"
@@ -3621,7 +3535,14 @@ function SidebarComponent({
                 {hasSessionSearch && (
                   <div className="sidebar-session-search-scope" role="status">
                     <span>Showing matches for “{sessionSearch.trim()}”</span>
-                    <button type="button" onClick={() => setSessionSearch("")}>
+                    <button
+                      type="button"
+                      aria-label="Clear session search"
+                      onClick={() => {
+                        setSessionSearch("");
+                        sessionSearchInputRef.current?.focus();
+                      }}
+                    >
                       Clear
                     </button>
                   </div>

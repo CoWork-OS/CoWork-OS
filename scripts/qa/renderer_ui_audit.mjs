@@ -11,6 +11,7 @@ const root = process.cwd();
 const results = [];
 const server = await createServer({
   configFile: path.join(root, "vite.config.mts"),
+  cacheDir: path.join(root, "node_modules", ".vite-renderer-ui-audit"),
   server: {
     host: "127.0.0.1",
     port: 0,
@@ -262,6 +263,79 @@ try {
     "Scheduled jobs: Enter/Space expand and collapse without invoking neighboring actions",
   );
 
+  await page.getByRole("button", { name: "Show files", exact: true }).click();
+  const fileSearch = page.getByRole("searchbox", { name: "Search files across all sources" });
+  await page.getByRole("button", { name: "Open file local-notes.txt" }).waitFor();
+  await page.getByRole("button", { name: "Open file overview.md" }).click();
+  const previewUrl = page.url();
+  await page.getByRole("link", { name: "Jump within" }).click();
+  assert.equal(
+    await page
+      .getByRole("heading", { name: "Local section" })
+      .evaluate((element) => element.matches(":focus")),
+    true,
+  );
+  assert.equal(page.url(), previewUrl);
+  await page.getByRole("link", { name: "Open target" }).click();
+  await page.waitForFunction(() => document.activeElement?.textContent === "Deep section");
+  assert.ok(
+    await page.locator(".file-viewer-content").evaluate((element) => element.scrollTop > 0),
+  );
+  await page.getByRole("button", { name: "Back to previous file" }).click();
+  await page.getByRole("dialog", { name: "overview.md" }).waitFor();
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog", { name: "overview.md" }).waitFor({ state: "detached" });
+  results.push(
+    "Markdown preview: links focus the requested headings in the same file or another file without navigating the app",
+  );
+  await fileSearch.fill("old-search-hit");
+  await page.waitForFunction(() => window.qa.resolveHubSearch);
+  await page.getByText("Loading files…", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Open file local-notes.txt" }).count(), 0);
+  await page.getByRole("button", { name: "Artifacts", exact: true }).click();
+  await page.getByRole("button", { name: "Open file report.txt" }).waitFor();
+  assert.equal(await fileSearch.inputValue(), "");
+  await page.evaluate(() => window.qa.resolveHubSearch());
+  assert.equal(await page.getByRole("button", { name: "Open file old-search-hit.txt" }).count(), 0);
+  await page.evaluate(() => {
+    window.qa.failHubListing = true;
+  });
+  await page.getByRole("button", { name: "Local", exact: true }).click();
+  await page.getByText("Files could not be loaded.", { exact: true }).waitFor();
+  results.push(
+    "Desktop Library: source switch exits search, ignores stale results, and reports a failed listing",
+  );
+
+  await page.getByRole("button", { name: "Show archive", exact: true }).click();
+  await page.getByText("No matching archived sessions", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Load older archived sessions" }).click();
+  await page.getByRole("button", { name: "Unarchive Older archive fixture" }).waitFor();
+  results.push("Archived sessions: an older search match is reachable beyond the first 200 rows");
+
+  await page.getByRole("button", { name: "Show automation", exact: true }).click();
+  await page.getByRole("button", { name: /^Daily document review/ }).click();
+  const runAutomation = page.getByRole("button", { name: "Run now", exact: true });
+  await runAutomation.waitFor();
+  const automationSearch = page.getByRole("searchbox", { name: "Find an automation" });
+  await automationSearch.fill("no matching automation");
+  await page.getByText("No automations match this search.", { exact: true }).waitFor();
+  await runAutomation.waitFor({ state: "detached" });
+  await automationSearch.clear();
+  await runAutomation.waitFor();
+  results.push(
+    "Automation Studio: filtering hides the selected item's controls until it is back in the results",
+  );
+  const routineAlert = page.getByRole("button", { name: "Open routine alert" });
+  const routineHeading = page.getByRole("heading", { name: "Review approval", exact: true });
+  await routineAlert.click();
+  await routineHeading.waitFor();
+  await automationSearch.fill("no matching automation");
+  await routineHeading.waitFor({ state: "detached" });
+  await routineAlert.click();
+  await routineHeading.waitFor();
+  assert.equal(await automationSearch.inputValue(), "");
+  results.push("Automation Studio: reopening the same routine alert clears the active filter");
+
   await page.getByRole("button", { name: "Show menus", exact: true }).click();
   await page.getByRole("button", { name: "Access: Retired profile", exact: true }).click();
   assert.equal(
@@ -278,6 +352,35 @@ try {
   console.log("Check passed:", results.length + 1);
   results.push(
     "Access menu: unavailable choice is navigable; arrows and Escape restore the trigger",
+  );
+  const more = page.getByRole("button", { name: "More", exact: true });
+  const destinations = page.getByRole("menu", { name: "More destinations" });
+  await more.click();
+  assert.equal(
+    await destinations
+      .getByRole("menuitem")
+      .first()
+      .evaluate((item) => item.matches(":focus")),
+    true,
+  );
+  await page.keyboard.press("ArrowDown");
+  const pin = destinations.getByRole("menuitemcheckbox").first();
+  assert.equal(await pin.evaluate((item) => item.matches(":focus")), true);
+  await page.keyboard.press("Space");
+  assert.equal(await pin.getAttribute("aria-checked"), "true");
+  await page.keyboard.press("Escape");
+  await destinations.waitFor({ state: "detached" });
+  assert.equal(await more.evaluate((button) => button.matches(":focus")), true);
+  await more.click();
+  await page.keyboard.press("Shift+Tab");
+  await destinations.waitFor({ state: "detached" });
+  assert.equal(await more.evaluate((button) => button.matches(":focus")), true);
+  await more.click();
+  await page.keyboard.press("Tab");
+  await destinations.waitFor({ state: "detached" });
+  assert.equal(await more.evaluate((button) => button.matches(":focus")), false);
+  results.push(
+    "Sidebar More: opening focuses a destination, arrows reach pin controls, and Escape and Tab dismiss it",
   );
   for (const kind of ["document", "spreadsheet", "presentation", "web"]) {
     await page.locator(`.${kind}-artifact-menu-btn`).click();
@@ -373,6 +476,7 @@ try {
       actualPage,
       "Actual app window did not finish startup; inspect logs/renderer-ui-audit-app.log",
     );
+    actualPage.setDefaultTimeout(10000);
     actualPage.on("pageerror", (e) => {
       errors.push(e.message);
       console.error("App renderer error:", e.message);
@@ -398,6 +502,85 @@ try {
     assert.ok(home && home.x >= 0 && home.x + home.width <= dimensions.width + 1);
     results.push(
       "Actual app: Calm homepage loads with desktop preload in a disposable profile; narrow-window content stays within viewport",
+    );
+    await actualPage.getByRole("button", { name: "Settings", exact: true }).click();
+    const settingsSearch = actualPage.getByRole("textbox", {
+      name: "Search settings",
+      exact: true,
+    });
+    await settingsSearch.fill("composer");
+    await actualPage.getByRole("button", { name: "Clear search" }).click();
+    assert.equal(await settingsSearch.inputValue(), "");
+    assert.equal(await settingsSearch.evaluate((input) => input.matches(":focus")), true);
+    results.push("Actual app: clearing Settings search restores focus to the labeled search field");
+    const openFixtureBrowser = async () => {
+      await actualPage.getByRole("button", { name: "Browser reload fixture", exact: true }).click();
+      await actualPage.getByRole("button", { name: "Task actions", exact: true }).click();
+      await actualPage.getByRole("menuitem", { name: "Open browser", exact: true }).click();
+      await actualPage.getByRole("tablist", { name: "Browser tabs" }).waitFor();
+    };
+    const nativeTabIds = () =>
+      actualWindow.evaluate((w) =>
+        w.contentView.children
+          .map((view) => view.webContents?.id)
+          .filter((id) => id && id !== w.webContents.id),
+      );
+    const waitForNativeTabs = async () => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const ids = await nativeTabIds();
+        if (ids.length) return ids;
+        await actualPage.waitForTimeout(50);
+      }
+      assert.fail("No native browser tab was attached");
+    };
+    await actualPage.getByRole("button", { name: "Home", exact: true }).click();
+    const sessionSearch = actualPage.getByRole("searchbox", { name: "Search sessions" });
+    await sessionSearch.fill("no session like this");
+    await actualPage.getByRole("button", { name: "Clear session search" }).click();
+    assert.equal(await sessionSearch.inputValue(), "");
+    assert.equal(await sessionSearch.evaluate((input) => input.matches(":focus")), true);
+    const sessionActions = actualPage.getByRole("button", {
+      name: "Session actions for Browser reload fixture",
+    });
+    await actualPage.getByRole("button", { name: "Browser reload fixture", exact: true }).hover();
+    await sessionActions.click();
+    const rename = actualPage.getByRole("menuitem", { name: "Rename", exact: true });
+    assert.equal(await rename.evaluate((item) => item.matches(":focus")), true);
+    await actualPage.keyboard.press("ArrowDown");
+    assert.equal(
+      await actualPage
+        .getByRole("menuitem", { name: "Pin", exact: true })
+        .evaluate((item) => item.matches(":focus")),
+      true,
+    );
+    await actualPage.keyboard.press("Escape");
+    await rename.waitFor({ state: "detached" });
+    assert.equal(await sessionActions.evaluate((button) => button.matches(":focus")), true);
+    await sessionActions.click();
+    await rename.click();
+    await actualPage.locator(".cli-rename-input").waitFor();
+    await actualPage.keyboard.press("Escape");
+    results.push(
+      "Actual app: clearing session search restores focus and session actions support pointer and keyboard activation",
+    );
+    await openFixtureBrowser();
+    const nativeTabs = await waitForNativeTabs();
+    const closeBrowser = actualPage.getByRole("button", { name: "Close browser workbench" });
+    await closeBrowser.click();
+    await closeBrowser.waitFor({ state: "detached" });
+    for (const method of ["reload", "reloadIgnoringCache"]) {
+      await Promise.all([
+        actualPage.waitForEvent("domcontentloaded"),
+        actualWindow.evaluate((w, reload) => w.webContents[reload](), method),
+      ]);
+      await actualPage.locator(".welcome-view").waitFor();
+      assert.deepEqual(await nativeTabIds(), []);
+      await openFixtureBrowser();
+      assert.deepEqual(await waitForNativeTabs(), nativeTabs);
+    }
+    results.push(
+      "Actual app: Reload and Force Reload each restore Home, detach native browser surfaces, and allow reopening the same live tab",
     );
   }
   assert.deepEqual(errors, []);

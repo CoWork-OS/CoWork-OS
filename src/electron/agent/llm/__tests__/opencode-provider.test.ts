@@ -207,11 +207,13 @@ describe("OpenCode provider routing", () => {
   });
 
   it("sends one stable x-opencode-session header on every Go request (#889)", async () => {
-    const fetchMock = vi.fn().mockImplementation(async (url: string) =>
-      url.endsWith("/messages")
-        ? responseJson({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" })
-        : responseJson({ choices: [{ message: { role: "assistant", content: "ok" } }] }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (url: string) =>
+        url.endsWith("/messages")
+          ? responseJson({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" })
+          : responseJson({ choices: [{ message: { role: "assistant", content: "ok" } }] }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const options = {
       type: "opencode-go" as const,

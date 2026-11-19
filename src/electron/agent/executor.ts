@@ -131,6 +131,7 @@ import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
 import { extractToolDataTable, toolDataHandle, toolDataNote } from "../answer-surfaces/tool-data";
 import { formatAnswerSurfaceChanges } from "../answer-surfaces/answer-surface-changes";
 import { ANSWER_SURFACE_PROMPT } from "../../shared/answer-surfaces/prompt";
+import { NEXT_ACTION_PROMPT } from "../../shared/answer-surfaces/next-action";
 import { ANSWER_SURFACE_SECTION_TOKENS } from "./content/ContentBuilder";
 import {
   findAnswerSurfaceProblems,
@@ -9684,7 +9685,9 @@ ${transcript}
       ),
       buildSystemBlock(
         "chat_answer_surfaces",
-        !isThinkMode && this.shouldOfferAnswerSurfaces() ? ANSWER_SURFACE_PROMPT : "",
+        !isThinkMode && this.shouldOfferAnswerSurfaces()
+          ? `${ANSWER_SURFACE_PROMPT}\n\n${NEXT_ACTION_PROMPT}`
+          : "",
         "session",
       ),
       buildSystemBlock(`chat_rules:${hashPromptCacheValue(rules)}`, rules, "session"),
@@ -20620,11 +20623,14 @@ ${transcript}
     const explicitExts = hasReadOnly
       ? []
       : extractExplicitOutputExtensionsUtil(this.task.title || "", prompt);
-    return buildCompletionGuidancePromptUtil({
+    const guidance = buildCompletionGuidancePromptUtil({
       hasReadOnlyConstraint: hasReadOnly,
       explicitOutputExtensions: explicitExts,
       likelyRequiresExecution: this.requiresExecutionToolRun,
     });
+    // The next-step button is drawn by the desktop and browser views only.
+    if (!this.shouldOfferAnswerSurfaces()) return guidance;
+    return [guidance, NEXT_ACTION_PROMPT].filter(Boolean).join("\n\n");
   }
 
   private buildIntegrationMentionGuidancePrompt(): string {

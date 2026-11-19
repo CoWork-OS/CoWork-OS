@@ -13,6 +13,8 @@ import {
   isAnswerSurfaceFenceStart,
 } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceBlock } from "./AnswerSurface/AnswerSurface";
+import { NextActionButton } from "./NextAction/NextActionButton";
+import { splitNextAction } from "../../shared/answer-surfaces/next-action";
 import { CodeBlockRunScopeContext, type CodeBlockRunTarget } from "../utils/code-block-runs";
 import { isMeshyTaskId } from "../../shared/meshy";
 
@@ -665,7 +667,9 @@ export function AssistantMessageContent({
   codeBlockRunTarget,
   messageKey,
 }: AssistantMessageContentProps) {
-  const segments = parseAssistantMessageSegments(message);
+  // The suggested next step never renders as text; under the live reply it is a button.
+  const { body, next } = splitNextAction(message);
+  const segments = parseAssistantMessageSegments(body);
 
   return (
     <>
@@ -874,6 +878,7 @@ export function AssistantMessageContent({
           </div>
         );
       })}
+      {next && !streaming && <NextActionButton text={next} messageKey={messageKey} />}
     </>
   );
 }

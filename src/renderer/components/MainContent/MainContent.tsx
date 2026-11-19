@@ -251,6 +251,7 @@ import {
 import { preloadableLazy } from "../../utils/preloadable-lazy";
 import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
 import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
+import type { NextActionScope } from "../NextAction/NextActionButton";
 import { ModelGalleryHost } from "../Model3D/ModelGalleryHost";
 import { AttachmentTile } from "../AttachmentTile";
 import { BotCollaborationHeader } from "../BotCollaborationHeader";
@@ -6604,6 +6605,25 @@ function MainContentComponent({
     }
     return latest;
   }, [filteredEvents]);
+  // The suggested next step is live only under the reply the conversation shows last,
+  // once the run has stopped and before the user has said anything else.
+  const nextActionMessageKey = useMemo(() => {
+    if (!task?.id || isTaskWorking || isReplayMode || !lastAssistantMessage?.id) return null;
+    const index = filteredEvents.lastIndexOf(lastAssistantMessage);
+    const answeredSince = filteredEvents
+      .slice(index + 1)
+      .some((event) => getEffectiveTaskEventType(event) === "user_message");
+    return answeredSince ? null : lastAssistantMessage.id;
+  }, [filteredEvents, isReplayMode, isTaskWorking, lastAssistantMessage, task?.id]);
+  const nextActionScope = useMemo<NextActionScope>(
+    () => ({
+      activeMessageKey: nextActionMessageKey,
+      // The button shows every character it sends, so it goes out like a typed message
+      // marked as coming from the answer (it approves nothing beyond its words).
+      send: (text) => handleSurfaceActionPrompt(text, "answer"),
+    }),
+    [handleSurfaceActionPrompt, nextActionMessageKey],
+  );
 
   const {
     cleanedDisplayPrompt,
@@ -9418,6 +9438,7 @@ function MainContentComponent({
         scopeKey={task?.id}
         onSendPrompt={handleSurfaceActionPrompt}
         onOpenLink={handleSurfaceActionOpen}
+        nextAction={nextActionScope}
       >
         <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
           {!isBotConversation && (

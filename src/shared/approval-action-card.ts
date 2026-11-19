@@ -234,14 +234,18 @@ export function actionCardReceipt(card: ApprovalActionCard, approved: boolean): 
   return invites ? "Approved — sending invite" : "Approved — adding to calendar";
 }
 
-function parse(value: ActionCardTime | undefined): { at: Date; allDay: boolean } | undefined {
+function parse(
+  value: ActionCardTime | undefined,
+  useWrittenClock: boolean,
+): { at: Date; allDay: boolean } | undefined {
   if (!value) return undefined;
   if (value.date && /^\d{4}-\d{2}-\d{2}$/.test(value.date)) {
-    const [year, month, day] = value.date.split("-").map(Number);
-    return { at: new Date(year, month - 1, day), allDay: true };
+    const at = new Date(`${value.date}T00:00:00Z`);
+    return Number.isNaN(at.getTime()) ? undefined : { at, allDay: true };
   }
   if (!value.dateTime) return undefined;
-  const ms = Date.parse(value.dateTime);
+  // Use UTC to store written wall-clock fields without the viewer's clock changes.
+  const ms = Date.parse(useWrittenClock ? `${value.dateTime}Z` : value.dateTime);
   return Number.isNaN(ms) ? undefined : { at: new Date(ms), allDay: false };
 }
 
@@ -260,12 +264,14 @@ export function formatActionCardWhen(
   locale?: string,
   viewerTimeZone?: string,
 ): string {
-  const start = parse(card.start);
-  const end = parse(card.end);
+  const useWrittenClock = Boolean(card.timeZone) && !hasOffset(card.start) && !hasOffset(card.end);
+  const start = parse(card.start, useWrittenClock);
+  const end = parse(card.end, useWrittenClock);
   if (!start) return "";
   const wallClock = !start.allDay && !hasOffset(card.start);
-  // Wall-clock strings parse in the viewer's zone, which reproduces the written digits.
-  const timeZone = wallClock ? undefined : viewerTimeZone;
+  const viewerZone = wallClock ? undefined : viewerTimeZone;
+  // Calendar dates and wall-clock times keep their written fields in any viewer's zone.
+  const timeZone = start.allDay || useWrittenClock ? "UTC" : viewerZone;
   const day = new Intl.DateTimeFormat(locale, {
     weekday: "short",
     month: "short",

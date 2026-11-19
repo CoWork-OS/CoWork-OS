@@ -69,6 +69,23 @@ describe("collectTurnWorkStats", () => {
     ).toBe(1);
   });
 
+  it("counts explicit approval denials without attributing system denials to the user", () => {
+    const stats = collectTurnWorkStats(
+      [
+        event("dialog", "approval_denied", { action: "deny_once", userDeclined: true }),
+        event("restart", "approval_denied", { reason: "review_denied_after_restart" }),
+        event("authority", "approval_denied", { action: "deny_once", userDeclined: false }),
+        event("inline-stale", "approval_denied", {
+          reason: "assistant_input_denied",
+          userDeclined: false,
+        }),
+        event("old-dialog", "approval_denied", { action: "deny_once" }),
+      ],
+      { historyComplete: true },
+    );
+    expect(stats.get(INITIAL_TURN_ID)?.declined).toBe(2);
+  });
+
   it("reads legacy types through timeline projections", () => {
     const projected = {
       ...event("p1", "timeline_step_updated"),

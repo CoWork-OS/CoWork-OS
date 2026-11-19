@@ -1,6 +1,9 @@
 import type { TaskEvent } from "../../../shared/types";
+import { readAnswerBibliography } from "../../../shared/answer-citations";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { extractDomainFromUrl, stripHtmlTags } from "./markdown-normalization";
+import { isCompletionSummaryCoveredByAssistantEvent } from "./task-feed-logic";
+import { getAssistantOrCompletionText } from "./task-event-presentation";
 
 export type TaskCitation = {
   index: number;
@@ -18,26 +21,7 @@ function clean(value: unknown): string {
   return typeof value === "string" && value.trim().length > 0 ? stripHtmlTags(value).trim() : "";
 }
 
-/**
- * The task's sources as the answer's [N] badges number them, from its latest citation event.
- * The timeline projection of that event (`timeline_evidence_attached`) carries evidence refs;
- * a legacy `citations_collected` event carries the citations themselves.
- */
-export function extractTaskCitations(events: readonly TaskEvent[]): TaskCitation[] {
-  let evidenceEvent: TaskEvent | undefined;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (
-      event.type === "timeline_evidence_attached" ||
-      getEffectiveTaskEventType(event) === "citations_collected"
-    ) {
-      evidenceEvent = event;
-      break;
-    }
-  }
-  if (!evidenceEvent) return [];
-  const payload = (evidenceEvent.payload ?? {}) as Record<string, unknown>;
-
+function readLegacyEvidence(payload: Record<string, unknown>): TaskCitation[] {
   const refs = Array.isArray(payload.evidenceRefs)
     ? (payload.evidenceRefs as Array<Record<string, unknown>>)
     : [];
@@ -63,9 +47,11 @@ export function extractTaskCitations(events: readonly TaskEvent[]): TaskCitation
     });
   }
 
-  const raw = Array.isArray(payload.citations)
-    ? (payload.citations as Array<Record<string, unknown>>)
-    : [];
+  return readCitationRows(payload.citations);
+}
+
+function readCitationRows(value: unknown): TaskCitation[] {
+  const raw = Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
   return raw.flatMap((citation, position) => {
     const url = typeof citation?.url === "string" ? citation.url : "";
     if (!url) return [];
@@ -84,4 +70,82 @@ export function extractTaskCitations(events: readonly TaskEvent[]): TaskCitation
       },
     ];
   });
+}
+
+/** Recover the initial run's old terminal snapshot without sharing it with follow-ups. */
+export function indexLegacyInitialAnswerCitations(events: readonly TaskEvent[]) {
+  const citationsByEventId = new Map<string, TaskCitation[]>();
+  let initialTaskId: string | undefined;
+  let latestAnswer: TaskEvent | undefined;
+  let evidence: TaskCitation[] = [];
+  for (const event of events) {
+    const type = getEffectiveTaskEventType(event);
+    if (type === "task_created") {
+      initialTaskId = event.taskId;
+      latestAnswer = undefined;
+      evidence = [];
+    } else if (event.taskId === initialTaskId) {
+      if (type === "assistant_message" && event.payload?.internal !== true) {
+        latestAnswer = event;
+        evidence = [];
+      } else if (type === "citations_collected" && !event.payload?.gate) {
+        evidence = readLegacyEvidence(event.payload ?? {});
+      } else if (type === "task_completed") {
+        if (evidence.length) {
+          citationsByEventId.set(event.id, evidence);
+          if (
+            latestAnswer &&
+            (getAssistantOrCompletionText(event) === getAssistantOrCompletionText(latestAnswer) ||
+              isCompletionSummaryCoveredByAssistantEvent(event, latestAnswer))
+          ) {
+            citationsByEventId.set(latestAnswer.id, evidence);
+          }
+        }
+        initialTaskId = undefined;
+      } else if (
+        type === "task_cancelled" ||
+        type === "task_failed" ||
+        type === "agent_follow_up_started" ||
+        type === "follow_up_completed" ||
+        type === "follow_up_failed"
+      ) {
+        initialTaskId = undefined;
+      } else if (type === "user_message") {
+        latestAnswer = undefined;
+        evidence = [];
+      }
+    }
+  }
+  return citationsByEventId;
+}
+
+export function readSavedAnswerCitations(
+  text: string,
+  snapshot: unknown,
+  legacyEvidence: readonly TaskCitation[] = [],
+): TaskCitation[] {
+  // Even an empty snapshot is authoritative. It must not inherit citations from another answer.
+  if (Array.isArray(snapshot)) return readCitationRows(snapshot);
+  if (!/\[\d/.test(text)) return [];
+  const ownSources = readAnswerBibliography(text);
+  if (ownSources === null) return [];
+  if (ownSources.length) {
+    return readCitationRows(ownSources).map(
+      (source) =>
+        legacyEvidence.find((entry) => entry.index === source.index && entry.url === source.url) ??
+        source,
+    );
+  }
+  return [...legacyEvidence];
+}
+
+export function readTaskAnswerCitations(
+  event: TaskEvent,
+  legacyEvidence?: readonly TaskCitation[],
+) {
+  return readSavedAnswerCitations(
+    getAssistantOrCompletionText(event),
+    event.payload?.answerCitations,
+    legacyEvidence,
+  );
 }

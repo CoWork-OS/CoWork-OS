@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { CitationTracker } from "../citation/CitationTracker";
+import { createTimelineEmitter } from "../timeline-emitter";
 import { decideTaskOutcome } from "../outcome-policy";
 import { createTerminalState } from "../runtime/TerminalState";
 
@@ -8,6 +10,40 @@ vi.mock("electron", () => ({
     getPath: vi.fn().mockReturnValue("/tmp"),
   },
 }));
+
+it("persists the citation mapping beside each answer after an executor restart", () => {
+  const logEvent = vi.fn();
+  for (const url of ["https://example.com/initial", "https://example.org/follow-up"]) {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "same-task" };
+    executor.citationTracker = new CitationTracker(executor.task.id);
+    executor.citationTracker.addFromFetch(url, "Saved source");
+    executor.timelineEmitter = createTimelineEmitter(executor.task.id, logEvent);
+    executor.emitEvent("assistant_message", { message: "A sourced answer [1]." });
+  }
+  expect(logEvent.mock.calls).toEqual([
+    [
+      "timeline_step_updated",
+      expect.objectContaining({
+        legacyType: "assistant_message",
+        message: "A sourced answer [1].",
+        answerCitations: [
+          expect.objectContaining({ index: 1, url: "https://example.com/initial" }),
+        ],
+      }),
+    ],
+    [
+      "timeline_step_updated",
+      expect.objectContaining({
+        legacyType: "assistant_message",
+        message: "A sourced answer [1].",
+        answerCitations: [
+          expect.objectContaining({ index: 1, url: "https://example.org/follow-up" }),
+        ],
+      }),
+    ],
+  ]);
+});
 
 function createExecutorForFinalization(overrides: Partial<Any> = {}): Any {
   const executor = Object.create(TaskExecutor.prototype) as Any;

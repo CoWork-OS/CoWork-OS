@@ -345,6 +345,7 @@ import {
 } from "./strategy/TaskStrategyService";
 import { asksAboutProjectBehavior, referencesOwnWorkspace } from "./strategy/code-signals";
 import { CitationTracker } from "./citation/CitationTracker";
+import { reconcileAnswerCitations, type AnswerCitationSource } from "../../shared/answer-citations";
 import { WorkflowDecomposer } from "./strategy/WorkflowDecomposer";
 import {
   scorePlanStepIntentAlignment,
@@ -2057,9 +2058,8 @@ export class TaskExecutor {
     // Callers may opt out only when they intentionally need to preserve a
     // failure marker for a non-standard recovery path.
     const clearTerminalFailure = opts?.clearTerminalFailure !== false;
-    const summary = [this.buildFollowUpResultSummary(), arithmeticWarning]
-      .filter(Boolean)
-      .join("\n\n");
+    const answer = this.prepareFollowUpAnswer();
+    const summary = [answer.text, arithmeticWarning].filter(Boolean).join("\n\n");
     const trimmedSummary = typeof summary === "string" ? summary.trim() : "";
 
     // Follow-up completion used to write `completed` directly, bypassing the
@@ -2152,6 +2152,7 @@ export class TaskExecutor {
     this.emitEvent("task_completed", {
       message,
       ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
+      answerCitations: answer.sources,
       ...(this.task.terminalStatus ? { terminalStatus: this.task.terminalStatus } : {}),
       ...(this.task.failureClass ? { failureClass: this.task.failureClass } : {}),
       ...runtimeProjection,
@@ -2178,6 +2179,10 @@ export class TaskExecutor {
   }
 
   private buildFollowUpResultSummary(): string {
+    return this.prepareFollowUpAnswer().text;
+  }
+
+  private prepareFollowUpAnswer(): { text: string; sources: AnswerCitationSource[] } {
     const bestKnownSummary = String(this.bestKnownOutcome?.resultSummary || "").trim();
     const candidates = [
       this.getLatestAssistantConversationText(),
@@ -2189,16 +2194,17 @@ export class TaskExecutor {
       this.task.resultSummary,
     ];
 
-    for (const candidate of candidates) {
+    for (const [index, candidate] of candidates.entries()) {
       if (!candidate) continue;
       const trimmed = String(candidate).trim();
       if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
       // This value is persisted and rendered as the final answer. Keep it
       // lossless; only prompt-context copies are bounded below.
-      return this.reconcileAnswerCitations(trimmed);
+      // A previous run's fallback summary can use a different source registry.
+      return this.prepareAnswerCitations(trimmed, { useRegistry: index < candidates.length - 2 });
     }
 
-    return "";
+    return { text: "", sources: [] };
   }
 
   /**
@@ -3918,8 +3924,8 @@ export class TaskExecutor {
       payloadObj.internal !== true &&
       typeof payloadObj.message === "string"
     ) {
-      const reconciled = this.reconcileAnswerCitations(payloadObj.message, { log: true });
-      if (reconciled !== payloadObj.message) payloadObj = { ...payloadObj, message: reconciled };
+      const answer = this.prepareAnswerCitations(payloadObj.message, { log: true });
+      payloadObj = { ...payloadObj, message: answer.text, answerCitations: answer.sources };
     }
 
     // Some tests instantiate TaskExecutor-like objects without running the constructor.
@@ -17618,11 +17624,13 @@ ${transcript}
    * different numberings. Put both on the task's source registry so a number
    * names the same source in the answer, its source list, and the sources panel.
    */
-  private reconcileAnswerCitations(text: string, opts?: { log?: boolean }): string {
-    const tracker = this.citationTracker;
-    if (!tracker || typeof text !== "string" || !text) return text;
+  private prepareAnswerCitations(
+    text: string,
+    opts?: { log?: boolean; useRegistry?: boolean },
+  ): { text: string; sources: AnswerCitationSource[] } {
+    const tracker = opts?.useRegistry === false ? undefined : this.citationTracker;
     try {
-      const result = tracker.reconcileAnswer(text);
+      const result = tracker ? tracker.reconcileAnswer(text) : reconcileAnswerCitations(text, []);
       if (result.changed && opts?.log) {
         this.emitEvent("log", {
           metric: "answer_citations_reconciled",
@@ -17631,10 +17639,15 @@ ${transcript}
           dropped: result.dropped,
         });
       }
-      return result.text;
+      const registered = result.sources.length ? tracker?.getCitations() : undefined;
+      const sources = result.sources.map((source) => {
+        const match = registered?.[source.index - 1];
+        return match?.url === source.url ? { ...match } : source;
+      });
+      return { text: result.text, sources };
     } catch (error) {
       logger.warn(`${this.logTag} Citation reconciliation failed:`, error);
-      return text;
+      return { text, sources: [] };
     }
   }
 
@@ -17792,10 +17805,8 @@ ${transcript}
         failureClass = "required_verification";
       }
     }
-    const summaryCandidate = this.reconcileAnswerCitations(
-      this.selectFinalTaskSummary(resultSummary),
-    );
-    const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
+    const answer = this.prepareAnswerCitations(this.selectFinalTaskSummary(resultSummary));
+    const summary = this.reconcileSummaryWithWorkspaceOutputs(answer.text);
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
     this.task.status = "completed";
     this.task.completedAt = Date.now();
@@ -17832,6 +17843,7 @@ ${transcript}
     void Promise.resolve(
       this.daemon.completeTask(this.task.id, finalSummary, {
         terminalStatus,
+        answerCitations: answer.sources,
         failureClass: this.task.failureClass,
         ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
         ...runtimeProjection,
@@ -17896,10 +17908,8 @@ ${transcript}
     const nonBlockingFailedStepIds = this.getNonBlockingFailedStepIdsAtCompletion();
     const failedMutationRequiredStepIds = this.getFailedMutationRequiredStepIdsAtCompletion();
     const waivedVerificationStepIds = this.getVerificationStepIds(waivableFailedStepIds);
-    const summaryCandidate = this.reconcileAnswerCitations(
-      this.selectFinalTaskSummary(resultSummary),
-    );
-    const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
+    const answer = this.prepareAnswerCitations(this.selectFinalTaskSummary(resultSummary));
+    const summary = this.reconcileSummaryWithWorkspaceOutputs(answer.text);
     this.task.status = "completed";
     this.task.completedAt = Date.now();
     const fallbackTerminalStatus: NonNullable<Task["terminalStatus"]> =
@@ -18013,6 +18023,7 @@ ${transcript}
     void Promise.resolve(
       this.daemon.completeTask(this.task.id, finalSummary, {
         terminalStatus: this.task.terminalStatus,
+        answerCitations: answer.sources,
         failureClass: this.task.failureClass,
         ...(explicitTerminalState
           ? {

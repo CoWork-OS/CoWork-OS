@@ -9,7 +9,10 @@
 
 import { Citation, CitationBundle } from "./types";
 import type { ConnectorSource } from "./connector-sources";
-import { type AnswerCitationReconciliation, reconcileAnswerCitations } from "./answer-citations";
+import {
+  type AnswerCitationReconciliation,
+  reconcileAnswerCitations,
+} from "../../../shared/answer-citations";
 
 function flattenPromptText(value: string, maxChars: number): string {
   const flat = String(value || "")

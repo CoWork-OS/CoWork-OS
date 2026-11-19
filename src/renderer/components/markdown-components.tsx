@@ -24,6 +24,7 @@ import {
   Folder,
   Terminal as TerminalIcon,
 } from "lucide-react";
+import type { ExtraProps } from "react-markdown";
 
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
@@ -647,29 +648,35 @@ function resolveFileLinkTarget(href: string, linkText: string): string | null {
   return null;
 }
 
-const CITATION_REF_REGEX = /\[(\d+)\]/g;
+const CITATION_REF_REGEX = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
 
 /** Set inside a rendered link so inline `code` in its label is not turned into a second chip. */
 const InsideMarkdownLinkContext = createContext(false);
 /** Inside a list, whose sources row goes after the whole list, not after each item. */
 const InsideMarkdownListContext = createContext(false);
 
-/** The sources a block cites by [N], in first-cited order, each once. */
-export function citedSourcesInText<T extends { index: number }>(
-  text: string,
-  citationMap: ReadonlyMap<number, T>,
-): T[] {
-  const cited: T[] = [];
-  const seen = new Set<number>();
-  for (const match of text.matchAll(/\[(\d+)\]/g)) {
-    const index = Number(match[1]);
-    const citation = citationMap.get(index);
-    if (citation && !seen.has(index)) {
-      seen.add(index);
-      cited.push(citation);
+/** The sources cited in prose, in first-cited order. Code and link labels have their own meaning. */
+function citedSourcesInBlock(
+  node: ExtraProps["node"],
+  citationMap: ReadonlyMap<number, ClaimSource>,
+): ClaimSource[] {
+  if (!node || citationMap.size === 0) return [];
+  const cited = new Set<ClaimSource>();
+  const visit = (element: NonNullable<ExtraProps["node"]>) => {
+    if (element.tagName === "a" || element.tagName === "code" || element.tagName === "pre") return;
+    for (const child of element.children) {
+      if (child.type === "element") visit(child);
+      if (child.type !== "text") continue;
+      for (const match of child.value.matchAll(CITATION_REF_REGEX)) {
+        for (const number of match[1].split(",")) {
+          const citation = citationMap.get(Number(number));
+          if (citation) cited.add(citation);
+        }
+      }
     }
-  }
-  return cited;
+  };
+  visit(node);
+  return [...cited];
 }
 
 /** `[title](#terminal/<tab id>)`: a chip that opens that tab of the task's terminal panel. */
@@ -982,19 +989,28 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
         const parts: ReactNode[] = [];
         let lastIndex = 0;
 
-        CITATION_REF_REGEX.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = CITATION_REF_REGEX.exec(child)) !== null) {
-          const idx = parseInt(match[1], 10);
-          const citation = citationMap.get(idx);
-          if (!citation) continue;
+        for (const match of child.matchAll(CITATION_REF_REGEX)) {
+          const indices = match[1].split(",").map(Number);
+          if (!indices.some((index) => citationMap.has(index))) continue;
 
           if (match.index > lastIndex) {
             parts.push(child.slice(lastIndex, match.index));
           }
-          parts.push(
-            <CitationBadge key={`cite-${idx}-${match.index}`} index={idx} citation={citation} />,
-          );
+          indices.forEach((index, position) => {
+            if (position) parts.push(", ");
+            const citation = citationMap.get(index);
+            parts.push(
+              citation ? (
+                <CitationBadge
+                  key={`cite-${match.index}-${position}`}
+                  index={index}
+                  citation={citation}
+                />
+              ) : (
+                `[${index}]`
+              ),
+            );
+          });
           lastIndex = match.index + match[0].length;
         }
 
@@ -1014,13 +1030,14 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
   };
 
   // The sources behind a claim go right under it: after a paragraph, or after a whole list.
-  const claimSourcesFor = (children: ReactNode): ClaimSource[] =>
-    citationMap.size === 0 ? [] : citedSourcesInText(getTextContent(children), citationMap);
-
-  const MarkdownParagraph = ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) => {
+  const MarkdownParagraph = ({
+    children,
+    node,
+    ...props
+  }: HTMLAttributes<HTMLParagraphElement> & ExtraProps) => {
     const insideList = useContext(InsideMarkdownListContext);
     const paragraph = <p {...props}>{replaceCitationsInChildren(children)}</p>;
-    const sources = insideList ? [] : claimSourcesFor(children);
+    const sources = insideList ? [] : citedSourcesInBlock(node, citationMap);
     if (sources.length === 0) return paragraph;
     return (
       <>
@@ -1031,20 +1048,14 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
   };
 
   const renderList = (Tag: "ul" | "ol") =>
-    function MarkdownList({
-      children,
-      node: _node,
-      ...props
-    }: HTMLAttributes<HTMLElement> & {
-      node?: unknown;
-    }) {
+    function MarkdownList({ children, node, ...props }: HTMLAttributes<HTMLElement> & ExtraProps) {
       const insideList = useContext(InsideMarkdownListContext);
       const list = (
         <InsideMarkdownListContext.Provider value>
           <Tag {...(props as HTMLAttributes<HTMLUListElement & HTMLOListElement>)}>{children}</Tag>
         </InsideMarkdownListContext.Provider>
       );
-      const sources = insideList ? [] : claimSourcesFor(children);
+      const sources = insideList ? [] : citedSourcesInBlock(node, citationMap);
       if (sources.length === 0) return list;
       return (
         <>

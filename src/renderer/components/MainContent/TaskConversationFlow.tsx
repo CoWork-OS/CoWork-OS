@@ -33,6 +33,7 @@ import { type AgentLifecycleRow as AgentLifecycleRowModel } from "../../utils/ag
 import { CliAgentFrame } from "../CliAgentFrame";
 import { resolveCliAgentType } from "../../../shared/cli-agent-detection";
 import { AssistantMessageContent } from "../AssistantMessageContent";
+import type { TaskCitation } from "./task-citations";
 import { AutoMailComposeFrame, MailComposeFrame } from "../MailComposeFrame";
 import { ApprovalActionCard } from "../ApprovalActionCard/ApprovalActionCard";
 import { normalizeApprovalActionCard } from "../../../shared/approval-action-card";
@@ -969,6 +970,8 @@ interface TaskConversationFlowProps {
   initialPromptEventId: string | null;
   trimmedPrompt: string;
   markdownComponents: Components;
+  answerMarkdownComponents: (citations: TaskCitation[]) => Components;
+  readAnswerSources: (event: TaskEvent) => TaskCitation[];
   messageFeedbackMap: Map<string, "accepted" | "rejected">;
   mainBodyRef: React.RefObject<HTMLDivElement | null>;
   onOpenBrowserView?: ((url?: string) => void) | undefined;
@@ -1061,6 +1064,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
   const initialPromptEventId = props.initialPromptEventId;
   const trimmedPrompt = props.trimmedPrompt;
   const markdownComponents = props.markdownComponents;
+  const { answerMarkdownComponents, readAnswerSources } = props;
   const messageFeedbackMap = props.messageFeedbackMap;
   const mainBodyRef = props.mainBodyRef;
   const onOpenBrowserView = props.onOpenBrowserView;
@@ -1752,6 +1756,9 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 verboseSteps ? 1 : 0,
                 effectiveType,
                 getTaskEventPayloadRenderSignature(event),
+                effectiveType === "assistant_message" || effectiveType === "task_completed"
+                  ? JSON.stringify(readAnswerSources(event))
+                  : "",
                 parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0,
                 suppressedParallelEventIds.has(event.id) ? 1 : 0,
                 // Bot messages show the bot's name and character, which load after the rows.
@@ -2833,7 +2840,9 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                             <div className="chat-bubble-content markdown-content">
                               <AssistantMessageContent
                                 message={cleanedMessageText}
-                                markdownComponents={markdownComponents}
+                                markdownComponents={answerMarkdownComponents(
+                                  readAnswerSources(event),
+                                )}
                                 workspacePath={workspace?.path}
                                 onOpenViewer={openFileInPanel}
                                 taskId={event.taskId}
@@ -3330,6 +3339,8 @@ function areTaskConversationFlowPropsEqual(
     prev.lastAssistantMessage?.id === next.lastAssistantMessage?.id &&
     prev.initialPromptEventId === next.initialPromptEventId &&
     prev.markdownComponents === next.markdownComponents &&
+    prev.answerMarkdownComponents === next.answerMarkdownComponents &&
+    prev.readAnswerSources === next.readAnswerSources &&
     prev.messageFeedbackMap === next.messageFeedbackMap &&
     prev.mainBodyRef === next.mainBodyRef &&
     prev.parallelGroupsByAnchorEventId === next.parallelGroupsByAnchorEventId &&

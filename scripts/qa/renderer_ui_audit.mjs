@@ -312,6 +312,30 @@ try {
   await page.getByRole("button", { name: "Unarchive Older archive fixture" }).waitFor();
   results.push("Archived sessions: an older search match is reachable beyond the first 200 rows");
 
+  await page.getByRole("button", { name: "Show work", exact: true }).click();
+  const workSearch = page.getByRole("searchbox", { name: "Search work" });
+  const workDetail = page.getByRole("complementary", { name: "Selected work" });
+  const olderWork = page.getByRole("button", { name: /Done Work session 10\b/ });
+  await workSearch.fill("Work session 10");
+  await olderWork.click();
+  await workSearch.clear();
+  await olderWork.waitFor({ state: "detached" });
+  await workDetail.getByRole("heading", { name: "Work session 1", exact: true }).waitFor();
+  const showAllWork = page.getByRole("button", { name: "Show all 10 sessions in No project" });
+  await showAllWork.click();
+  const showFewerWork = page.getByRole("button", { name: "Show fewer sessions in No project" });
+  assert.equal(await showFewerWork.getAttribute("aria-expanded"), "true");
+  await olderWork.click();
+  await workDetail.getByRole("heading", { name: "Work session 10", exact: true }).waitFor();
+  await showFewerWork.click();
+  await olderWork.waitFor({ state: "detached" });
+  await workDetail.getByRole("heading", { name: "Work session 1", exact: true }).waitFor();
+  assert.equal(await showAllWork.getAttribute("aria-expanded"), "false");
+  assert.equal(await showAllWork.evaluate((button) => button.matches(":focus")), true);
+  results.push(
+    "Work: expanded groups collapse and details follow a visible session after filtering or collapsing",
+  );
+
   await page.getByRole("button", { name: "Show automation", exact: true }).click();
   await page.getByRole("button", { name: /^Daily document review/ }).click();
   const runAutomation = page.getByRole("button", { name: "Run now", exact: true });

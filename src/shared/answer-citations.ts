@@ -37,6 +37,8 @@ export interface DroppedAnswerCitation {
 export interface AnswerCitationReconciliation {
   text: string;
   changed: boolean;
+  /** Sources resolved for the numbered markers in the returned answer. */
+  sources: AnswerCitationSource[];
   /** Inline markers whose numbers were rewritten (removed markers excluded). */
   renumberedMarkers: number;
   dropped: DroppedAnswerCitation[];
@@ -277,6 +279,16 @@ function findBibliography(lines: string[], fenceMask: boolean[]): Bibliography |
   return null;
 }
 
+/** A saved answer's own numbered links, independent of its session's source registry. */
+export function readAnswerBibliography(text: string): AnswerCitationSource[] | null {
+  const lines = text.split("\n");
+  const bibliography = findBibliography(lines, computeFenceMask(lines));
+  if (bibliography === "unusable") return null;
+  return (
+    bibliography?.entries.map(({ number, url, title }) => ({ index: number, url, title })) ?? []
+  );
+}
+
 /**
  * Comparison tables usually give each compared entity its own row, with direct
  * links to that entity's pages. When every linked host belongs to exactly one
@@ -365,6 +377,7 @@ export function reconcileAnswerCitations(
   const unchanged: AnswerCitationReconciliation = {
     text,
     changed: false,
+    sources: [],
     renumberedMarkers: 0,
     dropped: [],
     bibliographyRewritten: false,
@@ -618,6 +631,10 @@ export function reconcileAnswerCitations(
   return {
     text: output,
     changed: output !== text,
+    sources: [...citedIndices].flatMap((index) => {
+      const source = sourceFor(index);
+      return source ? [{ index, ...source }] : [];
+    }),
     renumberedMarkers,
     dropped,
     bibliographyRewritten,

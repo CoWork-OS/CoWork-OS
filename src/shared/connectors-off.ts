@@ -27,9 +27,9 @@ export function withConnectorOff(
 }
 
 /** `{ connectorsOff }` for a config merge: the union of the lists, or nothing when empty. */
-export function connectorsOffField(
-  ...lists: ReadonlyArray<readonly string[] | undefined | null>
-): { connectorsOff?: string[] } {
+export function connectorsOffField(...lists: ReadonlyArray<readonly string[] | undefined | null>): {
+  connectorsOff?: string[];
+} {
   const merged = mergeConnectorsOff(...lists);
   return merged.length > 0 ? { connectorsOff: merged } : {};
 }

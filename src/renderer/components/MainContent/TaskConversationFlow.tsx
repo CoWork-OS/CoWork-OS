@@ -108,6 +108,8 @@ import { type BotMascotLookup } from "./bot-earlier-conversations";
 import {
   VIRTUALIZED_FEED_ROW_THRESHOLD,
   applyTurnDisclosures,
+  collectTurnWorkStats,
+  getTaskFeedRowEvent,
   assignTimelineRef,
   captureTaskFeedReadingAnchor,
   collectInlineRunCommandSessionIds,
@@ -1574,12 +1576,30 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
   // shows every row the turn projection kept instead of the task-wide delivery subset.
   const feedTranscriptMode: TranscriptMode =
     turnDisclosuresEnabled && transcriptMode === "delivery" ? "inspect" : transcriptMode;
+  const turnWorkStats = useMemo(
+    () =>
+      turnDisclosuresEnabled
+        ? collectTurnWorkStats(events, {
+            historyComplete: !hasMoreTimelineHistory,
+            turnStartIds: new Set(
+              displayFeedRows.flatMap((row) => {
+                const event = getTaskFeedRowEvent(row);
+                return event?.id && getEffectiveTaskEventType(event) === "user_message"
+                  ? [event.id]
+                  : [];
+              }),
+            ),
+          })
+        : undefined,
+    [displayFeedRows, events, hasMoreTimelineHistory, turnDisclosuresEnabled],
+  );
   const turnProjectedFeedRows = useMemo(
     () =>
       turnDisclosuresEnabled
         ? applyTurnDisclosures(mergeAdjacentActivityBlockRows(displayFeedRows), {
             isTaskWorking,
             taskStartedAt: task?.createdAt ?? 0,
+            statsByTurnId: turnWorkStats,
             isTurnExpanded: (turnId) =>
               resolveDisclosureExpanded({
                 intent: getDisclosureIntent(disclosureIntents, "group", turnId),
@@ -1587,7 +1607,14 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
               }),
           }).rows
         : displayFeedRows,
-    [disclosureIntents, displayFeedRows, isTaskWorking, task?.createdAt, turnDisclosuresEnabled],
+    [
+      disclosureIntents,
+      displayFeedRows,
+      isTaskWorking,
+      task?.createdAt,
+      turnDisclosuresEnabled,
+      turnWorkStats,
+    ],
   );
   const { visibleFeedRows } = useMemo(
     () => selectVisibleTaskFeedRows(turnProjectedFeedRows, feedTranscriptMode),

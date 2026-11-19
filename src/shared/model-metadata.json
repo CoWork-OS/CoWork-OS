@@ -261,6 +261,15 @@
       "context": 32768,
       "maxOutput": 29491
     },
+    "alibaba/qwen4-max": {
+      "provider": "alibaba",
+      "input": 1.5,
+      "output": 4.5,
+      "cacheRead": 0.075,
+      "cacheWrite": 1.875,
+      "context": 1000000,
+      "maxOutput": 384000
+    },
     "allam-2-7b": {
       "provider": "groq",
       "input": 0,
@@ -1975,6 +1984,14 @@
       "context": 1048576,
       "maxOutput": 65536
     },
+    "gemini-4-neon": {
+      "provider": "google",
+      "input": 3,
+      "output": 15,
+      "cacheRead": 0.15,
+      "context": 1048576,
+      "maxOutput": 65536
+    },
     "gemini-embedding-001": {
       "provider": "google",
       "input": 0.15,
@@ -2807,6 +2824,15 @@
       "cacheWrite": 0.083333,
       "context": 1048576,
       "maxOutput": 943718
+    },
+    "google/gemini-4-neon": {
+      "provider": "openrouter",
+      "input": 3,
+      "output": 15,
+      "cacheRead": 0.15,
+      "cacheWrite": 0.083333,
+      "context": 1048576,
+      "maxOutput": 65536
     },
     "google/gemini-nano-banana-2.1": {
       "provider": "openrouter",
@@ -6072,6 +6098,15 @@
       "context": 131072,
       "maxOutput": 40960
     },
+    "qwen-4-max": {
+      "provider": "alibaba",
+      "input": 1.5,
+      "output": 4.5,
+      "cacheRead": 0.075,
+      "cacheWrite": 1.875,
+      "context": 1000000,
+      "maxOutput": 393216
+    },
     "qwen-flash": {
       "provider": "alibaba",
       "input": 0.05,
@@ -6633,12 +6668,21 @@
     },
     "qwen/qwen4-max": {
       "provider": "openrouter",
+      "input": 1.425,
+      "output": 4.275,
+      "cacheRead": 0.07125,
+      "cacheWrite": 1.78125,
+      "context": 1000000,
+      "maxOutput": 131072
+    },
+    "qwen/qwen4-max:thinking": {
+      "provider": "alibaba",
       "input": 1.5,
       "output": 4.5,
       "cacheRead": 0.075,
       "cacheWrite": 1.875,
       "context": 1000000,
-      "maxOutput": 131072
+      "maxOutput": 262144
     },
     "qwen2-5-omni-7b": {
       "provider": "alibaba",

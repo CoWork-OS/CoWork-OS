@@ -14,6 +14,7 @@ import {
   PROVIDER_IMAGE_CAPS,
 } from "./types";
 import type { LLMProviderType } from "../../../shared/types";
+import { isGeminiNeonModel, isQwen4MaxModel } from "../../../shared/llm-provider-catalog";
 import { isKimiVisionModel } from "../../../shared/kimi-models";
 
 const SUPPORTED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -63,6 +64,22 @@ export function getProviderImageCaps(
 ): LLMProviderImageCaps {
   if (model && KIMI_ROUTE_TYPES.has(providerType) && isKimiVisionModel(model)) {
     return KIMI_VISION_IMAGE_CAPS;
+  }
+  if (
+    model &&
+    isGeminiNeonModel(model) &&
+    ["google-vertex", "vercel-ai-gateway", "opencode", "venice", "github-copilot"].includes(
+      providerType,
+    )
+  ) {
+    return PROVIDER_IMAGE_CAPS.gemini;
+  }
+  if (
+    model &&
+    isQwen4MaxModel(model) &&
+    ["qwencloud", "opencode-go", "vercel-ai-gateway", "venice", "nano-gpt"].includes(providerType)
+  ) {
+    return PROVIDER_IMAGE_CAPS.gemini;
   }
   const modelCaps = model
     ? MODEL_IMAGE_CAPS[providerType]?.[model.trim().toLowerCase()]

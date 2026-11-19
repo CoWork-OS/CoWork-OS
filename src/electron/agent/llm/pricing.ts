@@ -1,4 +1,8 @@
-import { CUSTOM_PROVIDER_MAP } from "../../../shared/llm-provider-catalog";
+import {
+  CUSTOM_PROVIDER_MAP,
+  GEMINI_NEON_MODEL,
+  QWEN4_MAX_MODEL,
+} from "../../../shared/llm-provider-catalog";
 import type { LLMProviderType } from "../../../shared/types";
 import {
   lookupModelMetadata,
@@ -115,6 +119,21 @@ export function getModelPricing(
   // OpenRouter ":free" routes and Ollama ":latest" tags are not billed per token.
   if (/:(?:free|latest)$/i.test(String(modelId || "").trim())) {
     return { inputPer1M: 0, outputPer1M: 0 };
+  }
+
+  const id = String(modelId || "")
+    .trim()
+    .toLowerCase();
+  if (provider === "venice" && id === GEMINI_NEON_MODEL.id) {
+    return { inputPer1M: 3.75, outputPer1M: 18.75, cachedInputPer1M: 0.19 };
+  }
+  if (provider === "nano-gpt" && id === QWEN4_MAX_MODEL.openRouterId) {
+    return {
+      inputPer1M: 1.413,
+      outputPer1M: 4.24,
+      cachedInputPer1M: 0.071,
+      cacheWritePer1M: 1.767,
+    };
   }
 
   for (const candidate of modelIdCandidates(modelId)) {

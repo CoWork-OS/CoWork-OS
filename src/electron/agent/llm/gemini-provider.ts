@@ -1,5 +1,6 @@
 import {
   GoogleGenerativeAI,
+  type RequestOptions,
   GenerativeModel as _GenerativeModel,
   Content,
   Part,
@@ -9,6 +10,7 @@ import {
   SchemaType,
 } from "@google/generative-ai";
 import {
+  GEMINI_MODELS,
   LLMProvider,
   LLMProviderConfig,
   LLMRequest,
@@ -18,7 +20,11 @@ import {
   LLMTool,
 } from "./types";
 import { imageToTextFallback } from "./image-utils";
-import { GEMINI_DEFAULT_MODEL } from "../../../shared/llm-provider-catalog";
+import {
+  GEMINI_DEFAULT_MODEL,
+  GEMINI_NEON_MODEL,
+  isGeminiNeonModel,
+} from "../../../shared/llm-provider-catalog";
 
 /** Schema keywords Gemini function declarations accept (an OpenAPI subset). */
 const GEMINI_SCHEMA_KEYS = new Set([
@@ -70,7 +76,10 @@ export class GeminiProvider implements LLMProvider {
   private client: GoogleGenerativeAI;
   private defaultModel: string;
 
-  constructor(config: LLMProviderConfig) {
+  constructor(
+    config: LLMProviderConfig,
+    private readonly requestOptions?: RequestOptions,
+  ) {
     const apiKey = config.geminiApiKey;
     if (!apiKey) {
       throw new Error(
@@ -84,11 +93,22 @@ export class GeminiProvider implements LLMProvider {
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const modelName = request.model || this.defaultModel;
-    const model = this.client.getGenerativeModel({
-      model: modelName,
-      systemInstruction: request.system,
-    });
+    const model = this.client.getGenerativeModel(
+      {
+        model: modelName,
+        systemInstruction: request.system,
+      },
+      this.requestOptions,
+    );
 
+    const isNeon = isGeminiNeonModel(modelName);
+    const effort = request.reasoningEffort;
+    const thinkingLevel =
+      effort === "none"
+        ? "LOW"
+        : effort === "max" || effort === "ultra"
+          ? "XHIGH"
+          : effort?.toUpperCase();
     const contents = this.convertMessages(request.messages, modelName);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
 
@@ -99,7 +119,10 @@ export class GeminiProvider implements LLMProvider {
         {
           contents,
           generationConfig: {
-            maxOutputTokens: request.maxTokens,
+            maxOutputTokens: isNeon
+              ? Math.min(request.maxTokens, GEMINI_NEON_MODEL.maxOutputTokens)
+              : request.maxTokens,
+            ...(isNeon && thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
           },
           ...(tools && {
             tools,
@@ -134,10 +157,13 @@ export class GeminiProvider implements LLMProvider {
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
-      const model = this.client.getGenerativeModel({ model: this.defaultModel });
+      const model = this.client.getGenerativeModel(
+        { model: this.defaultModel },
+        this.requestOptions,
+      );
       await model.generateContent({
         contents: [{ role: "user", parts: [{ text: "Hi" }] }],
-        generationConfig: { maxOutputTokens: 10 },
+        generationConfig: { maxOutputTokens: isGeminiNeonModel(this.defaultModel) ? 1_024 : 10 },
       });
       return { success: true };
     } catch (error: Any) {
@@ -148,8 +174,13 @@ export class GeminiProvider implements LLMProvider {
     }
   }
 
+  static getDefaultModels(): Array<{ name: string; displayName: string; description: string }> {
+    return Object.values(GEMINI_MODELS).map(({ id, ...model }) => ({ name: id, ...model }));
+  }
+
   private convertMessages(messages: LLMMessage[], modelName = this.defaultModel): Content[] {
     const acceptsImages = geminiModelAcceptsImages(modelName);
+    const functionCallIds = new Map<string, string>();
     return messages.map((msg) => {
       const parts: Part[] = [];
 
@@ -160,11 +191,13 @@ export class GeminiProvider implements LLMProvider {
         for (const item of msg.content) {
           if (item.type === "tool_result") {
             // Gemini uses functionResponse for tool results
+            const id = functionCallIds.get(item.tool_use_id);
             parts.push({
               functionResponse: {
                 name:
                   (item as Any).providerMetadata?.geminiFunctionName ||
                   this.getToolNameFromId(item.tool_use_id),
+                ...(id ? { id } : {}),
                 response: {
                   result: item.content,
                   is_error: item.is_error || false,
@@ -185,10 +218,13 @@ export class GeminiProvider implements LLMProvider {
             const thoughtSignature =
               item.providerMetadata?.geminiThoughtSignature ||
               this.getThoughtSignatureFromId(item.id);
+            const id = item.providerMetadata?.geminiFunctionCallId;
+            if (id) functionCallIds.set(item.id, id);
             const functionCallPart: Any = {
               functionCall: {
                 name: item.name,
                 args: item.input,
+                ...(id ? { id } : {}),
               },
             };
             // Include thought signature if present (required for Gemini 3 models)
@@ -350,6 +386,7 @@ export class GeminiProvider implements LLMProvider {
     }
 
     for (const part of candidate.content?.parts || []) {
+      if (part.thought) continue;
       if (part.text) {
         content.push({
           type: "text",
@@ -369,6 +406,7 @@ export class GeminiProvider implements LLMProvider {
           input: part.functionCall.args || {},
           providerMetadata: {
             geminiFunctionName: part.functionCall.name,
+            ...(part.functionCall.id ? { geminiFunctionCallId: part.functionCall.id } : {}),
             ...(part.thoughtSignature ? { geminiThoughtSignature: part.thoughtSignature } : {}),
           },
         });
@@ -389,7 +427,9 @@ export class GeminiProvider implements LLMProvider {
       usage: response.usageMetadata
         ? {
             inputTokens: response.usageMetadata.promptTokenCount || 0,
-            outputTokens: response.usageMetadata.candidatesTokenCount || 0,
+            outputTokens:
+              (response.usageMetadata.candidatesTokenCount || 0) +
+              (response.usageMetadata.thoughtsTokenCount || 0),
             ...(Number.isFinite(response.usageMetadata.cachedContentTokenCount) &&
             Number(response.usageMetadata.cachedContentTokenCount) > 0
               ? { cachedTokens: response.usageMetadata.cachedContentTokenCount }
@@ -436,7 +476,7 @@ export class GeminiProvider implements LLMProvider {
       console.log(`[Gemini] Fetching models with API key: ${maskedKey}`);
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${apiKey}`,
       );
 
       if (!response.ok) {
@@ -445,7 +485,7 @@ export class GeminiProvider implements LLMProvider {
           `[Gemini] Failed to fetch models - Status: ${response.status} ${response.statusText}`,
         );
         console.error(`[Gemini] Error response body:`, errorBody);
-        return this.getDefaultModels();
+        return GeminiProvider.getDefaultModels();
       }
 
       const data = (await response.json()) as { models?: Any[] };
@@ -477,8 +517,8 @@ export class GeminiProvider implements LLMProvider {
         for (const pattern of excludePatterns) {
           if (pattern.test(name)) return false;
         }
-        // Must be a pro, flash, ultra, or nano variant (text models)
-        return name.includes("pro") || name.includes("flash") || name.includes("ultra");
+        // Gemini 4 Neon uses an element name rather than a Pro or Flash tier.
+        return isGeminiNeonModel(name) || /(?:pro|flash|ultra)/.test(name);
       };
 
       const models = (data.models || [])
@@ -517,48 +557,10 @@ export class GeminiProvider implements LLMProvider {
         return scoreB - scoreA;
       });
 
-      return sortedModels.length > 0 ? sortedModels : this.getDefaultModels();
+      return sortedModels.length > 0 ? sortedModels : GeminiProvider.getDefaultModels();
     } catch (error) {
       console.error("Failed to fetch Gemini models:", error);
-      return this.getDefaultModels();
+      return GeminiProvider.getDefaultModels();
     }
-  }
-
-  /**
-   * Get default models when API call fails
-   */
-  private getDefaultModels(): Array<{ name: string; displayName: string; description: string }> {
-    return [
-      {
-        name: "gemini-2.5-pro",
-        displayName: "Gemini 2.5 Pro",
-        description: "Most capable model for complex tasks",
-      },
-      {
-        name: "gemini-2.5-flash",
-        displayName: "Gemini 2.5 Flash",
-        description: "Fast and efficient for most tasks",
-      },
-      {
-        name: "gemini-2.0-flash",
-        displayName: "Gemini 2.0 Flash",
-        description: "Balanced speed and capability",
-      },
-      {
-        name: "gemini-2.0-flash-lite",
-        displayName: "Gemini 2.0 Flash Lite",
-        description: "Fastest and most cost-effective",
-      },
-      {
-        name: "gemini-1.5-pro",
-        displayName: "Gemini 1.5 Pro",
-        description: "Previous generation pro model",
-      },
-      {
-        name: "gemini-1.5-flash",
-        displayName: "Gemini 1.5 Flash",
-        description: "Previous generation flash model",
-      },
-    ];
   }
 }

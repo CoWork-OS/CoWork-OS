@@ -17,7 +17,11 @@ import type {
   HumanInputPolicy,
   MoaPreset,
 } from "../../../shared/types";
-import { FABLE_5_2_MODEL } from "../../../shared/llm-provider-catalog";
+import {
+  FABLE_5_2_MODEL,
+  GEMINI_NEON_MODEL,
+  QWEN4_MAX_MODEL,
+} from "../../../shared/llm-provider-catalog";
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 
 export type { LLMProviderType, AzureReasoningEffort, OpenAIReasoningEffort, LLMTextVerbosity };
@@ -164,6 +168,8 @@ export interface LLMToolUse {
   providerMetadata?: {
     geminiFunctionName?: string;
     geminiThoughtSignature?: string;
+    geminiFunctionCallId?: string;
+    vertexThoughtSignature?: string;
   };
   /**
    * Provider-side arguments or call metadata are invalid. The executor must turn
@@ -336,7 +342,12 @@ export interface LLMReasoningItem {
    * "anthropic": a thinking/redacted_thinking block (see anthropic-thinking.ts).
    * "chat-reasoning-content": a Chat Completions `reasoning_content` string (Kimi K3).
    */
-  format: "openai-responses" | "pi-ai" | "anthropic" | "chat-reasoning-content";
+  format:
+    | "openai-responses"
+    | "pi-ai"
+    | "anthropic"
+    | "chat-reasoning-content"
+    | "openrouter-reasoning-details";
   model: string;
   data: unknown;
 }
@@ -594,6 +605,11 @@ export function isRetiredAnthropicModelReference(model: string): boolean {
  * Available Gemini models from Google AI Studio
  */
 export const GEMINI_MODELS = {
+  [GEMINI_NEON_MODEL.id]: {
+    id: GEMINI_NEON_MODEL.id,
+    displayName: GEMINI_NEON_MODEL.displayName,
+    description: GEMINI_NEON_MODEL.description,
+  },
   "gemini-2.5-pro": {
     id: "gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
@@ -631,6 +647,16 @@ export const GEMINI_MODELS = {
  * OpenRouter provides access to many models from different providers
  */
 export const OPENROUTER_MODELS = {
+  [QWEN4_MAX_MODEL.openRouterId]: {
+    id: QWEN4_MAX_MODEL.openRouterId,
+    displayName: QWEN4_MAX_MODEL.displayName,
+    description: QWEN4_MAX_MODEL.description,
+  },
+  [GEMINI_NEON_MODEL.gatewayId]: {
+    id: GEMINI_NEON_MODEL.gatewayId,
+    displayName: GEMINI_NEON_MODEL.displayName,
+    description: GEMINI_NEON_MODEL.description,
+  },
   "openrouter/pareto-code": {
     id: "openrouter/pareto-code",
     displayName: "Pareto Code Router",

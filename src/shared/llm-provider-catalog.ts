@@ -14,6 +14,59 @@ export const OPENROUTER_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
  */
 export const OPENROUTER_FREE_MODEL_ID = "openrouter/free";
 
+export const GEMINI_NEON_MODEL = {
+  id: "gemini-4-neon",
+  gatewayId: "google/gemini-4-neon",
+  displayName: "Gemini 4 Neon",
+  description: "Multimodal reasoning for coding and agent workflows",
+  contextLength: 1_048_576,
+  maxOutputTokens: 65_536,
+} as const;
+
+export function isGeminiNeonModel(model: string): boolean {
+  const id = model
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, "");
+  return id === GEMINI_NEON_MODEL.id || id === GEMINI_NEON_MODEL.gatewayId;
+}
+
+export const QWEN4_MAX_MODEL = {
+  id: "qwen4-max",
+  openRouterId: "qwen/qwen4-max",
+  vercelId: "alibaba/qwen4-max",
+  veniceId: "qwen-4-max",
+  displayName: "Qwen4-Max",
+  description: "Multimodal reasoning for coding and professional workflows",
+  contextLength: 1_000_000,
+} as const;
+
+export function isQwen4MaxModel(model: string): boolean {
+  const id = model.trim().toLowerCase();
+  return (
+    id === QWEN4_MAX_MODEL.id ||
+    id === QWEN4_MAX_MODEL.veniceId ||
+    id === QWEN4_MAX_MODEL.vercelId ||
+    id === QWEN4_MAX_MODEL.openRouterId ||
+    id === `${QWEN4_MAX_MODEL.openRouterId}:thinking`
+  );
+}
+
+export function getBundledModelInfo(key: string) {
+  const model = isGeminiNeonModel(key)
+    ? GEMINI_NEON_MODEL
+    : isQwen4MaxModel(key)
+      ? QWEN4_MAX_MODEL
+      : undefined;
+  if (!model) return undefined;
+  return {
+    key,
+    displayName: key.endsWith(":thinking") ? `${model.displayName} (Thinking)` : model.displayName,
+    description: model.description,
+    contextLength: model.contextLength,
+  };
+}
+
 /** Kimi Code overseas endpoint (https://www.kimi.com/code/docs/en/kimi-code/models.html). */
 export const KIMI_CODE_DEFAULT_BASE_URL = "https://api.kimi.ai/coding/v1";
 /** Kimi Code mainland China endpoint; the catalog default before 2026-10. */
@@ -89,6 +142,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       "grok-4.6",
       "grok-4.5",
       FABLE_5_2_MODEL.id,
+      GEMINI_NEON_MODEL.id,
       "claude-sonnet-4-6",
       "claude-opus-4-6",
       "qwen3.7-max",
@@ -126,6 +180,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       "mimo-v2.5-pro",
       "minimax-m3",
       "minimax-m2.7",
+      QWEN4_MAX_MODEL.id,
       "qwen3.8-max",
       "qwen3.7-max",
       "qwen3.7-plus",
@@ -142,6 +197,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     name: "Google Vertex",
     compatibility: "openai",
     defaultModel: GEMINI_DEFAULT_MODEL,
+    knownModels: [GEMINI_NEON_MODEL.gatewayId],
     apiKeyLabel: "Access Token",
     apiKeyPlaceholder: "ya29...",
     requiresBaseUrl: true,
@@ -183,6 +239,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     compatibility: "anthropic",
     baseUrl: "https://ai-gateway.vercel.sh/v1",
     defaultModel: "claude-sonnet-4-6",
+    knownModels: [GEMINI_NEON_MODEL.gatewayId, QWEN4_MAX_MODEL.vercelId],
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "vgw_...",
     apiKeyUrl: "https://vercel.com/docs/ai-gateway",
@@ -223,6 +280,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     compatibility: "openai",
     defaultModel: "gpt-4o",
     apiKeyLabel: "GitHub Token",
+    knownModels: [GEMINI_NEON_MODEL.id],
     apiKeyPlaceholder: "ghp_...",
   },
   {
@@ -235,12 +293,26 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       "minimax/minimax-m2.7",
       "openai/gpt-5.2",
       "google/gemini-3-pro-preview",
+      QWEN4_MAX_MODEL.openRouterId,
+      `${QWEN4_MAX_MODEL.openRouterId}:thinking`,
       "anthropic/claude-sonnet-4-5",
     ],
     apiKeyLabel: "NanoGPT API Key",
     apiKeyPlaceholder: "nanogpt-...",
     apiKeyUrl: "https://nano-gpt.com/api",
     description: "OpenAI-compatible NanoGPT endpoint with a prefilled base URL.",
+  },
+  {
+    id: "qwencloud",
+    name: "QwenCloud",
+    compatibility: "openai",
+    baseUrl: "https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1",
+    defaultModel: QWEN4_MAX_MODEL.id,
+    knownModels: [QWEN4_MAX_MODEL.id],
+    apiKeyLabel: "API Key",
+    apiKeyPlaceholder: "sk-...",
+    apiKeyUrl: "https://docs.qwencloud.com/developer-guides/getting-started/latest-model",
+    description: "QwenCloud pay-as-you-go API. Use a base URL and API key from the same region.",
   },
   {
     id: "qwen-portal",
@@ -302,6 +374,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     compatibility: "openai",
     baseUrl: "https://api.venice.ai/api/v1",
     defaultModel: "llama-3.3-70b",
+    knownModels: [GEMINI_NEON_MODEL.id, QWEN4_MAX_MODEL.veniceId],
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "venice-...",
   },

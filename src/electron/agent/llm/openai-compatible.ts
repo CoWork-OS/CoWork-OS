@@ -8,7 +8,7 @@ import {
 } from "./types";
 import { createHash } from "node:crypto";
 import { imageToTextFallback } from "./image-utils";
-import { chatReasoningContentReplay } from "./reasoning-replay";
+import { chatReasoningContentReplay, openRouterReasoningDetailsReplay } from "./reasoning-replay";
 import { splitReasoningFromText } from "./reasoning-text";
 import { createLogger } from "../../utils/logger";
 import { assertNormalizedTurnTranscript } from "../runtime/turn-transcript-normalizer";
@@ -103,6 +103,8 @@ export interface OpenAICompatibleMessageOptions {
    * produced by this model (Kimi K3 requires it; see reasoning-replay.ts).
    */
   replayReasoningContentForModel?: string;
+  openRouterReasoningDetailsModel?: string;
+  replayVertexThoughtSignatures?: boolean;
 }
 
 function hashToolCallId(id: string): string {
@@ -193,7 +195,13 @@ export function toOpenAICompatibleMessages(
       replayModel && msg.role === "assistant"
         ? chatReasoningContentReplay(msg, replayModel)
         : undefined;
-    const reasoningField = reasoningContent ? { reasoning_content: reasoningContent } : {};
+    const details = options?.openRouterReasoningDetailsModel
+      ? openRouterReasoningDetailsReplay(msg, options.openRouterReasoningDetailsModel)
+      : [];
+    const reasoningField = {
+      ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+      ...(details.length > 0 ? { reasoning_details: details } : {}),
+    };
 
     if (typeof msg.content === "string") {
       result.push({ role: msg.role, content: msg.content, ...reasoningField });
@@ -228,8 +236,12 @@ export function toOpenAICompatibleMessages(
           });
         }
       } else if (item.type === "tool_use") {
+        const signature = options?.replayVertexThoughtSignatures
+          ? item.providerMetadata?.vertexThoughtSignature
+          : undefined;
         toolCalls.push({
           id: mapToolCallId(item.id),
+          ...(signature ? { extra_content: { google: { thought_signature: signature } } } : {}),
           type: "function",
           function: {
             name: item.name,
@@ -275,7 +287,7 @@ export function toOpenAICompatibleMessages(
 
     if (textParts.length > 0) {
       result.push({ role: msg.role, content: textParts.join("\n"), ...reasoningField });
-    } else if (reasoningContent) {
+    } else if (reasoningContent || details.length > 0) {
       // A thinking-only reply still has to be replayed as returned.
       result.push({ role: msg.role, content: "", ...reasoningField });
     }
@@ -366,7 +378,10 @@ export function toOpenAICompatibleTools(
   }));
 }
 
-export function fromOpenAICompatibleResponse(response: Any): LLMResponse {
+export function fromOpenAICompatibleResponse(
+  response: Any,
+  options?: { captureVertexThoughtSignatures?: boolean },
+): LLMResponse {
   const content: LLMContent[] = [];
   const choice = response.choices?.[0];
 
@@ -396,8 +411,14 @@ export function fromOpenAICompatibleResponse(response: Any): LLMResponse {
     for (const toolCall of message.tool_calls) {
       if (toolCall.type === "function") {
         const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.function?.arguments);
+        const signature = options?.captureVertexThoughtSignatures
+          ? toolCall.extra_content?.google?.thought_signature
+          : undefined;
         content.push({
           type: "tool_use",
+          ...(typeof signature === "string"
+            ? { providerMetadata: { vertexThoughtSignature: signature } }
+            : {}),
           id: toolCall.id,
           name: toolCall.function?.name,
           input: parsedArguments.input,

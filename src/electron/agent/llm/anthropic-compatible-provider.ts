@@ -1,3 +1,8 @@
+import {
+  GEMINI_NEON_MODEL,
+  isGeminiNeonModel,
+  isQwen4MaxModel,
+} from "../../../shared/llm-provider-catalog";
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
 import {
   LLMProvider,
@@ -253,7 +258,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         headers: this.getMessageHeaders(),
         body: JSON.stringify({
           model,
-          max_tokens: 10,
+          max_tokens: isGeminiNeonModel(model) || isQwen4MaxModel(model) ? 1_024 : 10,
           messages: [{ role: "user", content: "Hi" }],
         }),
       });
@@ -451,7 +456,10 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       headers: this.getMessageHeaders(replay.usesTurnContext),
       body: JSON.stringify({
         model: args.model,
-        max_tokens: plan.maxTokens,
+        max_tokens:
+          this.type === "vercel-ai-gateway" && isGeminiNeonModel(args.model)
+            ? Math.min(plan.maxTokens, GEMINI_NEON_MODEL.maxOutputTokens)
+            : plan.maxTokens,
         system: this.buildSystemPayload(replay.systemRequest, args.promptCache),
         messages,
         ...(args.tools && { tools: args.tools }),

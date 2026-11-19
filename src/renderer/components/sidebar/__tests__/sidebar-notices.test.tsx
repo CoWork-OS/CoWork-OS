@@ -101,3 +101,30 @@ describe("composer prediction discovery", () => {
     expect(() => markComposerPredictionAvailable()).not.toThrow();
   });
 });
+
+describe("Google search ending notice (#914)", () => {
+  const googleNotice = SIDEBAR_NOTICES.find((notice) => notice.id === "google-search-ending-v1")!;
+  const visibility = { composerPredictionAvailable: false, searchUsesClosingProvider: false };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows only while web search uses a closing provider", () => {
+    expect(googleNotice.isVisible?.(visibility)).toBe(false);
+    expect(googleNotice.isVisible?.({ ...visibility, searchUsesClosingProvider: true })).toBe(true);
+  });
+
+  it("comes first, with a one-time tip that names the date and alternatives", () => {
+    expect(SIDEBAR_NOTICES[0]).toBe(googleNotice);
+    expect(googleNotice.tip?.description).toMatch(/1 January 2027/);
+    expect(googleNotice.tip?.description).toMatch(/Brave/);
+  });
+
+  it("opens Web Search settings", () => {
+    const events = new EventTarget();
+    vi.stubGlobal("window", events);
+    const opened = vi.fn();
+    events.addEventListener("open-settings", (event) => opened((event as CustomEvent).detail));
+    googleNotice.onActivate({ openUseCasesFallback: vi.fn() });
+    expect(opened).toHaveBeenCalledExactlyOnceWith({ tab: "search" });
+  });
+});

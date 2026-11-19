@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { SearchProviderType, SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
+import { SEARCH_SETTINGS_CHANGED } from "../hooks/useClosingSearchProvider";
 
 /** A closing provider stays visible only for people who already set it up. */
 export function isProviderOffered(provider: SearchProviderInfo): boolean {
@@ -103,6 +104,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setGoogleApiKey("");
       setGoogleSearchEngineId("");
       await loadConfig();
+      window.dispatchEvent(new Event(SEARCH_SETTINGS_CHANGED));
     } catch (error: Any) {
       console.error("Failed to save search settings:", error);
     } finally {

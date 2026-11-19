@@ -3637,7 +3637,13 @@ export function App() {
       );
       // "connectors" opens Integrations, whose first sub-tab is Connectors.
       setSettingsTab(
-        tab === "appearance" ? "appearance" : tab === "connectors" ? "integrations" : "llm",
+        tab === "appearance"
+          ? "appearance"
+          : tab === "connectors"
+            ? "integrations"
+            : tab === "search"
+              ? "search"
+              : "llm",
       );
       setCurrentView("settings");
     };

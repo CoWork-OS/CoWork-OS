@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, Box, Orbit, Sparkles, X } from "lucide-react";
+import { ArrowUpRight, Box, CalendarClock, Orbit, Sparkles, X } from "lucide-react";
+import { useClosingSearchProvider } from "../../hooks/useClosingSearchProvider";
 import { useComposerPredictionAvailable } from "../../hooks/useComposerPredictions";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { requestUseCasesGallery, requestUseCasesGalleryWhenReady } from "../use-cases-events";
@@ -24,9 +25,15 @@ export interface SidebarNotice {
   label: string;
   /** Runs when the notice body is clicked. */
   onActivate: (ctx: SidebarNoticeContext) => void;
-  isVisible?: (ctx: { composerPredictionAvailable: boolean }) => boolean;
+  isVisible?: (ctx: SidebarNoticeVisibilityContext) => boolean;
   /** A feature-discovery tooltip opens automatically only on its first display. */
   tip?: { title: string; description: string };
+}
+
+export interface SidebarNoticeVisibilityContext {
+  composerPredictionAvailable: boolean;
+  /** Web search uses a provider whose service is closing, as primary or fallback. */
+  searchUsesClosingProvider: boolean;
 }
 
 export interface SidebarNoticeContext {
@@ -36,6 +43,21 @@ export interface SidebarNoticeContext {
 }
 
 export const SIDEBAR_NOTICES: SidebarNotice[] = [
+  {
+    // Google closes the Custom Search JSON API on 1 January 2027 (#914).
+    id: "google-search-ending-v1",
+    icon: CalendarClock,
+    label: "Google search ends 1 Jan 2027",
+    tip: {
+      title: "Google Custom Search is closing",
+      description:
+        "Your web search uses Google Custom Search, which Google shuts down on 1 January 2027. Set up another provider, such as Brave, Tavily, Exa or SerpAPI, and choose it as primary or fallback in Settings → AI Models → Web Search.",
+    },
+    isVisible: ({ searchUsesClosingProvider }) => searchUsesClosingProvider,
+    onActivate: () => {
+      window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "search" } }));
+    },
+  },
   {
     id: "composer-predictions-v1",
     icon: Sparkles,
@@ -198,6 +220,7 @@ function SidebarNoticeTip({
 
 export function SidebarNotices({ onStartNewSession }: { onStartNewSession?: () => void } = {}) {
   const composerPredictionAvailable = useComposerPredictionAvailable();
+  const searchUsesClosingProvider = useClosingSearchProvider() !== null;
   const [dismissed, setDismissed] = useState(() => readIds(DISMISSED_KEY));
   // Snapshot of notices seen before this mount, so only brand-new ones animate.
   const [seenAtMount] = useState(() => readIds(SEEN_KEY));
@@ -208,7 +231,8 @@ export function SidebarNotices({ onStartNewSession }: { onStartNewSession?: () =
 
   const visible = SIDEBAR_NOTICES.filter(
     (notice) =>
-      !dismissed.has(notice.id) && (notice.isVisible?.({ composerPredictionAvailable }) ?? true),
+      !dismissed.has(notice.id) &&
+      (notice.isVisible?.({ composerPredictionAvailable, searchUsesClosingProvider }) ?? true),
   );
 
   useEffect(() => {

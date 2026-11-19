@@ -182,6 +182,11 @@ class OpenAIProviderError extends Error {
  * - API Key: Uses OpenAI SDK directly with api.openai.com
  * - OAuth: Uses pi-ai SDK with ChatGPT backend (chatgpt.com/backend-api/)
  */
+export interface OpenAIProviderOptions {
+  /** Sent on every API-key request (not used by the OAuth / ChatGPT paths). */
+  defaultHeaders?: Record<string, string>;
+}
+
 export class OpenAIProvider implements LLMProvider {
   readonly type = "openai" as const;
   /** The API-key SDK client, created on its first request (see sdk-loaders); null under OAuth. */
@@ -202,7 +207,7 @@ export class OpenAIProvider implements LLMProvider {
   // retry. A new provider instance (for example after account/model changes)
   // starts with a fresh capability probe.
 
-  constructor(config: LLMProviderConfig) {
+  constructor(config: LLMProviderConfig, options: OpenAIProviderOptions = {}) {
     const apiKey = config.openaiApiKey;
     const accessToken = config.openaiAccessToken;
     const refreshToken = config.openaiRefreshToken;
@@ -238,8 +243,14 @@ export class OpenAIProvider implements LLMProvider {
     } else if (apiKey) {
       // Use API key - standard OpenAI SDK
       const baseURL = this.openaiBaseUrl;
+      const defaultHeaders = options.defaultHeaders;
       this.getApiKeyClient = lazyClient(
-        async () => new (await loadOpenAISdk())({ apiKey, ...(baseURL ? { baseURL } : {}) }),
+        async () =>
+          new (await loadOpenAISdk())({
+            apiKey,
+            ...(baseURL ? { baseURL } : {}),
+            ...(defaultHeaders ? { defaultHeaders } : {}),
+          }),
       );
       this.authMethod = "api_key";
       logger.debug("Using API key authentication");

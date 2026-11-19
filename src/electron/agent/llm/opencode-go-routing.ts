@@ -1,3 +1,10 @@
+/**
+ * OpenCode routes and prompt-caches inference by this header and rejects
+ * requests without it ("Request is missing x-opencode-session"). The value must
+ * stay the same for every request of one conversation.
+ */
+export const OPENCODE_SESSION_HEADER = "x-opencode-session";
+
 export function isOpenCodeGoBaseUrl(baseUrl: string): boolean {
   const trimmed = baseUrl.trim();
   try {

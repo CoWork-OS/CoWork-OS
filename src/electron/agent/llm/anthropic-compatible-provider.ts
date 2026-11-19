@@ -114,6 +114,8 @@ export interface AnthropicCompatibleProviderOptions {
    */
   sendThinkingConfig?: boolean;
   reasoningEffort?: string;
+  /** Added to every request this provider sends (messages and /models). */
+  extraHeaders?: Record<string, string>;
 }
 
 interface ThinkingRequestOptions {
@@ -134,6 +136,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   private managedPromptCacheSupported = true;
   private readonly sendThinkingConfig: boolean;
   private readonly reasoningEffort?: string;
+  private readonly extraHeaders?: Record<string, string>;
   /** Models whose endpoint rejected thinking/effort parameters (sticky per instance). */
   private readonly thinkingConfigRejectedModels = new Set<string>();
   private readonly turnContextRejectedModels = new Set<string>();
@@ -149,6 +152,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     this.managedPromptCacheSupported = !isNanoGptBaseUrl(options.baseUrl);
     this.sendThinkingConfig = options.sendThinkingConfig === true;
     this.reasoningEffort = options.reasoningEffort;
+    this.extraHeaders = options.extraHeaders;
   }
 
   private normalizeModelForEndpoint(model: string): string {
@@ -284,6 +288,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   private getMessageHeaders(usesTurnContext = false): Record<string, string> {
     const isOpenRouter = this.type === "openrouter";
     return {
+      ...this.extraHeaders,
       "Content-Type": "application/json",
       "anthropic-version": ANTHROPIC_VERSION,
       ...(isOpenRouter ? getOpenRouterAttributionHeaders() : {}),
@@ -300,6 +305,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   async getAvailableModels(): Promise<Array<{ id: string; name: string }>> {
     try {
       const headers: Record<string, string> = {
+        ...this.extraHeaders,
         "anthropic-version": ANTHROPIC_VERSION,
       };
       if (this.apiKey) {

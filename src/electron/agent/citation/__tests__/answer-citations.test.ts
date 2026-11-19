@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { reconcileAnswerCitations, type AnswerCitationSource } from "../answer-citations";
+import {
+  reconcileAnswerCitations,
+  type AnswerCitationSource,
+} from "../../../../shared/answer-citations";
 import { CitationTracker } from "../CitationTracker";
 
 const MS = "https://support.microsoft.com/en-us/teams/meetings";

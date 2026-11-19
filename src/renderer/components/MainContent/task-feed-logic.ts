@@ -133,6 +133,12 @@ const AUTOMATIC_APPROVAL_REASONS = new Set([
   "durable_restart_allow_once",
 ]);
 
+const USER_DECLINE_REASONS = new Set([
+  "assistant_input_denied",
+  "assistant_input_dismissed",
+  "review_denied_after_restart",
+]);
+
 /**
  * Counts each turn's work by turn id ("turn:initial", "turn:<user message id>"), the same ids
  * `applyTurnDisclosures` gives its headers. Only approvals a person answered count as approved
@@ -190,12 +196,9 @@ export function collectTurnWorkStats(
       const stats = ensure();
       if (stats) stats.approved += 1;
     } else if (type === "approval_denied") {
-      // A declined card; timeouts and fail-closed recoveries were never answered.
-      if (
-        payload.reason !== "assistant_input_denied" &&
-        payload.reason !== "assistant_input_dismissed"
-      )
-        continue;
+      // A refused Allow may use the same reason or action as a user's denial.
+      const userDeclined = payload.userDeclined ?? USER_DECLINE_REASONS.has(String(payload.reason));
+      if (userDeclined !== true) continue;
       const stats = ensure();
       if (stats) stats.declined += 1;
     }

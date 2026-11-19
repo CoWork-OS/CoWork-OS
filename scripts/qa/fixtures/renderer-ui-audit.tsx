@@ -18,6 +18,7 @@ import { MCPRegistryBrowser } from "../../../src/renderer/components/MCPRegistry
 import { FileHub } from "../../../src/renderer/components/FileHub";
 import AutomationStudioPanel from "../../../src/renderer/components/AutomationStudioPanel";
 import { SidebarArchivedSessions } from "../../../src/renderer/components/sidebar/SidebarArchivedSessions";
+import { WorkView } from "../../../src/renderer/components/work/WorkView";
 import "../../../src/renderer/styles/index.css";
 import "../../../src/renderer/styles/calm-theme.css";
 import "../../../src/renderer/components/MainContent/main-content.css";
@@ -148,6 +149,15 @@ const archivedRows = Array.from({ length: 202 }, (_, index) => ({
   sessionArchivedAt: 202 - index,
   updatedAt: 1,
   createdAt: 1,
+}));
+const workTasks = Array.from({ length: 10 }, (_, index) => ({
+  id: `work-${index + 1}`,
+  title: `Work session ${index + 1}`,
+  prompt: "",
+  workspaceId: "fixture",
+  status: "completed" as const,
+  createdAt: 1000 - index,
+  updatedAt: 1000 - index,
 }));
 window.electronAPI = new Proxy(
   {
@@ -281,6 +291,7 @@ function Fixture() {
           "files",
           "automation",
           "archive",
+          "work",
         ].map((id) => (
           <button key={id} onClick={() => setMode(id)}>
             Show {id}
@@ -416,6 +427,9 @@ function Fixture() {
           onUnarchived={() => {}}
           onOpenRestored={() => {}}
         />
+      )}
+      {mode === "work" && (
+        <WorkView tasks={workTasks} onOpenTask={() => {}} onTasksChanged={() => {}} />
       )}
     </>
   );

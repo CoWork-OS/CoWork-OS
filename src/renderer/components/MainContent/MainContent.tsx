@@ -217,7 +217,7 @@ import { SessionProgressCard } from "../SessionProgressCard";
 import { Suspense } from "react";
 import type { SurfaceActionOrigin } from "../../../shared/answer-surfaces/actions";
 import type { BotConversationProjection } from "../../../shared/bot-lifecycle";
-import { BotGreetingTracker, toBotMessage } from "../../../shared/bot-messages";
+import { BotGreetingTracker, toBotMessage, type BotMessage } from "../../../shared/bot-messages";
 import { isPactAuthorizationInputRequest } from "../../../shared/pact";
 import { useHomeTodaySignals } from "../../hooks/useHomeTodaySignals";
 import { useTaskDisclosureIntents } from "../../hooks/useTaskDisclosureIntents";
@@ -352,7 +352,12 @@ import {
 } from "./main-content-constants";
 import type { CreateTaskOptions, FocusedCard, SettingsTab } from "./main-content-types";
 import "./main-content.css";
-import { extractTaskCitations } from "./task-citations";
+import {
+  indexLegacyInitialAnswerCitations,
+  readSavedAnswerCitations,
+  readTaskAnswerCitations,
+  type TaskCitation,
+} from "./task-citations";
 import {
   CollapsibleUserBubble,
   MessageCopyButton,
@@ -1942,9 +1947,17 @@ function MainContentComponent({
   const [llmWikiVaultSummary, setLlmWikiVaultSummary] = useState<LlmWikiVaultSummary | null>(null);
   const [llmWikiVaultLoading, setLlmWikiVaultLoading] = useState(false);
   const [welcomeTaskSuggestions, setWelcomeTaskSuggestions] = useState<WelcomeTaskSuggestion[]>([]);
-  // Extract citations from task events for inline badge and per-claim source rendering. Every
-  // task collects sources, so this is not limited to research-workflow tasks.
-  const citations = useMemo(() => extractTaskCitations(events), [events]);
+  const readAnswerSources = useMemo(() => {
+    const legacy = indexLegacyInitialAnswerCitations(rawEvents);
+    const cache = new WeakMap<TaskEvent, TaskCitation[]>();
+    return (event: TaskEvent) => {
+      const cached = cache.get(event);
+      if (cached) return cached;
+      const sources = readTaskAnswerCitations(event, legacy.get(event.id));
+      cache.set(event, sources);
+      return sources;
+    };
+  }, [rawEvents]);
 
   useEffect(() => {
     if (
@@ -2136,22 +2149,25 @@ function MainContentComponent({
     () => buildWrittenFileResolver(writtenFilePathsKey ? writtenFilePathsKey.split("\n") : []),
     [writtenFilePathsKey],
   );
-  const markdownComponents = useMemo(
-    () =>
-      buildMarkdownComponents({
-        workspacePath: workspace?.path,
-        onOpenViewer: openFileInPanel,
-        onOpenWebLinkInSidebar,
-        citations,
-        resolveInlineCodeFilePath,
-      }),
-    [
-      workspace?.path,
-      openFileInPanel,
+  const markdownOptions = useMemo(
+    () => ({
+      workspacePath: workspace?.path,
+      onOpenViewer: openFileInPanel,
       onOpenWebLinkInSidebar,
-      citations,
       resolveInlineCodeFilePath,
-    ],
+    }),
+    [workspace?.path, openFileInPanel, onOpenWebLinkInSidebar, resolveInlineCodeFilePath],
+  );
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents(markdownOptions),
+    [markdownOptions],
+  );
+  const answerMarkdownComponents = useCallback(
+    (citations: TaskCitation[]) =>
+      citations.length
+        ? buildMarkdownComponents({ ...markdownOptions, citations })
+        : markdownComponents,
+    [markdownOptions, markdownComponents],
   );
   const eventTitleMarkdownComponents = useMemo(
     () => ({
@@ -2161,13 +2177,12 @@ function MainContentComponent({
         workspacePath: workspace?.path,
         onOpenViewer: openFileInPanel,
         onOpenWebLinkInSidebar,
-        citations,
         inlineImageLinks: false,
       }).a,
       // Keep timeline titles inline; replace emoji with Lucide icons.
       p: ({ children }: Any) => <>{replaceEmojisInChildren(children, 14)}</>,
     }),
-    [markdownComponents, workspace?.path, openFileInPanel, onOpenWebLinkInSidebar, citations],
+    [markdownComponents, workspace?.path, openFileInPanel, onOpenWebLinkInSidebar],
   );
   // Canvas sessions state - track active canvas sessions for current task
   const [canvasSessions, setCanvasSessions] = useState<CanvasSession[]>([]);
@@ -6647,15 +6662,17 @@ function MainContentComponent({
     return null;
   }, [events, isBotConversation]);
   const renderBotHistoryMarkdown = useCallback(
-    (text: string) => (
+    (text: string, message: BotMessage) => (
       <AssistantMessageContent
         message={text}
-        markdownComponents={markdownComponents}
+        markdownComponents={answerMarkdownComponents(
+          message.role === "bot" ? readSavedAnswerCitations(text, message.answerCitations) : [],
+        )}
         workspacePath={workspace?.path}
         onOpenViewer={setViewerFilePath}
       />
     ),
-    [markdownComponents, workspace?.path],
+    [answerMarkdownComponents, workspace?.path],
   );
   const botTranscriptMarkdown = useMemo(() => {
     if (!task || !isBotConversation) return taskMarkdown;
@@ -8585,6 +8602,8 @@ function MainContentComponent({
         transcriptMode={transcriptMode}
         returnToDefaultTranscript={returnToDefaultTranscript}
         markdownComponents={markdownComponents}
+        answerMarkdownComponents={answerMarkdownComponents}
+        readAnswerSources={readAnswerSources}
         mainBodyRef={mainBodyRef}
         messageFeedbackMap={shownMessageFeedback}
         onOpenBrowserView={onOpenBrowserView}

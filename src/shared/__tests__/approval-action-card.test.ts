@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACTION_CARD_MAX_ATTENDEES,
   actionCardButtonLabel,
@@ -219,6 +219,39 @@ describe("formatActionCardWhen", () => {
     expect(
       formatActionCardWhen({ start: { date: "2026-11-17" }, end: { date: "2026-11-20" } }, "en-US"),
     ).toBe("Tue, Nov 17 – Thu, Nov 19 · All day");
+  });
+
+  describe("when the viewer's clocks change", () => {
+    beforeEach(() => vi.stubEnv("TZ", "Europe/Lisbon"));
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("keeps the last included day of an all-day event across a clock change", () => {
+      expect(
+        formatActionCardWhen(
+          { start: { date: "2026-03-28" }, end: { date: "2026-03-30" } },
+          "en-GB",
+        ),
+      ).toBe("Sat 28 Mar – Sun 29 Mar · All day");
+    });
+
+    it("keeps another zone's wall-clock time during the viewer's missing hour", () => {
+      expect(
+        formatActionCardWhen(
+          {
+            start: { dateTime: "2026-03-29T01:30:00" },
+            end: { dateTime: "2026-03-29T03:00:00" },
+            timeZone: "America/New_York",
+          },
+          "en-GB",
+        ),
+      ).toBe("Sun 29 Mar · 1:30 – 3:00 (America/New York)");
+    });
+
+    it("keeps local time resolution for an offsetless time without a named zone", () => {
+      expect(formatActionCardWhen({ start: { dateTime: "2026-03-29T01:30:00" } }, "en-GB")).toBe(
+        "Sun 29 Mar · 2:30",
+      );
+    });
   });
 
   it("is empty without a usable start", () => {

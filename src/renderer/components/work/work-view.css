@@ -133,9 +133,14 @@ html.visual-calm .work-view-group {
 
 html.visual-calm .work-view-group-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
   padding: 0 4px 2px;
+}
+
+html.visual-calm .work-view-group-header .work-view-more {
+  margin-inline-start: auto;
 }
 
 html.visual-calm .work-view-group-header h2 {

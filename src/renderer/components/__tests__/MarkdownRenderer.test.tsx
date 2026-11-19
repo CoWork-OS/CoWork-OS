@@ -96,6 +96,14 @@ describe("MarkdownRenderer claim sources", () => {
     expect(markup).toContain("2 sources");
   });
 
+  it("links each known source in a grouped citation", () => {
+    const markup = render("The claim cites [1, 2, 9].");
+    expect(markup).toContain('title="Proposal review — calendar.google.com"');
+    expect(markup).toContain('title="Pricing report — example.com"');
+    expect(markup).toContain("[9]");
+    expect(markup).toContain("2 sources");
+  });
+
   it("puts one row after a whole list, not one per item", () => {
     const markup = render("- First [1]\n- Second [2]\n- Third [1]");
     expect(markup.match(/class="claim-sources"/g)).toHaveLength(1);
@@ -104,6 +112,22 @@ describe("MarkdownRenderer claim sources", () => {
 
   it("adds no row to text without known references", () => {
     expect(render("Nothing cited here [9].")).not.toContain("claim-sources");
+  });
+
+  it.each([
+    "Use the literal `[1]` here.",
+    String.raw`Read the [docs \[1\]](https://example.com/help).`,
+    "- Syntax:\n\n  ```text\n  [1]\n  ```",
+  ])("does not credit literal citation-like text in %s", (markdown) => {
+    expect(render(markdown)).not.toContain("claim-sources");
+  });
+
+  it("credits only the source referenced outside inline code and links", () => {
+    const markup = render(
+      "Use the `[1]` key and " + String.raw`[docs \[1\]](https://example.com/help). See [2].`,
+    );
+    expect(markup).toContain("1 source");
+    expect(markup).not.toContain("Google Calendar");
   });
 });
 

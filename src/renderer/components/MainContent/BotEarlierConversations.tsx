@@ -40,7 +40,7 @@ export interface BotEarlierConversationsProps {
   canLoadMore: boolean;
   /** When the first message shown below this section was sent, if there is one. */
   currentFirstMessageAt: number | null;
-  renderMarkdown: (text: string) => ReactNode;
+  renderMarkdown: (text: string, message: BotMessage) => ReactNode;
   /** Characters for teammates whose messages were relayed into this chat. */
   mascotForSender?: BotMascotLookup;
 }
@@ -257,14 +257,14 @@ function BotHistoryMessageRow({
   message: BotMessage;
   relayedBy?: string;
   senderMascot: BotMascotId | null;
-  renderMarkdown: (text: string) => ReactNode;
+  renderMarkdown: (text: string, message: BotMessage) => ReactNode;
 }) {
   if (message.role === "user") {
     const text = normalizeInitialPromptText(message.text);
     return (
       <div className="chat-message user-message">
         <div className="chat-bubble user-bubble">
-          <div className="markdown-content">{renderMarkdown(text)}</div>
+          <div className="markdown-content">{renderMarkdown(text, message)}</div>
         </div>
         <MessageCopyButton text={text} />
       </div>
@@ -283,7 +283,7 @@ function BotHistoryMessageRow({
             <span>{relayedBy}</span>
           </div>
         )}
-        <div className="chat-bubble-content markdown-content">{renderMarkdown(text)}</div>
+        <div className="chat-bubble-content markdown-content">{renderMarkdown(text, message)}</div>
       </div>
       <div className="message-actions">
         <MessageCopyButton text={text} />

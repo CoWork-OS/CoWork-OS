@@ -156,8 +156,23 @@ export function WorkView({
     [tasks, workspaces, attention.items, context, filters],
   );
 
-  const allRows = useMemo(() => model.groups.flatMap((group) => group.rows), [model]);
-  const selected = allRows.find((row) => row.id === selectedId) ?? allRows[0] ?? null;
+  const visibleGroups = useMemo(
+    () =>
+      model.groups.map((group) => {
+        const expanded = expandedGroups.has(group.id);
+        return {
+          group,
+          expanded,
+          rows: expanded ? group.rows : group.rows.slice(0, GROUP_PREVIEW_ROWS),
+        };
+      }),
+    [expandedGroups, model.groups],
+  );
+  const selectedGroup =
+    visibleGroups.find(({ group }) => group.rows.some((row) => row.id === selectedId)) ??
+    visibleGroups[0];
+  const selected =
+    selectedGroup?.rows.find((row) => row.id === selectedId) ?? selectedGroup?.rows[0];
 
   useEffect(() => {
     setConfirmArchive(false);
@@ -262,15 +277,35 @@ export function WorkView({
                   : "Nothing here yet. Sessions you or your agents start show up here."}
               </p>
             )}
-            {model.groups.map((group) => {
-              const expanded = expandedGroups.has(group.id);
-              const rows = expanded ? group.rows : group.rows.slice(0, GROUP_PREVIEW_ROWS);
-              const hidden = group.rows.length - rows.length;
+            {visibleGroups.map(({ group, expanded, rows }) => {
+              const canExpand = group.rows.length > GROUP_PREVIEW_ROWS;
               return (
                 <section key={group.id} className="work-view-group" aria-label={group.label}>
                   <div className="work-view-group-header">
                     <h2>{group.label}</h2>
                     <span>{workGroupSummary(group)}</span>
+                    {canExpand && (
+                      <button
+                        type="button"
+                        className="work-view-more"
+                        aria-expanded={expanded}
+                        aria-label={
+                          expanded
+                            ? `Show fewer sessions in ${group.label}`
+                            : `Show all ${group.rows.length} sessions in ${group.label}`
+                        }
+                        onClick={() =>
+                          setExpandedGroups((current) => {
+                            const next = new Set(current);
+                            if (expanded) next.delete(group.id);
+                            else next.add(group.id);
+                            return next;
+                          })
+                        }
+                      >
+                        {expanded ? "Show fewer" : `Show all ${group.rows.length}`}
+                      </button>
+                    )}
                   </div>
                   <ul className="work-view-rows">
                     {rows.map((row) => (
@@ -315,15 +350,6 @@ export function WorkView({
                       </li>
                     ))}
                   </ul>
-                  {hidden > 0 && (
-                    <button
-                      type="button"
-                      className="work-view-more"
-                      onClick={() => setExpandedGroups((current) => new Set(current).add(group.id))}
-                    >
-                      Show all {group.rows.length}
-                    </button>
-                  )}
                 </section>
               );
             })}
@@ -337,10 +363,7 @@ export function WorkView({
           {selected && (
             <WorkDetail
               row={selected}
-              projectLabel={
-                model.groups.find((group) => group.rows.some((row) => row.id === selected.id))
-                  ?.label ?? "No project"
-              }
+              projectLabel={selectedGroup.group.label}
               now={now}
               confirmArchive={confirmArchive}
               archiveError={archiveError}

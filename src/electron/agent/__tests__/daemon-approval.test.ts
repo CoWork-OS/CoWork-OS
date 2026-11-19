@@ -1924,6 +1924,36 @@ describe("inline approval card routing (legacy approval queue off)", () => {
     expect(runtime.recordPermissionDenial).toHaveBeenCalledWith("tool:run_command");
   });
 
+  it("does not describe a refused inline Allow as a user denial", async () => {
+    useInlineCardRuntime();
+    const daemon = buildCardDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+    daemon.requestUserInput = vi.fn().mockResolvedValue({
+      requestId: "req-1",
+      status: "submitted",
+      answers: { approval_decision: { optionLabel: "Allow once" } },
+    });
+    const validateDecision = vi.fn().mockResolvedValue(false);
+    await expect(
+      AgentDaemon.prototype["requestAssistantApproval"].call(
+        daemon,
+        "task-card",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+        null,
+        "tool:run_command",
+        undefined,
+        validateDecision,
+      ),
+    ).resolves.toBe(false);
+    expect(validateDecision).toHaveBeenCalledWith(true, "allow_once");
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-card",
+      "approval_denied",
+      expect.objectContaining({ userDeclined: false }),
+    );
+  });
+
   it("denies an unanswered approval card after the approval timeout", async () => {
     useInlineCardRuntime();
     vi.useFakeTimers();
@@ -2076,6 +2106,38 @@ it("auto-approves routine app consent only under effective Full access and curre
 });
 
 describe("approval resolution wins before effects", () => {
+  it.each([false, true])("distinguishes manual denials after restart=%s", async (recovered) => {
+    for (const attemptedAllow of [false, true]) {
+      const approval = {
+        id: `decision-receipt-${recovered}-${attemptedAllow}`,
+        taskId: "task-decision-receipt",
+        status: "pending",
+      };
+      const pending = { approval, taskId: approval.taskId, reject: vi.fn() };
+      const daemonLike = {
+        pendingApprovals: new Map(recovered ? [] : [[approval.id, pending]]),
+        approvalRepo: {
+          findById: vi.fn().mockResolvedValue(approval),
+          resolvePending: vi.fn().mockResolvedValue(true),
+        },
+        taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+        getExecutorForTask: vi.fn(),
+        isApprovalAuthorityCurrent: vi.fn().mockResolvedValue(false),
+        persistApprovalActionRule: vi.fn().mockResolvedValue({}),
+        updateTask: vi.fn(),
+        logEvent: vi.fn(),
+      } as Any;
+      expect(
+        await AgentDaemon.prototype.respondToApproval.call(daemonLike, approval.id, attemptedAllow),
+      ).toBe("handled");
+      expect(daemonLike.logEvent).toHaveBeenCalledWith(
+        approval.taskId,
+        "approval_denied",
+        expect.objectContaining({ action: "deny_once", userDeclined: !attemptedAllow }),
+      );
+    }
+  });
+
   it("serializes opposite process-local responses under one approval key", async () => {
     let release!: (won: boolean) => void;
     const transition = new Promise<boolean>((resolve) => {

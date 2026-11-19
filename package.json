@@ -296,7 +296,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "langium": "4.4.0",
-    "oxfmt": "^0.78.0",
+    "oxfmt": "^0.79.0",
     "oxlint": "^1.47.0",
     "twilio": "^6.1.1",
     "typescript": "^5.9.0",

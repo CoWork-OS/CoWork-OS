@@ -538,6 +538,15 @@ export const AgentRoleModelFieldsSchema = z.object({
   modelKey: z.union([z.string().trim().max(200), z.null()]).optional(),
 });
 
+/** One connector (a configured MCP server id) turned off or back on for one conversation. */
+export const TaskConnectorOffSchema = z
+  .object({
+    taskId: z.string().uuid(),
+    connectorId: z.string().trim().min(1).max(200),
+    off: z.boolean(),
+  })
+  .strict();
+
 export const TaskModelSelectionSchema = z
   .object({
     taskId: z.string().uuid(),

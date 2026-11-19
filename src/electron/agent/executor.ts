@@ -1,3 +1,4 @@
+import { mergeConnectorsOff } from "../../shared/connectors-off";
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
 import {
   isFreshAgentHandoff,
@@ -7495,6 +7496,8 @@ ${transcript}
           ? "This bot works in its own folder for this run and cannot switch workspaces. To work in a project, start the chat there or set the bot's Files to Your workspace."
           : undefined,
     );
+    // Connectors the user turned off for this conversation in the Workspace section.
+    registry.setConnectorsOff(this.getEffectiveConnectorsOff());
     return registry;
   }
 
@@ -21934,9 +21937,24 @@ You are continuing a previous conversation. The context from the previous conver
       ...this.task,
       agentConfig,
     }).task;
+    this.toolRegistry?.setConnectorsOff(this.getEffectiveConnectorsOff());
     if (this._runtime) {
       this._runtime.setPermissionMode(this.getDefaultPermissionMode());
     }
+  }
+
+  /**
+   * Connectors off for this conversation: the saved list joined with this run's config, so
+   * no turn override can turn back on a connector the user turned off.
+   */
+  private getEffectiveConnectorsOff(): string[] {
+    let saved: string[] | undefined;
+    try {
+      saved = this.daemon.getTask?.(this.task.id)?.agentConfig?.connectorsOff;
+    } catch {
+      saved = undefined;
+    }
+    return mergeConnectorsOff(saved, this.task.agentConfig?.connectorsOff);
   }
 
   private applyQueuedAgentConfigOverride(agentConfigOverride?: AgentConfig): void {

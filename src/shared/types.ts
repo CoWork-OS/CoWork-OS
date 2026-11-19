@@ -2476,6 +2476,11 @@ export interface AgentConfig {
   cli?: CliTaskOwnership;
   /** User-selected integration mentions for soft tool-routing guidance. */
   integrationMentions?: IntegrationMentionSelection[];
+  /**
+   * Connected MCP servers (by id) the user turned off for this conversation from the
+   * Workspace section. Their tools are denied like tool restrictions; it only narrows.
+   */
+  connectorsOff?: string[];
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
   /**
@@ -8365,6 +8370,7 @@ export const IPC_CHANNELS = {
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
   TASK_UPDATE_WORKSPACE: "task:updateWorkspace",
   TASK_SET_MODEL: "task:setModel",
+  TASK_SET_CONNECTOR_OFF: "task:setConnectorOff",
   UNIFIED_RECALL_QUERY: "recall:query",
   LLM_ROUTING_STATUS: "llm:routingStatus",
   LLM_ROUTING_EVENT: "llm:routingEvent",

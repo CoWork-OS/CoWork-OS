@@ -633,7 +633,7 @@ describe("RightPanel checklist rendering", () => {
     expect(signatureC).not.toBe(signatureA);
   });
 
-  it("keeps the context section visible during live execution and shows skills/tools", () => {
+  it("keeps the context and workspace sections visible during live execution", () => {
     const markup = renderToStaticMarkup(
       React.createElement(RightPanel, {
         task: {
@@ -670,9 +670,49 @@ describe("RightPanel checklist rendering", () => {
     );
 
     expect(markup).toContain("Context");
-    expect(markup).toContain("Skills used");
+    // Skills now sit in the Workspace section, marked as used.
+    expect(markup).toContain("workspace-scope-section");
+    expect(markup).not.toContain("Skills used");
     expect(markup).toContain("Novelist");
     expect(markup).toContain("Tools used");
     expect(markup).toContain("read_file");
+  });
+});
+
+describe("RightPanel workspace section", () => {
+  const task = { id: "task-ws", status: "executing", title: "Task", prompt: "Prompt" } as Any;
+
+  it("shows the conversation's folder from the start", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RightPanel, {
+        task,
+        workspace: { id: "ws-1", name: "Q4 deals", path: "/Users/x/Q4 deals" } as Any,
+        events: [] as Any,
+      }),
+    );
+    expect(markup).toContain("workspace-scope-section");
+    expect(markup).toContain("Q4 deals");
+  });
+
+  it("lets the folder row reveal the folder in Finder", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RightPanel, {
+        task,
+        workspace: { id: "ws-1", name: "Q4 deals", path: "/Users/x/Q4 deals" } as Any,
+        events: [] as Any,
+      }),
+    );
+    expect(markup).toMatch(/<button[^>]*workspace-scope-folder[^>]*Show in Finder/);
+  });
+
+  it("stays hidden with nothing to show", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RightPanel, {
+        task,
+        workspace: { id: "temp", name: "Temp", path: "/tmp/t", isTemp: true } as Any,
+        events: [] as Any,
+      }),
+    );
+    expect(markup).not.toContain("workspace-scope-section");
   });
 });

@@ -205,4 +205,80 @@ describe("OpenCode provider routing", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("sends one stable x-opencode-session header on every Go request (#889)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (url: string) =>
+        url.endsWith("/messages")
+          ? responseJson({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" })
+          : responseJson({ choices: [{ message: { role: "assistant", content: "ok" } }] }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const options = {
+      type: "opencode-go" as const,
+      providerName: "OpenCode Go",
+      apiKey: "go-key",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      defaultModel: "deepseek-v4-flash",
+    };
+    const provider = new OpenCodeProvider(options);
+
+    await provider.createMessage({ ...request, model: "opencode-go/deepseek-v4-flash" });
+    await provider.createMessage({ ...request, model: "opencode-go/deepseek-v4-flash" });
+    await provider.createMessage({ ...request, model: "opencode-go/qwen3.8-max" });
+    await new OpenCodeProvider(options).createMessage({ ...request, model: "deepseek-v4-flash" });
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([
+      "https://opencode.ai/zen/go/v1/chat/completions",
+      "https://opencode.ai/zen/go/v1/chat/completions",
+      "https://opencode.ai/zen/go/v1/messages",
+      "https://opencode.ai/zen/go/v1/chat/completions",
+    ]);
+    const sessions = fetchMock.mock.calls.map(([, init]) => sessionHeader(init));
+    expect(sessions[0]).toBe(provider.sessionId);
+    expect(sessions[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessions.slice(0, 3)).toEqual([sessions[0], sessions[0], sessions[0]]);
+    // A new task builds a new provider and starts a new OpenCode session.
+    expect(sessions[3]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessions[3]).not.toBe(sessions[0]);
+  });
+
+  it("sends the session header through the Responses SDK and model discovery", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) =>
+      url.endsWith("/models")
+        ? responseJson({ data: [{ id: "gpt-5.5" }] })
+        : responseJson({
+            output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+            status: "completed",
+          }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OpenCodeProvider({
+      type: "opencode",
+      providerName: "OpenCode Zen",
+      apiKey: "zen-key",
+      baseUrl: "https://opencode.ai/zen/v1",
+      defaultModel: "gpt-5.5",
+    });
+
+    await provider.createMessage({ ...request, model: "opencode/gpt-5.5" });
+    await provider.getAvailableModels();
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://opencode.ai/zen/v1/responses",
+      "https://opencode.ai/zen/v1/models",
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(sessionHeader(init)).toBe(provider.sessionId);
+    }
+  });
 });
+
+function sessionHeader(init: RequestInit | undefined): string | null {
+  const headers = init?.headers;
+  if (headers instanceof Headers) return headers.get("x-opencode-session");
+  const record = (headers ?? {}) as Record<string, string>;
+  return record["x-opencode-session"] ?? null;
+}

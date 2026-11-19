@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { GeminiProvider } from "./gemini-provider";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
@@ -15,6 +16,7 @@ import {
   isOpenCodeGoBaseUrl,
   isOpenCodeZenBaseUrl,
   normalizeOpenCodeGoAnthropicBaseUrl,
+  OPENCODE_SESSION_HEADER,
   normalizeOpenCodeGoModelId,
   type OpenCodeProduct,
 } from "./opencode-go-routing";
@@ -40,18 +42,30 @@ export class OpenCodeProvider implements LLMProvider {
   private zenFable52Provider?: AnthropicCompatibleProvider;
   private product: OpenCodeProduct;
   private diagnosticFetch?: ProviderDiagnosticFetch;
+  /**
+   * One id per provider instance. Each task builds its own provider, so every
+   * request of a conversation (and a settings "Test") shares one session.
+   */
+  readonly sessionId: string;
 
   constructor(options: OpenCodeProviderOptions) {
     this.diagnosticFetch = options.diagnosticFetch;
     this.type = options.type;
     this.defaultModel = options.defaultModel;
     this.product = isOpenCodeGoBaseUrl(options.baseUrl) ? "go" : "zen";
+    this.sessionId = randomUUID();
+    const extraHeaders = { [OPENCODE_SESSION_HEADER]: this.sessionId };
     // OpenCode serves hosted models that return native tool calls; text that
     // looks like a call is not recovered here.
-    this.openaiProvider = new OpenAICompatibleProvider({ ...options, textToolCallFallback: false });
+    this.openaiProvider = new OpenAICompatibleProvider({
+      ...options,
+      extraHeaders,
+      textToolCallFallback: false,
+    });
     const baseUrl = normalizeOpenCodeGoAnthropicBaseUrl(options.baseUrl);
     this.anthropicProvider = new AnthropicCompatibleProvider({
       ...options,
+      extraHeaders,
       baseUrl,
       defaultModel: normalizeOpenCodeGoModelId(options.defaultModel),
     });
@@ -62,10 +76,11 @@ export class OpenCodeProvider implements LLMProvider {
       openaiBaseUrl: baseUrl,
       openaiResponsesApi: true,
     } as const;
-    this.responsesProvider = new OpenAIProvider(responsesConfig);
+    this.responsesProvider = new OpenAIProvider(responsesConfig, { defaultHeaders: extraHeaders });
     if (this.product === "go") {
       this.goQwen4Provider = new AnthropicCompatibleProvider({
         ...options,
+        extraHeaders,
         defaultModel: QWEN4_MAX_MODEL.id,
         baseUrl: "https://opencode.ai/inference/go/anthropic/v1",
       });
@@ -76,12 +91,13 @@ export class OpenCodeProvider implements LLMProvider {
           { type: "gemini", model: GEMINI_NEON_MODEL.id, geminiApiKey: options.apiKey },
           { baseUrl: "https://opencode.ai/inference/google" },
         );
-      this.zenGpt62Provider = new OpenAIProvider({
-        ...responsesConfig,
-        openaiBaseUrl: "https://opencode.ai/inference/openai/v1",
-      });
+      this.zenGpt62Provider = new OpenAIProvider(
+        { ...responsesConfig, openaiBaseUrl: "https://opencode.ai/inference/openai/v1" },
+        { defaultHeaders: extraHeaders },
+      );
       this.zenFable52Provider = new AnthropicCompatibleProvider({
         ...options,
+        extraHeaders,
         defaultModel: FABLE_5_2_MODEL.id,
         baseUrl: "https://opencode.ai/inference/anthropic/v1",
         sendThinkingConfig: true,

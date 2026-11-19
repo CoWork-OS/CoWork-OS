@@ -1,0 +1,192 @@
+/* A calendar change drawn as the event: pending approval above the composer, receipt in chat. */
+.approval-action-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 100%);
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  /* The chat column can set a monospace face for system rows; the card is UI text. */
+  font-family: var(--font-ui);
+}
+
+.input-request-card-approval .approval-action-card {
+  width: 100%;
+  padding: 2px 0 0;
+  border: none;
+  background: transparent;
+}
+
+.approval-action-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.approval-action-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 7px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.approval-action-card[data-operation="delete"] .approval-action-card-icon {
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+.approval-action-card-eyebrow {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-action-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.approval-action-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.approval-action-card-title[data-struck="true"] {
+  text-decoration: line-through;
+  text-decoration-color: var(--color-text-tertiary);
+}
+
+.approval-action-card-when {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.approval-action-card-line,
+.approval-action-card-attendees {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.approval-action-card-line svg,
+.approval-action-card-attendees svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.approval-action-card-line span {
+  overflow-wrap: anywhere;
+}
+
+.approval-action-card-attendees ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.approval-action-card-attendees li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 8px 1px 2px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+}
+
+.approval-action-card-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.approval-action-card-attendee {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-action-card-attendees li.approval-action-card-more {
+  padding: 1px 8px;
+}
+
+.approval-action-card-description {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.approval-action-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* The decision drawn where the buttons were, so the card reads as done. */
+.approval-action-card-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.approval-action-card[data-state="approved"] .approval-action-card-receipt {
+  color: var(--color-success);
+}
+
+.approval-action-card[data-state="declined"] .approval-action-card-receipt {
+  color: var(--color-text-secondary);
+}
+
+.approval-action-card-reply {
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.chat-message .approval-action-card {
+  margin: 2px 0 6px;
+}

@@ -291,6 +291,7 @@ import {
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
 import { isExplicitExportConsentRequest } from "./visual-consent-policy";
 import { isHeadlessMode } from "../utils/runtime-mode";
+import { normalizeApprovalActionCard } from "../../shared/approval-action-card";
 import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
@@ -10959,10 +10960,37 @@ export class AgentDaemon extends EventEmitter {
       }
 
       if (response.status === "submitted") {
+        // An answered action card stays in the transcript as its receipt: the event it covered
+        // and the decision, taken from the stored card, never from the renderer's answer.
+        const cardQuestion = request.questions.find(
+          (question) => question.id === ASSISTANT_APPROVAL_QUESTION_ID && question.actionCard,
+        );
+        const actionCard = normalizeApprovalActionCard(cardQuestion?.actionCard);
+        const actionCardReply = (() => {
+          const reply = response.answers?.[ASSISTANT_APPROVAL_QUESTION_ID]?.otherText;
+          const clean = typeof reply === "string" ? reply.replace(/\s+/g, " ").trim() : "";
+          return clean.length > 220 ? `${clean.slice(0, 219)}…` : clean;
+        })();
         this.logEvent(request.taskId, "assistant_message", {
           message: buildStructuredInputSelectionMessage(request, response.answers),
           requestId: response.requestId,
           source: "structured_input_selection",
+          ...(actionCard
+            ? {
+                actionCard,
+                // Only an allow the card actually offered counts, as in the approval waiter.
+                actionCardApproved:
+                  parseAssistantApprovalAction(response.answers) !== "deny_once" &&
+                  Boolean(
+                    cardQuestion?.options.some(
+                      (option) =>
+                        option.label ===
+                        response.answers?.[ASSISTANT_APPROVAL_QUESTION_ID]?.optionLabel,
+                    ),
+                  ),
+                ...(actionCardReply ? { actionCardReply } : {}),
+              }
+            : {}),
         });
       }
 

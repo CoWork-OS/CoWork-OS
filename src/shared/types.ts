@@ -4,6 +4,7 @@ import type {
 } from "./execution-environment";
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
+import type { ApprovalActionCard } from "./approval-action-card";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
 import type { BotDesktopNetwork, BotWorksOn } from "./bot-computer";
 import type { BotFileAccess } from "./bot-containment";
@@ -5182,6 +5183,12 @@ export interface RequestUserInputQuestion {
    * never carry one.
    */
   preview?: RequestUserInputPreview;
+  /**
+   * The change an approval covers, drawn as the thing itself (a calendar event) with buttons
+   * named for the effect. Set only by the main process from the reviewed request; presentation
+   * only, and the answer is still one of `options`.
+   */
+  actionCard?: ApprovalActionCard;
 }
 
 export interface RequestUserInputPreview {

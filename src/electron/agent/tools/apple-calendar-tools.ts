@@ -62,6 +62,33 @@ function parseEpochSeconds(iso?: string): number | null {
   return Math.floor(ms / 1000);
 }
 
+/** What the approval card draws for an Apple Calendar change: the fields this call writes. */
+function appleEventPreview(
+  operation: "create_event" | "update_event" | "delete_event",
+  input: {
+    calendar_id?: string;
+    summary?: string;
+    start?: string;
+    end?: string;
+    location?: string;
+    description?: string;
+  },
+) {
+  return {
+    version: 1,
+    provider: "apple_calendar",
+    operation,
+    calendar: input.calendar_id,
+    event: {
+      summary: input.summary,
+      start: input.start,
+      end: input.end,
+      location: input.location,
+      description: input.description,
+    },
+  };
+}
+
 function epochToIso(epochSeconds: string | number | undefined): string | undefined {
   if (epochSeconds === undefined) return undefined;
   const n = typeof epochSeconds === "string" ? Number(epochSeconds) : epochSeconds;
@@ -525,6 +552,10 @@ export class AppleCalendarTools {
             summary: input.summary,
             start: input.start,
             end: input.end,
+            // Location and notes are written too, so the approval shows them.
+            location: input.location,
+            description: input.description,
+            calendarEventPreview: appleEventPreview(action, input),
           });
           const out = await this.runAppleScript([
             action,
@@ -564,6 +595,9 @@ export class AppleCalendarTools {
             summary: input.summary,
             start: input.start,
             end: input.end,
+            location: input.location,
+            description: input.description,
+            calendarEventPreview: appleEventPreview(action, input),
           });
           const out = await this.runAppleScript([
             action,
@@ -594,6 +628,7 @@ export class AppleCalendarTools {
             action,
             calendar_id: input.calendar_id || "(search)",
             event_id: input.event_id,
+            calendarEventPreview: appleEventPreview(action, input),
           });
           const out = await this.runAppleScript([action, input.calendar_id || "", input.event_id]);
           const [event_id, calendar_id, calendar_name] = splitFields(out);

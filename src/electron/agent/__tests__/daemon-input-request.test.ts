@@ -542,3 +542,77 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 });
+
+describe("AgentDaemon calendar action card receipts", () => {
+  const actionCard = {
+    kind: "calendar_event",
+    provider: "google_calendar",
+    operation: "create",
+    title: "Proposal review with Sophie",
+    attendees: ["sophie@example.com"],
+    attendeesOmitted: 0,
+  };
+
+  let requestCount = 0;
+  async function answer(answers: Any) {
+    // Responses are idempotent per request id, so each case answers its own request.
+    const requestId = `req-card-${(requestCount += 1)}`;
+    const repo = createInMemoryInputRequestRepo(requestId);
+    const daemonLike = {
+      inputRequestRepo: repo,
+      taskRepo: {
+        findById: vi
+          .fn()
+          .mockReturnValue({ id: "task-1", status: "paused" } satisfies Partial<Task>),
+      },
+      pendingInputRequests: new Map(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+      sendMessage: vi.fn(),
+    } as Any;
+    void AgentDaemon.prototype.requestUserInput
+      .call(daemonLike, "task-1", {
+        questions: [
+          {
+            header: "Permission",
+            id: "approval_decision",
+            question: "Create a Google Calendar event. Do you want CoWork to continue?",
+            actionCard,
+            options: [
+              { label: "Deny", description: "Stop." },
+              { label: "Allow once", description: "Continue once." },
+            ],
+          },
+        ],
+      } as Any)
+      .catch(() => undefined);
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    await AgentDaemon.prototype.respondToInputRequest.call(daemonLike, {
+      requestId,
+      status: "submitted",
+      answers,
+    });
+    const call = daemonLike.logEvent.mock.calls.find(
+      ([, type, payload]: Any[]) =>
+        type === "assistant_message" && payload?.source === "structured_input_selection",
+    );
+    return call?.[2];
+  }
+
+  it("records the card and an approval taken from an offered option", async () => {
+    const payload = await answer({ approval_decision: { optionLabel: "Allow once" } });
+    expect(payload.actionCard).toMatchObject({ title: "Proposal review with Sophie" });
+    expect(payload.actionCardApproved).toBe(true);
+  });
+
+  it("records a denial with the reply the person typed", async () => {
+    const payload = await answer({ approval_decision: { otherText: "Make it 10:00 instead" } });
+    expect(payload.actionCardApproved).toBe(false);
+    expect(payload.actionCardReply).toBe("Make it 10:00 instead");
+  });
+
+  it("never counts an allow label the card did not offer", async () => {
+    const payload = await answer({ approval_decision: { optionLabel: "Always allow" } });
+    expect(payload.actionCardApproved).toBe(false);
+  });
+});

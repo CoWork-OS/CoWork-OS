@@ -1339,6 +1339,7 @@ const SettingsSidebar = memo(function SettingsSidebar({
   onSelect,
 }: SettingsSidebarProps) {
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const sidebarSearchRef = useRef<HTMLInputElement>(null);
   const deferredSidebarSearch = useDeferredValue(sidebarSearch);
   const hasSidebarSearch = sidebarSearch.trim().length > 0;
 
@@ -1383,15 +1384,21 @@ const SettingsSidebar = memo(function SettingsSidebar({
           <path d="M21 21l-4.35-4.35" />
         </svg>
         <input
+          ref={sidebarSearchRef}
           type="text"
+          aria-label="Search settings"
           placeholder="Search settings..."
           value={sidebarSearch}
           onChange={(e) => setSidebarSearch(e.target.value)}
         />
         {hasSidebarSearch && (
           <button
+            type="button"
             className="settings-sidebar-search-clear"
-            onClick={() => setSidebarSearch("")}
+            onClick={() => {
+              setSidebarSearch("");
+              sidebarSearchRef.current?.focus();
+            }}
             aria-label="Clear search"
           >
             <svg

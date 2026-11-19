@@ -7,6 +7,7 @@ import { FullAccessConfirmationDialog } from "../../../src/renderer/components/F
 import { ModalDialog } from "../../../src/renderer/components/ModalDialog";
 import { MCPLaunchPlanReview } from "../../../src/renderer/components/MCPLaunchPlanReview";
 import { CalmAccessMenu } from "../../../src/renderer/components/calm/CalmTopBar";
+import { SidebarRail } from "../../../src/renderer/components/sidebar/SidebarRail";
 import { DocumentArtifactCard } from "../../../src/renderer/components/DocumentArtifactCard";
 import { SpreadsheetArtifactCard } from "../../../src/renderer/components/SpreadsheetArtifactCard";
 import { WebArtifactCard } from "../../../src/renderer/components/WebArtifactCard";
@@ -14,6 +15,9 @@ import { PresentationArtifactCard } from "../../../src/renderer/components/Prese
 import { NotificationPanel } from "../../../src/renderer/components/NotificationPanel";
 import { ChatGPTImportWizard } from "../../../src/renderer/components/ChatGPTImportWizard";
 import { MCPRegistryBrowser } from "../../../src/renderer/components/MCPRegistryBrowser";
+import { FileHub } from "../../../src/renderer/components/FileHub";
+import AutomationStudioPanel from "../../../src/renderer/components/AutomationStudioPanel";
+import { SidebarArchivedSessions } from "../../../src/renderer/components/sidebar/SidebarArchivedSessions";
 import "../../../src/renderer/styles/index.css";
 import "../../../src/renderer/styles/calm-theme.css";
 import "../../../src/renderer/components/MainContent/main-content.css";
@@ -28,6 +32,8 @@ const qa = (window.qa = {
   pendingLists: [],
   holdGoogle: false,
   resolveGoogle: null,
+  failHubListing: false,
+  resolveHubSearch: null,
   resolveThread(id) {
     for (const done of this.pending.get(id) || []) done(detail(id));
     this.pending.delete(id);
@@ -117,6 +123,32 @@ const server = {
   tags: ["documents"],
   verified: true,
 };
+function hubFile(name, source) {
+  return {
+    id: name,
+    name,
+    source,
+    path: `/fixture/${name}`,
+    mimeType: "text/plain",
+    size: 10,
+    modifiedAt: 1,
+  };
+}
+const previewFiles = {
+  "overview.md":
+    "# Overview\n\n[Jump within](#local-section)\n\n[Open target](detail.md#deep-section)\n\n" +
+    "A section of text.\n\n".repeat(50) +
+    "## Local section",
+  "detail.md": "# Details\n\n" + "A section of text.\n\n".repeat(50) + "## Deep section",
+};
+const archivedRows = Array.from({ length: 202 }, (_, index) => ({
+  id: `archive-${index}`,
+  title: index === 201 ? "Older archive fixture" : `Archived session ${index}`,
+  sessionArchived: true,
+  sessionArchivedAt: 202 - index,
+  updatedAt: 1,
+  createdAt: 1,
+}));
 window.electronAPI = new Proxy(
   {
     getMailboxSyncStatus: async () => status,
@@ -163,6 +195,39 @@ window.electronAPI = new Proxy(
       return [];
     },
     getLLMSettings: async () => ({}),
+    getHubSources: async () => ["local", "artifacts"],
+    getRecentHubFiles: async () => [],
+    listHubFiles: async ({ source }) => {
+      if (qa.failHubListing) throw new Error("Fixture list failed");
+      return (source === "artifacts" ? ["report.txt"] : ["local-notes.txt", "overview.md"]).map(
+        (name) => hubFile(name, source),
+      );
+    },
+    searchHubFiles: () =>
+      new Promise((resolve) => {
+        qa.resolveHubSearch = () => resolve([{ file: hubFile("old-search-hit.txt", "local") }]);
+      }),
+    getRoutineWorkflowCapabilities: async () => ({ operations: [], templates: [] }),
+    listRoutines: async () => [
+      {
+        id: "routine-1",
+        name: "Review approval",
+        enabled: true,
+        workspaceId: "fixture",
+        triggers: [],
+        updatedAt: 1,
+      },
+    ],
+    getRoutine: async () => ({ instructions: "Review the pending approval." }),
+    readFileForViewer: async (path) => {
+      const fileName = path.split("/").pop();
+      return {
+        success: true,
+        data: { fileName, path, fileType: "markdown", content: previewFiles[fileName], size: 10 },
+      };
+    },
+    listSidebarTasks: async ({ limit, offset, archivedSessionsOnly }) =>
+      archivedSessionsOnly ? archivedRows.slice(offset, offset + limit) : [],
     getCronStatus: async () => ({ enabled: true, scheduler: { state: "running" }, jobCount: 1 }),
     listCronJobs: async () => [
       {
@@ -197,6 +262,7 @@ window.electronAPI = new Proxy(
 
 function Fixture() {
   const [mode, setMode] = useState("dialogs");
+  const [focusRoutine, setFocusRoutine] = useState<{ id: string } | null>(null);
   const [parent, setParent] = useState(false);
   const [child, setChild] = useState(false);
   const [accessWarning, setAccessWarning] = useState(false);
@@ -205,7 +271,17 @@ function Fixture() {
   return (
     <>
       <nav style={{ padding: 16, display: "flex", gap: 12 }}>
-        {["dialogs", "inbox", "menus", "import", "registry", "scheduled"].map((id) => (
+        {[
+          "dialogs",
+          "inbox",
+          "menus",
+          "import",
+          "registry",
+          "scheduled",
+          "files",
+          "automation",
+          "archive",
+        ].map((id) => (
           <button key={id} onClick={() => setMode(id)}>
             Show {id}
           </button>
@@ -305,6 +381,12 @@ function Fixture() {
             }}
           />
           <NotificationPanel placement="sidebar" />
+          <SidebarRail
+            activeId="home"
+            initialPinnedIds={[]}
+            onNavigate={() => {}}
+            onOpenSettings={() => {}}
+          />
           <div style={{ position: "fixed", bottom: 12, right: 12, display: "flex", gap: 8 }}>
             <DocumentArtifactCard filePath="/fixture/report.docx" />
             <SpreadsheetArtifactCard filePath="/fixture/report.xlsx" />
@@ -318,6 +400,23 @@ function Fixture() {
       )}
       {mode === "scheduled" && <ScheduledTasksSettings />}
       {mode === "registry" && <MCPRegistryBrowser />}
+      {mode === "files" && <FileHub workspaceId="fixture" />}
+      {mode === "automation" && (
+        <>
+          <button onClick={() => setFocusRoutine({ id: "routine-1" })}>Open routine alert</button>
+          <AutomationStudioPanel workspaceId="fixture" focusRoutine={focusRoutine} />
+        </>
+      )}
+      {mode === "archive" && (
+        <SidebarArchivedSessions
+          normalizedSearch="older archive fixture"
+          workspaces={[]}
+          titleFor={(task) => task.title}
+          onClose={() => {}}
+          onUnarchived={() => {}}
+          onOpenRestored={() => {}}
+        />
+      )}
     </>
   );
 }

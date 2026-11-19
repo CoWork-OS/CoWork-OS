@@ -177,9 +177,23 @@
 }
 
 .sidebar-archived-more {
+  align-self: flex-start;
   padding: 8px;
-  color: var(--color-text-muted);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
   font-size: 11.5px;
+  cursor: pointer;
+}
+
+.sidebar-archived-more:hover:not(:disabled) {
+  background: var(--sidebar-panel-row-hover);
+}
+
+.sidebar-archived-more:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* The Undo line shown right after a session is archived. */

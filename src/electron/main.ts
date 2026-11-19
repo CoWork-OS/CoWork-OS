@@ -1114,10 +1114,15 @@ function attachBrowserWorkbenchWindowInput(window: BrowserWindow): void {
     browserWorkbenchChromeFocused = false;
   };
   window.on("blur", releaseShortcuts);
-  window.webContents.on("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => {
-    if (isMainFrame) releaseShortcuts();
+  window.webContents.on("did-start-navigation", ({ isMainFrame, isSameDocument }) => {
+    if (!isMainFrame) return;
+    releaseShortcuts();
+    if (!isSameDocument) browserTabViewHost?.detachAll();
   });
-  window.webContents.on("render-process-gone", releaseShortcuts);
+  window.webContents.on("render-process-gone", () => {
+    releaseShortcuts();
+    browserTabViewHost?.detachAll();
+  });
   window.webContents.on("before-input-event", (event, input) => {
     if (!browserWorkbenchChromeFocused || input.type !== "keyDown") return;
     const command = matchBrowserShortcut(
@@ -2171,7 +2176,8 @@ if (isMacSafeStorageMigrationWorker) {
           ? {
               vibrancy: "under-window" as const,
               visualEffectState: "active" as const,
-              transparent: true,
+              // Keep the web background clear for vibrancy. A fully transparent
+              // BrowserWindow can lose its rendered content on reload on macOS.
               backgroundColor: "#00000000",
             }
           : {

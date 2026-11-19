@@ -1,8 +1,10 @@
+import type { Element, Root, RootContent } from "hast";
 import type { Components } from "react-markdown";
 
 interface FileViewerMarkdownOptions {
   filePath: string;
-  onOpenFile: (filePath: string) => void;
+  onOpenFile: (filePath: string, fragment?: string) => void;
+  onOpenFragment: (fragment: string) => void;
   onOpenExternal: (url: string) => Promise<unknown>;
   onError: (error: unknown) => void;
 }
@@ -11,6 +13,7 @@ interface FileViewerMarkdownOptions {
 export function buildFileViewerMarkdownComponents({
   filePath,
   onOpenFile,
+  onOpenFragment,
   onOpenExternal,
   onError,
 }: FileViewerMarkdownOptions): Components {
@@ -20,11 +23,13 @@ export function buildFileViewerMarkdownComponents({
         {...props}
         href={href}
         onClick={(event) => {
-          // In-page anchors can use the browser's normal fragment navigation.
-          if (href?.startsWith("#")) return;
           event.preventDefault();
           event.stopPropagation();
           if (!href) return;
+          if (href.startsWith("#")) {
+            onOpenFragment(href.slice(1));
+            return;
+          }
 
           if (/^(?:https?:|mailto:)/i.test(href) || href.startsWith("//")) {
             const externalUrl = href.startsWith("//") ? `https:${href}` : href;
@@ -58,7 +63,8 @@ export function buildFileViewerMarkdownComponents({
               ? decodedPath.replace(/^\/(?=[a-z]:\/)/i, "")
               : decodedPath;
             // The viewer's existing IPC handler enforces workspace containment.
-            onOpenFile(localPath);
+            if (target.hash) onOpenFile(localPath, target.hash.slice(1));
+            else onOpenFile(localPath);
           } catch (error) {
             onError(error);
           }
@@ -68,4 +74,54 @@ export function buildFileViewerMarkdownComponents({
       </a>
     ),
   };
+}
+
+function headingText(node: RootContent): string {
+  if (node.type === "text") return node.value;
+  if (node.type !== "element") return "";
+  if (node.tagName === "img") return String(node.properties.alt ?? "");
+  return node.children.map(headingText).join("");
+}
+
+/** Generate heading targets local to a preview, without adding IDs to the app document. */
+export function addFilePreviewHeadingFragments() {
+  return (tree: Root) => {
+    const used = new Set<string>();
+    const visit = (parent: Root | Element) => {
+      for (const node of parent.children) {
+        if (node.type !== "element") continue;
+        if (/^h[1-6]$/.test(node.tagName)) {
+          const slug = headingText(node)
+            .trim()
+            .toLowerCase()
+            .replace(/[^\p{L}\p{M}\p{N}_\s-]/gu, "")
+            .replace(/\s/g, "-");
+          if (slug) {
+            let target = slug;
+            for (let i = 1; used.has(target); i++) target = `${slug}-${i}`;
+            used.add(target);
+            node.properties.dataPreviewFragment = target;
+            node.properties.tabIndex = -1;
+          }
+        }
+        visit(node);
+      }
+    };
+    visit(tree);
+  };
+}
+
+export function focusFilePreviewFragment(container: HTMLElement, fragment: string): void {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(fragment);
+  } catch {
+    return;
+  }
+  const target = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-preview-fragment], [id]"),
+  ).find((element) => element.dataset.previewFragment === decoded || element.id === decoded);
+  if (!target && (!decoded || decoded.toLowerCase() === "top")) container.scrollTop = 0;
+  target?.scrollIntoView({ block: "start" });
+  target?.focus({ preventScroll: true });
 }

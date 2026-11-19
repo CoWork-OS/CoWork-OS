@@ -151,12 +151,12 @@ function taskIdFromSavedDeepLink(value: string): string | null {
 export default function AutomationStudioPanel({
   workspaceId,
   onOpenTask,
-  focusRoutineId,
+  focusRoutine,
   onOpenAdvanced,
 }: {
   workspaceId?: string;
   onOpenTask?: (taskId: string) => void;
-  focusRoutineId?: string | null;
+  focusRoutine?: { id: string } | null;
   onOpenAdvanced?: (owner: AutomationOwner, id?: string) => void;
 }) {
   // An unsaved flow kept from the last visit comes back in the Builder.
@@ -337,7 +337,6 @@ export default function AutomationStudioPanel({
       ),
     [activityItems, selectedActivityOwnerKey],
   );
-  const selectedLibraryItem = libraryItems.find((item) => item.key === selectedLibraryKey) || null;
   const selectedActivityItem =
     visibleActivityItems.find((item) => item.key === selectedActivityKey) || null;
   const selectedActivityOwner = libraryItems.find((item) => item.key === selectedActivityOwnerKey);
@@ -346,16 +345,22 @@ export default function AutomationStudioPanel({
       .toLocaleLowerCase()
       .includes(libraryQuery.trim().toLocaleLowerCase()),
   );
+  const selectedLibraryItem =
+    visibleLibraryItems.find((item) => item.key === selectedLibraryKey) ?? null;
 
   useEffect(() => {
-    if (!focusRoutineId || loading) return;
+    if (focusRoutine) setLibraryQuery("");
+  }, [focusRoutine]);
+
+  useEffect(() => {
+    if (!focusRoutine || loading) return;
     const item = libraryItems.find(
-      (entry) => entry.owner === "routines" && entry.id === focusRoutineId,
+      (entry) => entry.owner === "routines" && entry.id === focusRoutine.id,
     );
     setView("library");
     setSelectedLibraryKey(item?.key || null);
-    if (!item) setError(`Routine ${focusRoutineId} is not available in this Library.`);
-  }, [focusRoutineId, loading, libraryItems]);
+    if (!item) setError(`Routine ${focusRoutine.id} is not available in this Library.`);
+  }, [focusRoutine, loading, libraryItems]);
 
   useEffect(() => {
     if (!selectedLibraryItem || selectedLibraryItem.owner !== "routines") {
@@ -1237,6 +1242,7 @@ export default function AutomationStudioPanel({
                     <button
                       key={item.key}
                       className={`studio-flow-row ${selectedLibraryKey === item.key ? "selected" : ""}`}
+                      aria-pressed={selectedLibraryKey === item.key}
                       onClick={() => setSelectedLibraryKey(item.key)}
                     >
                       <span className={`studio-status-dot ${item.enabled ? "on" : "draft"}`} />

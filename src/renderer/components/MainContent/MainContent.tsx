@@ -296,6 +296,7 @@ import { CalmHomeToday } from "../calm/CalmHomeToday";
 import { CalmModeToggle } from "../calm/CalmModeToggle";
 import { CalmAccessMenu, type CalmAccessMenuProps } from "../calm/CalmTopBar";
 import { useDismissable } from "../calm/useDismissable";
+import { useMenuKeyboard } from "../calm/useMenuKeyboard";
 import { deriveBuildChanges, normalizeBuildPath } from "../calm/build-changes";
 import { isBuildTask } from "../calm/build-task";
 import { buildMarkdownComponents } from "../markdown-components";
@@ -1119,7 +1120,6 @@ function MainContentComponent({
     triggerSummary: string;
   } | null>(null);
   const taskHeaderMenuRef = useRef<HTMLDivElement>(null);
-  const taskHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
   const stagingAttachmentIdsRef = useRef<Set<string>>(new Set());
   const pendingAttachmentIdsRef = useRef<Set<string>>(new Set());
   const pendingAttachmentsRef = useRef<PendingAttachment[]>(pendingAttachments);
@@ -6697,6 +6697,7 @@ function MainContentComponent({
     setShowTaskHeaderMenu(false);
     setShowBotAdvanced(false);
   }, []);
+  useMenuKeyboard(taskHeaderMenuRef, showTaskHeaderMenu, closeTaskHeaderMenu);
 
   const copyTaskHeaderMenuText = useCallback(async (text: string) => {
     if (!text) return;
@@ -6705,52 +6706,6 @@ function MainContentComponent({
     } catch (error) {
       console.error("Failed to copy task menu value:", error);
     }
-  }, []);
-
-  const handleTaskHeaderMenuKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
-      const menu = taskHeaderMenuRef.current;
-      if (!menu) return;
-
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeTaskHeaderMenu();
-        taskHeaderMenuButtonRef.current?.focus();
-        return;
-      }
-
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-
-      event.preventDefault();
-      const options = Array.from(
-        menu.querySelectorAll<HTMLButtonElement>(
-          "button[data-task-header-menu-option]:not(:disabled)",
-        ),
-      );
-      if (options.length === 0) return;
-      const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
-      const offset = event.key === "ArrowDown" ? 1 : -1;
-      const nextIndex =
-        currentIndex >= 0
-          ? (currentIndex + offset + options.length) % options.length
-          : event.key === "ArrowDown"
-            ? 0
-            : options.length - 1;
-      options[nextIndex]?.focus();
-    },
-    [closeTaskHeaderMenu],
-  );
-
-  const handleTaskHeaderMenuButtonKeyDown = useCallback((event: React.KeyboardEvent) => {
-    if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
-    event.preventDefault();
-    setShowTaskHeaderMenu(true);
-    requestAnimationFrame(() => {
-      const firstOption = taskHeaderMenuRef.current?.querySelector<HTMLButtonElement>(
-        "button[data-task-header-menu-option]:not(:disabled)",
-      );
-      firstOption?.focus();
-    });
   }, []);
 
   const handleTaskHeaderPin = useCallback(async () => {
@@ -8753,7 +8708,6 @@ function MainContentComponent({
               <div className="main-header-task-menu-container" ref={taskHeaderMenuRef}>
                 <button
                   type="button"
-                  ref={taskHeaderMenuButtonRef}
                   className={`main-header-task-menu-btn ${showTaskHeaderMenu ? "active" : ""}`}
                   aria-haspopup="menu"
                   aria-expanded={showTaskHeaderMenu}
@@ -8764,7 +8718,12 @@ function MainContentComponent({
                     event.stopPropagation();
                     setShowTaskHeaderMenu((open) => !open);
                   }}
-                  onKeyDown={handleTaskHeaderMenuButtonKeyDown}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown" && !showTaskHeaderMenu) {
+                      event.preventDefault();
+                      setShowTaskHeaderMenu(true);
+                    }
+                  }}
                 >
                   <Ellipsis size={18} strokeWidth={2.4} aria-hidden="true" />
                 </button>
@@ -8775,7 +8734,6 @@ function MainContentComponent({
                     role="menu"
                     aria-label={menuLabel}
                     onClick={(event) => event.stopPropagation()}
-                    onKeyDown={handleTaskHeaderMenuKeyDown}
                   >
                     {isBotConversation ? (
                       <>
@@ -8783,7 +8741,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
                           onClick={() => {
                             closeTaskHeaderMenu();
@@ -8797,7 +8754,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
                           onClick={() => {
                             closeTaskHeaderMenu();
@@ -8811,7 +8767,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           onClick={() => {
                             closeTaskHeaderMenu();
                             setShowBotHistory((open) => !open);
@@ -8825,7 +8780,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
@@ -8850,7 +8804,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
@@ -8871,7 +8824,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
@@ -8898,7 +8850,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
@@ -8923,7 +8874,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
@@ -8944,7 +8894,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={
                             Boolean(remoteSession) ||
                             Boolean(taskHeaderTaskMutationUnavailableReason) ||
@@ -8971,7 +8920,6 @@ function MainContentComponent({
                       type="button"
                       className="main-header-task-menu-item"
                       role="menuitem"
-                      data-task-header-menu-option
                       disabled={
                         Boolean(remoteSession) || !workspace?.path || !onOpenBrowserWorkbenchSidebar
                       }
@@ -8997,7 +8945,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={!taskWorkingDirectory}
                           onClick={() => {
                             closeTaskHeaderMenu();
@@ -9011,7 +8958,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={!taskIdCopyValue}
                           onClick={() => {
                             closeTaskHeaderMenu();
@@ -9027,7 +8973,6 @@ function MainContentComponent({
                       type="button"
                       className="main-header-task-menu-item"
                       role="menuitem"
-                      data-task-header-menu-option
                       onClick={() => {
                         closeTaskHeaderMenu();
                         void copyTaskHeaderMenuText(botDeeplink);
@@ -9040,7 +8985,6 @@ function MainContentComponent({
                       type="button"
                       className="main-header-task-menu-item"
                       role="menuitem"
-                      data-task-header-menu-option
                       onClick={() => {
                         closeTaskHeaderMenu();
                         void copyTaskHeaderMenuText(
@@ -9057,7 +9001,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={Boolean(taskHeaderForkUnavailableReason)}
                           title={taskHeaderForkUnavailableReason}
                           aria-label={
@@ -9075,7 +9018,6 @@ function MainContentComponent({
                             type="button"
                             className="main-header-task-menu-item"
                             role="menuitem"
-                            data-task-header-menu-option
                             disabled={Boolean(taskHeaderForkUnavailableReason)}
                             title={taskHeaderForkUnavailableReason}
                             aria-label={
@@ -9097,7 +9039,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={Boolean(taskHeaderForkUnavailableReason)}
                           title={taskHeaderForkUnavailableReason}
                           aria-label={
@@ -9115,7 +9056,6 @@ function MainContentComponent({
                             type="button"
                             className="main-header-task-menu-item"
                             role="menuitem"
-                            data-task-header-menu-option
                             disabled={Boolean(taskHeaderForkUnavailableReason)}
                             title={taskHeaderForkUnavailableReason}
                             aria-label={
@@ -9140,7 +9080,6 @@ function MainContentComponent({
                       type="button"
                       className="main-header-task-menu-item"
                       role="menuitem"
-                      data-task-header-menu-option
                       disabled={Boolean(taskHeaderRoutineUnavailableReason)}
                       title={taskHeaderRoutineUnavailableReason}
                       aria-label={
@@ -9166,7 +9105,6 @@ function MainContentComponent({
                           className="main-header-task-menu-item"
                           role="menuitemcheckbox"
                           aria-checked={verboseSteps}
-                          data-task-header-menu-option
                           onClick={() => {
                             closeTaskHeaderMenu();
                             toggleVerboseSteps();
@@ -9187,7 +9125,6 @@ function MainContentComponent({
                           className="main-header-task-menu-item"
                           role="menuitemcheckbox"
                           aria-checked={codePreviewsExpanded}
-                          data-task-header-menu-option
                           onClick={() => {
                             closeTaskHeaderMenu();
                             toggleCodePreviews();
@@ -9212,7 +9149,6 @@ function MainContentComponent({
                               type="button"
                               className="main-header-task-menu-item"
                               role="menuitem"
-                              data-task-header-menu-option
                               onClick={() => {
                                 closeTaskHeaderMenu();
                                 replayControls.startReplay();
@@ -9227,7 +9163,6 @@ function MainContentComponent({
                             type="button"
                             className="main-header-task-menu-item"
                             role="menuitem"
-                            data-task-header-menu-option
                             onClick={() => {
                               closeTaskHeaderMenu();
                               replayControls.showControls();
@@ -9244,7 +9179,6 @@ function MainContentComponent({
                         type="button"
                         className="main-header-task-menu-item"
                         role="menuitem"
-                        data-task-header-menu-option
                         onClick={() => {
                           closeTaskHeaderMenu();
                           onViewTaskOutputs(task.id, taskOutputSummary.primaryOutputPath);
@@ -9259,7 +9193,6 @@ function MainContentComponent({
                         type="button"
                         className="main-header-task-menu-item"
                         role="menuitem"
-                        data-task-header-menu-option
                         aria-expanded={showBotAdvanced}
                         aria-controls="bot-advanced-actions"
                         onClick={() => setShowBotAdvanced((open) => !open)}
@@ -9274,7 +9207,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={!taskWorkingDirectory}
                           onClick={() => {
                             closeTaskHeaderMenu();
@@ -9288,7 +9220,6 @@ function MainContentComponent({
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
-                          data-task-header-menu-option
                           disabled={!taskIdCopyValue}
                           onClick={() => {
                             closeTaskHeaderMenu();

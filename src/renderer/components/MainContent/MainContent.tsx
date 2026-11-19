@@ -350,7 +350,7 @@ import {
 } from "./main-content-constants";
 import type { CreateTaskOptions, FocusedCard, SettingsTab } from "./main-content-types";
 import "./main-content.css";
-import { extractDomainFromUrl, stripHtmlTags } from "./markdown-normalization";
+import { extractTaskCitations } from "./task-citations";
 import {
   CollapsibleUserBubble,
   MessageCopyButton,
@@ -1941,103 +1941,9 @@ function MainContentComponent({
   const [llmWikiVaultSummary, setLlmWikiVaultSummary] = useState<LlmWikiVaultSummary | null>(null);
   const [llmWikiVaultLoading, setLlmWikiVaultLoading] = useState(false);
   const [welcomeTaskSuggestions, setWelcomeTaskSuggestions] = useState<WelcomeTaskSuggestion[]>([]);
-  // Extract citations from task events for inline badge rendering
-  const citations = useMemo(() => {
-    const reversed = [...events].reverse();
-    const evidenceEvent =
-      reversed.find((event) => getEffectiveTaskEventType(event) === "timeline_evidence_attached") ||
-      (researchWorkflowEnabled
-        ? reversed.find((event) => getEffectiveTaskEventType(event) === "citations_collected")
-        : undefined);
-    if (!evidenceEvent) return [];
-    const refs = Array.isArray(evidenceEvent.payload?.evidenceRefs)
-      ? (evidenceEvent.payload.evidenceRefs as Array<Record<string, unknown>>)
-      : [];
-    if (refs.length > 0) {
-      return refs
-        .map((ref, index) => {
-          const source = typeof ref?.sourceUrlOrPath === "string" ? ref.sourceUrlOrPath : "";
-          if (!source) return null;
-          const domain = extractDomainFromUrl(source);
-          const snippet = typeof ref?.snippet === "string" ? stripHtmlTags(ref.snippet) : "";
-          const sourceTool =
-            typeof ref?.sourceTool === "string" && ref.sourceTool.trim().length > 0
-              ? stripHtmlTags(ref.sourceTool)
-              : "timeline_evidence";
-          return {
-            index: index + 1,
-            url: source,
-            snippet,
-            title: domain || source,
-            domain,
-            accessedAt: 0,
-            sourceTool,
-          };
-        })
-        .filter(
-          (
-            entry,
-          ): entry is {
-            index: number;
-            url: string;
-            title: string;
-            snippet: string;
-            domain: string;
-            accessedAt: number;
-            sourceTool: string;
-          } => entry !== null,
-        );
-    }
-    const rawCitations = Array.isArray(evidenceEvent.payload?.citations)
-      ? (evidenceEvent.payload.citations as Array<Record<string, unknown>>)
-      : [];
-    return rawCitations
-      .map((citation, index) => {
-        const url = typeof citation?.url === "string" ? citation.url : "";
-        if (!url) return null;
-        const domain =
-          typeof citation?.domain === "string" && citation.domain.trim().length > 0
-            ? stripHtmlTags(citation.domain)
-            : extractDomainFromUrl(url);
-        const title =
-          typeof citation?.title === "string" && citation.title.trim().length > 0
-            ? stripHtmlTags(citation.title)
-            : domain || url;
-        const snippet =
-          typeof citation?.snippet === "string" && citation.snippet.trim().length > 0
-            ? stripHtmlTags(citation.snippet)
-            : "";
-        const sourceTool =
-          typeof citation?.sourceTool === "string" && citation.sourceTool.trim().length > 0
-            ? stripHtmlTags(citation.sourceTool)
-            : typeof citation?.source === "string" && citation.source.trim().length > 0
-              ? stripHtmlTags(citation.source)
-              : "unknown";
-        const accessedAt = typeof citation?.accessedAt === "number" ? citation.accessedAt : 0;
-        return {
-          index: typeof citation?.index === "number" ? citation.index : index + 1,
-          url,
-          domain,
-          title,
-          snippet,
-          accessedAt,
-          sourceTool,
-        };
-      })
-      .filter(
-        (
-          entry,
-        ): entry is {
-          index: number;
-          url: string;
-          title: string;
-          snippet: string;
-          domain: string;
-          accessedAt: number;
-          sourceTool: string;
-        } => entry !== null,
-      );
-  }, [events, researchWorkflowEnabled]);
+  // Extract citations from task events for inline badge and per-claim source rendering. Every
+  // task collects sources, so this is not limited to research-workflow tasks.
+  const citations = useMemo(() => extractTaskCitations(events), [events]);
 
   useEffect(() => {
     if (

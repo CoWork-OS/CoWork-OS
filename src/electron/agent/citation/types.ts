@@ -21,6 +21,8 @@ export interface Citation {
    * (a page the final answer cited by URL without a research tool reading it).
    */
   sourceTool: string;
+  /** The connector a source came from ("Google Calendar"); absent for web pages. */
+  sourceLabel?: string;
 }
 
 export interface CitationBundle {

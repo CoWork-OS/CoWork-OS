@@ -1,3 +1,5 @@
+import { hasNextActionBlock } from "../../shared/answer-surfaces/next-action";
+
 /**
  * Convert ATX headings (###, ##, #) that appear mid-line into line-start headings
  * so they render correctly. E.g. "From X: ### Architecture Overview" -> "From X:\n### Architecture Overview"
@@ -194,7 +196,11 @@ export function unwrapMarkdownCodeBlocks(text: string): string {
     const isMarkdownLanguage = language === "markdown" || language === "md";
     const isPlainMarkdownDocument =
       language === "" && content.some((line) => /^#{1,6}\s/.test(line));
-    if (isMarkdownLanguage || isPlainMarkdownDocument) {
+    // Keep a literal Next Action example fenced so display cleaning cannot activate it.
+    if (
+      (isMarkdownLanguage || isPlainMarkdownDocument) &&
+      !hasNextActionBlock(content.join("\n"))
+    ) {
       out.push(...content);
     } else {
       out.push(...lines.slice(i, close + 1));

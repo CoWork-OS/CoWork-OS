@@ -30,8 +30,9 @@ type VideoLightboxProps = {
   formatLabel?: string;
   /** Human-readable file size, e.g. "2.2 MB". */
   sizeLabel?: string;
+  actionError?: string | null;
   onClose: () => void;
-  onCopyPath?: () => Promise<void> | void;
+  onCopyPath?: () => Promise<boolean | void> | void;
   onShowInFinder?: () => void;
   onOpenExternal?: () => void;
 };
@@ -121,6 +122,7 @@ export function VideoLightbox({
   fileName,
   formatLabel,
   sizeLabel,
+  actionError,
   onClose,
   onCopyPath,
   onShowInFinder,
@@ -344,10 +346,11 @@ export function VideoLightbox({
 
   const handleCopyPath = async () => {
     if (!onCopyPath) return;
+    setCopied(false);
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     try {
-      await onCopyPath();
+      if ((await onCopyPath()) === false) return;
       setCopied(true);
-      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopied(false), 1400);
     } catch {
       // The caller reports its own failure.
@@ -363,7 +366,7 @@ export function VideoLightbox({
   const buffered = duration > 0 ? clamp01(bufferedEnd / duration) : 0;
   const effectiveVolume = muted ? 0 : volume;
   const VolumeIcon = effectiveVolume === 0 ? VolumeX : effectiveVolume < 0.5 ? Volume1 : Volume2;
-  const controlsHidden = idle && playing && !scrubbing;
+  const controlsHidden = idle && playing && !scrubbing && !actionError;
 
   const metaLine = [
     formatLabel,
@@ -397,6 +400,11 @@ export function VideoLightbox({
             {label}
           </span>
           {metaLine && <span className="image-lightbox-meta">{metaLine}</span>}
+          {actionError && (
+            <span className="image-lightbox-action-error" role="alert">
+              {actionError}
+            </span>
+          )}
         </div>
         <div className="image-lightbox-actions">
           {onCopyPath && (

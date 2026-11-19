@@ -1,6 +1,6 @@
 import { usePositionUpdates } from "../hooks/usePositionUpdates";
 import { getFloatingPosition, type FloatingPosition } from "../utils/floating-position";
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -225,11 +225,14 @@ export function NotificationPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const bellButtonRef = useRef<HTMLButtonElement>(null);
+  const dropdownId = useId();
   const [dropdownPosition, setDropdownPosition] = useState<FloatingPosition | null>(null);
   const inSidebar = placement === "sidebar";
+  const showPanel = isOpen && canUseNotifications;
+  const panelPositioned = !inSidebar || dropdownPosition !== null;
 
   usePositionUpdates(
-    isOpen && inSidebar,
+    showPanel && inSidebar,
     () => {
       const rect = bellButtonRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -251,6 +254,10 @@ export function NotificationPanel({
     bellButtonRef,
     dropdownRef,
   );
+
+  useLayoutEffect(() => {
+    if (showPanel && panelPositioned) dropdownRef.current?.focus({ preventScroll: true });
+  }, [showPanel, panelPositioned]);
 
   // Load notifications on mount
   useEffect(() => {
@@ -349,9 +356,14 @@ export function NotificationPanel({
     onNotificationClick?.(group.latest);
   };
 
-  const dismissGroup = async (e: React.MouseEvent, group: NotificationGroup<AppNotification>) => {
-    e.stopPropagation();
+  const dismissGroup = async (
+    event: React.MouseEvent<HTMLButtonElement>,
+    group: NotificationGroup<AppNotification>,
+  ) => {
     if (!canUseNotifications) return;
+    if (document.activeElement === event.currentTarget) {
+      dropdownRef.current?.focus({ preventScroll: true });
+    }
     try {
       await Promise.all(group.items.map((item) => window.electronAPI.deleteNotification(item.id)));
     } catch (error) {
@@ -378,7 +390,12 @@ export function NotificationPanel({
         overflowY: "auto",
         visibility: dropdownPosition ? "visible" : "hidden",
       }
-    : { position: "absolute", top: "calc(100% + 8px)", right: 0 };
+    : {
+        position: "absolute",
+        top: "calc(100% + 8px)",
+        right: 0,
+        width: `min(${PANEL_WIDTH}px, calc(100vw - 24px))`,
+      };
   const sections = isOpen
     ? groupNotifications(notifications, Date.now(), { needsYouFromQueue: queueMode })
     : [];
@@ -425,55 +442,59 @@ export function NotificationPanel({
     const ToneIcon = TONE_ICONS[group.tone];
     const count = group.items.length;
     const opensSomething = Boolean(
-      group.latest.taskId || group.latest.suggestionId || group.latest.cronJobId,
+      group.latest.taskId ||
+      group.latest.suggestionId ||
+      group.latest.cronJobId ||
+      group.latest.openTarget,
     );
     return (
-      <div
-        key={group.key}
-        role="button"
-        tabIndex={0}
-        className={`notif-row tone-${group.tone}${group.unread ? " unread" : ""}`}
-        onClick={() => void openGroup(group)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            void openGroup(group);
-          }
-        }}
-        aria-label={`${group.title}${count > 1 ? `, ${count} times` : ""}${group.unread ? ", unread" : ""}`}
-      >
-        <span className="notif-row-icon" aria-hidden="true">
-          <ToneIcon size={14} strokeWidth={2.2} />
-        </span>
-        <div className="notif-row-body">
-          <NotificationMarkdownPreview text={group.title} className="notif-row-title" />
-          {group.message && (
-            <NotificationMarkdownPreview text={group.message} className="notif-row-message" />
-          )}
-          <div className="notif-row-meta">
-            {count > 1 && <span className="notif-row-count">{count}×</span>}
-            {group.tag && <span className="notif-row-tag">{group.tag}</span>}
-            <span>{formatRelativeTime(group.latest.createdAt)}</span>
+      <div key={group.key} className="notif-group">
+        <div
+          role="button"
+          tabIndex={0}
+          className={`notif-row tone-${group.tone}${group.unread ? " unread" : ""}`}
+          onClick={() => void openGroup(group)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              void openGroup(group);
+            }
+          }}
+          aria-label={`${group.title}${count > 1 ? `, ${count} times` : ""}${group.unread ? ", unread" : ""}`}
+        >
+          <span className="notif-row-icon" aria-hidden="true">
+            <ToneIcon size={14} strokeWidth={2.2} />
+          </span>
+          <div className="notif-row-body">
+            <NotificationMarkdownPreview text={group.title} className="notif-row-title" />
+            {group.message && (
+              <NotificationMarkdownPreview text={group.message} className="notif-row-message" />
+            )}
+            <div className="notif-row-meta">
+              {count > 1 && <span className="notif-row-count">{count}×</span>}
+              {group.tag && <span className="notif-row-tag">{group.tag}</span>}
+              <span>{formatRelativeTime(group.latest.createdAt)}</span>
+            </div>
+          </div>
+          <div className="notif-row-side">
+            {group.needsAction && !queueMode ? (
+              <span className="notif-row-cta">Respond</span>
+            ) : opensSomething ? (
+              <span className="notif-row-open" aria-hidden="true">
+                <ChevronRight size={14} />
+              </span>
+            ) : null}
           </div>
         </div>
-        <div className="notif-row-side">
-          {group.needsAction && !queueMode ? (
-            <span className="notif-row-cta">Respond</span>
-          ) : opensSomething ? (
-            <span className="notif-row-open" aria-hidden="true">
-              <ChevronRight size={14} />
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className="notif-row-dismiss"
-            onClick={(e) => void dismissGroup(e, group)}
-            title={count > 1 ? `Dismiss all ${count}` : "Dismiss"}
-            aria-label={count > 1 ? `Dismiss all ${count}` : "Dismiss"}
-          >
-            <X size={13} />
-          </button>
-        </div>
+        <button
+          type="button"
+          className="notif-row-dismiss"
+          onClick={(e) => void dismissGroup(e, group)}
+          title={count > 1 ? `Dismiss all ${count}` : "Dismiss"}
+          aria-label={count > 1 ? `Dismiss all ${count}` : "Dismiss"}
+        >
+          <X size={13} />
+        </button>
       </div>
     );
   };
@@ -488,6 +509,8 @@ export function NotificationPanel({
         onClick={() => setIsOpen(!isOpen)}
         disabled={!canUseNotifications}
         aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-controls={showPanel ? dropdownId : undefined}
         aria-label={
           canUseNotifications
             ? unreadLabel
@@ -511,15 +534,16 @@ export function NotificationPanel({
         )}
       </button>
 
-      {isOpen &&
-        canUseNotifications &&
+      {showPanel &&
         renderDropdown(
           <div
             ref={dropdownRef}
+            id={dropdownId}
             className="notif-panel"
-            style={{ ...dropdownStyle, width: PANEL_WIDTH }}
+            style={dropdownStyle}
             role="dialog"
             aria-label="Notifications"
+            tabIndex={-1}
           >
             <div className="notif-panel-header">
               <span className="notif-panel-title">Notifications</span>

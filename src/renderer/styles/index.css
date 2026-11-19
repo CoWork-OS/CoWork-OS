@@ -12490,6 +12490,14 @@ a,
 }
 
 /* Error state */
+.file-viewer-action-error {
+  color: var(--color-error);
+  font-size: 13px;
+  margin: 0;
+  padding: 8px 18px;
+  overflow-wrap: anywhere;
+}
+
 .file-viewer-error {
   display: flex;
   flex-direction: column;

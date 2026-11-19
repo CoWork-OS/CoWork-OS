@@ -43,4 +43,13 @@ describe("display cleaning", () => {
       "Go deeper on item two",
     ]);
   });
+
+  it("keeps literal Next Action syntax in a Markdown code example during display cleaning", () => {
+    const example = ["````markdown", "```cowork-next", "Sample step", "```", "````"].join("\n");
+    const message = `${example}\n\n\`\`\`cowork-next\nUse that format\n\`\`\``;
+    expect(splitNextAction(cleanAssistantMessageForDisplay(message))).toEqual({
+      body: example,
+      steps: ["Use that format"],
+    });
+  });
 });

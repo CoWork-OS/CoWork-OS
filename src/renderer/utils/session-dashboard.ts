@@ -9,7 +9,7 @@ export interface SessionDashboardMetrics {
   memberCount: number;
   automationRunCount: number;
   workspaceChangeCount: number;
-  recentChanges: string[];
+  recentChanges: Array<{ id: string; label: string; path?: string; deleted: boolean }>;
 }
 
 function eventType(event: TaskEvent): string {
@@ -77,9 +77,14 @@ export function buildSessionDashboardMetrics(
     .map((event) => {
       const path = pathForEvent(event);
       const type = eventType(event);
-      const verb =
-        type === "file_deleted" ? "Deleted" : type === "file_modified" ? "Updated" : "Created";
-      return path ? `${verb} ${path.split(/[\\/]/).pop() || path}` : type;
+      const deleted = type === "file_deleted";
+      const verb = deleted ? "Deleted" : type === "file_modified" ? "Updated" : "Created";
+      return {
+        id: event.id,
+        label: path ? `${verb} ${path.split(/[\\/]/).pop() || path}` : type,
+        path,
+        deleted,
+      };
     });
 
   const totalSteps = Math.max(0, progress.totalSteps);

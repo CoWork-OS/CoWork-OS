@@ -204,8 +204,14 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
       try {
         const sources = await (window as Any).electronAPI.getHubSources();
         setAvailableSources(sources || ["local", "artifacts"]);
-        const recent = await (window as Any).electronAPI.getRecentHubFiles(10);
-        setRecentFiles(recent || []);
+        const recent = await window.electronAPI.getRecentHubFiles(10);
+        setRecentFiles((opened) => {
+          const openedIds = new Set(opened.map((file) => file.id));
+          return [...opened, ...(recent ?? []).filter((file) => !openedIds.has(file.id))].slice(
+            0,
+            10,
+          );
+        });
       } catch {
         // API not available yet
       }

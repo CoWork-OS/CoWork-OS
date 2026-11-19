@@ -28,6 +28,11 @@ function presenceLabel(lastSeenAt: number | undefined, isViewer: boolean): strin
 }
 
 export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps) {
+  if (!task?.id || !hasHostMethod("getSessionMembers")) return null;
+  return <SessionMembers key={task.id} taskId={task.id} refreshKey={refreshKey} />;
+}
+
+function SessionMembers({ taskId, refreshKey }: { taskId: string; refreshKey?: string | number }) {
   const [snapshot, setSnapshot] = useState<SessionShareSnapshot>();
   const [inviteRole, setInviteRole] = useState<Exclude<SessionHumanRole, "owner">>("reviewer");
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -36,46 +41,36 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [loadedTaskId, setLoadedTaskId] = useState<string>();
+  const [expanded, setExpanded] = useState<boolean>();
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    if (task?.id && loadedTaskId !== task.id) setLoadedTaskId(undefined);
-    if (!task?.id || !hasHostMethod("getSessionMembers")) {
-      setSnapshot(undefined);
-      return;
-    }
     setError(null);
     void window.electronAPI
-      .getSessionMembers({ taskId: task.id })
+      .getSessionMembers({ taskId })
       .then((next) => {
         if (!cancelled) {
           setSnapshot(next);
-          setLoadedTaskId(task.id);
+          setHasLoaded(true);
         }
       })
       .catch((cause) => {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : "Unable to load members.");
-          setLoadedTaskId(task.id);
+          setHasLoaded(true);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [task?.id, refreshKey]);
+  }, [taskId, refreshKey]);
 
-  useEffect(() => {
-    setExpanded(false);
-  }, [task?.id]);
-
-  if (!task || !hasHostMethod("getSessionMembers")) return null;
-  if (loadedTaskId !== task.id) return null;
+  if (!hasLoaded) return null;
 
   const sharedSessionActive = snapshot ? hasSharedSessionActivity(snapshot) : false;
 
-  if (snapshot && !sharedSessionActive && !expanded) {
+  if (snapshot && !(expanded ?? sharedSessionActive)) {
     return (
       <button
         type="button"
@@ -84,7 +79,7 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
         aria-expanded={false}
       >
         <Users size={13} aria-hidden="true" />
-        <span>Share session</span>
+        <span>{sharedSessionActive ? "Shared session" : "Share session"}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </button>
     );

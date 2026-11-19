@@ -18,6 +18,10 @@ const google: SearchProviderInfo = {
   retirement: { endsOn: "2027-01-01", notice: "Ends 1 January 2027." },
 };
 const providers = [brave, google];
+const isolatedProviders = [
+  { ...brave, type: "duckduckgo" as const, name: "DuckDuckGo" },
+  { ...brave, type: "searxng" as const, name: "SearXNG" },
+];
 
 describe("findClosingSearchProvider (#914)", () => {
   it("finds Google when it is the primary provider", () => {
@@ -50,6 +54,26 @@ describe("findClosingSearchProvider (#914)", () => {
         providers: [brave, { ...google, configured: false }],
       }),
     ).toBeNull();
+  });
+
+  it.each(isolatedProviders)("ignores a retained Google fallback with $name", (primary) => {
+    expect(
+      findClosingSearchProvider({
+        primaryProvider: primary.type,
+        fallbackProvider: "google",
+        providers: [...providers, primary],
+      }),
+    ).toBeNull();
+  });
+
+  it("finds Google when a saved but unconfigured primary leaves it first in the routing order", () => {
+    expect(
+      findClosingSearchProvider({
+        primaryProvider: "brave",
+        fallbackProvider: null,
+        providers: [{ ...brave, configured: false }, google],
+      }),
+    ).toBe(google);
   });
 
   it("returns null without a status", () => {

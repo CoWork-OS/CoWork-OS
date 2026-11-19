@@ -23,6 +23,11 @@ const server = await createServer({
       name: "renderer-ui-audit",
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
+          if (req.url === "/ui-audit-find-target.html") {
+            res.setHeader("Content-Type", "text/html");
+            res.end("<title>Find fixture</title><p>Needle one</p><p>Needle two</p>");
+            return;
+          }
           if (req.url !== "/ui-audit.html") return next();
           const html =
             '<html class="visual-calm theme-light"><head></head><body><div id="root"></div><script type="module" src="/@fs/' +
@@ -282,12 +287,28 @@ try {
     await page.locator(".file-viewer-content").evaluate((element) => element.scrollTop > 0),
   );
   await page.getByRole("button", { name: "Back to previous file" }).click();
-  await page.getByRole("dialog", { name: "overview.md" }).waitFor();
+  const overviewPreview = page.getByRole("dialog", { name: "overview.md" });
+  await overviewPreview.getByTitle("Open in external app").click();
+  await overviewPreview.getByRole("alert").filter({ hasText: "File not found" }).waitFor();
   await page.keyboard.press("Escape");
-  await page.getByRole("dialog", { name: "overview.md" }).waitFor({ state: "detached" });
+  await overviewPreview.waitFor({ state: "detached" });
   results.push(
     "Markdown preview: links focus the requested headings in the same file or another file without navigating the app",
   );
+  await page.getByRole("button", { name: "Recent", exact: true }).click();
+  await page.waitForFunction(() => window.qa.resolveHubRecent);
+  await page.evaluate(() => window.qa.resolveHubRecent());
+  await page.getByRole("button", { name: "Open file previous.txt" }).waitFor();
+  assert.deepEqual(
+    await page
+      .getByRole("button", { name: /^Open file / })
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label"))),
+    ["Open file overview.md", "Open file previous.txt"],
+  );
+  results.push(
+    "Desktop Library: late Recent data preserves the just-opened file and viewer actions report failure",
+  );
+  await page.getByRole("button", { name: "Local", exact: true }).click();
   await fileSearch.fill("old-search-hit");
   await page.waitForFunction(() => window.qa.resolveHubSearch);
   await page.getByText("Loading files…", { exact: true }).waitFor();
@@ -336,6 +357,46 @@ try {
     "Work: expanded groups collapse and details follow a visible session after filtering or collapsing",
   );
 
+  await page.getByRole("button", { name: "Show workspace", exact: true }).click();
+  const alpha = page.getByRole("switch", { name: "Alpha in this conversation" });
+  const beta = page.getByRole("switch", { name: "Beta in this conversation" });
+  const workspaceHeader = page.locator(".workspace-scope-section .cli-section-header");
+  if ((await workspaceHeader.getAttribute("aria-expanded")) === "false")
+    await workspaceHeader.click();
+  await alpha.click();
+  assert.equal(await alpha.getAttribute("aria-checked"), "false");
+  await beta.evaluate((button) => button.click());
+  assert.equal(await page.evaluate(() => window.qa.connectorChanges.length), 1);
+  assert.ok(await beta.isDisabled());
+  await page.evaluate(() => window.qa.connectorChanges[0].reject(new Error("Fixture save failed")));
+  await page.getByText("Could not save the connector change.", { exact: true }).waitFor();
+  assert.equal(await alpha.getAttribute("aria-checked"), "true");
+  await beta.click();
+  await page.evaluate(() =>
+    window.qa.connectorChanges[1].resolve({
+      id: "scope-fixture",
+      agentConfig: { connectorsOff: ["beta"] },
+    }),
+  );
+  await page.getByText("Saving connector change…", { exact: true }).waitFor({ state: "detached" });
+  assert.equal(await alpha.getAttribute("aria-checked"), "true");
+  assert.equal(await beta.getAttribute("aria-checked"), "false");
+  results.push("Workspace connectors: save one toggle at a time and report failed saves");
+
+  await page.getByRole("button", { name: "Show search", exact: true }).click();
+  const googlePrimary = page.getByRole("radio", { name: /Google Custom Search/ });
+  const duckPrimary = page.getByRole("radio", { name: /DuckDuckGo/ });
+  assert.ok(await googlePrimary.isChecked());
+  await duckPrimary.check();
+  await page.getByRole("button", { name: "Save Settings", exact: true }).click();
+  await page.waitForFunction(() => window.qa.searchPrimary === "duckduckgo");
+  assert.ok(await duckPrimary.isChecked());
+  const searchSave = await page.evaluate(
+    () => window.qa.calls.find((call) => call.method === "saveSearchSettings").options,
+  );
+  assert.equal(searchSave.fallbackProvider, null);
+  results.push("Web Search: a Google-only setup can switch to DuckDuckGo as primary");
+
   await page.getByRole("button", { name: "Show automation", exact: true }).click();
   await page.getByRole("button", { name: /^Daily document review/ }).click();
   const runAutomation = page.getByRole("button", { name: "Run now", exact: true });
@@ -360,7 +421,77 @@ try {
   assert.equal(await automationSearch.inputValue(), "");
   results.push("Automation Studio: reopening the same routine alert clears the active filter");
 
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: /^Review approval/ }).click();
+  const approval = page.getByRole("button", { name: "Approve once", exact: true });
+  await approval.waitFor();
+  await page.getByRole("button", { name: /^Completed workflow/ }).click();
+  await page.waitForFunction(() => window.qa.resolveCompletedRunSteps);
+  assert.equal(await approval.count(), 0);
+  await page.getByText("Loading run steps…", { exact: true }).waitFor();
+  await page.evaluate(() => window.qa.resolveCompletedRunSteps());
+  const completedAction = page.getByText("Completed action", { exact: true });
+  await completedAction.waitFor();
+  const needsAttention = page.getByRole("checkbox", { name: "Needs attention" });
+  await needsAttention.check();
+  await completedAction.waitFor({ state: "detached" });
+  await needsAttention.uncheck();
+  await page.getByRole("button", { name: /^Review approval/ }).click();
+  await approval.waitFor();
+  await page.getByRole("button", { name: "Cancel run", exact: true }).click();
+  await approval.waitFor({ state: "detached" });
+  await page.locator(".studio-step-timeline").getByText("cancelled", { exact: true }).waitFor();
+  results.push(
+    "Automation Studio: approval controls belong to the visible run, and filtering and cancellation remove stale controls",
+  );
+
   await page.getByRole("button", { name: "Show menus", exact: true }).click();
+  const bell = page.getByRole("button", { name: /^Notifications\b/ });
+  const notifications = page.getByRole("dialog", { name: "Notifications", exact: true });
+  const reviewNotice = notifications.getByRole("button", { name: /^Review saved memories/ });
+  await bell.focus();
+  await page.keyboard.press("Enter");
+  await notifications.waitFor();
+  const focusedDialog = await notifications.evaluate((element) => element.matches(":focus"));
+  await page.keyboard.press("Tab");
+  const tabEntersDialog = await notifications.evaluate((element) =>
+    element.contains(document.activeElement),
+  );
+  const hasReviewIndicator = (await reviewNotice.locator(".notif-row-open").count()) === 1;
+  const fixtureWindow = await app.browserWindow(page);
+  const initialSize = await fixtureWindow.evaluate((win) => win.getSize());
+  await fixtureWindow.evaluate((win) => win.setSize(360, 520));
+  await page.waitForFunction(() => innerWidth <= 360);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const fitsWindow = await notifications.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= innerWidth;
+  });
+  await fixtureWindow.evaluate((win, size) => win.setSize(...size), initialSize);
+  await notifications.getByRole("button", { name: "Dismiss", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  const actions = await page.evaluate(() =>
+    window.qa.calls.filter((call) => call.id === "memory-review").map((call) => call.method),
+  );
+  assert.deepEqual(
+    { focusedDialog, tabEntersDialog, hasReviewIndicator, fitsWindow, actions },
+    {
+      focusedDialog: true,
+      tabEntersDialog: true,
+      hasReviewIndicator: true,
+      fitsWindow: true,
+      actions: ["deleteNotification"],
+    },
+  );
+  await notifications.getByText("You're all caught up").waitFor();
+  assert.equal(await notifications.evaluate((element) => element.matches(":focus")), true);
+  await page.keyboard.press("Escape");
+  await notifications.waitFor({ state: "hidden" });
+  assert.equal(await bell.evaluate((element) => element.matches(":focus")), true);
+  results.push("Notifications: keyboard entry, dismissal and Escape, review link, narrow viewport");
+
   await page.getByRole("button", { name: "Access: Retired profile", exact: true }).click();
   assert.equal(
     await page.evaluate(() => document.activeElement.getAttribute("aria-disabled")),
@@ -456,6 +587,45 @@ try {
   results.push(
     "All four artifact menus: viewport containment near bottom/right edges, including 640x400",
   );
+  await page.getByRole("button", { name: "Show folder-picker", exact: true }).click();
+  const folderPicker = page.getByRole("button", { name: "Choose folder", exact: true });
+  await folderPicker.focus();
+  await page.keyboard.press("Enter");
+  const currentFolder = page.getByRole("button", { name: /^Alpha folder/ });
+  const removeFolder = page.getByRole("button", { name: "Remove Beta folder from CoWork" });
+  await currentFolder.waitFor();
+  const menuFocused = await currentFolder.evaluate((button) => button.matches(":focus"));
+  await removeFolder.focus();
+  await page.keyboard.press("Enter");
+  const cancelRemoval = page.getByRole("button", { name: "Cancel", exact: true });
+  await cancelRemoval.waitFor();
+  const cancelFocused = await cancelRemoval.evaluate((button) => button.matches(":focus"));
+  await page.keyboard.press("Escape");
+  await removeFolder.waitFor();
+  const removeFocused = await removeFolder.evaluate((button) => button.matches(":focus"));
+  await page.keyboard.press("Escape");
+  await currentFolder.waitFor({ state: "hidden" });
+  assert.deepEqual(
+    {
+      menuFocused,
+      cancelFocused,
+      removeFocused,
+      triggerFocused: await folderPicker.evaluate((button) => button.matches(":focus")),
+      removed: await page.evaluate(() =>
+        window.qa.calls.some((call) => call.method === "removeFolder"),
+      ),
+    },
+    {
+      menuFocused: true,
+      cancelFocused: true,
+      removeFocused: true,
+      triggerFocused: true,
+      removed: false,
+    },
+  );
+  results.push(
+    "Folder picker: keyboard focus enters the list, cancels removal, and returns to the trigger",
+  );
   await fs.mkdir(path.join(root, "logs"), { recursive: true });
   await page.screenshot({ path: path.join(root, "logs/renderer-ui-audit-menus.png") });
   if (process.argv.includes("--app-smoke")) {
@@ -526,6 +696,23 @@ try {
     assert.ok(home && home.x >= 0 && home.x + home.width <= dimensions.width + 1);
     results.push(
       "Actual app: Calm homepage loads with desktop preload in a disposable profile; narrow-window content stays within viewport",
+    );
+    const composerFolder = actualPage.locator(".welcome-view .calm-folder-button");
+    await composerFolder.press("Enter");
+    const composerFolderPicker = actualPage.getByRole("dialog", {
+      name: "Choose a folder",
+      exact: true,
+    });
+    await composerFolderPicker.waitFor();
+    assert.equal(
+      await composerFolderPicker.evaluate((element) => element.contains(document.activeElement)),
+      true,
+    );
+    await actualPage.keyboard.press("Escape");
+    await composerFolderPicker.waitFor({ state: "detached" });
+    assert.equal(await composerFolder.evaluate((button) => button.matches(":focus")), true);
+    results.push(
+      "Actual app: the home composer folder picker accepts keyboard input and restores trigger focus",
     );
     await actualPage.getByRole("button", { name: "Settings", exact: true }).click();
     const settingsSearch = actualPage.getByRole("textbox", {
@@ -606,6 +793,55 @@ try {
     results.push(
       "Actual app: Reload and Force Reload each restore Home, detach native browser surfaces, and allow reopening the same live tab",
     );
+
+    await actualWindow.evaluate((w) => w.setSize(1280, 800));
+    const findUrl = `http://127.0.0.1:${port}/ui-audit-find-target.html`;
+    const address = actualPage.getByRole("textbox", { name: "Browser URL", exact: true });
+    await address.fill(findUrl);
+    await address.press("Enter");
+    await actualPage
+      .getByRole("tab", { name: "Find fixture", exact: true })
+      .waitFor({ state: "attached" });
+    // Chromium's find highlights are outside the DOM. Count native clearSelection calls
+    // on the disposable guest while still running the real Electron method.
+    await app.evaluate(async ({ webContents }, url) => {
+      const guest = webContents.getAllWebContents().find((contents) => contents.getURL() === url);
+      if (!guest) throw new Error("Find fixture guest did not load");
+      if (guest.isLoadingMainFrame()) {
+        await new Promise((resolve) => guest.once("did-finish-load", resolve));
+      }
+      const paragraphs = await guest.executeJavaScript("document.querySelectorAll('p').length");
+      if (paragraphs !== 2) throw new Error("Find fixture did not render both paragraphs");
+      const stop = guest.stopFindInPage;
+      globalThis.uiAuditFindClears = 0;
+      guest.stopFindInPage = function (action) {
+        if (action === "clearSelection") globalThis.uiAuditFindClears++;
+        return stop.call(this, action);
+      };
+    }, findUrl);
+    const waitForFindClears = async (count) => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if ((await app.evaluate(() => globalThis.uiAuditFindClears)) >= count) return;
+        await actualPage.waitForTimeout(50);
+      }
+      assert.fail(`Expected ${count} native find highlight clears`);
+    };
+    await address.press("ControlOrMeta+f");
+    const findInput = actualPage.getByRole("textbox", { name: "Find in page", exact: true });
+    const matchCount = actualPage.locator(".browser-workbench-findbar-count");
+    await findInput.fill("needle");
+    await matchCount.filter({ hasText: /of 2$/ }).waitFor();
+    await findInput.fill("");
+    await waitForFindClears(1);
+    assert.equal(await findInput.isVisible(), true);
+    assert.equal(await matchCount.textContent(), "");
+    await findInput.fill("needle");
+    await matchCount.filter({ hasText: /of 2$/ }).waitFor();
+    await actualPage.getByRole("button", { name: "New tab", exact: true }).click();
+    await findInput.waitFor({ state: "detached" });
+    await waitForFindClears(2);
+    results.push("Actual app: Browser Find clears native highlights on erase and tab switch");
   }
   assert.deepEqual(errors, []);
   await fs.writeFile(

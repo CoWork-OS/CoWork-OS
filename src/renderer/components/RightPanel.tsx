@@ -1401,6 +1401,8 @@ const WorkspaceSection = memo(
     workspace,
     toggleSection,
     onToggleConnector,
+    savingConnector,
+    connectorSaveFailed,
     rendererPerfLoggingEnabled,
   }: {
     visible: boolean;
@@ -1410,6 +1412,8 @@ const WorkspaceSection = memo(
     toggleSection: () => void;
     /** Turns a connector off or back on for this conversation; absent where unsupported. */
     onToggleConnector?: (connectorId: string) => void;
+    savingConnector: boolean;
+    connectorSaveFailed: boolean;
     rendererPerfLoggingEnabled: boolean;
   }) {
     const folder = workspace?.path && !workspace.isTemp ? workspace : null;
@@ -1476,6 +1480,15 @@ const WorkspaceSection = memo(
                     <span className="terminal-only"># connectors:</span>
                     <span className="modern-only">Connectors</span>
                   </div>
+                  {savingConnector ? (
+                    <div className="workspace-scope-more" role="status">
+                      Saving connector change…
+                    </div>
+                  ) : connectorSaveFailed ? (
+                    <div className="workspace-scope-error" role="status">
+                      Could not save the connector change.
+                    </div>
+                  ) : null}
                   <div className="cli-active-context-scroll">
                     {scope.connectors.map((connector) => {
                       const ConnectorIcon = resolveConnectorLucideIcon(
@@ -1504,6 +1517,7 @@ const WorkspaceSection = memo(
                               type="button"
                               role="switch"
                               aria-checked={!connector.off}
+                              aria-disabled={savingConnector}
                               aria-label={`${connector.name} in this conversation`}
                               title={
                                 connector.off
@@ -1560,6 +1574,8 @@ const WorkspaceSection = memo(
     prev.workspace?.isTemp === next.workspace?.isTemp &&
     getWorkspaceScopeSignature(prev.scope) === getWorkspaceScopeSignature(next.scope) &&
     prev.onToggleConnector === next.onToggleConnector &&
+    prev.savingConnector === next.savingConnector &&
+    prev.connectorSaveFailed === next.connectorSaveFailed &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
@@ -2343,19 +2359,25 @@ function RightPanelComponent({
     return names;
   }, [events, sharedTaskEventUi]);
   const taskAllowedTools = task?.agentConfig?.allowedTools;
-  // Switches answer at once; the saved task confirms (or undoes) the change.
+  // Keep the optimistic switch tied to one save. Each response contains the entire saved list.
   const [connectorsOffDraft, setConnectorsOffDraft] = useState<{
     taskId: string;
+    base: string;
     ids: string[];
+    status: "saving" | "saved" | "failed";
   } | null>(null);
+  const connectorSaveInFlight = useRef(false);
   const taskId = task?.id;
   const persistedConnectorsOff = task?.agentConfig?.connectorsOff;
+  const persistedConnectorsKey = JSON.stringify(persistedConnectorsOff ?? []);
   const connectorsOff = useMemo(
     () =>
-      connectorsOffDraft && connectorsOffDraft.taskId === taskId
+      connectorsOffDraft &&
+      connectorsOffDraft.taskId === taskId &&
+      (connectorsOffDraft.status === "saving" || connectorsOffDraft.base === persistedConnectorsKey)
         ? connectorsOffDraft.ids
         : persistedConnectorsOff || [],
-    [connectorsOffDraft, taskId, persistedConnectorsOff],
+    [connectorsOffDraft, taskId, persistedConnectorsKey, persistedConnectorsOff],
   );
   const connectorsOffRef = useRef(connectorsOff);
   connectorsOffRef.current = connectorsOff;
@@ -2363,22 +2385,37 @@ function RightPanelComponent({
     Boolean(taskId) && !task?.agentConfig?.botConversation && hasHostMethod("setTaskConnectorOff");
   const toggleConnector = useCallback(
     async (connectorId: string) => {
-      if (!taskId) return;
+      if (!taskId || connectorSaveInFlight.current) return;
       const current = connectorsOffRef.current;
       const off = !current.includes(connectorId);
-      setConnectorsOffDraft({ taskId, ids: withConnectorOff(current, connectorId, off) });
+      const base = persistedConnectorsKey;
+      connectorSaveInFlight.current = true;
+      setConnectorsOffDraft({
+        taskId,
+        base,
+        ids: withConnectorOff(current, connectorId, off),
+        status: "saving",
+      });
       try {
         const updated = await window.electronAPI.setTaskConnectorOff?.({
           taskId,
           connectorId,
           off,
         });
-        setConnectorsOffDraft({ taskId, ids: updated?.agentConfig?.connectorsOff || [] });
+        if (!updated || updated.id !== taskId) throw new Error("Connector change was not saved");
+        setConnectorsOffDraft({
+          taskId,
+          base,
+          ids: updated.agentConfig?.connectorsOff ?? [],
+          status: "saved",
+        });
       } catch {
-        setConnectorsOffDraft({ taskId, ids: current });
+        setConnectorsOffDraft({ taskId, base, ids: current, status: "failed" });
+      } finally {
+        connectorSaveInFlight.current = false;
       }
     },
-    [taskId],
+    [taskId, persistedConnectorsKey],
   );
   const workspaceScope = useMemo(
     () =>
@@ -2736,6 +2773,10 @@ function RightPanelComponent({
         workspace={workspace}
         toggleSection={() => toggleSection("workspace")}
         onToggleConnector={canToggleConnectors ? toggleConnector : undefined}
+        savingConnector={connectorsOffDraft?.status === "saving"}
+        connectorSaveFailed={
+          connectorsOffDraft?.taskId === taskId && connectorsOffDraft?.status === "failed"
+        }
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
       />
 

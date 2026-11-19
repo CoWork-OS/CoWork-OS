@@ -91,6 +91,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.image-lightbox-action-error {
+  color: #fecaca;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .image-lightbox-actions,
 .image-lightbox-zoombar {
   display: flex;

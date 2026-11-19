@@ -79,6 +79,12 @@ type SelectedRoutineDetail = {
   routine: Routine;
 } | null;
 
+type WorkflowRunSteps = {
+  runId: string;
+  steps: RoutineWorkflowStepRecord[];
+  error?: string;
+};
+
 const STARTER_OUTPUT_HINTS: Record<string, string[]> = {
   "starter.manual": ["timestamp", "source"],
   "starter.schedule": ["timestamp", "scheduledAt", "jobId"],
@@ -189,8 +195,8 @@ export default function AutomationStudioPanel({
   const [activityHistoryError, setActivityHistoryError] = useState<string | null>(null);
   const [pendingActivityOwnerKey, setPendingActivityOwnerKey] = useState<string | null>(null);
   const [activityNeedsAttention, setActivityNeedsAttention] = useState(false);
-  const [steps, setSteps] = useState<RoutineWorkflowStepRecord[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runSteps, setRunSteps] = useState<WorkflowRunSteps | null>(null);
+  const [workflowRunRefresh, setWorkflowRunRefresh] = useState<{ runId: string } | null>(null);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(
     restoredDraft?.selectedRoutineId ?? null,
   );
@@ -328,7 +334,7 @@ export default function AutomationStudioPanel({
       }),
     [libraryItems, routineRuns, runs, cronHistory, eventHistory],
   );
-  const visibleActivityItems = useMemo(
+  const ownerActivityItems = useMemo(
     () =>
       activityItems.filter((item) =>
         selectedActivityOwnerKey
@@ -337,8 +343,17 @@ export default function AutomationStudioPanel({
       ),
     [activityItems, selectedActivityOwnerKey],
   );
+  const visibleActivityItems = activityNeedsAttention
+    ? ownerActivityItems.filter((item) => item.needsAttention)
+    : ownerActivityItems;
   const selectedActivityItem =
     visibleActivityItems.find((item) => item.key === selectedActivityKey) || null;
+  const selectedRunId = view === "activity" ? selectedActivityItem?.workflowRunId : undefined;
+  const selectedRun = runs.find((run) => run.id === selectedRunId);
+  const refreshSelectedRun =
+    workflowRunRefresh?.runId === selectedRunId ? workflowRunRefresh : null;
+  const selectedRunSteps = runSteps?.runId === selectedRunId ? runSteps : null;
+  const steps = selectedRunSteps?.steps ?? [];
   const selectedActivityOwner = libraryItems.find((item) => item.key === selectedActivityOwnerKey);
   const visibleLibraryItems = libraryItems.filter((item) =>
     `${item.name} ${item.description} ${item.kind} ${item.triggerSummary}`
@@ -460,7 +475,6 @@ export default function AutomationStudioPanel({
     ) {
       setSelectedActivityOwnerKey(null);
       setSelectedActivityKey(null);
-      setSelectedRunId(null);
     }
   }, [selectedActivityOwnerKey, libraryItems]);
 
@@ -479,7 +493,6 @@ export default function AutomationStudioPanel({
     }
     if (!latest) return;
     setSelectedActivityKey(latest.key);
-    setSelectedRunId(latest.workflowRunId || null);
     setPendingActivityOwnerKey(null);
   }, [
     pendingActivityOwnerKey,
@@ -495,24 +508,29 @@ export default function AutomationStudioPanel({
   }, [loadOverview]);
 
   useEffect(() => {
-    if (!selectedRunId) {
-      setSteps([]);
-      return;
-    }
+    setRunSteps(null);
+    if (!selectedRunId) return;
     let cancelled = false;
     void window.electronAPI
       .listRoutineWorkflowRunSteps(selectedRunId)
       .then((nextSteps) => {
-        if (!cancelled) setSteps(nextSteps as RoutineWorkflowStepRecord[]);
+        if (!cancelled) {
+          setRunSteps({ runId: selectedRunId, steps: nextSteps as RoutineWorkflowStepRecord[] });
+        }
       })
       .catch((loadError: unknown) => {
-        if (!cancelled)
-          setError(loadError instanceof Error ? loadError.message : "Run steps could not load.");
+        if (!cancelled) {
+          setRunSteps({
+            runId: selectedRunId,
+            steps: [],
+            error: loadError instanceof Error ? loadError.message : "Run steps could not load.",
+          });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedRunId]);
+  }, [selectedRunId, refreshSelectedRun]);
 
   const selectedNode = useMemo(
     () => workflow.nodes.find((node) => node.id === selectedNodeId) || null,
@@ -649,6 +667,7 @@ export default function AutomationStudioPanel({
       setSelectedActivityOwnerKey(item.key);
       setPendingActivityOwnerKey(item.key);
       setSelectedActivityKey(null);
+      setActivityNeedsAttention(false);
       setView("activity");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Run request failed.");
@@ -965,6 +984,7 @@ export default function AutomationStudioPanel({
         setSelectedActivityOwnerKey(ownerKey);
         setPendingActivityOwnerKey(ownerKey);
       }
+      setActivityNeedsAttention(false);
       setView("activity");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "The workflow could not start.");
@@ -993,40 +1013,48 @@ export default function AutomationStudioPanel({
     }
   }
 
-  async function respondToApproval(step: RoutineWorkflowStepRecord, approved: boolean) {
-    setBusy(`approval:${step.id}`);
+  async function updateWorkflowRun(
+    runId: string,
+    action: () => Promise<unknown>,
+    errorMessage: string,
+  ) {
+    if (busy || runId !== selectedRunId) return;
+    setBusy("workflow-run");
+    setError(null);
     try {
-      await window.electronAPI.respondToRoutineWorkflowApproval({
-        runId: step.runId,
-        stepId: step.id,
-        approved,
-        reviewDigest: step.reviewDigest,
-      });
-      const [nextRuns, nextSteps] = await Promise.all([
+      await action();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : errorMessage);
+    }
+    try {
+      const [nextRuns, nextRoutineRuns] = await Promise.allSettled([
         window.electronAPI.listRoutineWorkflowRuns(undefined, 60),
-        window.electronAPI.listRoutineWorkflowRunSteps(step.runId),
+        window.electronAPI.listRoutineRuns(undefined, 200),
       ]);
-      setRuns(nextRuns as RoutineWorkflowRunRecord[]);
-      setSteps(nextSteps as RoutineWorkflowStepRecord[]);
-    } catch (approvalError) {
-      setError(
-        approvalError instanceof Error
-          ? approvalError.message
-          : "The approval could not be recorded.",
-      );
-      try {
-        const [nextRuns, nextSteps] = await Promise.all([
-          window.electronAPI.listRoutineWorkflowRuns(undefined, 60),
-          window.electronAPI.listRoutineWorkflowRunSteps(step.runId),
-        ]);
-        setRuns(nextRuns as RoutineWorkflowRunRecord[]);
-        setSteps(nextSteps as RoutineWorkflowStepRecord[]);
-      } catch {
-        // Keep the approval error visible if activity refresh is also unavailable.
-      }
+      if (nextRuns.status === "fulfilled") setRuns(nextRuns.value as RoutineWorkflowRunRecord[]);
+      if (nextRoutineRuns.status === "fulfilled")
+        setRoutineRuns(nextRoutineRuns.value as RoutineRun[]);
+      if (nextRuns.status === "rejected" || nextRoutineRuns.status === "rejected")
+        setError((current) => current || "Activity could not refresh.");
     } finally {
+      setRunSteps((current) => (current?.runId === runId ? null : current));
+      setWorkflowRunRefresh({ runId });
       setBusy(null);
     }
+  }
+
+  function respondToApproval(step: RoutineWorkflowStepRecord, approved: boolean) {
+    return updateWorkflowRun(
+      step.runId,
+      () =>
+        window.electronAPI.respondToRoutineWorkflowApproval({
+          runId: step.runId,
+          stepId: step.id,
+          approved,
+          reviewDigest: step.reviewDigest,
+        }),
+      "The approval could not be recorded.",
+    );
   }
 
   async function createWorkflowSecret() {
@@ -1558,7 +1586,7 @@ export default function AutomationStudioPanel({
                           setSelectedActivityOwnerKey(selectedLibraryItem.key);
                           setPendingActivityOwnerKey(selectedLibraryItem.key);
                           setSelectedActivityKey(null);
-                          setSelectedRunId(null);
+                          setActivityNeedsAttention(false);
                           setView("activity");
                         }}
                       >
@@ -2055,13 +2083,7 @@ export default function AutomationStudioPanel({
           <aside>
             <div className="studio-pane-heading">
               <span>Activity</span>
-              <small>
-                {
-                  visibleActivityItems.filter(
-                    (item) => !activityNeedsAttention || item.needsAttention,
-                  ).length
-                }
-              </small>
+              <small>{visibleActivityItems.length}</small>
             </div>
             <label className="studio-activity-owner-filter">
               <span>Automation history</span>
@@ -2070,7 +2092,7 @@ export default function AutomationStudioPanel({
                 onChange={(event) => {
                   setSelectedActivityOwnerKey(event.target.value || null);
                   setSelectedActivityKey(null);
-                  setSelectedRunId(null);
+                  setPendingActivityOwnerKey(null);
                 }}
               >
                 <option value="">Prompt and workflow runs</option>
@@ -2103,51 +2125,50 @@ export default function AutomationStudioPanel({
               />
               Needs attention
             </label>
-            {visibleActivityItems.length === 0 ? (
+            {visibleActivityItems.length === 0 && !activityHistoryLoading ? (
               <StudioEmpty
                 title={
-                  !selectedActivityOwnerKey
-                    ? "No activity yet"
-                    : selectedActivityOwner?.kind === "webhook"
-                      ? "Rule history unavailable"
-                      : activityHistoryError
-                        ? "History could not be loaded"
-                        : "No recorded activity"
+                  ownerActivityItems.length > 0
+                    ? "Nothing needs attention"
+                    : !selectedActivityOwnerKey
+                      ? "No activity yet"
+                      : selectedActivityOwner?.kind === "webhook"
+                        ? "Rule history unavailable"
+                        : activityHistoryError
+                          ? "History could not be loaded"
+                          : "No recorded activity"
                 }
                 body={
-                  !selectedActivityOwnerKey
-                    ? "Run an automation or select an owner to load its retained history."
-                    : selectedActivityOwner?.kind === "webhook"
-                      ? "The Library cannot load rule-level webhook history. Open Webhooks to inspect the shared receiver configuration."
-                      : activityHistoryError
-                        ? "The Library could not confirm whether this owner has retained activity. Review the error above and try again."
-                        : "This owner has no retained activity in its native history."
+                  ownerActivityItems.length > 0
+                    ? "Clear Needs attention to see the other runs."
+                    : !selectedActivityOwnerKey
+                      ? "Run an automation or select an owner to load its retained history."
+                      : selectedActivityOwner?.kind === "webhook"
+                        ? "The Library cannot load rule-level webhook history. Open Webhooks to inspect the shared receiver configuration."
+                        : activityHistoryError
+                          ? "The Library could not confirm whether this owner has retained activity. Review the error above and try again."
+                          : "This owner has no retained activity in its native history."
                 }
               />
             ) : (
-              visibleActivityItems
-                .filter((item) => !activityNeedsAttention || item.needsAttention)
-                .map((item) => (
-                  <button
-                    key={item.key}
-                    className={selectedActivityKey === item.key ? "selected" : ""}
-                    onClick={() => {
-                      setSelectedActivityKey(item.key);
-                      setSelectedRunId(item.workflowRunId || null);
-                    }}
-                  >
-                    <span
-                      className={`studio-status-dot ${item.needsAttention ? "failed" : item.execution}`}
-                    />
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>
-                        {item.source} · {formatRelativeTime(item.at)}
-                      </small>
-                    </span>
-                    <em>{item.approval || item.execution.replace(/_/g, " ")}</em>
-                  </button>
-                ))
+              visibleActivityItems.map((item) => (
+                <button
+                  key={item.key}
+                  className={selectedActivityKey === item.key ? "selected" : ""}
+                  onClick={() => setSelectedActivityKey(item.key)}
+                >
+                  <span
+                    className={`studio-status-dot ${item.needsAttention ? "failed" : item.execution}`}
+                  />
+                  <span>
+                    <strong>{item.name}</strong>
+                    <small>
+                      {item.source} · {formatRelativeTime(item.at)}
+                    </small>
+                  </span>
+                  <em>{item.approval || item.execution.replace(/_/g, " ")}</em>
+                </button>
+              ))
             )}
           </aside>
           <main>
@@ -2162,28 +2183,42 @@ export default function AutomationStudioPanel({
                 title="Select an activity item"
                 body="Review its native execution, delivery, approval, and linked evidence."
               />
-            ) : selectedActivityItem.workflowRunId && selectedRunId ? (
+            ) : selectedRunId ? (
               <>
                 <div className="studio-activity-header">
                   <div>
                     <span>{selectedActivityItem.source}</span>
-                    <code>{selectedActivityItem.workflowRunId}</code>
+                    <code>{selectedRunId}</code>
                   </div>
                   {["queued", "running", "waiting_for_approval"].includes(
-                    selectedActivityItem.execution,
+                    selectedRun?.status ?? "",
                   ) && (
                     <button
                       className="studio-secondary"
+                      disabled={Boolean(busy)}
                       onClick={() =>
-                        void window.electronAPI
-                          .cancelRoutineWorkflowRun(selectedActivityItem.workflowRunId!)
-                          .then(loadOverview)
+                        void updateWorkflowRun(
+                          selectedRunId,
+                          () => window.electronAPI.cancelRoutineWorkflowRun(selectedRunId),
+                          "The workflow run could not be canceled.",
+                        )
                       }
                     >
                       Cancel run
                     </button>
                   )}
                 </div>
+                {!selectedRunSteps ? (
+                  <p className="studio-muted" role="status">
+                    Loading run steps…
+                  </p>
+                ) : selectedRunSteps.error ? (
+                  <p className="studio-source-warning" role="alert">
+                    {selectedRunSteps.error}
+                  </p>
+                ) : steps.length === 0 ? (
+                  <p className="studio-muted">No steps have been recorded for this run.</p>
+                ) : null}
                 <div className="studio-step-timeline">
                   {steps.map((step) => (
                     <article key={step.id}>
@@ -2213,14 +2248,14 @@ export default function AutomationStudioPanel({
                         <div className="studio-approval-actions">
                           <button
                             className="studio-secondary"
-                            disabled={busy === `approval:${step.id}`}
+                            disabled={Boolean(busy)}
                             onClick={() => void respondToApproval(step, false)}
                           >
                             Reject
                           </button>
                           <button
                             className="studio-primary"
-                            disabled={busy === `approval:${step.id}`}
+                            disabled={Boolean(busy)}
                             onClick={() => void respondToApproval(step, true)}
                           >
                             {step.reviewDigest ? "Approve once" : "Refresh review"}

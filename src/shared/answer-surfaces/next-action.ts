@@ -19,8 +19,9 @@ export const NEXT_ACTION_MAX_CHARS = 100;
 /** Buttons under one answer; further lines in the block are ignored. */
 export const NEXT_ACTION_MAX_STEPS = 3;
 
-const FENCE_START = /^\s*```cowork-next\s*$/i;
-const FENCE_END = /^\s*```\s*$/;
+const POSSIBLE_NEXT_ACTION = /```cowork-next/i;
+const FENCE_START = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE_END = /^ {0,3}(`{3,}|~{3,})\s*$/;
 const LIST_MARKER = /^\s*(?:[-*•]|\d+[.)])\s+/;
 
 export type NextActionSplit = {
@@ -49,10 +50,29 @@ export function normalizeNextActions(raw: string): string[] {
   return steps;
 }
 
+/** Skip literal examples inside ordinary Markdown code fences. */
+function* findNextActionFences(lines: string[]): Generator<{ start: number; end: number }> {
+  for (let start = 0; start < lines.length; start += 1) {
+    const opener = FENCE_START.exec(lines[start]);
+    if (!opener) continue;
+    const [, delimiter, info] = opener;
+    if (delimiter[0] === "`" && info.includes("`")) continue;
+
+    let end = start + 1;
+    for (; end < lines.length; end += 1) {
+      const closing = FENCE_END.exec(lines[end])?.[1];
+      if (closing?.[0] === delimiter[0] && closing.length >= delimiter.length) break;
+    }
+    if (delimiter === "```" && info.trimEnd().toLowerCase() === NEXT_ACTION_FENCE_LANGUAGE) {
+      yield { start, end };
+    }
+    start = end;
+  }
+}
+
 export function hasNextActionBlock(message: string): boolean {
-  return String(message || "")
-    .split("\n")
-    .some((line) => FENCE_START.test(line));
+  const text = String(message || "");
+  return POSSIBLE_NEXT_ACTION.test(text) && !findNextActionFences(text.split("\n")).next().done;
 }
 
 /**
@@ -62,30 +82,26 @@ export function hasNextActionBlock(message: string): boolean {
  */
 export function splitNextAction(message: string): NextActionSplit {
   const text = String(message || "");
-  if (!hasNextActionBlock(text)) return { body: text, steps: [] };
+  if (!POSSIBLE_NEXT_ACTION.test(text)) return { body: text, steps: [] };
   const lines = text.split("\n");
   const kept: string[] = [];
+  let cursor = 0;
   let steps: string[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!FENCE_START.test(lines[index])) {
-      kept.push(lines[index]);
-      continue;
-    }
-    let end = index + 1;
-    while (end < lines.length && !FENCE_END.test(lines[end])) end += 1;
-    const closed = end < lines.length;
-    const atEnd = lines.slice(end + 1).every((line) => line.trim() === "");
-    steps = closed && atEnd ? normalizeNextActions(lines.slice(index + 1, end).join("\n")) : [];
-    index = end;
+  for (const { start, end } of findNextActionFences(lines)) {
+    kept.push(...lines.slice(cursor, start));
+    // Clean up only the gap left by the action. Keep blank lines within examples intact.
+    while (kept.at(-1)?.trim() === "") kept.pop();
+    cursor = end + 1;
+    while (lines[cursor]?.trim() === "") cursor += 1;
+    if (kept.length && cursor < lines.length) kept.push("");
+    steps =
+      end < lines.length && cursor === lines.length
+        ? normalizeNextActions(lines.slice(start + 1, end).join("\n"))
+        : [];
   }
-  return {
-    body: kept
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .replace(/^\s*\n/, "")
-      .trimEnd(),
-    steps,
-  };
+  if (cursor === 0) return { body: text, steps };
+  kept.push(...lines.slice(cursor));
+  return { body: kept.join("\n"), steps };
 }
 
 /** The answer without its suggested next steps, for every view that shows text only. */

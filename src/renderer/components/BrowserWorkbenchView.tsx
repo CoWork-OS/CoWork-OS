@@ -36,7 +36,7 @@ import {
 import { browserTabsStorageKey } from "./BrowserWorkbench/browser-tabs-model";
 import { stepZoomLevel } from "./BrowserWorkbench/browser-zoom";
 import { DiagnosticsDrawer } from "./BrowserWorkbench/DiagnosticsDrawer";
-import { FindBar, type FindBarHandle } from "./BrowserWorkbench/FindBar";
+import { FindBar, type BrowserFindOptions, type FindBarHandle } from "./BrowserWorkbench/FindBar";
 import { NewTabPage } from "./BrowserWorkbench/NewTabPage";
 import { Omnibox, type OmniboxHandle } from "./BrowserWorkbench/Omnibox";
 import { buildSearchUrl } from "./BrowserWorkbench/omnibox-input";
@@ -388,6 +388,7 @@ export function BrowserWorkbenchView({
   const sectionRef = useRef<HTMLElement | null>(null);
   const omniboxRef = useRef<OmniboxHandle | null>(null);
   const findBarRef = useRef<FindBarHandle | null>(null);
+  const searchingTabId = useRef<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findResult, setFindResult] = useState<BrowserFindResult | null>(null);
 
@@ -821,26 +822,40 @@ export function BrowserWorkbenchView({
     [openTab],
   );
 
-  const closeFind = useCallback(() => {
-    tabHandlesRef.current.get(activeTabId)?.stopFind();
-    setFindOpen(false);
+  const clearFind = useCallback(() => {
+    const tabId = searchingTabId.current;
+    searchingTabId.current = null;
+    if (tabId !== null) tabHandlesRef.current.get(tabId)?.stopFind();
     setFindResult(null);
-  }, [activeTabId]);
+  }, []);
 
-  // Find state belongs to one tab: switching tabs closes it.
-  useEffect(() => {
+  const closeFind = useCallback(() => {
+    clearFind();
     setFindOpen(false);
-    setFindResult(null);
-  }, [activeTabId]);
+  }, [clearFind]);
+
+  // Switching tabs closes the bar and clears highlights on the tab that owned the search.
+  useEffect(() => closeFind(), [activeTabId, closeFind]);
+
+  const handleFind = useCallback(
+    (text: string, options: BrowserFindOptions) => {
+      const handle = tabHandlesRef.current.get(activeTabId);
+      if (!handle) return;
+      if (options.findNext) setFindResult(null);
+      searchingTabId.current = activeTabId;
+      handle.find(text, options);
+    },
+    [activeTabId],
+  );
 
   const handleFindResult = useCallback((tabId: string, result: BrowserFindResult) => {
+    if (tabId !== searchingTabId.current) return;
     setFindResult((current) =>
       current?.activeMatchOrdinal === result.activeMatchOrdinal &&
       current.matches === result.matches
         ? current
         : result,
     );
-    void tabId;
   }, []);
 
   const handleTabMenuCommand = useCallback(
@@ -2099,7 +2114,8 @@ export function BrowserWorkbenchView({
         <FindBar
           ref={findBarRef}
           result={findResult}
-          onFind={(text, options) => tabHandlesRef.current.get(activeTabId)?.find(text, options)}
+          onFind={handleFind}
+          onClear={clearFind}
           onClose={closeFind}
         />
       )}

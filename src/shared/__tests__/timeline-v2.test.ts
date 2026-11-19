@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskEvent } from "../types";
 import {
+  extractTimelineEvidenceRefs,
   formatTimelineActivityLabel,
   inferTimelineStageForLegacyType,
   inferTimelineSubStageLabel,
@@ -176,5 +177,44 @@ describe("timeline v2 helpers", () => {
     expect(normalized.type).toBe("timeline_group_started");
     expect(normalized.status).toBe("in_progress");
     expect(normalized.legacyType).toBe("workflow_detected");
+  });
+});
+
+describe("evidence refs keep citation details", () => {
+  it("keeps [N], title, tool and connector, bounded, and drops bad values", () => {
+    const refs = extractTimelineEvidenceRefs({
+      id: "e1",
+      taskId: "t",
+      timestamp: 1,
+      type: "timeline_evidence_attached",
+      payload: {
+        evidenceRefs: [
+          {
+            evidenceId: "citation-1",
+            sourceType: "url",
+            sourceUrlOrPath: "https://calendar.google.com/e/1",
+            citationIndex: 2,
+            title: "Proposal review",
+            sourceTool: "calendar_action",
+            sourceLabel: "Google Calendar",
+          },
+          {
+            sourceUrlOrPath: "https://example.com",
+            citationIndex: -1,
+            title: "x".repeat(500),
+            sourceLabel: 7,
+          },
+        ],
+      },
+    } as never);
+    expect(refs[0]).toMatchObject({
+      citationIndex: 2,
+      title: "Proposal review",
+      sourceTool: "calendar_action",
+      sourceLabel: "Google Calendar",
+    });
+    expect(refs[1].citationIndex).toBeUndefined();
+    expect(refs[1].title).toHaveLength(300);
+    expect(refs[1].sourceLabel).toBeUndefined();
   });
 });

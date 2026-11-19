@@ -401,3 +401,52 @@ describe("Always allow on the inline approval card", () => {
     expect(findAssistantApprovalOptionLabel(undefined, "allow_once")).toBeUndefined();
   });
 });
+
+describe("calendar action cards", () => {
+  const reviewedEffect = {
+    version: 1,
+    provider: "google_calendar",
+    operation: "create_event",
+    calendarId: "primary",
+    event: {
+      summary: "Proposal review with Sophie",
+      start: { dateTime: "2026-11-17T09:30:00-08:00" },
+      end: { dateTime: "2026-11-17T09:50:00-08:00" },
+      attendees: [{ email: "sophie@example.com" }],
+    },
+  };
+
+  it("attaches the event card built from the reviewed request, keeping the options", () => {
+    const request = buildAssistantApprovalRequest(
+      "external_service",
+      "Create a Google Calendar event",
+      { tool: "calendar_action", reviewedEffect },
+    );
+    const question = request.questions[0];
+    expect(question.actionCard).toMatchObject({
+      operation: "create",
+      title: "Proposal review with Sophie",
+      attendees: ["sophie@example.com"],
+    });
+    // The card renames buttons on screen only; the answer protocol is unchanged.
+    expect(question.options.map((option) => option.label)).toEqual(["Deny", "Allow once"]);
+  });
+
+  it("names the card's buttons in the transcript line", () => {
+    expect(
+      buildAssistantApprovalMessage("external_service", "Create a Google Calendar event", {
+        tool: "calendar_action",
+        reviewedEffect,
+      }),
+    ).toBe(
+      "I need your decision before I can continue. Choose **Don't send** or **Send invite** below.",
+    );
+  });
+
+  it("adds no card to approvals that are not calendar changes", () => {
+    const request = buildAssistantApprovalRequest("run_command", "Run a command", {
+      command: "ls",
+    });
+    expect(request.questions[0].actionCard).toBeUndefined();
+  });
+});

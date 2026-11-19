@@ -12,6 +12,7 @@ import type {
   SurfaceActionOrigin,
   SurfaceActionRequest,
 } from "../../../shared/answer-surfaces/actions";
+import { NextActionContext, type NextActionScope } from "../NextAction/NextActionButton";
 
 /**
  * Asks the user to approve an answer surface's action. Resolves true once the approved
@@ -50,12 +51,15 @@ export function SurfaceActionProvider({
   scopeKey,
   onSendPrompt,
   onOpenLink,
+  nextAction = null,
   children,
 }: {
   /** The conversation the actions belong to; an open request is cancelled when it changes. */
   scopeKey?: string;
   onSendPrompt: (text: string, origin: SurfaceActionOrigin) => void | Promise<void>;
   onOpenLink: (url: string) => void | Promise<void>;
+  /** The suggested next step under the newest reply, which sends without this dialog. */
+  nextAction?: NextActionScope | null;
   children: ReactNode;
 }) {
   const [pending, setPending] = useState<Pending | null>(null);
@@ -110,7 +114,7 @@ export function SurfaceActionProvider({
 
   return (
     <SurfaceActionContext.Provider value={request}>
-      {children}
+      <NextActionContext.Provider value={nextAction}>{children}</NextActionContext.Provider>
       {pending && (
         <SurfaceActionConfirm
           request={pending.request}

@@ -4475,6 +4475,28 @@ button.collab-timeline-thought-agent:hover {
   line-height: 1.4;
 }
 
+/* The turn's receipt after its duration: "· 8 actions · 1 approved". */
+.turn-header-stats {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.turn-header-stat::before {
+  content: "·";
+  margin: 0 6px;
+  color: var(--color-text-secondary);
+}
+
+/* The label's own 4px gap already sits before the first dot. */
+.turn-header-stat:first-child::before {
+  margin-left: 2px;
+}
+
+.turn-header-stat[data-tone="attention"] {
+  color: var(--color-warning, var(--color-text-secondary));
+}
+
 .turn-header-toggle {
   padding: 0;
   border: 0;

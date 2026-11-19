@@ -48,8 +48,14 @@ function setup(options: { maxLiveViews?: number; driving?: boolean } = {}) {
     isDestroyed: () => false,
     webContents: { getZoomFactor: () => 1 },
     contentView: {
+      get children() {
+        return [...children];
+      },
       addChildView: vi.fn((view: Any) => children.push(view)),
-      removeChildView: vi.fn((view: Any) => children.splice(children.indexOf(view), 1)),
+      removeChildView: vi.fn((view: Any) => {
+        const index = children.indexOf(view);
+        if (index >= 0) children.splice(index, 1);
+      }),
     },
   };
   class FakeView {
@@ -158,6 +164,29 @@ describe("BrowserTabViewHost", () => {
     });
     host.hideSession("t", "s");
     expect(children.map((view) => view.visible)).toEqual([false, false]);
+  });
+
+  it("detaches native views on renderer replacement and reuses their live pages on reopen", async () => {
+    const { host, children, deps, key, open } = setup();
+    const first = await open("a");
+    const view = children[0];
+    await open("b");
+    host.load(key("a"), "https://example.com/");
+    host.layout({ ...key("a"), bounds: { x: 10, y: 20, width: 300, height: 200 } });
+
+    host.detachAll();
+    host.detachAll();
+    expect(children).toHaveLength(0);
+    expect(view.visible).toBe(false);
+    expect(deps.unregister).not.toHaveBeenCalled();
+    expect(view.webContents.isDestroyed()).toBe(false);
+
+    expect(await open("a")).toMatchObject({
+      reused: true,
+      webContentsId: first.webContentsId,
+      url: "https://example.com/",
+    });
+    expect(children).toEqual([view]);
   });
 
   it("forwards page events and turns clicks into a take-over request while CoWork drives", async () => {

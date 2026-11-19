@@ -33,7 +33,10 @@ import { type AgentLifecycleRow as AgentLifecycleRowModel } from "../../utils/ag
 import { CliAgentFrame } from "../CliAgentFrame";
 import { resolveCliAgentType } from "../../../shared/cli-agent-detection";
 import { AssistantMessageContent } from "../AssistantMessageContent";
+import type { TaskCitation } from "./task-citations";
 import { AutoMailComposeFrame, MailComposeFrame } from "../MailComposeFrame";
+import { ApprovalActionCard } from "../ApprovalActionCard/ApprovalActionCard";
+import { normalizeApprovalActionCard } from "../../../shared/approval-action-card";
 import { MemoryUsedAffordance } from "../memory/MemoryUsedAffordance";
 import { type AgentContext } from "../../hooks/useAgentContext";
 import {
@@ -108,6 +111,8 @@ import { type BotMascotLookup } from "./bot-earlier-conversations";
 import {
   VIRTUALIZED_FEED_ROW_THRESHOLD,
   applyTurnDisclosures,
+  collectTurnWorkStats,
+  getTaskFeedRowEvent,
   assignTimelineRef,
   captureTaskFeedReadingAnchor,
   collectInlineRunCommandSessionIds,
@@ -965,6 +970,8 @@ interface TaskConversationFlowProps {
   initialPromptEventId: string | null;
   trimmedPrompt: string;
   markdownComponents: Components;
+  answerMarkdownComponents: (citations: TaskCitation[]) => Components;
+  readAnswerSources: (event: TaskEvent) => TaskCitation[];
   messageFeedbackMap: Map<string, "accepted" | "rejected">;
   mainBodyRef: React.RefObject<HTMLDivElement | null>;
   onOpenBrowserView?: ((url?: string) => void) | undefined;
@@ -1057,6 +1064,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
   const initialPromptEventId = props.initialPromptEventId;
   const trimmedPrompt = props.trimmedPrompt;
   const markdownComponents = props.markdownComponents;
+  const { answerMarkdownComponents, readAnswerSources } = props;
   const messageFeedbackMap = props.messageFeedbackMap;
   const mainBodyRef = props.mainBodyRef;
   const onOpenBrowserView = props.onOpenBrowserView;
@@ -1574,12 +1582,30 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
   // shows every row the turn projection kept instead of the task-wide delivery subset.
   const feedTranscriptMode: TranscriptMode =
     turnDisclosuresEnabled && transcriptMode === "delivery" ? "inspect" : transcriptMode;
+  const turnWorkStats = useMemo(
+    () =>
+      turnDisclosuresEnabled
+        ? collectTurnWorkStats(events, {
+            historyComplete: !hasMoreTimelineHistory,
+            turnStartIds: new Set(
+              displayFeedRows.flatMap((row) => {
+                const event = getTaskFeedRowEvent(row);
+                return event?.id && getEffectiveTaskEventType(event) === "user_message"
+                  ? [event.id]
+                  : [];
+              }),
+            ),
+          })
+        : undefined,
+    [displayFeedRows, events, hasMoreTimelineHistory, turnDisclosuresEnabled],
+  );
   const turnProjectedFeedRows = useMemo(
     () =>
       turnDisclosuresEnabled
         ? applyTurnDisclosures(mergeAdjacentActivityBlockRows(displayFeedRows), {
             isTaskWorking,
             taskStartedAt: task?.createdAt ?? 0,
+            statsByTurnId: turnWorkStats,
             isTurnExpanded: (turnId) =>
               resolveDisclosureExpanded({
                 intent: getDisclosureIntent(disclosureIntents, "group", turnId),
@@ -1587,7 +1613,14 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
               }),
           }).rows
         : displayFeedRows,
-    [disclosureIntents, displayFeedRows, isTaskWorking, task?.createdAt, turnDisclosuresEnabled],
+    [
+      disclosureIntents,
+      displayFeedRows,
+      isTaskWorking,
+      task?.createdAt,
+      turnDisclosuresEnabled,
+      turnWorkStats,
+    ],
   );
   const { visibleFeedRows } = useMemo(
     () => selectVisibleTaskFeedRows(turnProjectedFeedRows, feedTranscriptMode),
@@ -1723,6 +1756,9 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 verboseSteps ? 1 : 0,
                 effectiveType,
                 getTaskEventPayloadRenderSignature(event),
+                effectiveType === "assistant_message" || effectiveType === "task_completed"
+                  ? JSON.stringify(readAnswerSources(event))
+                  : "",
                 parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0,
                 suppressedParallelEventIds.has(event.id) ? 1 : 0,
                 // Bot messages show the bot's name and character, which load after the rows.
@@ -2692,6 +2728,31 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 const agentMessageProtocolReceipt = isBotConversation
                   ? parseAgentMessageProtocolResult(messageText)
                   : null;
+                // An answered calendar approval stays in the conversation as the event and the
+                // decision, in place of the plain "You chose: Allow once" line.
+                const answeredActionCard =
+                  event.payload?.source === "structured_input_selection"
+                    ? normalizeApprovalActionCard(event.payload?.actionCard)
+                    : undefined;
+                if (answeredActionCard) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      <div className="chat-message assistant-message">
+                        <ApprovalActionCard
+                          card={answeredActionCard}
+                          state={
+                            event.payload?.actionCardApproved === true ? "approved" : "declined"
+                          }
+                          reply={
+                            typeof event.payload?.actionCardReply === "string"
+                              ? event.payload.actionCardReply
+                              : undefined
+                          }
+                        />
+                      </div>
+                    </Fragment>
+                  );
+                }
                 const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
                 const inlineFrames = getTaskEventInlineFrames(event);
                 const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);
@@ -2779,7 +2840,9 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                             <div className="chat-bubble-content markdown-content">
                               <AssistantMessageContent
                                 message={cleanedMessageText}
-                                markdownComponents={markdownComponents}
+                                markdownComponents={answerMarkdownComponents(
+                                  readAnswerSources(event),
+                                )}
                                 workspacePath={workspace?.path}
                                 onOpenViewer={openFileInPanel}
                                 taskId={event.taskId}
@@ -3276,6 +3339,8 @@ function areTaskConversationFlowPropsEqual(
     prev.lastAssistantMessage?.id === next.lastAssistantMessage?.id &&
     prev.initialPromptEventId === next.initialPromptEventId &&
     prev.markdownComponents === next.markdownComponents &&
+    prev.answerMarkdownComponents === next.answerMarkdownComponents &&
+    prev.readAnswerSources === next.readAnswerSources &&
     prev.messageFeedbackMap === next.messageFeedbackMap &&
     prev.mainBodyRef === next.mainBodyRef &&
     prev.parallelGroupsByAnchorEventId === next.parallelGroupsByAnchorEventId &&

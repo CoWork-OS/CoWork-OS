@@ -1,3 +1,8 @@
+import {
+  GEMINI_NEON_MODEL,
+  isGeminiNeonModel,
+  isQwen4MaxModel,
+} from "../../../shared/llm-provider-catalog";
 import type { LLMProviderType } from "../../../shared/types";
 import { getAnthropicModelCapabilities } from "../../../shared/anthropic-model-capabilities";
 import { estimateTotalTokens } from "../context-manager";
@@ -228,6 +233,7 @@ function getKnownHardCap(
   routedFamily: Exclude<OutputBudgetProviderFamily, "openrouter"> | null,
   modelId: string,
 ): number | null {
+  if (isGeminiNeonModel(modelId)) return GEMINI_NEON_MODEL.maxOutputTokens;
   const normalized = String(modelId || "").toLowerCase();
   const patterns =
     providerFamily === "bedrock-claude"
@@ -252,6 +258,8 @@ function isThinkingByDefaultModel(modelId: string, providerType = ""): boolean {
   const normalized = String(modelId || "").toLowerCase();
   return (
     isOpenAIReasoningModel(normalized) ||
+    isGeminiNeonModel(normalized) ||
+    isQwen4MaxModel(normalized) ||
     /claude-(?:(?:opus|sonnet|haiku)-[5-9]|fable|mythos)/.test(normalized) ||
     // The Anthropic providers send adaptive thinking to Opus/Sonnet 4.6+ too
     // (anthropic-thinking.ts), and max_tokens includes the thinking.
@@ -279,20 +287,21 @@ function getPolicyDefault(
   const initialOverride = readEnvLimit("COWORK_LLM_AGENTIC_INITIAL_MAX_TOKENS");
   const escalatedOverride = readEnvLimit("COWORK_LLM_AGENTIC_ESCALATED_MAX_TOKENS");
   const effectiveFamily = routedFamily ?? providerFamily;
+  const thinkingByDefault = isThinkingByDefaultModel(modelId, providerType);
 
   // The request after a max_tokens truncation retries with the escalated budget
   // so the same output does not get cut off again.
   if (phase === "escalated" || requestKind === "continuation") {
     if (escalatedOverride !== null) return escalatedOverride;
     if (effectiveFamily === "anthropic") return DEFAULT_ANTHROPIC_ESCALATED_MAX_TOKENS;
-    if (effectiveFamily === "generic") return DEFAULT_GENERIC_ESCALATED_MAX_TOKENS;
+    if (effectiveFamily === "generic" && !thinkingByDefault) {
+      return DEFAULT_GENERIC_ESCALATED_MAX_TOKENS;
+    }
     return DEFAULT_AGENTIC_ESCALATED_MAX_TOKENS;
   }
 
   if (initialOverride !== null) return initialOverride;
-  const reasoningFloor = isThinkingByDefaultModel(modelId, providerType)
-    ? DEFAULT_REASONING_INITIAL_MAX_TOKENS
-    : 0;
+  const reasoningFloor = thinkingByDefault ? DEFAULT_REASONING_INITIAL_MAX_TOKENS : 0;
   if (requestKind === "tool_followup") {
     return Math.max(DEFAULT_TOOL_FOLLOW_UP_INITIAL_MAX_TOKENS, reasoningFloor);
   }

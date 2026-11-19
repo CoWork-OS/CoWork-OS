@@ -59,6 +59,10 @@ import {
   CUSTOM_PROVIDER_IDS,
   FABLE_5_2_MODEL,
   GEMINI_DEFAULT_MODEL,
+  GEMINI_NEON_MODEL,
+  isGeminiNeonModel,
+  getBundledModelInfo,
+  QWEN4_MAX_MODEL,
   GPT_6_2_MODELS,
   isGpt62Model,
   KIMI_CODE_CHINA_BASE_URL,
@@ -476,11 +480,14 @@ function resolveLocalInferenceResourceKey(
 }
 
 function getKnownCustomProviderModels(entry: ProviderCatalogEntry): CachedModelInfo[] {
-  return (entry.knownModels || []).map((modelId) => ({
-    key: modelId,
-    displayName: modelId,
-    description: entry.description || `${entry.name} model`,
-  }));
+  return (entry.knownModels || []).map(
+    (key) =>
+      getBundledModelInfo(key) || {
+        key,
+        displayName: key,
+        description: entry.description || `${entry.name} model`,
+      },
+  );
 }
 
 function mergeCustomProviderModels(
@@ -3024,7 +3031,7 @@ export class LLMProviderFactory {
           ? customConfig.cachedModels
           : currentModel
             ? [
-                {
+                getBundledModelInfo(currentModel) || {
                   key: currentModel,
                   displayName: currentModel,
                   description: customEntry.description || `${customEntry.name} model`,
@@ -3080,9 +3087,20 @@ export class LLMProviderFactory {
                 displayName: value.displayName,
                 description: value.description,
               }));
+        const neon = GEMINI_MODELS[GEMINI_NEON_MODEL.id];
         return {
           currentModel,
-          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
+          models: attachMetadata(
+            ensureCurrentModel(
+              modelList.some(({ key }) => isGeminiNeonModel(key))
+                ? modelList
+                : [
+                    ...modelList,
+                    { key: neon.id, displayName: neon.displayName, description: neon.description },
+                  ],
+              currentModel,
+            ),
+          ),
         };
       }
 
@@ -3097,6 +3115,8 @@ export class LLMProviderFactory {
                 description: value.description,
               }));
         const releaseModels = [
+          OPENROUTER_MODELS[GEMINI_NEON_MODEL.gatewayId],
+          OPENROUTER_MODELS[QWEN4_MAX_MODEL.openRouterId],
           OPENROUTER_MODELS["openai/gpt-6.1-terra"],
           OPENROUTER_MODELS["openai/gpt-6.2-astra"],
           OPENROUTER_MODELS["openai/gpt-6.2-sol"],
@@ -4077,38 +4097,7 @@ export class LLMProviderFactory {
     const settingsKey = settings.gemini?.apiKey;
     const key = await resolveSecretValue(normalizedApiKey || settingsKey);
 
-    const defaultModels = [
-      {
-        name: "gemini-2.5-pro",
-        displayName: "Gemini 2.5 Pro",
-        description: "Most capable model for complex tasks",
-      },
-      {
-        name: "gemini-2.5-flash",
-        displayName: "Gemini 2.5 Flash",
-        description: "Fast and efficient for most tasks",
-      },
-      {
-        name: "gemini-2.0-flash",
-        displayName: "Gemini 2.0 Flash",
-        description: "Balanced speed and capability",
-      },
-      {
-        name: "gemini-2.0-flash-lite",
-        displayName: "Gemini 2.0 Flash Lite",
-        description: "Fastest and most cost-effective",
-      },
-      {
-        name: "gemini-1.5-pro",
-        displayName: "Gemini 1.5 Pro",
-        description: "Previous generation pro model",
-      },
-      {
-        name: "gemini-1.5-flash",
-        displayName: "Gemini 1.5 Flash",
-        description: "Previous generation flash model",
-      },
-    ];
+    const defaultModels = GeminiProvider.getDefaultModels();
 
     if (!key) {
       // Return default models if no API key
@@ -4289,6 +4278,16 @@ export class LLMProviderFactory {
         id: OPENROUTER_MODELS["anthropic/claude-fable-5.2"].id,
         name: FABLE_5_2_MODEL.name,
         context_length: 1_000_000,
+      },
+      {
+        id: GEMINI_NEON_MODEL.gatewayId,
+        name: GEMINI_NEON_MODEL.displayName,
+        context_length: GEMINI_NEON_MODEL.contextLength,
+      },
+      {
+        id: QWEN4_MAX_MODEL.openRouterId,
+        name: QWEN4_MAX_MODEL.displayName,
+        context_length: QWEN4_MAX_MODEL.contextLength,
       },
       { id: "openai/gpt-6.1-terra", name: "GPT-6.1 Terra", context_length: 1_050_000 },
       { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 },

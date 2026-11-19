@@ -114,3 +114,17 @@ export function chatReasoningContentReplay(message: LLMMessage, model: string): 
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   return parts.length > 0 ? parts.join("") : undefined;
 }
+
+// OpenRouter carries Gemini thought signatures in opaque reasoning_details blocks.
+export function reasoningFromOpenRouterMessage(message: Any, model: string): LLMReasoningItem[] {
+  const details = message?.reasoning_details;
+  return Array.isArray(details) && details.length > 0
+    ? [{ format: "openrouter-reasoning-details", model, data: details }]
+    : [];
+}
+
+export function openRouterReasoningDetailsReplay(message: LLMMessage, model: string): unknown[] {
+  return itemsFor(message, "openrouter-reasoning-details", model).flatMap(({ data }) =>
+    Array.isArray(data) ? data : [],
+  );
+}

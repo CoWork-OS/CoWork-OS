@@ -1,6 +1,7 @@
 import type { TaskEvent } from "./types";
 import { parseAgentMessageProtocolResult } from "./agent-message-receipt";
 import { formatUserFacingCompletionSummary } from "./task-completion";
+import type { AnswerCitationSource } from "./answer-citations";
 
 /** One chat message in a bot's history, across all of its conversations. */
 export interface BotMessage {
@@ -14,6 +15,7 @@ export interface BotMessage {
   senderLabel?: string;
   /** Raw message text; the renderer applies its display cleanup. */
   text: string;
+  answerCitations?: AnswerCitationSource[];
   timestamp: number;
   /** The text was cut to `BOT_MESSAGE_TEXT_MAX_CHARS`. */
   truncated?: boolean;
@@ -147,6 +149,9 @@ export function toBotMessage(event: TaskEvent): BotMessage | null {
     role,
     ...(senderLabel ? { senderLabel } : {}),
     text: truncated ? `${text.slice(0, BOT_MESSAGE_TEXT_MAX_CHARS).trimEnd()}…` : text,
+    ...(role === "bot" && Array.isArray(payload.answerCitations)
+      ? { answerCitations: payload.answerCitations }
+      : {}),
     timestamp: Number.isFinite(event.timestamp) ? event.timestamp : 0,
     ...(truncated ? { truncated: true } : {}),
   };

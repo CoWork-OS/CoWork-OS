@@ -130,7 +130,6 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
       ? selectedWorkspaceId
       : undefined;
   const [activeSource, setActiveSource] = useState("local");
-  const [files, setFiles] = useState<UnifiedFile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [recentFiles, setRecentFiles] = useState<UnifiedFile[]>([]);
   const [showRecent, setShowRecent] = useState(false);
@@ -144,43 +143,55 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
   const [workspaceRoots, setWorkspaceRoots] = useState<string[]>([]);
   // Root of the selected workspace as the main process resolved it for the Local listing.
   const [listedRoot, setListedRoot] = useState<string | null>(null);
-  const loadRequestSeqRef = useRef(0);
   const currentFolder = folderTrail[folderTrail.length - 1];
   const currentFolderPath = currentFolder?.path;
-  const browsingFolders = !showRecent && activeSource === "local" && !searchQuery.trim();
-
-  const loadFiles = useCallback(async () => {
-    const requestId = ++loadRequestSeqRef.current;
-    try {
-      let next: UnifiedFile[];
-      if (searchQuery.trim()) {
-        const results = await (window as Any).electronAPI.searchHubFiles(
-          searchQuery,
-          availableSources,
-          workspaceId,
-        );
-        next = (results || []).map((r: Any) => r.file);
-      } else {
-        const result: UnifiedFile[] | null = await (window as Any).electronAPI.listHubFiles({
-          source: activeSource,
-          ...(activeSource === "local" && workspaceId ? { workspaceId } : {}),
-          ...(activeSource === "local" && currentFolderPath ? { path: currentFolderPath } : {}),
-        });
-        next = result || [];
-        const root = next
-          .map((file) => file.metadata?.workspacePath)
-          .find((value): value is string => typeof value === "string");
-        if (root && requestId === loadRequestSeqRef.current) setListedRoot(root);
-      }
-      if (requestId === loadRequestSeqRef.current) setFiles(next);
-    } catch {
-      if (requestId === loadRequestSeqRef.current) setFiles([]);
-    }
-  }, [activeSource, availableSources, searchQuery, currentFolderPath, workspaceId]);
+  const query = searchQuery.trim();
+  const selectedSource = showRecent || query ? null : activeSource;
+  const browsingFolders = selectedSource === "local";
+  const request = useMemo(
+    () => ({ activeSource, availableSources, query, currentFolderPath, workspaceId }),
+    [activeSource, availableSources, query, currentFolderPath, workspaceId],
+  );
+  const [listing, setListing] = useState<{
+    request: typeof request;
+    files: UnifiedFile[];
+    failed?: boolean;
+  } | null>(null);
 
   useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
+    if (showRecent) return;
+    let cancelled = false;
+    const loadFiles = async () => {
+      const { activeSource, availableSources, query, currentFolderPath, workspaceId } = request;
+      try {
+        if (query) {
+          const results: { file: UnifiedFile }[] | null = await (
+            window as Any
+          ).electronAPI.searchHubFiles(query, availableSources, workspaceId);
+          if (!cancelled)
+            setListing({ request, files: (results ?? []).map((result) => result.file) });
+        } else {
+          const files: UnifiedFile[] =
+            (await (window as Any).electronAPI.listHubFiles({
+              source: activeSource,
+              ...(activeSource === "local" && workspaceId ? { workspaceId } : {}),
+              ...(activeSource === "local" && currentFolderPath ? { path: currentFolderPath } : {}),
+            })) ?? [];
+          if (cancelled) return;
+          const root = files.find((file) => typeof file.metadata?.workspacePath === "string")
+            ?.metadata?.workspacePath;
+          if (typeof root === "string" && root) setListedRoot(root);
+          setListing({ request, files });
+        }
+      } catch {
+        if (!cancelled) setListing({ request, files: [], failed: true });
+      }
+    };
+    void loadFiles();
+    return () => {
+      cancelled = true;
+    };
+  }, [request, showRecent]);
 
   // Folders opened in one workspace mean nothing in another.
   useEffect(() => {
@@ -230,7 +241,14 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
     void (window as Any).electronAPI.trackHubFileAccess(file).catch(() => undefined);
   };
 
-  const visibleFiles = showRecent ? recentFiles : files;
+  const currentListing = listing?.request === request ? listing : null;
+  const visibleFiles = showRecent ? recentFiles : (currentListing?.files ?? []);
+  let emptyMessage = browsingFolders && currentFolder ? "This folder is empty" : "No files found";
+  if (!showRecent) {
+    if (!currentListing) emptyMessage = "Loading files…";
+    else if (currentListing.failed) emptyMessage = "Files could not be loaded.";
+    else if (query) emptyMessage = "No files match your search";
+  }
   const parentFolderName =
     folderTrail.length > 1
       ? folderTrail[folderTrail.length - 2].name
@@ -253,6 +271,8 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
         >
           <Search size={14} style={{ color: "var(--text-tertiary, #666)", flexShrink: 0 }} />
           <input
+            type="search"
+            aria-label="Search files across all sources"
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
@@ -282,6 +302,8 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
         }}
       >
         <button
+          type="button"
+          aria-pressed={showRecent}
           onClick={() => {
             setSearchQuery("");
             setShowRecent(!showRecent);
@@ -305,8 +327,11 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
         {SOURCE_TABS.filter((t) => availableSources.includes(t.key)).map((tab) => (
           <button
             key={tab.key}
+            type="button"
+            aria-pressed={selectedSource === tab.key}
             onClick={() => {
               setActiveSource(tab.key);
+              setSearchQuery("");
               setShowRecent(false);
               setFolderTrail([]);
             }}
@@ -317,10 +342,9 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
               padding: "4px 10px",
               borderRadius: 4,
               border: "none",
-              background:
-                activeSource === tab.key && !showRecent ? "var(--accent-bg, #2563eb22)" : "none",
+              background: selectedSource === tab.key ? "var(--accent-bg, #2563eb22)" : "none",
               color:
-                activeSource === tab.key && !showRecent
+                selectedSource === tab.key
                   ? "var(--accent-color, #60a5fa)"
                   : "var(--text-secondary, #999)",
               cursor: "pointer",
@@ -335,9 +359,9 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
 
       {/* File list */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-        {((activeSource === "artifacts" && !showRecent) || searchQuery.trim()) && (
+        {(selectedSource === "artifacts" || query) && (
           <p style={{ margin: "4px 16px 8px", fontSize: 12, color: "var(--text-tertiary, #666)" }}>
-            {searchQuery.trim()
+            {query
               ? "Search checks up to 200 files per source."
               : "Showing up to 50 of the most recent artifacts."}
           </p>
@@ -370,6 +394,7 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
         )}
         {visibleFiles.length === 0 ? (
           <div
+            role="status"
             style={{
               textAlign: "center",
               padding: 32,
@@ -377,11 +402,7 @@ function DesktopFileHub({ workspaceId: selectedWorkspaceId }: { workspaceId?: st
               fontSize: 13,
             }}
           >
-            {searchQuery
-              ? "No files match your search"
-              : browsingFolders && currentFolder
-                ? "This folder is empty"
-                : "No files found"}
+            {emptyMessage}
           </div>
         ) : (
           visibleFiles.map((file) => (

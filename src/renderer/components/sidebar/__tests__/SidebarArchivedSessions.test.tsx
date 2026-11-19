@@ -29,6 +29,7 @@ function render(overrides: Partial<SidebarArchivedSessionsViewProps> = {}): stri
     createElement(SidebarArchivedSessionsView, {
       sessions: [],
       loading: false,
+      loadingMore: false,
       loadError: null,
       hasMore: false,
       normalizedSearch: "",
@@ -38,6 +39,7 @@ function render(overrides: Partial<SidebarArchivedSessionsViewProps> = {}): stri
       actionError: null,
       titleFor: (row: Task) => row.title,
       onClose: () => {},
+      onLoadMore: () => {},
       onUnarchive: () => {},
       onOpenRestored: () => {},
       ...overrides,
@@ -125,9 +127,14 @@ describe("SidebarArchivedSessionsView", () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Unarchive Draft release notes"/);
   });
 
-  it("says when only the newest archived sessions are shown", () => {
-    const html = render({ sessions: [task({ id: "t1" })], hasMore: true });
-    expect(html).toContain("Showing the 200 most recently archived sessions.");
+  it("offers older archived sessions even when the loaded sessions do not match", () => {
+    const html = render({
+      sessions: [task({ id: "t1" })],
+      hasMore: true,
+      normalizedSearch: "older",
+    });
+    expect(html).toContain("No matching archived sessions");
+    expect(html).toContain(">Load older archived sessions</button>");
     expect(html).toContain("1+");
   });
 });

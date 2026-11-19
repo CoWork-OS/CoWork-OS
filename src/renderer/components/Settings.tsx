@@ -92,6 +92,9 @@ import {
 import {
   CUSTOM_PROVIDER_MAP,
   GEMINI_DEFAULT_MODEL,
+  GEMINI_NEON_MODEL,
+  getBundledModelInfo,
+  QWEN4_MAX_MODEL,
   OPENROUTER_DEFAULT_MODEL_ID,
   GPT_6_2_MODELS,
   isGpt62Model,
@@ -1339,6 +1342,7 @@ const SettingsSidebar = memo(function SettingsSidebar({
   onSelect,
 }: SettingsSidebarProps) {
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const sidebarSearchRef = useRef<HTMLInputElement>(null);
   const deferredSidebarSearch = useDeferredValue(sidebarSearch);
   const hasSidebarSearch = sidebarSearch.trim().length > 0;
 
@@ -1383,15 +1387,21 @@ const SettingsSidebar = memo(function SettingsSidebar({
           <path d="M21 21l-4.35-4.35" />
         </svg>
         <input
+          ref={sidebarSearchRef}
           type="text"
+          aria-label="Search settings"
           placeholder="Search settings..."
           value={sidebarSearch}
           onChange={(e) => setSidebarSearch(e.target.value)}
         />
         {hasSidebarSearch && (
           <button
+            type="button"
             className="settings-sidebar-search-clear"
-            onClick={() => setSidebarSearch("")}
+            onClick={() => {
+              setSidebarSearch("");
+              sidebarSearchRef.current?.focus();
+            }}
             aria-label="Clear search"
           >
             <svg
@@ -5167,7 +5177,16 @@ export function Settings({
   const selectedCustomConfig = selectedCustomProvider
     ? customProviders[resolvedProviderType] || {}
     : {};
-  const selectedCustomModels = selectedCustomConfig.cachedModels || [];
+  const bundledCustomModels = (selectedCustomProvider?.knownModels || [])
+    .map(getBundledModelInfo)
+    .filter((model) => model !== undefined);
+  const cachedCustomModels = selectedCustomConfig.cachedModels || [];
+  const selectedCustomModels = [
+    ...cachedCustomModels,
+    ...bundledCustomModels.filter(
+      ({ key }) => !cachedCustomModels.some((model) => model.key === key),
+    ),
+  ];
   const currentProviderLabel =
     providers.find((provider) => provider.type === currentProviderType)?.name ||
     currentProviderType;
@@ -6335,26 +6354,22 @@ export function Settings({
                 Select a Gemini model. Enter your API key and click "Refresh Models" to load
                 available models.
               </p>
-              {geminiModels.length > 0 ? (
-                <SearchableSelect
-                  options={geminiModels.map((model) => ({
-                    value: model.name,
-                    label: model.displayName,
-                    description: model.description,
-                  }))}
-                  value={geminiModel}
-                  onChange={setGeminiModel}
-                  placeholder="Select a model..."
-                />
-              ) : (
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder={GEMINI_DEFAULT_MODEL}
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                />
-              )}
+              <SearchableSelect
+                options={[
+                  ...geminiModels,
+                  ...(geminiModels.some(({ name }) => name === GEMINI_NEON_MODEL.id)
+                    ? []
+                    : [{ ...GEMINI_NEON_MODEL, name: GEMINI_NEON_MODEL.id }]),
+                ].map((model) => ({
+                  value: model.name,
+                  label: model.displayName,
+                  description: model.description,
+                }))}
+                value={geminiModel}
+                onChange={setGeminiModel}
+                placeholder="Select a model..."
+                allowCustomValue
+              />
             </div>
           </>
         )}
@@ -6445,27 +6460,30 @@ export function Settings({
                 Select a model from OpenRouter's catalog. Enter your API key and click "Refresh
                 Models" to load available models.
               </p>
-              {openrouterModels.length > 0 ? (
-                <SearchableSelect
-                  options={openrouterModels.map((model) => ({
-                    value: model.id,
-                    label: model.name,
-                    description: `${Math.round(model.context_length / 1000)}k context`,
-                  }))}
-                  value={openrouterModel}
-                  onChange={setOpenrouterModel}
-                  placeholder="Select a model..."
-                  allowCustomValue
-                />
-              ) : (
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder={OPENROUTER_DEFAULT_MODEL_ID}
-                  value={openrouterModel}
-                  onChange={(e) => setOpenrouterModel(e.target.value)}
-                />
-              )}
+              <SearchableSelect
+                options={[
+                  ...openrouterModels,
+                  ...[
+                    { ...GEMINI_NEON_MODEL, id: GEMINI_NEON_MODEL.gatewayId },
+                    { ...QWEN4_MAX_MODEL, id: QWEN4_MAX_MODEL.openRouterId },
+                  ]
+                    .filter(({ id }) => !openrouterModels.some((model) => model.id === id))
+                    .map(({ id, displayName, contextLength }) => ({
+                      id,
+                      name: displayName,
+                      context_length: contextLength,
+                    })),
+                ].map((model) => ({
+                  value: model.id,
+                  label: model.name,
+                  description: `${Math.round(model.context_length / 1000)}k context`,
+                }))}
+                value={openrouterModel}
+                onChange={setOpenrouterModel}
+                placeholder="Select a model..."
+                allowCustomValue
+              />
+
               <p className="settings-hint">
                 OpenRouter provides access to many models from different providers (Claude, GPT-4,
                 Llama, etc.) through a unified API.
@@ -8014,6 +8032,7 @@ export function Settings({
                   value={selectedCustomConfig.model || ""}
                   onChange={(value) => updateCustomProvider(resolvedProviderType, { model: value })}
                   placeholder="Select a model..."
+                  allowCustomValue={bundledCustomModels.length > 0}
                 />
               ) : (
                 <input

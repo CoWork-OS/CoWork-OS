@@ -1,4 +1,9 @@
 import { InlineApprovalDraftReview } from "../ApprovalDraftReview";
+import { ApprovalActionCard } from "../ApprovalActionCard/ApprovalActionCard";
+import {
+  actionCardButtonLabel,
+  normalizeApprovalActionCard,
+} from "../../../shared/approval-action-card";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ASSISTANT_APPROVAL_QUESTION_ID,
@@ -435,6 +440,109 @@ export function StructuredInputPromptCard({
       : parts.detail;
     const submitOption = (optionIndex: number) =>
       onSubmit({ [activeQuestion.id]: { optionLabel: activeOptions[optionIndex]?.label } });
+    const actionCard = normalizeApprovalActionCard(activeQuestion.actionCard);
+    const approvalDetails = approvalDetailsOpen && (
+      <div className="input-request-approval-details">
+        <p>{parts.detail ? `${parts.title} ${parts.detail}` : parts.title}</p>
+        {parts.scope && (
+          <p className="input-request-scope">
+            <span className="input-request-scope-label">Scope</span>
+            <span className="input-request-scope-value">{renderApprovalScope(parts.scope)}</span>
+          </p>
+        )}
+        {!activeOtherSelected && (
+          <button
+            type="button"
+            className="input-request-link"
+            onClick={() => updateSelection(activeQuestion.id, activeOptions.length)}
+          >
+            Reply instead
+          </button>
+        )}
+      </div>
+    );
+    const replyActions = (
+      <>
+        <button
+          type="button"
+          className="input-request-dismiss"
+          onClick={() => updateSelection(activeQuestion.id, visibleOptions[0]?.optionIndex ?? 0)}
+        >
+          Back
+        </button>
+        <button
+          type="button"
+          className="input-request-submit"
+          onClick={submitIfAllowed}
+          disabled={!canSubmit}
+        >
+          Send
+        </button>
+      </>
+    );
+    // A calendar change is drawn as the event, with buttons named for what each one does. The
+    // buttons still answer with the approval's own option labels.
+    if (actionCard) {
+      return (
+        <div className="input-request-composer-shell" role="region" aria-label="Your input needed">
+          <div className="input-request-card input-request-card-inline input-request-card-approval">
+            <ApprovalActionCard
+              card={actionCard}
+              state="pending"
+              actions={
+                activeOtherSelected
+                  ? replyActions
+                  : visibleOptions.map(({ option, optionIndex }, displayIndex) => (
+                      <button
+                        key={`${activeQuestion.id}-option-${optionIndex}`}
+                        type="button"
+                        title={
+                          option.description
+                            ? `${option.description} (${displayIndex + 1})`
+                            : undefined
+                        }
+                        data-selected={activeSelected === optionIndex ? "true" : undefined}
+                        className={
+                          option.label.trim().toLowerCase().startsWith("allow")
+                            ? "input-request-submit"
+                            : "input-request-dismiss"
+                        }
+                        onClick={() => submitOption(optionIndex)}
+                      >
+                        {actionCardButtonLabel(actionCard, option.label)}
+                      </button>
+                    ))
+              }
+              footer={
+                <>
+                  <div className="input-request-approval-meta">
+                    <button
+                      type="button"
+                      className="input-request-link"
+                      aria-expanded={approvalDetailsOpen}
+                      onClick={() => setApprovalDetailsOpen((open) => !open)}
+                    >
+                      {approvalDetailsOpen ? "Hide details" : "Details"}
+                    </button>
+                    {!activeOtherSelected && (
+                      <button
+                        type="button"
+                        className="input-request-link"
+                        onClick={() => updateSelection(activeQuestion.id, activeOptions.length)}
+                      >
+                        Suggest a change
+                      </button>
+                    )}
+                  </div>
+                  {approvalDetails}
+                  {otherField}
+                </>
+              }
+            />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="input-request-composer-shell" role="region" aria-label="Your input needed">
         <div className="input-request-card input-request-card-inline input-request-card-approval">
@@ -464,71 +572,32 @@ export function StructuredInputPromptCard({
               </div>
             </div>
             <div className="input-request-approval-actions" role="group" aria-label={parts.title}>
-              {activeOtherSelected ? (
-                <>
-                  <button
-                    type="button"
-                    className="input-request-dismiss"
-                    onClick={() =>
-                      updateSelection(activeQuestion.id, visibleOptions[0]?.optionIndex ?? 0)
-                    }
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    className="input-request-submit"
-                    onClick={submitIfAllowed}
-                    disabled={!canSubmit}
-                  >
-                    Send
-                  </button>
-                </>
-              ) : (
-                visibleOptions.map(({ option, optionIndex }, displayIndex) => (
-                  <button
-                    key={`${activeQuestion.id}-option-${optionIndex}`}
-                    type="button"
-                    title={
-                      option.description ? `${option.description} (${displayIndex + 1})` : undefined
-                    }
-                    data-selected={activeSelected === optionIndex ? "true" : undefined}
-                    className={
-                      option.label.trim().toLowerCase().startsWith("allow")
-                        ? "input-request-submit"
-                        : "input-request-dismiss"
-                    }
-                    onClick={() => submitOption(optionIndex)}
-                  >
-                    {option.label}
-                  </button>
-                ))
-              )}
+              {activeOtherSelected
+                ? replyActions
+                : visibleOptions.map(({ option, optionIndex }, displayIndex) => (
+                    <button
+                      key={`${activeQuestion.id}-option-${optionIndex}`}
+                      type="button"
+                      title={
+                        option.description
+                          ? `${option.description} (${displayIndex + 1})`
+                          : undefined
+                      }
+                      data-selected={activeSelected === optionIndex ? "true" : undefined}
+                      className={
+                        option.label.trim().toLowerCase().startsWith("allow")
+                          ? "input-request-submit"
+                          : "input-request-dismiss"
+                      }
+                      onClick={() => submitOption(optionIndex)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
             </div>
           </div>
           {!command && preview}
-          {approvalDetailsOpen && (
-            <div className="input-request-approval-details">
-              <p>{parts.detail ? `${parts.title} ${parts.detail}` : parts.title}</p>
-              {parts.scope && (
-                <p className="input-request-scope">
-                  <span className="input-request-scope-label">Scope</span>
-                  <span className="input-request-scope-value">
-                    {renderApprovalScope(parts.scope)}
-                  </span>
-                </p>
-              )}
-              {!activeOtherSelected && (
-                <button
-                  type="button"
-                  className="input-request-link"
-                  onClick={() => updateSelection(activeQuestion.id, activeOptions.length)}
-                >
-                  Reply instead
-                </button>
-              )}
-            </div>
-          )}
+          {approvalDetails}
           {otherField}
         </div>
       </div>

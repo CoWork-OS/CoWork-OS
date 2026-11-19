@@ -1,5 +1,11 @@
 import type { ProviderDiagnosticFetch } from "./provider-diagnostic-fetch";
-import { isGpt62Model } from "../../../shared/llm-provider-catalog";
+import {
+  GEMINI_NEON_MODEL,
+  isGeminiNeonModel,
+  isGpt62Model,
+  isQwen4MaxModel,
+  OPENROUTER_DEFAULT_MODEL_ID,
+} from "../../../shared/llm-provider-catalog";
 import { isFable52Model } from "../../../shared/anthropic-model-capabilities";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import {
@@ -23,10 +29,14 @@ import {
 import {
   buildOpenAICompatibleSystemMessages,
   parseOpenAICompatibleToolArguments,
+  toOpenAICompatibleMessages,
 } from "./openai-compatible";
 import { createLogger } from "../../utils/logger";
 import { registerLiveModelMetadata, type ModelMetadataEntry } from "../../../shared/model-metadata";
-import { OPENROUTER_DEFAULT_MODEL_ID } from "../../../shared/llm-provider-catalog";
+import {
+  reasoningFromChatCompletionMessage,
+  reasoningFromOpenRouterMessage,
+} from "./reasoning-replay";
 
 const logger = createLogger("OpenRouter");
 const SHARED_MODEL_IMAGE_SUPPORT = new Map<string, boolean>();
@@ -174,27 +184,53 @@ export class OpenRouterProvider implements LLMProvider {
         throw this.buildImageInputUnsupportedError(model);
       }
     }
-    const messages = this.convertMessages(request, promptCache);
-    const reasoningEffort =
-      request.reasoningEffort === "none"
-        ? "low"
-        : request.reasoningEffort === "ultra"
-          ? "max"
-          : request.reasoningEffort;
+    const isNeon = isGeminiNeonModel(model);
+    const isQwen4 = isQwen4MaxModel(model);
+    const replaysReasoning = isNeon || isQwen4;
+    const messages = replaysReasoning
+      ? toOpenAICompatibleMessages(request.messages, request.system, {
+          systemBlocks: request.systemBlocks,
+          supportsImages: true,
+          openRouterReasoningDetailsModel: model,
+          ...(isQwen4 ? { replayReasoningContentForModel: model } : {}),
+        })
+      : this.convertMessages(request, promptCache);
+    let reasoningEffort = request.reasoningEffort;
+    if (replaysReasoning) {
+      if (reasoningEffort === "max" || reasoningEffort === "ultra") reasoningEffort = "xhigh";
+      if (isNeon && reasoningEffort === "none") reasoningEffort = "low";
+    } else if (isGpt62Model(model)) {
+      if (reasoningEffort === "none") reasoningEffort = "low";
+      if (reasoningEffort === "ultra") reasoningEffort = "max";
+    } else {
+      reasoningEffort = undefined;
+    }
 
     try {
       logger.debug(`Calling API with model: ${model}`);
       const data = await this.sendChatCompletion({
         model,
         messages,
-        maxTokens: request.maxTokens,
-        reasoningEffort: isGpt62Model(model) ? reasoningEffort : undefined,
+        maxTokens: isNeon
+          ? Math.min(request.maxTokens, GEMINI_NEON_MODEL.maxOutputTokens)
+          : request.maxTokens,
+        reasoningEffort,
         tools,
         toolChoice: request.toolChoice,
         promptCache,
         signal: request.signal,
       });
-      return this.convertResponse(data);
+      const result = this.convertResponse(data);
+      if (replaysReasoning) {
+        const message = data.choices?.[0]?.message;
+        const details = reasoningFromOpenRouterMessage(message, model);
+        const reasoning =
+          details.length > 0 || !isQwen4
+            ? details
+            : reasoningFromChatCompletionMessage(message, model);
+        if (reasoning.length > 0) result.reasoning = reasoning;
+      }
+      return result;
     } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
@@ -248,7 +284,8 @@ export class OpenRouterProvider implements LLMProvider {
         body: JSON.stringify({
           model: this.defaultModel,
           messages: [{ role: "user", content: "Hi" }],
-          max_tokens: 10,
+          max_tokens:
+            isGeminiNeonModel(this.defaultModel) || isQwen4MaxModel(this.defaultModel) ? 1_024 : 10,
           ...this.getParetoRouterPluginBody(this.defaultModel),
         }),
       });

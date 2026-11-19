@@ -114,6 +114,108 @@ export interface TaskTurnSummary {
   expanded: boolean;
   /** Only a finished turn with both work and a final answer can fold its work away. */
   collapsible: boolean;
+  /** What the turn did, for the header's receipt; absent when its start is not loaded. */
+  stats?: TurnWorkStats;
+}
+
+/** One turn's work in counts: what ran, what failed, and what the person decided. */
+export interface TurnWorkStats {
+  actions: number;
+  failed: number;
+  approved: number;
+  declined: number;
+}
+
+/** Approvals granted without a person deciding: rules, the safety reviewer, restart grants. */
+const AUTOMATIC_APPROVAL_REASONS = new Set([
+  "auto_review",
+  "session_auto_approve",
+  "durable_restart_allow_once",
+]);
+
+const USER_DECLINE_REASONS = new Set([
+  "assistant_input_denied",
+  "assistant_input_dismissed",
+  "review_denied_after_restart",
+]);
+
+/**
+ * Counts each turn's work by turn id ("turn:initial", "turn:<user message id>"), the same ids
+ * `applyTurnDisclosures` gives its headers. Only approvals a person answered count as approved
+ * or declined; automatic grants and lapsed cards do not. When older history is not loaded the
+ * first turn's start is missing, so it gets no counts rather than partial ones.
+ */
+export function collectTurnWorkStats(
+  events: readonly TaskEvent[],
+  options: {
+    historyComplete: boolean;
+    /**
+     * User messages the feed shows. Only these open a turn there: the task prompt is hidden
+     * and belongs to "turn:initial", so it must not open one here either.
+     */
+    turnStartIds?: ReadonlySet<string>;
+  },
+): Map<string, TurnWorkStats> {
+  const statsByTurn = new Map<string, TurnWorkStats>();
+  let turnId: string | null = options.historyComplete ? INITIAL_TURN_ID : null;
+  let current: TurnWorkStats | null = null;
+  const ensure = (): TurnWorkStats | null => {
+    if (!turnId) return null;
+    if (!current) {
+      current = { actions: 0, failed: 0, approved: 0, declined: 0 };
+      statsByTurn.set(turnId, current);
+    }
+    return current;
+  };
+  for (const event of events) {
+    const effectiveType = getEffectiveTaskEventType(event);
+    // Errors keep the timeline type even when projected, so a failed tool reads as its legacy type.
+    const type =
+      effectiveType === "timeline_error"
+        ? String(event.legacyType ?? (event.payload as { legacyType?: unknown })?.legacyType ?? "")
+        : effectiveType;
+    if (type === "user_message") {
+      if (options.turnStartIds && !(event.id && options.turnStartIds.has(event.id))) continue;
+      turnId = event.id ? `turn:${event.id}` : null;
+      current = null;
+      continue;
+    }
+    const payload =
+      event.payload && typeof event.payload === "object"
+        ? (event.payload as Record<string, unknown>)
+        : {};
+    if (type === "tool_call") {
+      const stats = ensure();
+      if (stats) stats.actions += 1;
+    } else if (type === "tool_error") {
+      const stats = ensure();
+      if (stats) stats.failed += 1;
+    } else if (type === "approval_granted") {
+      if (payload.autoResolved === true) continue;
+      if (AUTOMATIC_APPROVAL_REASONS.has(String(payload.reason))) continue;
+      const stats = ensure();
+      if (stats) stats.approved += 1;
+    } else if (type === "approval_denied") {
+      // A refused Allow may use the same reason or action as a user's denial.
+      const userDeclined = payload.userDeclined ?? USER_DECLINE_REASONS.has(String(payload.reason));
+      if (userDeclined !== true) continue;
+      const stats = ensure();
+      if (stats) stats.declined += 1;
+    }
+  }
+  return statsByTurn;
+}
+
+/** "8 actions", "1 failed", "1 approved", "1 declined": only the counts that are not zero. */
+export function formatTurnWorkStats(stats: TurnWorkStats | undefined): string[] {
+  if (!stats) return [];
+  const parts: string[] = [];
+  if (stats.actions > 0)
+    parts.push(`${stats.actions} ${stats.actions === 1 ? "action" : "actions"}`);
+  if (stats.failed > 0) parts.push(`${stats.failed} failed`);
+  if (stats.approved > 0) parts.push(`${stats.approved} approved`);
+  if (stats.declined > 0) parts.push(`${stats.declined} declined`);
+  return parts;
 }
 
 export const INITIAL_TURN_ID = "turn:initial";
@@ -912,6 +1014,8 @@ export function applyTurnDisclosures(
     isTurnExpanded: (turnId: string) => boolean;
     /** The task prompt's turn renders its header outside the feed, above the first row. */
     omitInitialHeaderRow?: boolean;
+    /** Per-turn counts for the header receipt (`collectTurnWorkStats`). */
+    statsByTurnId?: ReadonlyMap<string, TurnWorkStats>;
   },
 ): { rows: TaskFeedRow[]; turns: TaskTurnSummary[] } {
   const segments: Array<{ id: string; userRow: TaskFeedRow | null; body: TaskFeedRow[] }> = [];
@@ -989,6 +1093,8 @@ export function applyTurnDisclosures(
       expanded: !collapsible || options.isTurnExpanded(segment.id),
       collapsible,
     };
+    const stats = options.statsByTurnId?.get(segment.id);
+    if (stats) turn.stats = stats;
 
     if (segment.userRow) rows.push(segment.userRow);
     if (isRunning || work.length > 0) {
@@ -1001,7 +1107,7 @@ export function applyTurnDisclosures(
           estimatedHeight: 41,
           revision: `${turn.status}:${turn.expanded ? 1 : 0}:${turn.collapsible ? 1 : 0}:${
             turn.endedAt ?? "live"
-          }`,
+          }:${formatTurnWorkStats(turn.stats).join(",")}`,
           visiblePerfEventId: null,
         });
       }

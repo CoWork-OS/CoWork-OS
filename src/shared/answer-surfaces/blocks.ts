@@ -1,5 +1,6 @@
 import { normalizeSurfaceActionUrl, visibleSurfaceText } from "./actions";
 import { isToolDataSource } from "./data";
+import { withoutNextAction } from "./next-action";
 import { richEmbedsToPlainText } from "../rich-embeds";
 import {
   initialSurfaceState,
@@ -303,7 +304,9 @@ export function answerSurfaceToPlainText(
  * blocks become their text version (invalid or unfinished ones are dropped rather than
  * shown as raw JSON), and rich embeds (frames, HTML pages, videos) become one line each.
  */
-export function toPlainAnswerText(message: string): string {
+export function toPlainAnswerText(rawMessage: string): string {
+  // The suggested next step is a button only the desktop draws; text views drop it.
+  const message = withoutNextAction(rawMessage);
   if (!hasAnswerSurfaceBlock(message)) return richEmbedsToPlainText(message);
   const withSurfaces = splitAnswerSurfaceBlocks(message)
     .map((part) => {
@@ -319,7 +322,8 @@ export function toPlainAnswerText(message: string): string {
 }
 
 /** Removes every ```cowork-ui block, finished or not, for previews that show prose only. */
-export function withoutAnswerSurfaceBlocks(message: string): string {
+export function withoutAnswerSurfaceBlocks(rawMessage: string): string {
+  const message = withoutNextAction(rawMessage);
   // Rich embeds (frames, pages) become one line too, so a preview never shows raw HTML.
   if (!hasAnswerSurfaceBlock(message)) return richEmbedsToPlainText(message);
   const prose = splitAnswerSurfaceBlocks(message)

@@ -225,6 +225,7 @@ import { isThirdPartyGatewayTask } from "../../gateway/gateway-sender-identity";
 import { rememberPreferredNameInFolder } from "../../memory/repo/memory-repo-producers";
 import { createLogger } from "../../utils/logger";
 import { CitationTracker } from "../citation/CitationTracker";
+import { extractConnectorSources } from "../citation/connector-sources";
 import {
   canonicalizeToolName as canonicalizeToolNameUtil,
   getToolSemantics as getToolSemanticsUtil,
@@ -1293,6 +1294,17 @@ export class ToolRegistry {
 
   getCitationTracker(): CitationTracker | undefined {
     return this.citationTracker;
+  }
+
+  /** Credits a connector read's records as sources, then passes its result on unchanged. */
+  private withConnectorSources<T>(toolName: string, input: unknown, result: T): T {
+    if (this.citationTracker) {
+      this.citationTracker.addFromConnector(
+        toolName,
+        extractConnectorSources(toolName, input, result),
+      );
+    }
+    return result;
   }
 
   /**
@@ -5885,7 +5897,8 @@ ${skillDescriptions}`;
     }
 
     // Notion tools
-    if (name === "notion_action") return await this.notionTools.executeAction(input);
+    if (name === "notion_action")
+      return this.withConnectorSources(name, input, await this.notionTools.executeAction(input));
 
     // Box tools
     if (name === "box_action") return await this.boxTools.executeAction(input);
@@ -5894,7 +5907,12 @@ ${skillDescriptions}`;
     if (name === "onedrive_action") return await this.oneDriveTools.executeAction(input);
 
     // Google Drive tools
-    if (name === "google_drive_action") return await this.googleDriveTools.executeAction(input);
+    if (name === "google_drive_action")
+      return this.withConnectorSources(
+        name,
+        input,
+        await this.googleDriveTools.executeAction(input),
+      );
 
     // Gmail tools
     if (name === "gmail_action") return await this.gmailTools.executeAction(input);
@@ -5906,7 +5924,12 @@ ${skillDescriptions}`;
     }
 
     // Google Calendar tools
-    if (name === "calendar_action") return await this.googleCalendarTools.executeAction(input);
+    if (name === "calendar_action")
+      return this.withConnectorSources(
+        name,
+        input,
+        await this.googleCalendarTools.executeAction(input),
+      );
 
     // Apple Calendar tools (macOS)
     if (name === "apple_calendar_action") return await this.appleCalendarTools.executeAction(input);

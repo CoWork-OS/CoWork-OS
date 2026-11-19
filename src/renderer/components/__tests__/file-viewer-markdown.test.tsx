@@ -2,15 +2,20 @@ import type { AnchorHTMLAttributes, MouseEvent, ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import { describe, expect, it, vi } from "vitest";
-import { buildFileViewerMarkdownComponents } from "../file-viewer-markdown";
+import {
+  addFilePreviewHeadingFragments,
+  buildFileViewerMarkdownComponents,
+} from "../file-viewer-markdown";
 
 function preview(filePath = "/workspace/README.md") {
   const onOpenFile = vi.fn();
+  const onOpenFragment = vi.fn();
   const onOpenExternal = vi.fn(async (_url: string) => undefined);
   const onError = vi.fn();
   const components = buildFileViewerMarkdownComponents({
     filePath,
     onOpenFile,
+    onOpenFragment,
     onOpenExternal,
     onError,
   });
@@ -25,7 +30,7 @@ function preview(filePath = "/workspace/README.md") {
     Link({ href, children: "Open" }).props.onClick!(event);
     return event;
   };
-  return { components, click, onOpenFile, onOpenExternal, onError };
+  return { components, click, onOpenFile, onOpenFragment, onOpenExternal, onError };
 }
 
 describe("file preview Markdown navigation", () => {
@@ -40,7 +45,7 @@ describe("file preview Markdown navigation", () => {
   it("resolves parent paths from a nested document and decodes file names", () => {
     const view = preview("/workspace/docs/guide.md");
     view.click("../reports/Our%20Plan.pdf#summary");
-    expect(view.onOpenFile).toHaveBeenCalledWith("/workspace/reports/Our Plan.pdf");
+    expect(view.onOpenFile).toHaveBeenCalledWith("/workspace/reports/Our Plan.pdf", "summary");
   });
 
   it("preserves reserved characters in the document directory", () => {
@@ -81,10 +86,22 @@ describe("file preview Markdown navigation", () => {
     },
   );
 
-  it("leaves in-page fragments as fragment navigation", () => {
+  it("uses preview navigation for in-page fragments without changing the app URL", () => {
     const view = preview();
-    expect(view.click("#summary").preventDefault).not.toHaveBeenCalled();
+    expect(view.click("#summary").preventDefault).toHaveBeenCalledOnce();
+    expect(view.onOpenFragment).toHaveBeenCalledWith("summary");
     expect(view.onOpenFile).not.toHaveBeenCalled();
+  });
+
+  it("assigns scoped, distinct targets to repeated headings with inline formatting", () => {
+    const markup = renderToStaticMarkup(
+      <ReactMarkdown rehypePlugins={[addFilePreviewHeadingFragments]}>
+        {"## Café *Setup*\n\n### Café `Setup`!"}
+      </ReactMarkdown>,
+    );
+    expect(markup).toContain('data-preview-fragment="café-setup"');
+    expect(markup).toContain('data-preview-fragment="café-setup-1"');
+    expect(markup).not.toContain('id="café-setup"');
   });
 
   it("reports malformed encoded file links without navigating", () => {

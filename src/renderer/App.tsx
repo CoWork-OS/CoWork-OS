@@ -2380,7 +2380,7 @@ export function App() {
     | "customize"
   >("appearance");
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
-  const [focusAutomationRoutineId, setFocusAutomationRoutineId] = useState<string | null>(null);
+  const [focusAutomationRoutine, setFocusAutomationRoutine] = useState<{ id: string } | null>(null);
   const [focusAutomationOwner, setFocusAutomationOwner] = useState<{
     owner: AutomationOwner;
     id: string;
@@ -7904,7 +7904,7 @@ export function App() {
           setCurrentView("agents");
           return;
         case "automations":
-          setFocusAutomationRoutineId(null);
+          setFocusAutomationRoutine(null);
           setCurrentView("automations");
           return;
         case "library":
@@ -8258,7 +8258,7 @@ export function App() {
   // automation, or Today for commitments and suggestions.
   const handleAttentionClick = (item: AttentionItem) => {
     if (item.ref.type === "workflow_step") {
-      setFocusAutomationRoutineId(item.ref.routineId);
+      setFocusAutomationRoutine({ id: item.ref.routineId });
       setCurrentView("automations");
       return;
     }
@@ -8803,7 +8803,7 @@ export function App() {
                 <main className="main-content automation-studio-main">
                   <AutomationStudioPanel
                     workspaceId={currentWorkspace?.id}
-                    focusRoutineId={focusAutomationRoutineId}
+                    focusRoutine={focusAutomationRoutine}
                     onOpenAdvanced={(owner, id) => {
                       const tabByOwner = {
                         routines: "routines",
@@ -9017,7 +9017,7 @@ export function App() {
                     setCurrentView("settings");
                   }}
                   onOpenRoutine={(routineId) => {
-                    setFocusAutomationRoutineId(routineId);
+                    setFocusAutomationRoutine({ id: routineId });
                     setCurrentView("automations");
                   }}
                   onOpenDevices={(deviceId) => {
@@ -9084,7 +9084,7 @@ export function App() {
                   selectedTaskId={selectedTaskId}
                   workspace={currentWorkspace}
                   onViewRoutine={(routineId) => {
-                    setFocusAutomationRoutineId(routineId);
+                    setFocusAutomationRoutine({ id: routineId });
                     setCurrentView("automations");
                   }}
                   onReviewApproval={reviewApprovalInPlace}

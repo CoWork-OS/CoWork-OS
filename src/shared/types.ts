@@ -4,6 +4,7 @@ import type {
 } from "./execution-environment";
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
+import type { ApprovalActionCard } from "./approval-action-card";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
 import type { BotDesktopNetwork, BotWorksOn } from "./bot-computer";
 import type { BotFileAccess } from "./bot-containment";
@@ -1499,6 +1500,11 @@ export interface EvidenceRef {
   sourceUrlOrPath: string;
   snippet?: string;
   capturedAt: number;
+  /** For a citation: its [N], title, the tool that read it and the connector it came from. */
+  citationIndex?: number;
+  title?: string;
+  sourceTool?: string;
+  sourceLabel?: string;
 }
 
 export type ToolType =
@@ -5187,6 +5193,12 @@ export interface RequestUserInputQuestion {
    * never carry one.
    */
   preview?: RequestUserInputPreview;
+  /**
+   * The change an approval covers, drawn as the thing itself (a calendar event) with buttons
+   * named for the effect. Set only by the main process from the reviewed request; presentation
+   * only, and the answer is still one of `options`.
+   */
+  actionCard?: ApprovalActionCard;
 }
 
 export interface RequestUserInputPreview {
@@ -9209,6 +9221,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "mistral",
   "github-copilot",
   "nano-gpt",
+  "qwencloud",
   "qwen-portal",
   "minimax",
   "minimax-portal",

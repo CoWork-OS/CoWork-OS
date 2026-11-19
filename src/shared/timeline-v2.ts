@@ -412,6 +412,28 @@ function inferLegacyActor(legacyType: EventType): TimelineEventActor {
   return "system";
 }
 
+/**
+ * The citation details a ref may carry ([N], title, reading tool, connector), kept so the
+ * answer's source badges and per-claim rows can name a source. Bounded; anything else drops.
+ */
+function citationFields(
+  obj: Record<string, unknown>,
+  indexKey: "citationIndex" | "index",
+): Pick<EvidenceRef, "citationIndex" | "title" | "sourceTool" | "sourceLabel"> {
+  const text = (value: unknown, max: number) =>
+    typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
+  const index = Number(obj[indexKey]);
+  const title = text(obj.title, 300);
+  const sourceTool = text(obj.sourceTool, 80);
+  const sourceLabel = text(obj.sourceLabel, 80);
+  return {
+    ...(Number.isSafeInteger(index) && index > 0 ? { citationIndex: index } : {}),
+    ...(title ? { title } : {}),
+    ...(sourceTool ? { sourceTool } : {}),
+    ...(sourceLabel ? { sourceLabel } : {}),
+  };
+}
+
 function toEvidenceRefs(payload: Record<string, unknown>, timestamp: number): EvidenceRef[] {
   const raw = payload.evidenceRefs;
   if (Array.isArray(raw)) {
@@ -444,6 +466,7 @@ function toEvidenceRefs(payload: Record<string, unknown>, timestamp: number): Ev
           typeof obj.capturedAt === "number" && Number.isFinite(obj.capturedAt)
             ? obj.capturedAt
             : timestamp,
+        ...citationFields(obj, "citationIndex"),
       });
     });
     return refs;
@@ -474,6 +497,7 @@ function toEvidenceRefs(payload: Record<string, unknown>, timestamp: number): Ev
       sourceUrlOrPath: url,
       snippet,
       capturedAt: timestamp,
+      ...citationFields(obj, "index"),
     });
   });
 

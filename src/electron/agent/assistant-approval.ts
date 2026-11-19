@@ -9,6 +9,10 @@ import {
   ASSISTANT_APPROVAL_QUESTION_ID,
   RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
 } from "../../shared/approval-draft-presentation";
+import {
+  actionCardButtonLabel,
+  approvalActionCardFromDetails,
+} from "../../shared/approval-action-card";
 
 // Shared so the needs-you queue can tell approval decisions from ordinary questions.
 export { ASSISTANT_APPROVAL_QUESTION_ID };
@@ -219,6 +223,11 @@ export function buildAssistantApprovalRequest(
   const permissionsText =
     reviewPermissions.length > 0 ? ` Permissions: ${reviewPermissions.join("; ")}.` : "";
   const preview = buildApprovalPreview(detailsRecord);
+  // An exact-write review keeps its own review gate; every other approval for a known calendar
+  // change is drawn as the event.
+  const actionCard = requiresExactWriteReview
+    ? undefined
+    : approvalActionCardFromDetails(detailsRecord);
   const operation =
     APPROVAL_OPERATION_NOUNS[approvalType] ??
     (normalizeText(approvalType, 80).replace(/_/g, " ") || "operation");
@@ -261,6 +270,7 @@ export function buildAssistantApprovalRequest(
             : ""
         } Do you want CoWork to continue?`,
         ...(preview ? { preview } : {}),
+        ...(actionCard ? { actionCard } : {}),
         options,
       },
     ],
@@ -278,7 +288,12 @@ export function buildAssistantApprovalMessage(
   details?: unknown,
 ): string {
   const request = buildAssistantApprovalRequest(approvalType, description, details);
-  const labels = request.questions[0].options.map((option) => `**${option.label}**`);
+  const { actionCard, options } = request.questions[0];
+  // Name the buttons as the card draws them ("Send invite", not "Allow once").
+  const labels = options.map(
+    (option) =>
+      `**${actionCard ? actionCardButtonLabel(actionCard, option.label) : option.label}**`,
+  );
   const choices =
     labels.length > 2
       ? `${labels.slice(0, -1).join(", ")}, or ${labels[labels.length - 1]}`

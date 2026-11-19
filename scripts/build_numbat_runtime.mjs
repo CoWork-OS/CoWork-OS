@@ -206,6 +206,13 @@ function findGo(cacheDir) {
   return "";
 }
 
+function withoutPSModulePath(env) {
+  // Windows env names are case-insensitive, so match the key in any case.
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => key.toLowerCase() !== "psmodulepath"),
+  );
+}
+
 async function ensureGo(cacheDir) {
   const existing = findGo(cacheDir);
   if (existing) return existing;
@@ -217,6 +224,11 @@ async function ensureGo(cacheDir) {
   fs.rmSync(sdkRoot, { recursive: true, force: true });
   fs.mkdirSync(sdkRoot, { recursive: true, mode: 0o700 });
   if (sdk.file.endsWith(".zip")) {
+    // npm on Windows runners can start from PowerShell 7, whose PSModulePath
+    // is inherited here and makes Windows PowerShell 5.1 load the PS7 Archive
+    // module; its Expand-Archive then fails with "Cannot find an overload for
+    // ExtractToDirectory". Dropping PSModulePath restores 5.1's own modules.
+    // (Not tar: GNU tar may come first on PATH and cannot read zip files.)
     run(
       "powershell.exe",
       [
@@ -230,7 +242,7 @@ async function ensureGo(cacheDir) {
         sdkRoot,
         "-Force",
       ],
-      { cwd: cacheDir },
+      { cwd: cacheDir, env: withoutPSModulePath(process.env) },
     );
   } else {
     run("tar", tarArgs(["-xzf", tarPath(archivePath), "-C", tarPath(sdkRoot)]));

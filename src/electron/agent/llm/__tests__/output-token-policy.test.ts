@@ -77,6 +77,31 @@ describe("output-token-policy", () => {
     expect(budget.transport.value).toBe(64_000);
   });
 
+  it.each([
+    ["google-vertex", "google/gemini-4-neon"],
+    ["qwencloud", "qwen4-max"],
+  ])("raises the %s output budget on continuation", (providerType, modelId) => {
+    const request = {
+      providerType,
+      modelId,
+      messages: [],
+      system: "",
+    };
+    const initial = resolveOutputTokenBudget({
+      ...request,
+      requestKind: "agentic_main",
+      phase: "initial",
+    });
+    const continuation = resolveOutputTokenBudget({
+      ...request,
+      requestKind: "continuation",
+      phase: "escalated",
+    });
+
+    expect(initial.chosenBudget).toBe(32_000);
+    expect(continuation.chosenBudget).toBe(48_000);
+  });
+
   it("routes OpenRouter Anthropic models through Anthropic-style defaults", () => {
     const budget = resolveOutputTokenBudget({
       providerType: "openrouter",

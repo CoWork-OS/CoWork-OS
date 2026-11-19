@@ -296,6 +296,7 @@ import {
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
 import { isExplicitExportConsentRequest } from "./visual-consent-policy";
 import { isHeadlessMode } from "../utils/runtime-mode";
+import { normalizeApprovalActionCard } from "../../shared/approval-action-card";
 import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
@@ -8949,13 +8950,15 @@ export class AgentDaemon extends EventEmitter {
         typeof details === "object" &&
         typeof details.responsibilityActionReview === "object" &&
         details.responsibilityActionReview?.version === 1;
-      let action: ApprovalResponseAction =
+      const requestedAction =
         response.status === "submitted"
           ? parseAssistantApprovalAction(response.answers, isResponsibilityActionReview)
           : "deny_once";
       // Answers come from the renderer: an "Always allow" the card never offered is refused.
-      if (action === "allow_workspace" && !canOfferAssistantAlwaysAllow(details))
-        action = "deny_once";
+      const action =
+        requestedAction === "allow_workspace" && !canOfferAssistantAlwaysAllow(details)
+          ? "deny_once"
+          : requestedAction;
       let approved = action !== "deny_once";
       if (validateDecision) approved = await validateDecision(approved, action);
       if (signal?.aborted) {
@@ -8977,6 +8980,7 @@ export class AgentDaemon extends EventEmitter {
           assistantInput: true,
           approvalType: type,
           reason: "assistant_input_denied",
+          userDeclined: requestedAction === "deny_once",
         });
         AgentDaemon.prototype["relayApprovalReply"].call(this, taskId, response);
       }
@@ -10536,6 +10540,7 @@ export class AgentDaemon extends EventEmitter {
           approvalId,
           action: normalizedAction,
           persistence: persistenceResult,
+          ...(!didApprove ? { userDeclined: !authorityChanged } : {}),
         });
 
         if (didApprove) {
@@ -10689,6 +10694,7 @@ export class AgentDaemon extends EventEmitter {
         action: normalizedAction,
         persistence: persistenceResult,
         recoveredAfterRestart: true,
+        ...(!didApprove ? { userDeclined: !authorityChanged } : {}),
       });
 
       if (didApprove) {
@@ -10972,10 +10978,37 @@ export class AgentDaemon extends EventEmitter {
       }
 
       if (response.status === "submitted") {
+        // An answered action card stays in the transcript as its receipt: the event it covered
+        // and the decision, taken from the stored card, never from the renderer's answer.
+        const cardQuestion = request.questions.find(
+          (question) => question.id === ASSISTANT_APPROVAL_QUESTION_ID && question.actionCard,
+        );
+        const actionCard = normalizeApprovalActionCard(cardQuestion?.actionCard);
+        const actionCardReply = (() => {
+          const reply = response.answers?.[ASSISTANT_APPROVAL_QUESTION_ID]?.otherText;
+          const clean = typeof reply === "string" ? reply.replace(/\s+/g, " ").trim() : "";
+          return clean.length > 220 ? `${clean.slice(0, 219)}…` : clean;
+        })();
         this.logEvent(request.taskId, "assistant_message", {
           message: buildStructuredInputSelectionMessage(request, response.answers),
           requestId: response.requestId,
           source: "structured_input_selection",
+          ...(actionCard
+            ? {
+                actionCard,
+                // Only an allow the card actually offered counts, as in the approval waiter.
+                actionCardApproved:
+                  parseAssistantApprovalAction(response.answers) !== "deny_once" &&
+                  Boolean(
+                    cardQuestion?.options.some(
+                      (option) =>
+                        option.label ===
+                        response.answers?.[ASSISTANT_APPROVAL_QUESTION_ID]?.optionLabel,
+                    ),
+                  ),
+                ...(actionCardReply ? { actionCardReply } : {}),
+              }
+            : {}),
         });
       }
 
@@ -16408,6 +16441,7 @@ export class AgentDaemon extends EventEmitter {
       failureClass?: Task["failureClass"];
       budgetUsage?: Task["budgetUsage"];
       outputSummary?: TaskOutputSummary;
+      answerCitations?: import("../../shared/answer-citations").AnswerCitationSource[];
       waiveFailedStepIds?: string[];
       failedMutationRequiredStepIds?: string[];
       waivedVerificationStepIds?: string[];
@@ -17422,6 +17456,9 @@ export class AgentDaemon extends EventEmitter {
       message: terminalStatusMessage,
       lastRunDurationMs,
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
+      ...(isCompletedOutcome && metadata?.answerCitations
+        ? { answerCitations: metadata.answerCitations }
+        : {}),
       ...(resolvedOutcome.status !== "completed" ? { status: resolvedOutcome.status } : {}),
       terminalStatus,
       ...(memoryExecutionReceipt ? { memoryExecutionReceipt } : {}),

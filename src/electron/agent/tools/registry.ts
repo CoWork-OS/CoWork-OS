@@ -813,6 +813,8 @@ export class ToolRegistry {
   private _deepWorkMode = false;
   private _codeExecTools?: CodeExecTools;
   private toolRestrictionSet: ParsedToolRestrictions = parseToolRestrictions();
+  /** MCP servers the user turned off for this conversation (agentConfig.connectorsOff). */
+  private connectorsOff: ReadonlySet<string> = new Set();
   /** MCP servers whose tools are deferred to tool_search (see getMCPToolDefinitions). */
   private deferredMcpServers: Array<{ name: string; toolCount: number }> = [];
   private shadowedToolsLogged = false;
@@ -925,6 +927,40 @@ export class ToolRegistry {
     // individual tool names (e.g., "read_clipboard").
     this.toolRestrictionSet = parseToolRestrictions(restrictions);
     this.invalidateToolCaches();
+  }
+
+  /**
+   * Turns connectors off (or back on) for this conversation. It only narrows: a tool of an
+   * off server is hidden and refused like a task restriction; every other check still runs.
+   */
+  setConnectorsOff(serverIds: readonly string[] | undefined): void {
+    const next = new Set((serverIds || []).filter((id) => typeof id === "string" && id));
+    if (
+      next.size === this.connectorsOff.size &&
+      [...next].every((id) => this.connectorsOff.has(id))
+    )
+      return;
+    this.connectorsOff = next;
+    this.invalidateToolCaches();
+  }
+
+  /** Whether the tool belongs to a connector turned off for this conversation. */
+  private isConnectorTurnedOff(toolName: string): boolean {
+    if (!this.connectorsOff?.size) return false;
+    let prefix = "mcp_";
+    try {
+      prefix = MCPSettingsManager.loadSettings().toolNamePrefix || prefix;
+    } catch {
+      // Settings unavailable: the default prefix still classifies connector tools.
+    }
+    if (!toolName.startsWith(prefix)) return false;
+    try {
+      const id = MCPClientManager.getInstance().getServerIdForTool(toolName.slice(prefix.length));
+      return typeof id === "string" && this.connectorsOff.has(id);
+    } catch {
+      // Unknown owner while connectors are turned off: refuse rather than guess.
+      return true;
+    }
   }
 
   private invalidateToolCaches(): void {
@@ -1604,6 +1640,7 @@ export class ToolRegistry {
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (isToolDeniedByRestrictions(toolName, this.toolRestrictionSet)) return true;
+    if (this.isConnectorTurnedOff(toolName)) return true;
     try {
       if (this.isBlockedByBotWorksOn(toolName)) return true;
       if (this.isBlockedByBotContainment(toolName)) return true;
@@ -1645,6 +1682,7 @@ export class ToolRegistry {
     if (isToolDeniedByRestrictions(toolName, this.toolRestrictionSet)) {
       return false;
     }
+    if (this.isConnectorTurnedOff(toolName)) return false;
     if (this.isBlockedByBotWorksOn(toolName)) {
       return false;
     }
@@ -4537,7 +4575,12 @@ export class ToolRegistry {
       this.deferredMcpServers = [];
       for (const [id, count] of toolCountByServer) {
         const server = serversById.get(id);
-        if (count > MCP_DEFERRED_SERVER_TOOL_THRESHOLD && server?.enabled !== false)
+        // A connector turned off for this conversation is not advertised either.
+        if (
+          count > MCP_DEFERRED_SERVER_TOOL_THRESHOLD &&
+          server?.enabled !== false &&
+          !this.connectorsOff?.has(id)
+        )
           this.deferredMcpServers.push({ name: server?.name || id, toolCount: count });
       }
 
@@ -6463,6 +6506,10 @@ ${skillDescriptions}`;
     const configuredPolicy = getConfiguredMcpToolPolicy(name);
     if (configuredPolicy?.enabled === false) {
       throw new Error(`MCP server for "${name}" is disabled`);
+    }
+    // Also refused by the policy pipeline; checked here too for any direct caller.
+    if (this.isConnectorTurnedOff(name)) {
+      throw new Error(`"${routedServer?.name || name}" is turned off for this conversation`);
     }
     const endpointDecision = this.evaluateMcpEndpointNetworkPolicy(name);
     if (endpointDecision?.action === "deny") {

@@ -2724,6 +2724,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     modelKey: string;
     reasoningEffort?: LLMReasoningEffort;
   }) => ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_MODEL, selection),
+  setTaskConnectorOff: (change: { taskId: string; connectorId: string; off: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_CONNECTOR_OFF, change),
   archiveTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE, id),
   unarchiveTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_UNARCHIVE, id),
   archiveWorkspaceSessions: (workspaceId: string) =>
@@ -6198,6 +6200,12 @@ export interface ElectronAPI {
     providerType: LLMProviderType;
     modelKey: string;
     reasoningEffort?: LLMReasoningEffort;
+  }) => Promise<Task>;
+  /** Turns one connector (an MCP server id) off or back on for one conversation. */
+  setTaskConnectorOff?: (change: {
+    taskId: string;
+    connectorId: string;
+    off: boolean;
   }) => Promise<Task>;
   archiveTask: (id: string) => Promise<Any>;
   /** Brings an archived session back to the sidebar. */

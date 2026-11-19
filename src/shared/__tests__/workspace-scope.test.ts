@@ -61,4 +61,18 @@ describe("buildWorkspaceScope", () => {
     });
     expect(scope.connectors.map((c) => c.name)).toEqual(["GitHub"]);
   });
+
+  it("keeps connectors turned off for the conversation listed, after the ones still on", () => {
+    const scope = buildWorkspaceScope({
+      connectors,
+      skills: [],
+      usedToolNames: new Set(),
+      usedSkills: [],
+      connectorsOff: ["gh"],
+    });
+    expect(scope.connectors.map((c) => [c.name, c.off])).toEqual([
+      ["Salesforce", false],
+      ["GitHub", true],
+    ]);
+  });
 });

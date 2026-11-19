@@ -75,6 +75,33 @@ describe("AgentDaemon.createChildTask", () => {
     ]);
   });
 
+  it("keeps connectors the user turned off for the parent off for the child", async () => {
+    const taskRepo = {
+      findById: vi.fn(() => ({
+        id: "parent",
+        status: "executing",
+        agentConfig: { connectorsOff: ["server-slack"] },
+      })),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({ id: "child", ...task })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Helper",
+      prompt: "Help",
+      workspaceId: "ws",
+      parentTaskId: "parent",
+      agentType: "sub",
+      // A caller can add to the list, never shorten it.
+      agentConfig: { connectorsOff: ["server-jira"] } as Any,
+    });
+    expect(child.agentConfig.connectorsOff).toEqual(["server-slack", "server-jira"]);
+  });
+
   it("keeps a child on no more computer than the bot that delegated it", async () => {
     const taskRepo = {
       findById: vi.fn(() => ({

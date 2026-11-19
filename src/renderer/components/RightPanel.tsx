@@ -103,6 +103,7 @@ import { assignAgentGlyphs, getAgentGlyphForSeed } from "../utils/agent-glyphs";
 import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
 import { scrollBehavior } from "../utils/motion";
 import { buildWorkspaceScope, type WorkspaceScope } from "../../shared/workspace-scope";
+import { withConnectorOff } from "../../shared/connectors-off";
 import "./right-panel.css";
 
 /**
@@ -936,7 +937,9 @@ function getActiveContextSignature(
 
 function getWorkspaceScopeSignature(scope: WorkspaceScope): string {
   return [
-    scope.connectors.map((c) => `${c.id}:${c.name}:${c.icon}:${c.used ? 1 : 0}`).join("|"),
+    scope.connectors
+      .map((c) => `${c.id}:${c.name}:${c.icon}:${c.used ? 1 : 0}:${c.off ? 1 : 0}`)
+      .join("|"),
     scope.usedSkills.join("|"),
     String(scope.otherSkillCount),
   ].join("::");
@@ -1386,6 +1389,10 @@ const FolderSection = memo(
  * What this conversation can reach, shown from the start: its folder, the connectors it may
  * call and the skills it may apply. Ones it has used so far are marked "Used".
  */
+function openConnectorSettings(): void {
+  window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "connectors" } }));
+}
+
 const WorkspaceSection = memo(
   function WorkspaceSection({
     visible,
@@ -1393,6 +1400,7 @@ const WorkspaceSection = memo(
     scope,
     workspace,
     toggleSection,
+    onToggleConnector,
     rendererPerfLoggingEnabled,
   }: {
     visible: boolean;
@@ -1400,6 +1408,8 @@ const WorkspaceSection = memo(
     scope: WorkspaceScope;
     workspace: Workspace | null;
     toggleSection: () => void;
+    /** Turns a connector off or back on for this conversation; absent where unsupported. */
+    onToggleConnector?: (connectorId: string) => void;
     rendererPerfLoggingEnabled: boolean;
   }) {
     const folder = workspace?.path && !workspace.isTemp ? workspace : null;
@@ -1407,6 +1417,7 @@ const WorkspaceSection = memo(
     if (!visible || (!folder && scope.connectors.length === 0 && !hasSkills)) return null;
     recordRendererRender("RightPanel.section", "workspace", rendererPerfLoggingEnabled);
     const usedConnectorCount = scope.connectors.filter((connector) => connector.used).length;
+    const onCount = scope.connectors.filter((connector) => !connector.off).length;
     return (
       <div className="right-panel-section cli-section workspace-scope-section">
         <button
@@ -1423,9 +1434,9 @@ const WorkspaceSection = memo(
           {scope.connectors.length > 0 && (
             <span
               className="cli-active-context-badge"
-              title={`${usedConnectorCount} of ${scope.connectors.length} connectors used`}
+              title={`${onCount} of ${scope.connectors.length} connectors on, ${usedConnectorCount} used`}
             >
-              {scope.connectors.length}
+              {onCount}
             </span>
           )}
           <span className="cli-section-toggle">
@@ -1444,12 +1455,19 @@ const WorkspaceSection = memo(
                     <span className="terminal-only"># folder:</span>
                     <span className="modern-only">Folder</span>
                   </div>
-                  <div className="cli-context-item workspace-scope-folder" title={folder.path}>
+                  <button
+                    type="button"
+                    className="cli-context-item workspace-scope-folder workspace-scope-link"
+                    title={`${folder.path}\n\nShow in Finder`}
+                    onClick={() =>
+                      void window.electronAPI?.showInFinder?.(folder.path, folder.path)
+                    }
+                  >
                     <span className="cli-active-context-icon">
                       <FolderOpen size={14} />
                     </span>
                     <span className="cli-context-key">{folder.name}</span>
-                  </div>
+                  </button>
                 </div>
               )}
               {scope.connectors.length > 0 && (
@@ -1467,13 +1485,37 @@ const WorkspaceSection = memo(
                       return (
                         <div
                           key={connector.id}
-                          className={`cli-context-item workspace-scope-item${connector.used ? " is-used" : ""}`}
+                          className={`cli-context-item workspace-scope-item workspace-scope-connector${connector.used ? " is-used" : ""}${connector.off ? " is-off" : ""}`}
                         >
                           <span className="cli-active-context-icon">
                             <ConnectorIcon size={14} />
                           </span>
-                          <span className="cli-context-key">{connector.name}</span>
+                          <button
+                            type="button"
+                            className="cli-context-key workspace-scope-name"
+                            title={`Open ${connector.name} in Connectors settings`}
+                            onClick={openConnectorSettings}
+                          >
+                            {connector.name}
+                          </button>
                           {connector.used && <span className="workspace-scope-used">Used</span>}
+                          {onToggleConnector && (
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={!connector.off}
+                              aria-label={`${connector.name} in this conversation`}
+                              title={
+                                connector.off
+                                  ? `Turn ${connector.name} back on for this conversation`
+                                  : `Turn ${connector.name} off for this conversation`
+                              }
+                              className="workspace-scope-switch"
+                              onClick={() => onToggleConnector(connector.id)}
+                            >
+                              <span className="workspace-scope-switch-knob" aria-hidden="true" />
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -1517,6 +1559,7 @@ const WorkspaceSection = memo(
     prev.workspace?.name === next.workspace?.name &&
     prev.workspace?.isTemp === next.workspace?.isTemp &&
     getWorkspaceScopeSignature(prev.scope) === getWorkspaceScopeSignature(next.scope) &&
+    prev.onToggleConnector === next.onToggleConnector &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
@@ -2300,6 +2343,43 @@ function RightPanelComponent({
     return names;
   }, [events, sharedTaskEventUi]);
   const taskAllowedTools = task?.agentConfig?.allowedTools;
+  // Switches answer at once; the saved task confirms (or undoes) the change.
+  const [connectorsOffDraft, setConnectorsOffDraft] = useState<{
+    taskId: string;
+    ids: string[];
+  } | null>(null);
+  const taskId = task?.id;
+  const persistedConnectorsOff = task?.agentConfig?.connectorsOff;
+  const connectorsOff = useMemo(
+    () =>
+      connectorsOffDraft && connectorsOffDraft.taskId === taskId
+        ? connectorsOffDraft.ids
+        : persistedConnectorsOff || [],
+    [connectorsOffDraft, taskId, persistedConnectorsOff],
+  );
+  const connectorsOffRef = useRef(connectorsOff);
+  connectorsOffRef.current = connectorsOff;
+  const canToggleConnectors =
+    Boolean(taskId) && !task?.agentConfig?.botConversation && hasHostMethod("setTaskConnectorOff");
+  const toggleConnector = useCallback(
+    async (connectorId: string) => {
+      if (!taskId) return;
+      const current = connectorsOffRef.current;
+      const off = !current.includes(connectorId);
+      setConnectorsOffDraft({ taskId, ids: withConnectorOff(current, connectorId, off) });
+      try {
+        const updated = await window.electronAPI.setTaskConnectorOff?.({
+          taskId,
+          connectorId,
+          off,
+        });
+        setConnectorsOffDraft({ taskId, ids: updated?.agentConfig?.connectorsOff || [] });
+      } catch {
+        setConnectorsOffDraft({ taskId, ids: current });
+      }
+    },
+    [taskId],
+  );
   const workspaceScope = useMemo(
     () =>
       buildWorkspaceScope({
@@ -2308,8 +2388,9 @@ function RightPanelComponent({
         usedToolNames,
         usedSkills,
         allowedTools: taskAllowedTools,
+        connectorsOff,
       }),
-    [activeContext, usedToolNames, usedSkills, taskAllowedTools],
+    [activeContext, usedToolNames, usedSkills, taskAllowedTools, connectorsOff],
   );
   const isLiveExecutionMode =
     task?.status === "executing" || (task?.status === "completed" && hasActiveChildren);
@@ -2654,6 +2735,7 @@ function RightPanelComponent({
         scope={stableWorkspaceScope}
         workspace={workspace}
         toggleSection={() => toggleSection("workspace")}
+        onToggleConnector={canToggleConnectors ? toggleConnector : undefined}
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
       />
 

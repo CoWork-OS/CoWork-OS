@@ -19,6 +19,8 @@ export type WorkspaceScopeConnector = {
   name: string;
   icon: string;
   used: boolean;
+  /** Turned off for this conversation: its tools are hidden from and refused to the agent. */
+  off: boolean;
 };
 
 export type WorkspaceScope = {
@@ -44,7 +46,10 @@ export function buildWorkspaceScope(input: {
   usedSkills: readonly string[];
   /** The task's tool allow-list; when set, a connector counts only if one of its tools is on it. */
   allowedTools?: readonly string[];
+  /** Connector ids turned off for this conversation. */
+  connectorsOff?: readonly string[];
 }): WorkspaceScope {
+  const off = new Set(input.connectorsOff || []);
   const allowed = input.allowedTools?.length ? new Set(input.allowedTools) : null;
   const connectors = input.connectors
     .filter((connector) => connector.status === "connected")
@@ -54,8 +59,15 @@ export function buildWorkspaceScope(input: {
       name: connector.name,
       icon: connector.icon,
       used: connector.tools.some((tool) => input.usedToolNames.has(tool)),
+      off: off.has(connector.id),
     }))
-    .sort((a, b) => Number(b.used) - Number(a.used) || a.name.localeCompare(b.name));
+    // Used first, then on, then off; by name within each.
+    .sort(
+      (a, b) =>
+        Number(b.used) - Number(a.used) ||
+        Number(a.off) - Number(b.off) ||
+        a.name.localeCompare(b.name),
+    );
 
   const usedKeys = new Set(input.usedSkills.map(skillKey));
   const otherSkillCount = input.skills.filter(

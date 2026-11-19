@@ -2622,3 +2622,85 @@ button.collab-agent-summary-row:hover {
   font-size: 11px;
   color: var(--color-text-muted);
 }
+
+/* Rows open what they name: the folder in Finder, a connector in Connectors settings. */
+.right-panel .workspace-scope-link,
+.right-panel .workspace-scope-name {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.right-panel .workspace-scope-link {
+  width: 100%;
+}
+
+.right-panel .workspace-scope-name {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  justify-self: stretch;
+}
+
+.right-panel .workspace-scope-connector .workspace-scope-name {
+  display: block;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.right-panel .workspace-scope-name:hover,
+.right-panel .workspace-scope-link:hover .cli-context-key {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.right-panel .cli-active-context-scroll .workspace-scope-connector {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+/* Off for this conversation: the row fades, the switch stays clear. */
+.right-panel .workspace-scope-connector.is-off .cli-active-context-icon,
+.right-panel .workspace-scope-connector.is-off .workspace-scope-name {
+  opacity: 0.45;
+}
+
+.workspace-scope-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 26px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-accent);
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease-out);
+}
+
+.workspace-scope-switch[aria-checked="false"] {
+  background: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+}
+
+.workspace-scope-switch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.workspace-scope-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: #fff;
+  transition: transform 0.15s var(--ease-out);
+}
+
+.workspace-scope-switch[aria-checked="true"] .workspace-scope-switch-knob {
+  transform: translateX(11px);
+}

@@ -416,6 +416,7 @@ import {
   TaskRenameSchema,
   TaskWorkspaceUpdateSchema,
   TaskModelSelectionSchema,
+  TaskConnectorOffSchema,
   AgentRoleModelFieldsSchema,
   TaskMessageSchema,
   EditQueuedTaskInputSchema,
@@ -1228,6 +1229,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.BOT_CAPABILITIES_GET, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.TASK_SET_CONNECTOR_OFF, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_LIST, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_START, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PROPOSAL_START_ALL, RATE_LIMIT_CONFIGS.limited);
@@ -5919,6 +5921,14 @@ export async function setupIpcHandlers(
       );
     }
     return task;
+  });
+
+  // The Workspace section's per-conversation connector switches. Narrowing only.
+  ipcMain.handle(IPC_CHANNELS.TASK_SET_CONNECTOR_OFF, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SET_CONNECTOR_OFF);
+    const validated = validateInput(TaskConnectorOffSchema, data, "conversation connector");
+    await authorizeTaskForEvent(event, validated.taskId, "manage");
+    return agentDaemon.setTaskConnectorOff(validated.taskId, validated.connectorId, validated.off);
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_PIN, async (_, id: string) => {

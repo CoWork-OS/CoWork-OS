@@ -694,6 +694,17 @@ describe("RightPanel workspace section", () => {
     expect(markup).toContain("Q4 deals");
   });
 
+  it("lets the folder row reveal the folder in Finder", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RightPanel, {
+        task,
+        workspace: { id: "ws-1", name: "Q4 deals", path: "/Users/x/Q4 deals" } as Any,
+        events: [] as Any,
+      }),
+    );
+    expect(markup).toMatch(/<button[^>]*workspace-scope-folder[^>]*Show in Finder/);
+  });
+
   it("stays hidden with nothing to show", () => {
     const markup = renderToStaticMarkup(
       React.createElement(RightPanel, {

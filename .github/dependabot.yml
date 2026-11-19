@@ -17,6 +17,17 @@ updates:
       minor-and-patch:
         patterns:
           - "*"
+        # These updates need deliberate work, so they arrive as their own PRs
+        # instead of blocking every grouped update:
+        # - The renderer build pins the exact Mermaid parser sources
+        #   (scripts/build/mermaid-parser/source-lock.json) and fails on any
+        #   other version.
+        # - The pdf.js chunk sits close to the 500 kB renderer chunk budget
+        #   (scripts/qa/check-renderer-bundles.mjs); 6.5 pushes it over.
+        exclude-patterns:
+          - "mermaid"
+          - "@mermaid-js/*"
+          - "pdfjs-dist"
         update-types:
           - "minor"
           - "patch"

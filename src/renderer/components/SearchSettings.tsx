@@ -1,9 +1,5 @@
 import { useState, useEffect } from "react";
-import {
-  SearchProviderType,
-  SearchConfigStatus,
-  SearchProviderInfo,
-} from "../../shared/types";
+import { SearchProviderType, SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
 
 /** A closing provider stays visible only for people who already set it up. */
 export function isProviderOffered(provider: SearchProviderInfo): boolean {

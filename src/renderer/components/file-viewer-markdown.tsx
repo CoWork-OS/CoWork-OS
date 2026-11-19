@@ -1,5 +1,8 @@
-import type { Element, Root, RootContent } from "hast";
-import type { Components } from "react-markdown";
+import type { Components, ExtraProps } from "react-markdown";
+
+type MarkdownElement = NonNullable<ExtraProps["node"]>;
+type MarkdownChild = MarkdownElement["children"][number];
+type MarkdownParent = { children: readonly (MarkdownChild | { type: "doctype" })[] };
 
 interface FileViewerMarkdownOptions {
   filePath: string;
@@ -76,7 +79,7 @@ export function buildFileViewerMarkdownComponents({
   };
 }
 
-function headingText(node: RootContent): string {
+function headingText(node: MarkdownChild): string {
   if (node.type === "text") return node.value;
   if (node.type !== "element") return "";
   if (node.tagName === "img") return String(node.properties.alt ?? "");
@@ -85,9 +88,9 @@ function headingText(node: RootContent): string {
 
 /** Generate heading targets local to a preview, without adding IDs to the app document. */
 export function addFilePreviewHeadingFragments() {
-  return (tree: Root) => {
+  return (tree: MarkdownParent) => {
     const used = new Set<string>();
-    const visit = (parent: Root | Element) => {
+    const visit = (parent: MarkdownParent) => {
       for (const node of parent.children) {
         if (node.type !== "element") continue;
         if (/^h[1-6]$/.test(node.tagName)) {

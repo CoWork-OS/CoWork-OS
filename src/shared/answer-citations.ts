@@ -280,12 +280,13 @@ function findBibliography(lines: string[], fenceMask: boolean[]): Bibliography |
 }
 
 /** A saved answer's own numbered links, independent of its session's source registry. */
-export function readAnswerBibliography(text: string): AnswerCitationSource[] {
+export function readAnswerBibliography(text: string): AnswerCitationSource[] | null {
   const lines = text.split("\n");
   const bibliography = findBibliography(lines, computeFenceMask(lines));
-  return !bibliography || bibliography === "unusable"
-    ? []
-    : bibliography.entries.map(({ number, url, title }) => ({ index: number, url, title }));
+  if (bibliography === "unusable") return null;
+  return (
+    bibliography?.entries.map(({ number, url, title }) => ({ index: number, url, title })) ?? []
+  );
 }
 
 /**

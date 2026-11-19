@@ -128,6 +128,7 @@ export function readSavedAnswerCitations(
   if (Array.isArray(snapshot)) return readCitationRows(snapshot);
   if (!/\[\d/.test(text)) return [];
   const ownSources = readAnswerBibliography(text);
+  if (ownSources === null) return [];
   if (ownSources.length) {
     return readCitationRows(ownSources).map(
       (source) =>

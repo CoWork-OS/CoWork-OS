@@ -97,4 +97,14 @@ describe("saved answer citations", () => {
     const empty = event("empty", "assistant_message", { message: text, answerCitations: [] });
     expect(readTaskAnswerCitations(empty)).toEqual([]);
   });
+
+  it("leaves a conflicting legacy bibliography unlinked even when an older snapshot exists", () => {
+    const text =
+      "A claim [1].\n\n## Sources\n- [1] [A](https://example.com/a)\n- [1] [B](https://example.com/b)";
+    const legacy = indexLegacyInitialAnswerCitations(legacyEvents).get(firstAnswer.id);
+    expect(legacy).toHaveLength(1);
+    expect(
+      readTaskAnswerCitations(event("ambiguous", "assistant_message", { message: text }), legacy),
+    ).toEqual([]);
+  });
 });

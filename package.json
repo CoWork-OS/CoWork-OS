@@ -215,7 +215,7 @@
     "@anthropic-ai/sdk": "^1.1.0",
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
-    "@aws-sdk/credential-provider-ini": "3.973.27",
+    "@aws-sdk/credential-provider-ini": "3.973.30",
     "@chenglou/pretext": "^1.0.0",
     "@earendil-works/pi-ai": "^1.1.0",
     "@electron/rebuild": "4.2.1",
@@ -236,7 +236,7 @@
     "chokidar": "^6.0.0",
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
-    "electron": "45.2.3",
+    "electron": "45.3.3",
     "electron-updater": "^6.8.9",
     "elkjs": "0.12.1",
     "eventsource": "^5.1.1",
@@ -276,7 +276,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@electron/asar": "4.3.1",
+    "@electron/asar": "4.3.2",
     "@types/better-sqlite3": "^9.6.0",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.6.2",
@@ -296,7 +296,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "langium": "4.4.0",
-    "oxfmt": "^0.77.0",
+    "oxfmt": "^0.78.0",
     "oxlint": "^1.47.0",
     "twilio": "^6.1.1",
     "typescript": "^5.9.0",
@@ -304,7 +304,7 @@
     "vitest": "^5.0.1"
   },
   "optionalDependencies": {
-    "better-sqlite3": "13.0.3"
+    "better-sqlite3": "13.2.0"
   },
   "bundleDependencies": [
     "baileys"

@@ -47,7 +47,8 @@ export const SIDEBAR_NOTICES: SidebarNotice[] = [
     // Google closes the Custom Search JSON API on 1 January 2027 (#914).
     id: "google-search-ending-v1",
     icon: CalendarClock,
-    label: "Google search ends 1 Jan 2027",
+    // Fits the sidebar at its default width; the tip and Settings give the year.
+    label: "Google search ends 1 Jan",
     tip: {
       title: "Google Custom Search is closing",
       description:

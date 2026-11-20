@@ -115,6 +115,8 @@ describe("Google search ending notice (#914)", () => {
 
   it("comes first, with a one-time tip that names the date and alternatives", () => {
     expect(SIDEBAR_NOTICES[0]).toBe(googleNotice);
+    // Short enough to show the date untruncated at the default sidebar width.
+    expect(googleNotice.label).toBe("Google search ends 1 Jan");
     expect(googleNotice.tip?.description).toMatch(/1 January 2027/);
     expect(googleNotice.tip?.description).toMatch(/Brave/);
   });

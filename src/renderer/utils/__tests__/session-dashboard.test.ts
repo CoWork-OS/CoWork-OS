@@ -59,6 +59,29 @@ describe("buildSessionDashboardMetrics", () => {
     expect(metrics.automationRunCount).toBe(1);
   });
 
+  it("keeps each displayed file change tied to its own event and path", () => {
+    const metrics = buildSessionDashboardMetrics(task, progress, [
+      event("1", "file_created", { path: "docs/report.md" }),
+      event("2", "file_created", { path: "dist/report.md" }),
+      event("3", "file_modified", { filePath: "summary/annual-report.md" }),
+      event("4", "artifact_created", { outputPath: "dist/bundle.js" }),
+      event("5", "file_deleted", { path: "archive/report.md" }),
+    ]);
+
+    expect(metrics.recentChanges).toEqual([
+      { id: "5", label: "Deleted report.md", path: "archive/report.md", deleted: true },
+      { id: "4", label: "Created bundle.js", path: "dist/bundle.js", deleted: false },
+      {
+        id: "3",
+        label: "Updated annual-report.md",
+        path: "summary/annual-report.md",
+        deleted: false,
+      },
+      { id: "2", label: "Created report.md", path: "dist/report.md", deleted: false },
+      { id: "1", label: "Created report.md", path: "docs/report.md", deleted: false },
+    ]);
+  });
+
   it.each(["executing", "completed", "failed"] as const)(
     "does not invent a progress percentage for a %s task without plan steps",
     (status) => {

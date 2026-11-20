@@ -2685,6 +2685,16 @@ button.collab-agent-summary-row:hover {
   background: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
 }
 
+.workspace-scope-switch[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.workspace-scope-error {
+  color: var(--color-error);
+  font-size: 12px;
+}
+
 .workspace-scope-switch:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;

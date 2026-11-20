@@ -3,19 +3,18 @@ import { CaseSensitive, ChevronDown, ChevronUp, X } from "lucide-react";
 import type { BrowserFindResult } from "./BrowserTabView";
 
 export type FindBarHandle = { focus: () => void; findNext: (forward: boolean) => void };
+export type BrowserFindOptions = { forward: boolean; findNext: boolean; matchCase: boolean };
 
 type FindBarProps = {
   result: BrowserFindResult | null;
-  onFind: (
-    text: string,
-    options: { forward: boolean; findNext: boolean; matchCase: boolean },
-  ) => void;
+  onFind: (text: string, options: BrowserFindOptions) => void;
+  onClear: () => void;
   onClose: () => void;
 };
 
 /** Find in page: match count, next/previous, match case. Esc closes and clears highlights. */
 export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
-  { result, onFind, onClose },
+  { result, onFind, onClear, onClose },
   ref,
 ) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -51,8 +50,10 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
         placeholder="Find in page"
         aria-label="Find in page"
         onChange={(event) => {
-          setText(event.target.value);
-          find(true, false, event.target.value);
+          const nextText = event.target.value;
+          setText(nextText);
+          if (nextText) find(true, false, nextText);
+          else onClear();
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {

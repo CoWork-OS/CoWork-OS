@@ -21,6 +21,7 @@ type ImageLightboxProps = {
   alt?: string;
   /** Secondary line under the file name, e.g. "PNG · 520×574 · 156 KB". */
   meta?: string;
+  actionError?: string | null;
   onClose: () => void;
   onShowInFinder?: () => void;
   onOpenExternal?: () => void;
@@ -61,6 +62,7 @@ export function ImageLightbox({
   fileName,
   alt,
   meta,
+  actionError,
   onClose,
   onShowInFinder,
   onOpenExternal,
@@ -250,6 +252,11 @@ export function ImageLightbox({
             {label}
           </span>
           {metaLine && <span className="image-lightbox-meta">{metaLine}</span>}
+          {actionError && (
+            <span className="image-lightbox-action-error" role="alert">
+              {actionError}
+            </span>
+          )}
         </div>
         <div className="image-lightbox-actions">
           {src && (

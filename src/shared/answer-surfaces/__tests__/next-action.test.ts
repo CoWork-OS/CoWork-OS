@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   NEXT_ACTION_MAX_CHARS,
   NEXT_ACTION_MAX_STEPS,
+  hasNextActionBlock,
   normalizeNextAction,
   splitNextAction,
   withoutNextAction,
@@ -22,6 +23,33 @@ describe("splitNextAction", () => {
   it("leaves messages without a block untouched", () => {
     const message = "Plain answer.\n\n```ts\nconst a = 1;\n```";
     expect(splitNextAction(message)).toEqual({ body: message, steps: [] });
+  });
+
+  it.each(["````markdown", "~~~markdown"])(
+    "preserves a literal next-step example inside %s",
+    (opening) => {
+      const closing = opening.startsWith("`") ? "````" : "~~~";
+      const answer = `Here is an example:\n\n${opening}\n${fence("Sample step")}\n${closing}`;
+      expect(hasNextActionBlock(answer)).toBe(false);
+      expect(splitNextAction(answer)).toEqual({ body: answer, steps: [] });
+    },
+  );
+
+  it("preserves an indented code example", () => {
+    const example = fence("Sample step")
+      .split("\n")
+      .map((line) => `    ${line}`)
+      .join("\n");
+    const answer = `Here is an example:\n\n${example}`;
+    expect(splitNextAction(answer)).toEqual({ body: answer, steps: [] });
+  });
+
+  it("offers a real trailing action without rewriting the earlier code example", () => {
+    const example = `Example:\n\n\`\`\`\`markdown\n${fence("Sample step")}\n\n\n\`\`\`\``;
+    expect(splitNextAction(`${example}\n\n${fence("Use that format")}`)).toEqual({
+      body: example,
+      steps: ["Use that format"],
+    });
   });
 
   it("drops a block that is not last, but never shows it as text", () => {

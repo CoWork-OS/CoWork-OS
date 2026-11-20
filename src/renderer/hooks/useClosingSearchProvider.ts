@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import type { SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
+import {
+  resolvePrimarySearchProvider,
+  supportsSearchFallback,
+} from "../utils/search-provider-selection";
 
 /** Fired by Search settings after a save, so notices re-read the provider choice. */
 export const SEARCH_SETTINGS_CHANGED = "search-settings-changed";
@@ -12,10 +16,13 @@ export function findClosingSearchProvider(
   status: Pick<SearchConfigStatus, "primaryProvider" | "fallbackProvider" | "providers"> | null,
 ): SearchProviderInfo | null {
   if (!status) return null;
-  const inUse = new Set([status.primaryProvider, status.fallbackProvider]);
+  const primary = resolvePrimarySearchProvider(status.providers, status.primaryProvider);
+  if (primary?.retirement) return primary;
+  if (!primary || !supportsSearchFallback(primary.type)) return null;
   return (
     status.providers.find(
-      (provider) => provider.retirement && provider.configured && inUse.has(provider.type),
+      (provider) =>
+        provider.retirement && provider.configured && provider.type === status.fallbackProvider,
     ) ?? null
   );
 }

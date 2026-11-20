@@ -90,6 +90,8 @@ export function WorkspaceDropdownMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const returnToFolderId = useRef<string | null>(null);
   const isPlaced = fit !== null;
   const showFilter = workspaces.length > FILTER_THRESHOLD;
   const shown = showFilter ? filterWorkspaces(workspaces, query) : workspaces;
@@ -176,18 +178,40 @@ export function WorkspaceDropdownMenu({
     updateFade();
   }, [updateFade]);
 
-  // The menu is hidden until its first measurement, and a hidden field can't take focus,
-  // so focus the filter once it is placed.
-  useEffect(() => {
-    if (isPlaced) filterRef.current?.focus();
-  }, [isPlaced]);
+  const focusPicker = useCallback(() => {
+    const target =
+      filterRef.current ??
+      listRef.current?.querySelector<HTMLButtonElement>(".workspace-dropdown-item.active") ??
+      menuRef.current?.querySelector<HTMLButtonElement>(".workspace-dropdown-item");
+    target?.focus();
+  }, []);
 
-  // Keep the inline remove confirmation in view.
-  useEffect(() => {
-    if (!confirmingId) return;
-    listRef.current
-      ?.querySelector<HTMLElement>(".workspace-dropdown-confirm")
-      ?.scrollIntoView({ block: "nearest" });
+  // The portal stays hidden until its first measurement.
+  useLayoutEffect(() => {
+    if (isPlaced) focusPicker();
+  }, [isPlaced, focusPicker]);
+
+  useLayoutEffect(() => {
+    if (confirmingId) {
+      cancelRef.current
+        ?.closest(".workspace-dropdown-confirm")
+        ?.scrollIntoView({ block: "nearest" });
+      cancelRef.current?.focus({ preventScroll: true });
+    } else if (returnToFolderId.current !== null) {
+      const folderId = returnToFolderId.current;
+      returnToFolderId.current = null;
+      const trigger = listRef.current?.querySelector<HTMLButtonElement>(
+        `.workspace-dropdown-remove[data-workspace-id="${CSS.escape(folderId)}"]`,
+      );
+      if (trigger) trigger.focus();
+      else focusPicker();
+    }
+  }, [confirmingId, focusPicker]);
+
+  const cancelRemoval = useCallback(() => {
+    returnToFolderId.current = confirmingId;
+    setConfirmingId(null);
+    setError(null);
   }, [confirmingId]);
 
   useEffect(() => {
@@ -196,16 +220,15 @@ export function WorkspaceDropdownMenu({
       event.preventDefault();
       event.stopPropagation();
       if (confirmingId) {
-        if (removingId) return;
-        setConfirmingId(null);
-        setError(null);
+        if (!removingId) cancelRemoval();
         return;
       }
       onClose?.();
+      anchorRef.current?.parentElement?.querySelector("button")?.focus({ preventScroll: true });
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [confirmingId, removingId, onClose]);
+  }, [cancelRemoval, confirmingId, removingId, onClose]);
 
   // Until the first measurement (before paint) the menu sits hidden at the window origin.
   const menuStyle: CSSProperties = fit
@@ -218,11 +241,12 @@ export function WorkspaceDropdownMenu({
     : { left: 0, top: 0, visibility: "hidden" };
 
   const remove = async (workspace: Workspace) => {
-    if (!onRemove) return;
+    if (!onRemove || removingId) return;
     setRemovingId(workspace.id);
     setError(null);
     try {
       await onRemove(workspace);
+      returnToFolderId.current = workspace.id;
       setConfirmingId(null);
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Could not remove the folder.");
@@ -239,6 +263,8 @@ export function WorkspaceDropdownMenu({
           ref={menuRef}
           className={`workspace-dropdown workspace-dropdown-floating workspace-dropdown-${fit?.placement ?? "up"}`}
           style={menuStyle}
+          role="dialog"
+          aria-label="Choose a folder"
         >
           {workspaces.length > 0 && (
             <>
@@ -286,12 +312,10 @@ export function WorkspaceDropdownMenu({
                         </div>
                         <div className="workspace-dropdown-confirm-actions">
                           <button
+                            ref={cancelRef}
                             type="button"
                             className="workspace-dropdown-confirm-cancel"
-                            onClick={() => {
-                              setConfirmingId(null);
-                              setError(null);
-                            }}
+                            onClick={cancelRemoval}
                             disabled={removingId === w.id}
                           >
                             Cancel
@@ -338,6 +362,8 @@ export function WorkspaceDropdownMenu({
                         <button
                           type="button"
                           className="workspace-dropdown-remove"
+                          data-workspace-id={w.id}
+                          disabled={removingId !== null}
                           aria-label={`Remove ${w.name} from CoWork`}
                           title="Remove from CoWork"
                           onClick={() => {

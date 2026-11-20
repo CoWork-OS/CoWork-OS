@@ -3524,7 +3524,7 @@ function MainContentComponent({
   }, []);
   useDismissable(skillsMenuRef, showSkillsMenu, closeSkillsMenu);
 
-  // Close workspace dropdown on click outside or Escape
+  // The folder picker handles Escape, including its inline confirmation.
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       // The folder menu renders in a portal on <body>, outside the container.
@@ -3537,16 +3537,11 @@ function MainContentComponent({
         setShowWorkspaceDropdown(false);
       }
     };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowWorkspaceDropdown(false);
-    };
     if (showWorkspaceDropdown) {
       document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("keydown", handleKeyDown);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [showWorkspaceDropdown]);
 
@@ -7953,6 +7948,8 @@ function MainContentComponent({
                           <button
                             className="folder-selector"
                             onClick={handleWorkspaceDropdownToggle}
+                            aria-haspopup="dialog"
+                            aria-expanded={showWorkspaceDropdown}
                           >
                             <svg
                               width="14"
@@ -8269,7 +8266,7 @@ function MainContentComponent({
                     type="button"
                     className="calm-folder-button"
                     onClick={handleWorkspaceDropdownToggle}
-                    aria-haspopup="menu"
+                    aria-haspopup="dialog"
                     aria-expanded={showWorkspaceDropdown}
                     title={
                       isBrowserHost
@@ -8308,6 +8305,8 @@ function MainContentComponent({
                     <button
                       className="input-status-workspace"
                       onClick={handleWorkspaceDropdownToggle}
+                      aria-haspopup="dialog"
+                      aria-expanded={showWorkspaceDropdown}
                       title={
                         isBrowserHost
                           ? workspace?.name || "Select project"

@@ -422,28 +422,18 @@ export function SessionDashboardCard({
       {showSummary && metrics && metrics.recentChanges.length > 0 ? (
         <div className="session-dashboard-changes">
           <span className="session-dashboard-section-label">Recent workspace changes</span>
-          {metrics.recentChanges.map((change, index) => {
-            const file = events
-              .filter((event) =>
-                ["file_created", "file_modified", "file_deleted", "artifact_created"].includes(
-                  String(event.legacyType || event.type),
-                ),
-              )
-              .map((event) => event.payload?.path)
-              .filter((path): path is string => typeof path === "string")
-              .find((path) => change.endsWith(String(path).split(/[\\/]/).pop() || path));
-            return (
-              <button
-                type="button"
-                className="session-dashboard-change"
-                key={`${change}-${index}`}
-                onClick={() => file && onOpenFile?.(file)}
-                disabled={!file}
-              >
-                {change}
-              </button>
-            );
-          })}
+          {metrics.recentChanges.map(({ id, label, path, deleted }) => (
+            <button
+              type="button"
+              className="session-dashboard-change"
+              key={id}
+              title={path}
+              onClick={() => path && onOpenFile?.(path)}
+              disabled={!path || deleted || !onOpenFile}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       ) : null}
       {task.branchFromTaskId && onSelectTask ? (

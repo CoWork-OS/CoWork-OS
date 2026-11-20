@@ -408,7 +408,11 @@ export class SearchProviderFactory {
         serpapi: settings.serpapi?.apiKey ? settings.serpapi : existingSettings.serpapi,
         google:
           settings.google?.apiKey || settings.google?.searchEngineId
-            ? { ...existingSettings.google, ...settings.google }
+            ? {
+                apiKey: settings.google.apiKey || existingSettings.google?.apiKey,
+                searchEngineId:
+                  settings.google.searchEngineId || existingSettings.google?.searchEngineId,
+              }
             : existingSettings.google,
         searxng: Object.prototype.hasOwnProperty.call(settings, "searxng")
           ? settings.searxng?.baseUrl

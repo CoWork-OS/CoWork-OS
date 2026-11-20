@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { SearchProviderType, SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
 import { SEARCH_SETTINGS_CHANGED } from "../hooks/useClosingSearchProvider";
+import {
+  resolvePrimarySearchProvider,
+  supportsSearchFallback,
+} from "../utils/search-provider-selection";
 
 /** A closing provider stays visible only for people who already set it up. */
 export function isProviderOffered(provider: SearchProviderInfo): boolean {
@@ -63,7 +67,11 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
         if (prev && offered.some((provider) => provider.type === prev)) {
           return prev;
         }
-        return status.primaryProvider ?? offered[0]?.type ?? null;
+        return (
+          offered.find((provider) => provider.type === status.primaryProvider)?.type ??
+          offered[0]?.type ??
+          null
+        );
       });
       onStatusChange?.(status.isConfigured);
     } catch (error) {
@@ -125,11 +133,13 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
     }
   };
 
-  // DuckDuckGo is used only when no configured provider exists or it is explicitly selected.
-  const configuredProviders =
-    configStatus?.providers.filter((p) => p.configured && p.type !== "duckduckgo") || [];
-  const hasMultipleProviders = configuredProviders.length > 1;
   const offeredProviders = configStatus?.providers.filter(isProviderOffered) || [];
+  const configuredProviders = offeredProviders.filter((provider) => provider.configured);
+  const selectedPrimary =
+    resolvePrimarySearchProvider(configuredProviders, primaryProvider)?.type ?? null;
+  const fallbackOptions = configuredProviders.filter(
+    (provider) => provider.type !== selectedPrimary && provider.type !== "duckduckgo",
+  );
   const activeProviderConfig = offeredProviders.find((p) => p.type === activeProvider) || null;
 
   if (loading) {
@@ -376,7 +386,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
         )}
       </div>
 
-      {configuredProviders.length > 0 && (
+      {configuredProviders.length > 1 && (
         <>
           <div className="settings-section">
             <h3>Primary Provider</h3>
@@ -386,16 +396,18 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
               {configuredProviders.map((provider) => (
                 <label
                   key={provider.type}
-                  className={`provider-option ${primaryProvider === provider.type ? "selected" : ""}`}
+                  className={`provider-option ${selectedPrimary === provider.type ? "selected" : ""}`}
                 >
                   <input
                     type="radio"
                     name="primaryProvider"
-                    checked={primaryProvider === provider.type}
+                    checked={selectedPrimary === provider.type}
                     onChange={() => {
                       setPrimaryProvider(provider.type);
-                      // Self-hosted SearXNG is an isolation boundary and never has a fallback.
-                      if (provider.type === "searxng" || fallbackProvider === provider.type) {
+                      if (
+                        !supportsSearchFallback(provider.type) ||
+                        fallbackProvider === provider.type
+                      ) {
                         setFallbackProvider(null);
                       }
                     }}
@@ -416,7 +428,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
             </div>
           </div>
 
-          {hasMultipleProviders && primaryProvider !== "searxng" && (
+          {fallbackOptions.length > 0 && supportsSearchFallback(selectedPrimary) && (
             <div className="settings-section">
               <h3>Fallback Provider</h3>
               <p className="settings-description">
@@ -439,32 +451,30 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                   </div>
                 </label>
 
-                {configuredProviders
-                  .filter((p) => p.type !== primaryProvider)
-                  .map((provider) => (
-                    <label
-                      key={provider.type}
-                      className={`provider-option ${fallbackProvider === provider.type ? "selected" : ""}`}
-                    >
-                      <input
-                        type="radio"
-                        name="fallbackProvider"
-                        checked={fallbackProvider === provider.type}
-                        onChange={() => setFallbackProvider(provider.type)}
-                      />
-                      <div className="provider-option-content">
-                        <span className="provider-name">{provider.name}</span>
-                        <span className="provider-types">
-                          Supports: {provider.supportedTypes.join(", ")}
+                {fallbackOptions.map((provider) => (
+                  <label
+                    key={provider.type}
+                    className={`provider-option ${fallbackProvider === provider.type ? "selected" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="fallbackProvider"
+                      checked={fallbackProvider === provider.type}
+                      onChange={() => setFallbackProvider(provider.type)}
+                    />
+                    <div className="provider-option-content">
+                      <span className="provider-name">{provider.name}</span>
+                      <span className="provider-types">
+                        Supports: {provider.supportedTypes.join(", ")}
+                      </span>
+                      {provider.retirement && (
+                        <span className="settings-hint warning">
+                          Ends {formatEndDate(provider.retirement.endsOn)}
                         </span>
-                        {provider.retirement && (
-                          <span className="settings-hint warning">
-                            Ends {formatEndDate(provider.retirement.endsOn)}
-                          </span>
-                        )}
-                      </div>
-                    </label>
-                  ))}
+                      )}
+                    </div>
+                  </label>
+                ))}
               </div>
             </div>
           )}

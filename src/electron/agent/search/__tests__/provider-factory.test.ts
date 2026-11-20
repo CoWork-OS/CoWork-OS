@@ -271,6 +271,44 @@ describe("SearchProviderFactory", () => {
     });
   });
 
+  describe("Google settings lifecycle", () => {
+    it.each([
+      [
+        "API key",
+        { apiKey: "replacement-key", searchEngineId: undefined },
+        { apiKey: "replacement-key", searchEngineId: "existing-engine" },
+      ],
+      [
+        "engine ID",
+        { apiKey: undefined, searchEngineId: "replacement-engine" },
+        { apiKey: "existing-key", searchEngineId: "replacement-engine" },
+      ],
+    ])("keeps Google configured when saving just the %s", (_, update, savedGoogle) => {
+      const repository = SecureSettingsRepository.getInstance() as Any;
+      repository.load.mockReturnValueOnce({
+        primaryProvider: "google",
+        fallbackProvider: null,
+        google: { apiKey: "existing-key", searchEngineId: "existing-engine" },
+      });
+
+      SearchProviderFactory.saveSettings({
+        primaryProvider: "google",
+        fallbackProvider: null,
+        google: update,
+      });
+
+      expect(repository.save).toHaveBeenCalledWith(
+        "search",
+        expect.objectContaining({ primaryProvider: "google", google: savedGoogle }),
+      );
+      expect(
+        SearchProviderFactory.getConfigStatus().providers.find(
+          (provider) => provider.type === "google",
+        )?.configured,
+      ).toBe(true);
+    });
+  });
+
   describe("SearXNG settings lifecycle", () => {
     it("clears the saved endpoint and invalid routing when an empty SearXNG object is saved", () => {
       const repository = SecureSettingsRepository.getInstance() as Any;

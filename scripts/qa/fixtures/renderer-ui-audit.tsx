@@ -19,6 +19,9 @@ import { FileHub } from "../../../src/renderer/components/FileHub";
 import AutomationStudioPanel from "../../../src/renderer/components/AutomationStudioPanel";
 import { SidebarArchivedSessions } from "../../../src/renderer/components/sidebar/SidebarArchivedSessions";
 import { WorkView } from "../../../src/renderer/components/work/WorkView";
+import { RightPanel } from "../../../src/renderer/components/RightPanel";
+import { SearchSettings } from "../../../src/renderer/components/SearchSettings";
+import { WorkspaceDropdownMenu } from "../../../src/renderer/components/MainContent/WorkspaceDropdownMenu";
 import "../../../src/renderer/styles/index.css";
 import "../../../src/renderer/styles/calm-theme.css";
 import "../../../src/renderer/components/MainContent/main-content.css";
@@ -35,6 +38,11 @@ const qa = (window.qa = {
   resolveGoogle: null,
   failHubListing: false,
   resolveHubSearch: null,
+  resolveHubRecent: null,
+  resolveCompletedRunSteps: null,
+  approvalRunCancelled: false,
+  connectorChanges: [],
+  searchPrimary: "google",
   resolveThread(id) {
     for (const done of this.pending.get(id) || []) done(detail(id));
     this.pending.delete(id);
@@ -159,8 +167,65 @@ const workTasks = Array.from({ length: 10 }, (_, index) => ({
   createdAt: 1000 - index,
   updatedAt: 1000 - index,
 }));
+const connectorTask = {
+  id: "scope-fixture",
+  title: "Connector scope fixture",
+  status: "completed" as const,
+  prompt: "",
+  workspaceId: "fixture",
+  createdAt: 1,
+  updatedAt: 1,
+};
+const pickerFolders = ["Alpha folder", "Beta folder"].map((name) => ({
+  id: name,
+  name,
+  path: `/fixture/${name}`,
+  createdAt: 1,
+  permissions: { read: true, write: true, delete: false, network: false, shell: false },
+}));
+const reviewNotice = {
+  id: "memory-review",
+  type: "info",
+  title: "Review saved memories",
+  message: "Review the new memory suggestions.",
+  read: false,
+  createdAt: Date.now(),
+  openTarget: "memory_review",
+};
+const notificationEvents = new Set();
+let notifications = [reviewNotice];
 window.electronAPI = new Proxy(
   {
+    getSessionMembers: async () => ({ members: [], invites: [], actor: { role: "owner" } }),
+    getSessionProgress: async () => undefined,
+    getActiveContext: async () => ({
+      connectors: ["Alpha", "Beta"].map((name) => ({
+        id: name.toLowerCase(),
+        name,
+        icon: "",
+        status: "connected",
+        tools: [],
+      })),
+      skills: [],
+    }),
+    setTaskConnectorOff: (change) =>
+      new Promise((resolve, reject) => {
+        qa.connectorChanges.push({ change, resolve, reject });
+      }),
+    getSearchConfigStatus: async () => ({
+      primaryProvider: qa.searchPrimary,
+      fallbackProvider: null,
+      providers: [
+        { type: "google", name: "Google Custom Search", configured: true, supportedTypes: ["web"] },
+        { type: "duckduckgo", name: "DuckDuckGo", configured: true, supportedTypes: ["web"] },
+      ],
+      isConfigured: true,
+      searxng: { allowPrivate: false },
+    }),
+    saveSearchSettings: async (options) => {
+      qa.calls.push({ method: "saveSearchSettings", options });
+      qa.searchPrimary = options.primaryProvider;
+    },
     getMailboxSyncStatus: async () => status,
     getMailboxClientState: async () => ({
       accounts: [account],
@@ -198,15 +263,35 @@ window.electronAPI = new Proxy(
       qa.calls.push({ method: "searchMCPRegistry", query, tags });
       return [server];
     },
-    listNotifications: async () => [],
-    getUnreadNotificationCount: async () => 0,
+    listNotifications: async () => notifications,
+    getUnreadNotificationCount: async () => notifications.length,
+    onNotificationEvent: (callback) => {
+      notificationEvents.add(callback);
+      return () => notificationEvents.delete(callback);
+    },
+    markNotificationRead: async (id) => {
+      qa.calls.push({ method: "markNotificationRead", id });
+    },
+    deleteNotification: async (id) => {
+      qa.calls.push({ method: "deleteNotification", id });
+      const notification = notifications.find((item) => item.id === id);
+      if (notification) {
+        notifications = notifications.filter((item) => item.id !== id);
+        notificationEvents.forEach((callback) => callback({ type: "removed", notification }));
+      }
+    },
     selectFiles: async () => {
       qa.calls.push({ method: "selectFiles" });
       return [];
     },
     getLLMSettings: async () => ({}),
     getHubSources: async () => ["local", "artifacts"],
-    getRecentHubFiles: async () => [],
+    getRecentHubFiles: () =>
+      new Promise((resolve) => {
+        qa.resolveHubRecent = () =>
+          resolve([hubFile("previous.txt", "local"), hubFile("overview.md", "local")]);
+      }),
+    openFile: async () => "File not found",
     listHubFiles: async ({ source }) => {
       if (qa.failHubListing) throw new Error("Fixture list failed");
       return (source === "artifacts" ? ["report.txt"] : ["local-notes.txt", "overview.md"]).map(
@@ -227,7 +312,52 @@ window.electronAPI = new Proxy(
         triggers: [],
         updatedAt: 1,
       },
+      {
+        id: "completed-routine",
+        name: "Completed workflow",
+        enabled: true,
+        workspaceId: "fixture",
+        triggers: [],
+        updatedAt: 1,
+      },
     ],
+    listRoutineWorkflowRuns: async () => [
+      {
+        id: "approval-run",
+        routineId: "routine-1",
+        status: qa.approvalRunCancelled ? "cancelled" : "waiting_for_approval",
+        createdAt: 2,
+      },
+      { id: "completed-run", routineId: "completed-routine", status: "completed", createdAt: 1 },
+    ],
+    listRoutineWorkflowRunSteps: async (runId) =>
+      runId === "approval-run"
+        ? [
+            {
+              id: "review-step",
+              runId,
+              operation: "Review action",
+              status: qa.approvalRunCancelled ? "cancelled" : "waiting_for_approval",
+              attemptCount: 1,
+              reviewDigest: "review-digest",
+            },
+          ]
+        : new Promise((resolve) => {
+            qa.resolveCompletedRunSteps = () =>
+              resolve([
+                {
+                  id: "completed-step",
+                  runId,
+                  operation: "Completed action",
+                  status: "completed",
+                  attemptCount: 1,
+                },
+              ]);
+          }),
+    cancelRoutineWorkflowRun: async (runId) => {
+      if (runId !== "approval-run") throw new Error("Cannot cancel another fixture run");
+      qa.approvalRunCancelled = true;
+    },
     getRoutine: async () => ({ instructions: "Review the pending approval." }),
     readFileForViewer: async (path) => {
       const fileName = path.split("/").pop();
@@ -278,6 +408,7 @@ function Fixture() {
   const [accessWarning, setAccessWarning] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   const [mcp, setMcp] = useState(false);
+  const [folderPicker, setFolderPicker] = useState(false);
   return (
     <>
       <nav style={{ padding: 16, display: "flex", gap: 12 }}>
@@ -292,6 +423,9 @@ function Fixture() {
           "automation",
           "archive",
           "work",
+          "workspace",
+          "search",
+          "folder-picker",
         ].map((id) => (
           <button key={id} onClick={() => setMode(id)}>
             Show {id}
@@ -431,6 +565,27 @@ function Fixture() {
       {mode === "work" && (
         <WorkView tasks={workTasks} onOpenTask={() => {}} onTasksChanged={() => {}} />
       )}
+      {mode === "workspace" && <RightPanel task={connectorTask} workspace={null} events={[]} />}
+      {mode === "folder-picker" && (
+        <div style={{ margin: 30 }}>
+          <button type="button" onClick={() => setFolderPicker((open) => !open)}>
+            Choose folder
+          </button>
+          {folderPicker && (
+            <WorkspaceDropdownMenu
+              workspaces={pickerFolders}
+              currentWorkspaceId="Alpha folder"
+              onSelect={() => setFolderPicker(false)}
+              onSelectNewFolder={() => setFolderPicker(false)}
+              onRemove={async (folder) => {
+                qa.calls.push({ method: "removeFolder", id: folder.id });
+              }}
+              onClose={() => setFolderPicker(false)}
+            />
+          )}
+        </div>
+      )}
+      {mode === "search" && <SearchSettings />}
     </>
   );
 }

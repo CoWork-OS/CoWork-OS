@@ -16,6 +16,7 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://github.com/CoWork-OS/CoWork-OS/discussions"><img src="https://img.shields.io/github/discussions/CoWork-OS/CoWork-OS" alt="Discussions"></a>
   <a href="https://discord.gg/UjykKwjhRC"><img src="https://img.shields.io/discord/1561115815695097986?label=Discord&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://x.com/Cowork_os"><img src="https://img.shields.io/badge/X-%40Cowork__os-black?logo=x&logoColor=white" alt="X: @Cowork_os"></a>
 </p>
 
 <p align="center">
@@ -148,6 +149,7 @@ OpenClaw 请使用 `--from openclaw`，也可以在应用的 **Settings > Import
 ## 社区
 
 - **聊天：**[Discord](https://discord.gg/UjykKwjhRC)，中文交流请到 #中文 频道。
+- **动态与更新：**[X 上的 @Cowork_os](https://x.com/Cowork_os)
 - **提问和想法：**[GitHub Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions)，中文提问也欢迎。
 - **Bug 与需求：**[Issues](https://github.com/CoWork-OS/CoWork-OS/issues)，我们会在一天内回复。
 - **参与贡献：**从 [good first issue](https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) 开始，并阅读 [CONTRIBUTING.md](../CONTRIBUTING.md)。改进中文文档和翻译同样是很有价值的贡献。

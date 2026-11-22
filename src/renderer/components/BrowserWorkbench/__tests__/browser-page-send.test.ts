@@ -36,9 +36,14 @@ describe("browser page sends", () => {
   });
 
   it("forwards the send options from the browser view to the task", () => {
-    const send = appSource.match(
-      /const sendSpreadsheetFullscreenMessage = useCallback\([\s\S]*?\[onSendMessage\],/,
-    )?.[0];
+    const callback = appSource.match(
+      /<BrowserWorkbenchView\b[\s\S]*?\bonSendMessage=\{(\w+)\}/,
+    )?.[1];
+    expect(callback, "BrowserWorkbenchView send callback").toBeDefined();
+    const send = appSource
+      .split(`const ${callback} = useCallback(`)[1]
+      ?.split("[onSendMessage],")[0];
+    expect(send, "BrowserWorkbenchView callback implementation").toBeDefined();
     expect(send).toContain("await onSendMessage(message, images, undefined, options);");
   });
 });

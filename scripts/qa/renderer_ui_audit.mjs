@@ -150,6 +150,13 @@ try {
   results.push({ manualComposeTyping: typing });
   console.log(JSON.stringify({ manualComposeTyping: typing }));
 
+  const compose = page.locator(".ibx-compose");
+  const composeBody = compose.getByRole("textbox", { name: "Message", exact: true });
+  await compose.getByRole("button", { name: "Reply", exact: true }).click();
+  const sameModePreservesDraft =
+    (await composeBody.inputValue()) === "Please send the updated document.";
+  if (!sameModePreservesDraft) await composeBody.fill("Please send the updated document.");
+
   await fs.mkdir(path.join(root, "logs"), { recursive: true });
   await page.screenshot({ path: path.join(root, "logs/renderer-ui-audit-inbox.png") });
   // The form sends its current local fields, then resets correctly for forwarding.
@@ -158,10 +165,15 @@ try {
     .fill("copy@example.com; second@example.com");
   await page.getByRole("textbox", { name: "Bcc", exact: true }).fill("private@example.com");
   await page.locator(".ibx-compose").getByRole("button", { name: "Send", exact: true }).click();
-  await page.waitForFunction(() =>
-    window.qa.calls.some(
-      (c) => c.method === "applyMailboxAction" && c.options.type === "send_message",
-    ),
+  await page.waitForFunction(() => typeof window.qa.resolveManualSend === "function");
+  assert.deepEqual(
+    {
+      sameModePreservesDraft,
+      fieldsReadOnlyDuringSend: await compose
+        .getByRole("textbox")
+        .evaluateAll((fields) => fields.every((field) => field.readOnly)),
+    },
+    { sameModePreservesDraft: true, fieldsReadOnlyDuringSend: true },
   );
   const sent = await page.evaluate(
     () =>
@@ -172,6 +184,8 @@ try {
   assert.equal(sent.messageBody, "Please send the updated document.");
   assert.deepEqual(sent.messageCc, ["copy@example.com", "second@example.com"]);
   assert.deepEqual(sent.messageBcc, ["private@example.com"]);
+  await page.evaluate(() => window.qa.resolveManualSend());
+  await compose.waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Forward", exact: true }).first().click();
   assert.equal(await page.getByRole("textbox", { name: "To", exact: true }).inputValue(), "");
   assert.match(
@@ -179,7 +193,7 @@ try {
     /Forwarded message/,
   );
   results.push(
-    "Manual compose: current local fields reach the send action; forwarding resets recipients and keeps quoted content",
+    "Manual compose: repeating the active mode keeps the draft, sending locks edits, and forwarding preserves quoted content",
   );
 
   await page.evaluate(() => {
@@ -230,11 +244,33 @@ try {
   results.push("Inbox: unmount during initialization stops subsequent reads and automatic sync");
 
   await page.getByRole("button", { name: "Show import", exact: true }).click();
+  const importExplainsRemoteModels = (await page.getByText(/text leaves your device/).count()) > 0;
   await page.getByRole("button", { name: "I have my export ready" }).click();
+  await page.evaluate(() => {
+    window.qa.useFixtureImportFile = true;
+  });
   await page.locator(".chatgpt-import-dropzone").focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => window.qa.calls.some((c) => c.method === "selectFiles"));
   results.push("Import file selector activates through Enter");
+  await page.getByRole("button", { name: "Start Import", exact: true }).click();
+  await page.waitForFunction(() => window.qa.finishFixtureImport);
+  const cancelImport = page.getByRole("button", { name: "Cancel Import", exact: true });
+  await cancelImport.click();
+  await page.waitForFunction(() => window.qa.importCancelAttempts === 1);
+  assert.equal(importExplainsRemoteModels, true);
+  await page.getByRole("alert").filter({ hasText: "Cancellation did not start" }).waitFor();
+  await cancelImport.click();
+  await page.waitForFunction(() => window.qa.importCancelAttempts === 2);
+  await page.evaluate(() => {
+    window.qa.finishFixtureImport();
+    window.qa.useFixtureImportFile = false;
+  });
+  await page.getByRole("heading", { name: "Import cancelled", exact: true }).waitFor();
+  await page.getByText("2 memories were created before cancellation.", { exact: true }).waitFor();
+  results.push(
+    "ChatGPT import: remote model processing is disclosed and cancellation can be retried",
+  );
   await page.getByRole("button", { name: "Show registry", exact: true }).click();
   await page.locator("button.registry-tag").first().focus();
   await page.keyboard.press("Space");
@@ -247,6 +283,28 @@ try {
   await page.getByRole("dialog", { name: "MCP server details" }).waitFor();
   await page.keyboard.press("Escape");
   results.push("Registry: tag uses native keyboard activation; details dialog closes with Escape");
+  const registrySearch = page.getByPlaceholder("Search servers...");
+  await registrySearch.fill("older");
+  await page.waitForFunction(() => window.qa.pendingRegistrySearches.has("older"));
+  await registrySearch.fill("newer");
+  await page.waitForFunction(() => window.qa.pendingRegistrySearches.has("newer"));
+  await page.evaluate(() => window.qa.pendingRegistrySearches.get("newer")());
+  await page.getByText("newer result", { exact: true }).waitFor();
+  await page.evaluate(() => window.qa.pendingRegistrySearches.get("older")());
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.equal(await page.getByText("older result", { exact: true }).count(), 0);
+  assert.equal(await page.getByText("newer result", { exact: true }).count(), 1);
+  await registrySearch.fill("unavailable");
+  await page.getByRole("alert").filter({ hasText: "Could not search the MCP registry." }).waitFor();
+  await registrySearch.clear();
+  await page.getByRole("button", { name: "Clear tag filter for documents" }).click();
+  await page.getByText("Docs", { exact: true }).waitFor();
+  results.push(
+    "Registry: only the current search renders, failures are visible, and tag filters can be cleared",
+  );
+
   await page.getByRole("button", { name: "Show scheduled", exact: true }).click();
   const expand = page.getByRole("button", { name: "Expand Daily document review" });
   await expand.focus();
@@ -266,6 +324,89 @@ try {
   );
   results.push(
     "Scheduled jobs: Enter/Space expand and collapse without invoking neighboring actions",
+  );
+  await page.getByTitle("Edit", { exact: true }).click();
+  const scheduledEditor = page.getByRole("dialog", { name: "Edit Scheduled Task" });
+  const scheduleDraftName = scheduledEditor.getByPlaceholder("e.g., Daily AI News Report");
+  await scheduleDraftName.fill("Keep my schedule draft");
+  await page.evaluate(() => {
+    window.qa.holdCronRefresh = true;
+    window.qa.cronEvents.forEach((listener) => listener({ type: "updated", jobId: "job-1" }));
+  });
+  await page.waitForFunction(() => window.qa.resolveCronRefresh);
+  assert.equal(await scheduleDraftName.inputValue(), "Keep my schedule draft");
+  await page.evaluate(() => window.qa.resolveCronRefresh());
+  await scheduledEditor.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await scheduledEditor.waitFor({ state: "detached" });
+  const scheduledUpdate = await page.evaluate(() =>
+    window.qa.calls.find((call) => call.method === "updateCronJob"),
+  );
+  assert.equal(scheduledUpdate.changes.name, "Keep my schedule draft");
+  assert.equal("schedule" in scheduledUpdate.changes, false);
+  results.push(
+    "Scheduled jobs: refresh preserves the open draft and a rename keeps the current schedule",
+  );
+
+  await page.getByRole("button", { name: "Show queued", exact: true }).click();
+  const queue = page.getByRole("region", { name: "Queued messages" });
+  const queueEditButtons = queue.getByRole("button", { name: "Edit", exact: true });
+  await queueEditButtons.first().click();
+  const queuedDraft = queue.getByRole("textbox", { name: "Edit queued message" });
+  const queuedSave = queue.getByRole("button", { name: "Save queued message" });
+  await queuedDraft.fill("Keep this queued draft");
+  const draftProtected = await queueEditButtons.last().isDisabled();
+  const refreshQueue = (type, remove) =>
+    page.evaluate(
+      ([eventType, removeFirst]) => {
+        const [first, second] = window.qa.queuedInputs;
+        window.qa.queuedInputs = removeFirst
+          ? [second]
+          : [{ ...first, message: "Changed in another window", revision: 2 }, second];
+        for (const listener of window.qa.queuedInputEvents) {
+          listener({
+            taskId: "queue-fixture",
+            type: eventType,
+            payload: { queuedInputUpdated: true },
+          });
+        }
+      },
+      [type, remove],
+    );
+  await refreshQueue("user_message", false);
+  await queue.getByText("Changed in another window", { exact: true }).waitFor();
+  assert.deepEqual(
+    { draftProtected, changedMessageCanSave: await queuedSave.isEnabled() },
+    { draftProtected: true, changedMessageCanSave: false },
+  );
+  await queue.getByRole("status").filter({ hasText: "changed while you were editing" }).waitFor();
+  assert.equal(await queuedDraft.inputValue(), "Keep this queued draft");
+  await queue.getByRole("button", { name: "Cancel edit" }).click();
+  await queueEditButtons.first().click();
+  await queuedDraft.fill("Keep this started draft");
+  await refreshQueue("task_dequeued", true);
+  await queue.getByRole("status").filter({ hasText: "no longer queued" }).waitFor();
+  assert.equal(await queuedSave.isDisabled(), true);
+  assert.equal(await queuedDraft.inputValue(), "Keep this started draft");
+  await queue.getByRole("button", { name: "Cancel edit" }).click();
+  await queueEditButtons.first().click();
+  await queuedDraft.fill("Updated second message");
+  await queuedSave.click();
+  await queue.getByText("Updated second message", { exact: true }).waitFor();
+  assert.deepEqual(
+    await page.evaluate(
+      () => window.qa.calls.find((call) => call.method === "editQueuedTaskInput").input,
+    ),
+    {
+      taskId: "queue-fixture",
+      id: "second",
+      kind: "follow_up",
+      expectedMessage: "Second queued follow-up",
+      expectedRevision: 1,
+      message: "Updated second message",
+    },
+  );
+  results.push(
+    "Queued messages: an open draft survives another edit or the message leaving the queue",
   );
 
   await page.getByRole("button", { name: "Show files", exact: true }).click();
@@ -356,6 +497,358 @@ try {
   results.push(
     "Work: expanded groups collapse and details follow a visible session after filtering or collapsing",
   );
+  await page.getByRole("button", { name: "Show work-archive", exact: true }).click();
+  const keepSession = page.getByRole("complementary", { name: "Selected work" });
+  await keepSession.getByRole("button", { name: "Archive 1 other session", exact: true }).click();
+  await keepSession.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.waitForFunction(() => window.qa.calls.some((call) => call.method === "archiveTask"));
+  assert.deepEqual(
+    await page.evaluate(() =>
+      window.qa.calls.filter((call) => call.method === "archiveTask").map((call) => call.id),
+    ),
+    ["other-session"],
+  );
+  results.push("Work: archive keeps every run in the displayed session lineage");
+
+  await page.getByRole("button", { name: "Show usage", exact: true }).click();
+  const usageWorkspace = page.getByRole("combobox", { name: "Workspace", exact: true });
+  const usageCount = page.locator(".insights-hero-value").getByText("101", { exact: true });
+  await usageCount.waitFor();
+  await usageWorkspace.selectOption("usage-beta");
+  await page.waitForFunction(() => window.qa.rejectUsageReport);
+  assert.equal(await usageCount.count(), 0);
+  await page.getByRole("status").filter({ hasText: "Loading usage report" }).waitFor();
+  await page.evaluate(() => window.qa.rejectUsageReport());
+  await page.getByRole("alert").filter({ hasText: "Fixture report failed" }).waitFor();
+  await usageWorkspace.selectOption("__all__");
+  await usageCount.waitFor();
+  results.push(
+    "Usage Insights: a new workspace hides stale totals and filters stay available after failure",
+  );
+  await page.getByRole("button", { name: "Show memory", exact: true }).click();
+  const cedarMemory = page.getByText("Cedar fixture memory", { exact: true });
+  const quartzMemory = page.getByText("Quartz fixture memory", { exact: true });
+  await cedarMemory.waitFor();
+  await page.getByRole("button", { name: "Pin", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search memories" }).fill("quartz");
+  await cedarMemory.waitFor({ state: "detached" });
+  assert.equal(await page.getByRole("button", { name: "Delete", exact: true }).count(), 0);
+  await page.waitForFunction(() => window.qa.resolveMemorySearch);
+  await page.evaluate(() => window.qa.resolveMemorySearch());
+  await quartzMemory.waitFor();
+  await page.evaluate(() => window.qa.resolveMemoryPin());
+  await page.getByText("Memory pinned.", { exact: true }).waitFor();
+  await quartzMemory.waitFor();
+  assert.equal(await cedarMemory.count(), 0);
+  results.push(
+    "Memory Knowledge: delayed pin cannot restore actions or results from a previous search",
+  );
+
+  await page.getByRole("button", { name: "Show spreadsheet", exact: true }).click();
+  const workbookFormula = page.locator(".spreadsheet-viewer-formula-input");
+  const saveWorkbook = page.getByRole("button", { name: "Save", exact: true });
+  const firstCell = page.locator(".spreadsheet-viewer-grid-wrap td").first();
+  await firstCell.getByText("Initial", { exact: true }).waitFor();
+  await workbookFormula.fill("First edit");
+  await saveWorkbook.click();
+  await page.waitForFunction(() => window.qa.resolveWorkbookSave);
+  assert.equal(await workbookFormula.isDisabled(), true);
+  assert.equal(await page.getByRole("button", { name: "+ Row", exact: true }).isDisabled(), true);
+  await firstCell.dblclick();
+  assert.equal(await page.locator(".spreadsheet-viewer-cell-input").count(), 0);
+  await page.evaluate(() => window.qa.resolveWorkbookSave());
+  await firstCell.getByText("First edit", { exact: true }).waitFor();
+  await firstCell.dblclick();
+  await page.locator(".spreadsheet-viewer-cell-input").fill("Draft saved on click");
+  await saveWorkbook.click();
+  await page.waitForFunction(() => window.qa.resolveWorkbookSave);
+  assert.equal(await page.evaluate(() => window.qa.workbookValue), "Draft saved on click");
+  await page.evaluate(() => window.qa.resolveWorkbookSave());
+  await firstCell.getByText("Draft saved on click", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "+ Row", exact: true }).click();
+  await saveWorkbook.click();
+  await page.waitForFunction(() => window.qa.resolveWorkbookSave);
+  const patchCount = () =>
+    page.evaluate(
+      () => window.qa.calls.filter((call) => call.method === "applySpreadsheetPatches").length,
+    );
+  const applied = await patchCount();
+  await page.evaluate(() => window.qa.resolveWorkbookSave(false));
+  await page.getByText("Fixture workbook save failed", { exact: true }).waitFor();
+  await saveWorkbook.click();
+  await page.waitForFunction(() => window.qa.resolveWorkbookSave);
+  assert.equal(await patchCount(), applied);
+  await page.evaluate(() => window.qa.resolveWorkbookSave());
+  results.push(
+    "Spreadsheet: Save includes the open cell draft, locks edits, and retries without replaying applied patches",
+  );
+
+  await page.getByRole("button", { name: "Show document", exact: true }).click();
+  const documentEditor = page.locator(".document-editor-page");
+  const saveDocument = page.getByTitle("Save document", { exact: true });
+  await page.waitForFunction(
+    () => document.querySelector(".document-editor-page")?.textContent === "Initial draft",
+  );
+  await documentEditor.focus();
+  await page.getByRole("button", { name: "Show document", exact: true }).focus();
+  const cleanAfterBlur = await saveDocument.isDisabled();
+  const appendToDocument = async (text) => {
+    await documentEditor.evaluate((editor) => {
+      editor.focus();
+      const selection = window.getSelection();
+      selection.selectAllChildren(editor.querySelector("p"));
+      selection.collapseToEnd();
+    });
+    await page.keyboard.insertText(text);
+  };
+  await appendToDocument(" saved");
+  await saveDocument.click();
+  await page.waitForFunction(() => window.qa.finishDocumentSave);
+  await appendToDocument(" and still editing");
+  await page.evaluate(() => window.qa.finishDocumentSave());
+  await page.waitForFunction(
+    () => document.querySelector(".document-viewer-save-btn")?.textContent === "Save",
+  );
+  assert.deepEqual(
+    {
+      cleanAfterBlur,
+      draft: await documentEditor.textContent(),
+      canSave: await saveDocument.isEnabled(),
+    },
+    { cleanAfterBlur: true, draft: "Initial draft saved and still editing", canSave: true },
+  );
+  await page.getByRole("status").filter({ hasText: "You have unsaved changes." }).waitFor();
+  await saveDocument.click();
+  await page.waitForFunction(() => window.qa.finishDocumentSave);
+  await page.evaluate(() => window.qa.finishDocumentSave(false));
+  await page.getByText("Fixture document save failed", { exact: true }).waitFor();
+  await saveDocument.click();
+  await page.waitForFunction(() => window.qa.finishDocumentSave);
+  await page.evaluate(() => window.qa.finishDocumentSave());
+  await page.getByText("Saved", { exact: true }).waitFor();
+  assert.equal(await saveDocument.isDisabled(), true);
+  assert.deepEqual(
+    await page.evaluate(() =>
+      window.qa.calls
+        .filter((call) => call.method === "updateDocumentFile")
+        .map((call) => call.text),
+    ),
+    [
+      "Initial draft saved",
+      "Initial draft saved and still editing",
+      "Initial draft saved and still editing",
+    ],
+  );
+  results.push(
+    "Document editor: content loads, a save preserves newer edits, and a failed save can be retried",
+  );
+
+  await page.getByRole("button", { name: "Show document-followup", exact: true }).click();
+  const artifactDraft = page.getByPlaceholder("Ask for follow-up changes");
+  const sendArtifactDraft = page.getByTitle("Send message", { exact: true });
+  await artifactDraft.fill("Keep this follow-up");
+  await sendArtifactDraft.click();
+  await page.waitForFunction(() => window.qa.finishArtifactFollowup);
+  const pendingDraft = await artifactDraft.inputValue();
+  await page.evaluate(() => window.qa.finishArtifactFollowup(false));
+  await page.waitForFunction(() => !window.qa.finishArtifactFollowup);
+  assert.equal(pendingDraft, "Keep this follow-up");
+  await page.getByText("Failed to send message. Please try again.", { exact: true }).waitFor();
+  assert.equal(await artifactDraft.inputValue(), "Keep this follow-up");
+  await sendArtifactDraft.click();
+  await page.waitForFunction(() => window.qa.finishArtifactFollowup);
+  await page.evaluate(() => window.qa.finishArtifactFollowup(true));
+  await page.waitForFunction(
+    () => document.querySelector('textarea[placeholder="Ask for follow-up changes"]')?.value === "",
+  );
+  assert.deepEqual(
+    await page.evaluate(() =>
+      window.qa.calls
+        .filter((call) => call.method === "sendArtifactFollowup")
+        .map((call) => call.message),
+    ),
+    ["Keep this follow-up", "Keep this follow-up"],
+  );
+  results.push("Artifact follow-up: rejected submissions keep the draft for a successful retry");
+
+  await page.getByRole("button", { name: "Show skills", exact: true }).click();
+  await page.getByRole("button", { name: "CoWork Registry", exact: true }).click();
+  const skillSearch = page.getByRole("textbox", { name: "Search CoWork registry" });
+  await skillSearch.fill("old");
+  await skillSearch.press("Enter");
+  await skillSearch.press("Enter");
+  await page.waitForFunction(() => window.qa.pendingSkillSearches.has("old"));
+  await skillSearch.fill("new");
+  assert.equal(await page.getByText(/No results were returned/).count(), 0);
+  await skillSearch.press("Enter");
+  await page.waitForFunction(() => window.qa.pendingSkillSearches.has("new"));
+  const resolveSkillSearch = (query, name) =>
+    page.evaluate(
+      ([keyword, resultName]) => {
+        window.qa.pendingSkillSearches.get(keyword)({
+          results: [{ id: keyword, name: resultName, description: "A fixture", version: "1.0.0" }],
+        });
+      },
+      [query, name],
+    );
+  await resolveSkillSearch("new", "New fixture skill");
+  await page.getByRole("heading", { name: "New fixture skill" }).waitFor();
+  await resolveSkillSearch("old", "Old fixture skill");
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  assert.equal(await page.getByRole("heading", { name: "New fixture skill" }).count(), 1);
+  assert.equal(await page.getByRole("heading", { name: "Old fixture skill" }).count(), 0);
+  assert.deepEqual(
+    await page.evaluate(() =>
+      window.qa.calls
+        .filter((call) => call.method === "searchSkillRegistry")
+        .map((call) => call.query),
+    ),
+    ["old", "new"],
+  );
+  await skillSearch.fill("draft");
+  assert.equal(await page.getByRole("heading", { name: "New fixture skill" }).count(), 0);
+  results.push(
+    "Skill Store: duplicate submission is ignored and old results cannot replace a new query",
+  );
+
+  await page.getByRole("button", { name: "Show add-tools", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search tools" }).fill("workspace-retention");
+  await page.getByRole("button", { name: /^Ops Audit/ }).click();
+  assert.equal(
+    await page.evaluate(
+      () => window.qa.calls.find((call) => call.method === "navigateAddTools").selection.targetId,
+    ),
+    "ops-audit",
+  );
+  results.push("Add Tools: catalog matches by a hidden category keep their navigation target");
+
+  await page.getByRole("button", { name: "Show mcp-tools", exact: true }).click();
+  const alphaTools = page
+    .locator('[data-mcp-server-id="alpha"]')
+    .getByRole("button", { name: "View Tools", exact: true });
+  await alphaTools.click();
+  await page.waitForFunction(() => window.qa.pendingMcpTools.has("alpha"));
+  const toolsDialog = page.getByRole("dialog", { name: "Tools from Alpha" });
+  const showsLoading = await toolsDialog.getByRole("status").count();
+  await page.evaluate(() => {
+    window.qa.pendingMcpTools.get("alpha").reject(new Error("Fixture tool listing failed"));
+    window.qa.pendingMcpTools.delete("alpha");
+  });
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  assert.equal(showsLoading, 1, "View Tools opens the dialog while loading");
+  await toolsDialog.getByRole("alert").filter({ hasText: "Fixture tool listing failed" }).waitFor();
+  await toolsDialog.getByRole("button", { name: "Try again" }).click();
+  await page.waitForFunction(() => window.qa.pendingMcpTools.has("alpha"));
+  await page.keyboard.press("Escape");
+  assert.equal(await alphaTools.evaluate((button) => button.matches(":focus")), true);
+  const betaTools = page
+    .locator('[data-mcp-server-id="beta"]')
+    .getByRole("button", { name: "View Tools", exact: true });
+  await betaTools.click();
+  await page.waitForFunction(() => window.qa.pendingMcpTools.has("beta"));
+  await page.evaluate(() => {
+    window.qa.pendingMcpTools
+      .get("beta")
+      .resolve([{ name: "beta_lookup", inputSchema: { type: "object" } }]);
+    window.qa.pendingMcpTools
+      .get("alpha")
+      .resolve([{ name: "alpha_stale", inputSchema: { type: "object" } }]);
+  });
+  const betaDialog = page.getByRole("dialog", { name: "Tools from Beta" });
+  await betaDialog.getByText("beta_lookup", { exact: true }).waitFor();
+  assert.equal(await page.getByText("alpha_stale", { exact: true }).count(), 0);
+  await page.keyboard.press("Escape");
+  results.push(
+    "MCP tools: listing failures are retryable and closed requests cannot overwrite another server",
+  );
+
+  await page.getByRole("button", { name: "Show build-changes", exact: true }).click();
+  const openBuildChanges = page.getByRole("button", { name: "Review build changes", exact: true });
+  await openBuildChanges.click();
+  const buildChanges = page.getByRole("dialog", { name: "Build changes", exact: true });
+  assert.equal(
+    await buildChanges
+      .getByRole("button", { name: "Close changes" })
+      .evaluate((button) => button.matches(":focus")),
+    true,
+  );
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(
+    await buildChanges
+      .getByRole("button", { name: "Open file" })
+      .evaluate((button) => button.matches(":focus")),
+    true,
+  );
+  await buildChanges.getByRole("button", { name: /removed\.md/ }).click();
+  assert.equal(await buildChanges.getByRole("button", { name: "Open file" }).count(), 0);
+  await page.keyboard.press("Escape");
+  await buildChanges.waitFor({ state: "detached" });
+  assert.equal(await openBuildChanges.evaluate((button) => button.matches(":focus")), true);
+  results.push("Build Changes: traps and restores focus and omits Open file for deleted entries");
+
+  await page.getByRole("button", { name: "Show model-picker", exact: true }).click();
+  const modelTrigger = page.getByRole("button", { name: /^Change model source/ });
+  const customModel = page.getByRole("button", { name: "Open custom model picker" });
+  const advancedPicker = page.getByRole("dialog", { name: "Choose a model", exact: true });
+  const modelSelections = () =>
+    page.evaluate(() => window.qa.calls.filter((call) => call.method === "modelChange"));
+  await modelTrigger.press("Enter");
+  const quickFocusedCustom = await customModel.evaluate((button) => button.matches(":focus"));
+  await page.keyboard.press("Enter");
+  const quickSelections = (await modelSelections()).length;
+  if (!(await advancedPicker.count())) {
+    if (!(await customModel.count())) await modelTrigger.press("Enter");
+    await customModel.click();
+  }
+  const modelSearch = advancedPicker.getByRole("textbox", { name: "Search Fixture source models" });
+  await modelSearch.press("Enter");
+  assert.deepEqual(
+    { quickFocusedCustom, quickSelections, totalSelections: (await modelSelections()).length },
+    { quickFocusedCustom: true, quickSelections: 0, totalSelections: 0 },
+  );
+  await modelSearch.fill("Selected fixture");
+  await modelSearch.press("Enter");
+  await advancedPicker.waitFor({ state: "detached" });
+  assert.equal((await modelSelections())[0].selection.modelKey, "selected-model");
+  assert.equal(await modelTrigger.evaluate((button) => button.matches(":focus")), true);
+  await modelTrigger.press("ArrowDown");
+  await customModel.press("Enter");
+  await advancedPicker.getByRole("tab", { name: "Retry source", exact: true }).click();
+  await page.waitForFunction(() => window.qa.modelCatalogAttempts === 1);
+  await advancedPicker.getByRole("alert").filter({ hasText: "Could not load models." }).waitFor();
+  await advancedPicker.getByRole("button", { name: "Retry", exact: true }).click();
+  await advancedPicker.getByRole("option", { name: "Recovered fixture model" }).waitFor();
+  await advancedPicker.getByRole("tab", { name: /Fixture source/ }).click();
+  await modelSearch.press("Escape");
+  await advancedPicker.waitFor({ state: "detached" });
+  assert.equal(await modelTrigger.evaluate((button) => button.matches(":focus")), true);
+  results.push("Model picker: keyboard opens Custom and an empty search cannot change the model");
+  results.push("Model picker: a failed provider request is retryable without closing the picker");
+
+  await page.getByRole("button", { name: "Show bot-history", exact: true }).click();
+  const history = page.getByRole("region", { name: "Fixture Bot conversation history" });
+  const earlier = history.getByRole("button", { name: /^Earlier fixture conversation/ });
+  await earlier.press("Enter");
+  assert.equal(await earlier.getAttribute("aria-current"), "true");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByText("Recovered fixture reply", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.qa.botHistoryAttempts), 2);
+  results.push("Bots: conversation rows are keyboard buttons and Retry reloads earlier messages");
+
+  await page.getByRole("button", { name: "Show mission-issue", exact: true }).click();
+  await page.getByRole("button", { name: "Open Issue A", exact: true }).click();
+  const firstComment = page.getByText("Comment for a", { exact: true });
+  await firstComment.waitFor();
+  await page.evaluate(() => {
+    window.qa.holdMissionIssue = true;
+  });
+  await page.getByRole("button", { name: "Open Issue B", exact: true }).click();
+  await firstComment.waitFor({ state: "detached" });
+  await page.getByRole("status").filter({ hasText: "Loading issue details" }).waitFor();
+  await page.waitForFunction(() => window.qa.resolveMissionIssue);
+  await page.evaluate(() => window.qa.resolveMissionIssue());
+  await page.getByText("Comment for b", { exact: true }).waitFor();
+  results.push("Mission Control: selecting another issue hides the old context while details load");
 
   await page.getByRole("button", { name: "Show workspace", exact: true }).click();
   const alpha = page.getByRole("switch", { name: "Alpha in this conversation" });
@@ -802,6 +1295,21 @@ try {
     await actualPage
       .getByRole("tab", { name: "Find fixture", exact: true })
       .waitFor({ state: "attached" });
+    const findReadyDeadline = Date.now() + 5000;
+    let findViewReady = false;
+    while (!findViewReady && Date.now() < findReadyDeadline) {
+      findViewReady = await actualWindow.evaluate(
+        (win, url) =>
+          win.contentView.children.some((view) => {
+            if (view.webContents?.getURL() !== url || !view.getVisible()) return false;
+            const bounds = view.getBounds();
+            return bounds.width > 0 && bounds.height > 0;
+          }),
+        findUrl,
+      );
+      if (!findViewReady) await actualPage.waitForTimeout(50);
+    }
+    assert.ok(findViewReady, "Find fixture native view did not become visible");
     // Chromium's find highlights are outside the DOM. Count native clearSelection calls
     // on the disposable guest while still running the real Electron method.
     await app.evaluate(async ({ webContents }, url) => {
@@ -812,17 +1320,25 @@ try {
       }
       const paragraphs = await guest.executeJavaScript("document.querySelectorAll('p').length");
       if (paragraphs !== 2) throw new Error("Find fixture did not render both paragraphs");
+      const find = guest.findInPage;
       const stop = guest.stopFindInPage;
-      globalThis.uiAuditFindClears = 0;
+      globalThis.uiAuditFind = { requests: 0, clears: 0, lastResult: null };
+      guest.findInPage = function (text, options) {
+        globalThis.uiAuditFind.requests++;
+        return find.call(this, text, options);
+      };
+      guest.on("found-in-page", (_event, result) => {
+        globalThis.uiAuditFind.lastResult = result;
+      });
       guest.stopFindInPage = function (action) {
-        if (action === "clearSelection") globalThis.uiAuditFindClears++;
+        if (action === "clearSelection") globalThis.uiAuditFind.clears++;
         return stop.call(this, action);
       };
     }, findUrl);
     const waitForFindClears = async (count) => {
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
-        if ((await app.evaluate(() => globalThis.uiAuditFindClears)) >= count) return;
+        if ((await app.evaluate(() => globalThis.uiAuditFind.clears)) >= count) return;
         await actualPage.waitForTimeout(50);
       }
       assert.fail(`Expected ${count} native find highlight clears`);
@@ -830,14 +1346,34 @@ try {
     await address.press("ControlOrMeta+f");
     const findInput = actualPage.getByRole("textbox", { name: "Find in page", exact: true });
     const matchCount = actualPage.locator(".browser-workbench-findbar-count");
-    await findInput.fill("needle");
-    await matchCount.filter({ hasText: /of 2$/ }).waitFor();
-    await findInput.fill("");
+    // Drive the renderer control directly. The native guest can take focus
+    // between Playwright focusing the input and sending text.
+    const setFindQuery = (query) =>
+      findInput.evaluate((input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }, query);
+    const waitForFindMatches = async () => {
+      try {
+        await matchCount.filter({ hasText: /of 2$/ }).waitFor();
+      } catch (error) {
+        const observed = await app.evaluate(() => globalThis.uiAuditFind);
+        throw new Error(
+          `Browser Find did not show both fixture matches: ${JSON.stringify(observed)}`,
+          {
+            cause: error,
+          },
+        );
+      }
+    };
+    await setFindQuery("needle");
+    await waitForFindMatches();
+    await setFindQuery("");
     await waitForFindClears(1);
     assert.equal(await findInput.isVisible(), true);
     assert.equal(await matchCount.textContent(), "");
-    await findInput.fill("needle");
-    await matchCount.filter({ hasText: /of 2$/ }).waitFor();
+    await setFindQuery("needle");
+    await waitForFindMatches();
     await actualPage.getByRole("button", { name: "New tab", exact: true }).click();
     await findInput.waitFor({ state: "detached" });
     await waitForFindClears(2);

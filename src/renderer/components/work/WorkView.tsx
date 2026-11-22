@@ -7,6 +7,7 @@ import {
 } from "../../../shared/attention";
 import type { Task, Workspace } from "../../../shared/types";
 import { useAttentionSnapshot } from "../../hooks/useAttentionSnapshot";
+import { hasHostMethod } from "../../host/browser-capabilities";
 import { formatHomeSessionTime } from "../../utils/home-sessions";
 import { getFileName, resolveTaskOutputSummaryFromTask } from "../../utils/task-outputs";
 import {
@@ -52,7 +53,7 @@ interface WorkViewProps {
   tasks: Task[];
   onOpenTask: (taskId: string) => void;
   /** Reloads the app's task lists after sessions were archived here. */
-  onTasksChanged: () => void;
+  onTasksChanged: () => void | Promise<void>;
   hasMoreTasks?: boolean;
   onLoadMoreTasks?: () => void;
 }
@@ -138,8 +139,9 @@ export function WorkView({
   const [filters, setFilters] = useState<WorkFilters>(DEFAULT_WORK_FILTERS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiveConfirmation, setArchiveConfirmation] = useState<string | null>(null);
+  const [archivingRowId, setArchivingRowId] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<{ rowId: string; message: string } | null>(null);
   const attention = useAttentionSnapshot(true);
   const { context, workspaces } = useWorkContext();
   const now = Date.now();
@@ -173,27 +175,43 @@ export function WorkView({
     visibleGroups[0];
   const selected =
     selectedGroup?.rows.find((row) => row.id === selectedId) ?? selectedGroup?.rows[0];
+  const archiveMethod = window.electronAPI?.archiveTask;
+  const canArchive = hasHostMethod("archiveTask") && typeof archiveMethod === "function";
+  const archiveBatch =
+    canArchive && selected?.archivableTaskIds.length
+      ? JSON.stringify([
+          selected.id,
+          selected.task.sessionId || selected.task.id,
+          selected.archivableTaskIds,
+        ])
+      : null;
+  const confirmArchive = archiveBatch !== null && archiveConfirmation === archiveBatch;
 
   useEffect(() => {
-    setConfirmArchive(false);
-    setArchiveError(null);
-  }, [selected?.id]);
+    setArchiveConfirmation(null);
+  }, [archiveBatch]);
 
   const setFilter = <K extends keyof WorkFilters>(key: K, value: WorkFilters[K]) =>
     setFilters((current) => ({ ...current, [key]: value }));
 
-  const archiveOlderRuns = async (row: WorkRow) => {
-    const older = row.runs.filter((run) => run.task.id !== row.task.id);
-    if (older.length === 0) return;
+  const archiveOtherSessions = async (row: WorkRow) => {
+    if (!confirmArchive || !archiveMethod || archivingRowId !== null) return;
+    setArchivingRowId(row.id);
     setArchiveError(null);
-    const results = await Promise.allSettled(
-      older.map((run) => window.electronAPI.archiveTask(run.task.id)),
-    );
-    setConfirmArchive(false);
-    if (results.some((result) => result.status === "rejected")) {
-      setArchiveError("Some runs could not be archived.");
+    try {
+      const results = await Promise.allSettled(
+        row.archivableTaskIds.map(async (taskId) => archiveMethod(taskId)),
+      );
+      if (results.some((result) => result.status === "rejected")) {
+        setArchiveError({ rowId: row.id, message: "Some sessions could not be archived." });
+      }
+      await onTasksChanged();
+    } catch {
+      setArchiveError({ rowId: row.id, message: "The session list could not be refreshed." });
+    } finally {
+      setArchiveConfirmation(null);
+      setArchivingRowId(null);
     }
-    onTasksChanged();
   };
 
   const isFiltered =
@@ -366,11 +384,13 @@ export function WorkView({
               projectLabel={selectedGroup.group.label}
               now={now}
               confirmArchive={confirmArchive}
-              archiveError={archiveError}
+              archiveCount={canArchive ? selected.archivableTaskIds.length : 0}
+              archivePending={archivingRowId !== null}
+              archiveError={archiveError?.rowId === selected.id ? archiveError.message : null}
               onOpenTask={onOpenTask}
-              onAskArchive={() => setConfirmArchive(true)}
-              onCancelArchive={() => setConfirmArchive(false)}
-              onArchive={() => void archiveOlderRuns(selected)}
+              onAskArchive={() => setArchiveConfirmation(archiveBatch)}
+              onCancelArchive={() => setArchiveConfirmation(null)}
+              onArchive={() => void archiveOtherSessions(selected)}
             />
           )}
         </div>
@@ -384,6 +404,8 @@ interface WorkDetailProps {
   projectLabel: string;
   now: number;
   confirmArchive: boolean;
+  archiveCount: number;
+  archivePending: boolean;
   archiveError: string | null;
   onOpenTask: (taskId: string) => void;
   onAskArchive: () => void;
@@ -396,6 +418,8 @@ function WorkDetail({
   projectLabel,
   now,
   confirmArchive,
+  archiveCount,
+  archivePending,
   archiveError,
   onOpenTask,
   onAskArchive,
@@ -406,7 +430,7 @@ function WorkDetail({
   const outputs = resolveTaskOutputSummaryFromTask(task);
   const outputPaths = outputs ? [...new Set(outputs.created)].slice(0, MAX_OUTPUTS) : [];
   const result = (task.resultSummary || task.semanticSummary || "").trim();
-  const olderRuns = row.runs.length - 1;
+  const otherSessions = `${archiveCount} other ${archiveCount === 1 ? "session" : "sessions"}`;
 
   return (
     <aside className="work-view-detail" aria-label="Selected work">
@@ -495,18 +519,18 @@ function WorkDetail({
         <button type="button" className="primary" onClick={() => onOpenTask(task.id)}>
           Open session
         </button>
-        {olderRuns > 0 && !confirmArchive && (
-          <button type="button" onClick={onAskArchive}>
-            Archive {olderRuns} older {olderRuns === 1 ? "run" : "runs"}
+        {archiveCount > 0 && !confirmArchive && (
+          <button type="button" disabled={archivePending} onClick={onAskArchive}>
+            Archive {otherSessions}
           </button>
         )}
-        {olderRuns > 0 && confirmArchive && (
+        {archiveCount > 0 && confirmArchive && (
           <span className="work-view-confirm">
-            <span>Keep the shown run and archive the other {olderRuns}?</span>
-            <button type="button" className="danger" onClick={onArchive}>
-              Archive
+            <span>Keep the shown session and archive {otherSessions}?</span>
+            <button type="button" className="danger" disabled={archivePending} onClick={onArchive}>
+              {archivePending ? "Archiving…" : "Archive"}
             </button>
-            <button type="button" onClick={onCancelArchive}>
+            <button type="button" disabled={archivePending} onClick={onCancelArchive}>
               Cancel
             </button>
           </span>

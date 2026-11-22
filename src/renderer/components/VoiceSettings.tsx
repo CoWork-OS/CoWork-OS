@@ -111,12 +111,17 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   const [capabilities, setCapabilities] = useState<VoiceCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [elevenLabsVoices, setElevenLabsVoices] = useState<ElevenLabsVoice[]>([]);
-  const [loadingVoices, setLoadingVoices] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [elevenLabsKeyPending, setElevenLabsKeyPending] = useState(false);
+  const [elevenLabsCatalog, setElevenLabsCatalog] = useState<{
+    apiKey: string;
+    voices: ElevenLabsVoice[];
+  } | null>(null);
 
   // Test connection states
   const [testingElevenLabs, setTestingElevenLabs] = useState(false);
   const [elevenLabsTestResult, setElevenLabsTestResult] = useState<{
+    apiKey: string;
     success: boolean;
     message: string;
   } | null>(null);
@@ -140,17 +145,53 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     autosaveRef.current = createVoiceSettingsAutosave(
       async (patch) => {
         setSaving(true);
+        setSaveFailed(false);
         try {
           return await window.electronAPI.saveVoiceSettings(patch);
         } finally {
           setSaving(false);
         }
       },
-      (updated) => setSettings(updated),
+      (updated) => {
+        setSettings(updated);
+        setElevenLabsKeyPending(false);
+      },
       500,
-      (error) => console.error("Failed to save voice settings:", error),
+      (error) => {
+        setSaveFailed(true);
+        console.error("Failed to save voice settings:", error);
+      },
     );
   }
+
+  const elevenLabsApiKey = settings.elevenLabsApiKey || "";
+  const canLoadElevenLabs = Boolean(elevenLabsApiKey) && !elevenLabsKeyPending;
+  const elevenLabsVoices =
+    canLoadElevenLabs && elevenLabsCatalog?.apiKey === elevenLabsApiKey
+      ? elevenLabsCatalog.voices
+      : null;
+
+  useEffect(() => {
+    setElevenLabsCatalog(null);
+    if (!canLoadElevenLabs || settings.ttsProvider !== "elevenlabs") return;
+    let cancelled = false;
+
+    const loadVoices = async () => {
+      let voices: ElevenLabsVoice[] = [];
+      try {
+        // The host reads the persisted key, so wait for autosave to acknowledge it.
+        voices = await window.electronAPI.getElevenLabsVoices();
+      } catch (error) {
+        if (!cancelled) console.error("Failed to load ElevenLabs voices:", error);
+      }
+      if (!cancelled) setElevenLabsCatalog({ apiKey: elevenLabsApiKey, voices });
+    };
+
+    void loadVoices();
+    return () => {
+      cancelled = true;
+    };
+  }, [canLoadElevenLabs, elevenLabsApiKey, settings.ttsProvider]);
 
   useEffect(() => {
     loadSettings();
@@ -181,27 +222,10 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
       ]);
       setSettings(loaded);
       setCapabilities(loadedCapabilities);
-
-      // Load ElevenLabs voices if API key is configured
-      if (loaded.elevenLabsApiKey) {
-        await loadElevenLabsVoices();
-      }
     } catch (error) {
       console.error("Failed to load voice settings:", error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadElevenLabsVoices = async () => {
-    try {
-      setLoadingVoices(true);
-      const voices = await window.electronAPI.getElevenLabsVoices();
-      setElevenLabsVoices(voices);
-    } catch (error) {
-      console.error("Failed to load ElevenLabs voices:", error);
-    } finally {
-      setLoadingVoices(false);
     }
   };
 
@@ -240,14 +264,9 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
 
   // Text input handlers use debounced save to prevent race conditions
   const handleElevenLabsApiKeyChange = (apiKey: string) => {
+    setElevenLabsKeyPending(true);
+    setElevenLabsTestResult(null);
     debouncedSave({ elevenLabsApiKey: apiKey });
-    // Load voices after debounce completes
-    if (apiKey) {
-      // Delay voice loading to match save timing
-      setTimeout(() => loadElevenLabsVoices(), 600);
-    } else {
-      setElevenLabsVoices([]);
-    }
   };
 
   const handleElevenLabsAgentsApiKeyChange = (apiKey: string) => {
@@ -319,11 +338,13 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   };
 
   const handleTestElevenLabs = async () => {
+    if (!canLoadElevenLabs) return;
     setTestingElevenLabs(true);
     setElevenLabsTestResult(null);
     try {
       const result = await window.electronAPI.testElevenLabsConnection();
       setElevenLabsTestResult({
+        apiKey: elevenLabsApiKey,
         success: result.success,
         message: result.success
           ? `Connected! Found ${result.voiceCount} voices.`
@@ -331,6 +352,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
       });
     } catch (error: Any) {
       setElevenLabsTestResult({
+        apiKey: elevenLabsApiKey,
         success: false,
         message: error.message || "Connection failed",
       });
@@ -408,6 +430,20 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
 
   return (
     <div className="voice-settings">
+      {saveFailed && (
+        <div className="test-result error" role="alert">
+          Could not save voice settings.
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => void autosaveRef.current?.flush()}
+            disabled={saving}
+          >
+            Retry save
+          </button>
+        </div>
+      )}
+
       {/* Enable/Disable */}
       <div className="settings-section">
         <div className="settings-header-row">
@@ -505,13 +541,13 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
                 type="password"
                 className="settings-input"
                 placeholder="Enter your ElevenLabs API key"
-                value={settings.elevenLabsApiKey || ""}
+                value={elevenLabsApiKey}
                 onChange={(e) => handleElevenLabsApiKeyChange(e.target.value)}
               />
               <button
                 className="button-secondary"
                 onClick={handleTestElevenLabs}
-                disabled={testingElevenLabs || !settings.elevenLabsApiKey}
+                disabled={testingElevenLabs || !canLoadElevenLabs}
               >
                 {testingElevenLabs ? "Testing..." : "Test"}
               </button>
@@ -526,7 +562,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
                 ElevenLabs Dashboard
               </a>
             </p>
-            {elevenLabsTestResult && (
+            {canLoadElevenLabs && elevenLabsTestResult?.apiKey === elevenLabsApiKey && (
               <div className={`test-result ${elevenLabsTestResult.success ? "success" : "error"}`}>
                 {elevenLabsTestResult.message}
               </div>
@@ -539,16 +575,22 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
               className="settings-select"
               value={settings.elevenLabsVoiceId || ""}
               onChange={(e) => handleVoiceChange(e.target.value)}
-              disabled={loadingVoices || elevenLabsVoices.length === 0}
+              disabled={!elevenLabsVoices?.length}
             >
               <option value="">
-                {loadingVoices
-                  ? "Loading voices..."
-                  : elevenLabsVoices.length === 0
-                    ? "Enter API key to load voices"
-                    : "Select a voice"}
+                {!elevenLabsApiKey
+                  ? "Enter API key to load voices"
+                  : !canLoadElevenLabs
+                    ? saveFailed
+                      ? "Save API key to load voices"
+                      : "Saving API key..."
+                    : !elevenLabsVoices
+                      ? "Loading voices..."
+                      : !elevenLabsVoices.length
+                        ? "No voices available"
+                        : "Select a voice"}
               </option>
-              {elevenLabsVoices.map((voice) => (
+              {elevenLabsVoices?.map((voice) => (
                 <option key={voice.voice_id} value={voice.voice_id}>
                   {voice.name}
                   {voice.category && ` (${voice.category})`}

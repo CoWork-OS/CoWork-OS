@@ -49,7 +49,7 @@ type PresentationArtifactViewerProps = {
   onClose: () => void;
   onFullscreen: () => void;
   onExitFullscreen: () => void;
-  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void>;
+  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void | boolean>;
   selectedModelLabel?: string;
   selectedModel?: string;
   selectedProvider?: LLMProviderType;
@@ -135,6 +135,7 @@ export function PresentationArtifactViewer({
   const [renderingImages, setRenderingImages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileData, setFileData] = useState<ViewerData | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [fullscreenMessage, setFullscreenMessage] = useState("");
   const [fullscreenSending, setFullscreenSending] = useState(false);
@@ -145,6 +146,7 @@ export function PresentationArtifactViewer({
   const [voiceNotice, setVoiceNotice] = useState("");
   const [turnContextExpanded, setTurnContextExpanded] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
+  const actionRequest = useRef(0);
   const fileName = fileData?.fileName || getFileName(filePath);
   const formatLabel = getPresentationFormatLabel(fileName);
   const fullscreenLabel =
@@ -168,12 +170,34 @@ export function PresentationArtifactViewer({
 
   useEffect(() => {
     let cancelled = false;
+    setActionError(null);
     setError(null);
     setCopyMessage("");
+
+    const cleanup = () => {
+      cancelled = true;
+      actionRequest.current += 1;
+    };
 
     const applyViewerData = (data: ViewerData) => {
       presentationViewerDataCache.set(cacheKey, data);
       setFileData(data);
+    };
+
+    const showTextFallback = () => {
+      if (cancelled) return;
+      setFileData((current) =>
+        current?.presentationPreview
+          ? {
+              ...current,
+              presentationPreview: {
+                ...current.presentationPreview,
+                renderStatus: "failed",
+                renderMessage: "Could not render slide images. Slide text is still available.",
+              },
+            }
+          : current,
+      );
     };
 
     const loadFullPreview = () => {
@@ -185,14 +209,15 @@ export function PresentationArtifactViewer({
           if (
             result.success &&
             result.data?.fileType === "pptx" &&
-            result.data.presentationPreview
+            result.data.presentationPreview &&
+            !presentationPreviewNeedsRender(result.data.presentationPreview)
           ) {
             applyViewerData(result.data);
+          } else {
+            showTextFallback();
           }
         })
-        .catch(() => {
-          // The fast text preview remains usable if high-fidelity rendering fails.
-        })
+        .catch(showTextFallback)
         .finally(() => {
           if (!cancelled) setRenderingImages(false);
         });
@@ -207,9 +232,7 @@ export function PresentationArtifactViewer({
       } else {
         setRenderingImages(false);
       }
-      return () => {
-        cancelled = true;
-      };
+      return cleanup;
     }
 
     setLoading(true);
@@ -243,9 +266,7 @@ export function PresentationArtifactViewer({
         if (!cancelled) setLoading(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return cleanup;
   }, [cacheKey, filePath, workspacePath]);
 
   useEffect(() => {
@@ -273,13 +294,28 @@ export function PresentationArtifactViewer({
     }
   };
 
-  const handleOpenExternal = () => {
-    void window.electronAPI.openFile(filePath, workspacePath);
+  const runFileAction = async (action: () => Promise<string | void>, fallback: string) => {
+    const request = ++actionRequest.current;
+    setActionError(null);
+    try {
+      const message = await action();
+      if (message && request === actionRequest.current) setActionError(message);
+    } catch {
+      if (request === actionRequest.current) setActionError(fallback);
+    }
   };
 
-  const handleShowInFinder = () => {
-    void window.electronAPI.showInFinder(filePath, workspacePath);
-  };
+  const handleOpenExternal = () =>
+    runFileAction(
+      () => window.electronAPI.openFile(filePath, workspacePath),
+      "Could not open the presentation in an external app.",
+    );
+
+  const handleShowInFinder = () =>
+    runFileAction(
+      () => window.electronAPI.showInFinder(filePath, workspacePath),
+      "Could not show the presentation in its folder.",
+    );
 
   const handleAttachFiles = useCallback(async () => {
     try {
@@ -339,18 +375,19 @@ export function PresentationArtifactViewer({
     const message = fullscreenMessage.trim();
     if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
       return;
-    const previousMessage = fullscreenMessage;
-    const previousAttachments = fullscreenAttachments;
+    const submittedDraft = fullscreenMessage;
+    const submittedAttachments = fullscreenAttachments;
     setFullscreenSending(true);
-    setFullscreenMessage("");
-    setFullscreenAttachments([]);
     try {
       setAttachmentError("");
       const payload = await buildMessageWithAttachments(message);
-      await onSendMessage(payload.message, payload.images);
+      const accepted = await onSendMessage(payload.message, payload.images);
+      if (accepted === false) throw new Error("Artifact follow-up was rejected");
+      setFullscreenMessage((current) => (current === submittedDraft ? "" : current));
+      setFullscreenAttachments((current) =>
+        current.filter((attachment) => !submittedAttachments.includes(attachment)),
+      );
     } catch {
-      setFullscreenMessage(previousMessage);
-      setFullscreenAttachments(previousAttachments);
       setAttachmentError("Failed to send message. Please try again.");
     } finally {
       setFullscreenSending(false);
@@ -442,6 +479,11 @@ export function PresentationArtifactViewer({
           <FolderOpen size={14} />
           Folder
         </button>
+        {actionError && (
+          <div className="presentation-artifact-viewer-message" role="alert">
+            {actionError}
+          </div>
+        )}
         {(copyMessage || renderNotice) && (
           <div className="presentation-artifact-viewer-message">{copyMessage || renderNotice}</div>
         )}
@@ -531,6 +573,7 @@ export function PresentationArtifactViewer({
                     className="input-field input-textarea"
                     placeholder="Ask for follow-up changes"
                     value={fullscreenMessage}
+                    readOnly={fullscreenSending}
                     rows={1}
                     onChange={(event) => setFullscreenMessage(event.target.value)}
                     onKeyDown={(event) => {

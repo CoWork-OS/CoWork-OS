@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, ZoomIn } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
 import "./artifact-viewers.css";
@@ -31,29 +31,17 @@ export function PresentationViewer({
   extraActions,
   className,
 }: PresentationViewerProps) {
-  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [selectedSlideIndex, setActiveSlideIndex] = useState(0);
   const [zoom, setZoom] = useState<(typeof ZOOM_LEVELS)[number]>(100);
   const slides = preview.slides;
-  const activeSlide = slides[activeSlideIndex] || slides[0] || null;
+  const activeSlideIndex = Math.min(selectedSlideIndex, Math.max(0, slides.length - 1));
+  const activeSlide = slides[activeSlideIndex] ?? null;
   const renderedCount = useMemo(
     () => slides.filter((slide) => Boolean(slide.imageUrl || slide.imageDataUrl)).length,
     [slides],
   );
   const getSlideImageSource = (slide: PresentationPreview["slides"][number] | null | undefined) =>
     slide?.imageUrl || slide?.imageDataUrl || "";
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "ArrowLeft") {
-        setActiveSlideIndex((current) => Math.max(0, current - 1));
-      }
-      if (event.key === "ArrowRight") {
-        setActiveSlideIndex((current) => Math.min(slides.length - 1, current + 1));
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [slides.length]);
 
   const canGoBack = activeSlideIndex > 0;
   const canGoForward = activeSlideIndex < slides.length - 1;
@@ -69,13 +57,43 @@ export function PresentationViewer({
     .filter(Boolean)
     .join(" • ");
 
-  const goBack = () => setActiveSlideIndex((current) => Math.max(0, current - 1));
-  const goForward = () =>
-    setActiveSlideIndex((current) => Math.min(slides.length - 1, current + 1));
+  const goBack = () => setActiveSlideIndex(activeSlideIndex - 1);
+  const goForward = () => setActiveSlideIndex(activeSlideIndex + 1);
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest("input, select, textarea, [contenteditable]")
+    ) {
+      return;
+    }
+    if (event.key === "ArrowLeft" && canGoBack) {
+      event.preventDefault();
+      goBack();
+    } else if (event.key === "ArrowRight" && canGoForward) {
+      event.preventDefault();
+      goForward();
+    }
+  };
   const slideWidthPercent = zoom;
 
   return (
-    <div className={`presentation-viewer${className ? ` ${className}` : ""}`}>
+    <div
+      className={`presentation-viewer${className ? ` ${className}` : ""}`}
+      role="region"
+      aria-label="Slide preview"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
       <aside className="presentation-viewer-sidebar" aria-label="Slides">
         <div className="presentation-viewer-file">
           <div className="presentation-viewer-file-name" title={fileName}>
@@ -91,6 +109,7 @@ export function PresentationViewer({
               className={`presentation-viewer-thumb ${index === activeSlideIndex ? "active" : ""}`}
               onClick={() => setActiveSlideIndex(index)}
               title={`Slide ${slide.index}`}
+              aria-current={index === activeSlideIndex ? "true" : undefined}
             >
               <span className="presentation-viewer-thumb-number">{slide.index}</span>
               {getSlideImageSource(slide) ? (
@@ -135,6 +154,7 @@ export function PresentationViewer({
             <label className="presentation-viewer-zoom" title="Zoom">
               <ZoomIn size={15} />
               <select
+                aria-label="Zoom"
                 value={zoom}
                 onChange={(event) =>
                   setZoom(Number(event.target.value) as (typeof ZOOM_LEVELS)[number])

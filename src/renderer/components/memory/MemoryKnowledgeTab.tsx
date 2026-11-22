@@ -4,6 +4,7 @@ import {
   type MemoryHubAddableKind,
   type MemoryHubItem,
   type MemoryHubKind,
+  type MemoryHubListRequest,
   type MemoryHubSource,
   type MemoryHubWhy,
 } from "../../../shared/memory-hub-types";
@@ -438,8 +439,10 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
       )}
 
       {props.loading && props.items.length === 0 && folderCount === 0 ? (
-        <div className="settings-loading">Loading memories...</div>
-      ) : groups.length === 0 && fromOthers.length === 0 && folderCount === 0 ? (
+        <div className="settings-loading" role="status">
+          Loading memories...
+        </div>
+      ) : !props.error && groups.length === 0 && fromOthers.length === 0 && folderCount === 0 ? (
         <div className="settings-empty">
           {filtered
             ? "No memories match these filters."
@@ -528,6 +531,15 @@ export const MEMORY_KNOWLEDGE_METHODS = [
   "clearGlobalMemoryItems",
 ] as const;
 
+interface KnowledgeList {
+  request: MemoryHubListRequest;
+  items: MemoryHubItem[];
+  total: number;
+  hasMore: boolean;
+  loading: boolean;
+  error?: string;
+}
+
 export function MemoryKnowledgeTab({
   workspaceId,
   canWrite = true,
@@ -550,10 +562,7 @@ export function MemoryKnowledgeTab({
   /** Bring this bot's own memory into view (opened from the bot's "What this bot knows"). */
   focusBotId?: string;
 }) {
-  const [items, setItems] = useState<MemoryHubItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [list, setList] = useState<KnowledgeList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // "Open in Memory Hub" (per-reply Memory used) starts the tab filtered to that item.
@@ -569,6 +578,22 @@ export function MemoryKnowledgeTab({
     kind: "preference",
     scope: "global",
   });
+  const search = query.trim();
+  const request = useMemo<MemoryHubListRequest>(
+    () => ({
+      workspaceId,
+      query: search || undefined,
+      kinds: kindFilter ? [kindFilter] : undefined,
+      sources: sourceFilter ? [sourceFilter] : undefined,
+      pinnedOnly: pinnedOnly || undefined,
+      limit: MEMORY_KNOWLEDGE_PAGE_SIZE,
+    }),
+    [workspaceId, search, kindFilter, sourceFilter, pinnedOnly],
+  );
+  const visibleList = list?.request === request ? list : null;
+  const items = visibleList?.items ?? [];
+  const activeRequest = useRef(request);
+  activeRequest.current = request;
   const generation = useRef(0);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -626,58 +651,85 @@ export function MemoryKnowledgeTab({
 
   const load = useCallback(
     async (offset: number) => {
-      if (!workspaceId) return;
+      if (!request.workspaceId) return;
       const current = ++generation.current;
-      setLoading(true);
+      setList((previous) =>
+        previous?.request === request
+          ? { ...previous, loading: true, error: undefined }
+          : { request, items: [], total: 0, hasMore: false, loading: true },
+      );
       try {
-        const page = await api().listMemoryItems({
-          workspaceId,
-          query: query.trim() || undefined,
-          kinds: kindFilter ? [kindFilter] : undefined,
-          sources: sourceFilter ? [sourceFilter] : undefined,
-          pinnedOnly: pinnedOnly || undefined,
-          limit: MEMORY_KNOWLEDGE_PAGE_SIZE,
-          offset,
-        });
-        if (current !== generation.current) return;
-        setItems((previous) => (offset === 0 ? page.items : [...previous, ...page.items]));
-        setTotal(page.total);
-        setHasMore(page.hasMore);
+        const page = await api().listMemoryItems({ ...request, offset });
+        if (current !== generation.current || activeRequest.current !== request) return;
+        setList((previous) => ({
+          request,
+          items:
+            offset && previous?.request === request
+              ? [...previous.items, ...page.items]
+              : page.items,
+          total: page.total,
+          hasMore: page.hasMore,
+          loading: false,
+        }));
         setError(null);
       } catch (loadError) {
-        if (current !== generation.current) return;
-        setError(loadError instanceof Error ? loadError.message : "Failed to load memories.");
-      } finally {
-        if (current === generation.current) setLoading(false);
+        if (current !== generation.current || activeRequest.current !== request) return;
+        setList((previous) =>
+          previous?.request === request
+            ? {
+                ...previous,
+                loading: false,
+                error: loadError instanceof Error ? loadError.message : "Failed to load memories.",
+              }
+            : previous,
+        );
       }
     },
-    [api, workspaceId, query, kindFilter, sourceFilter, pinnedOnly],
+    [api, request],
   );
+  const loadCurrent = useRef(load);
+  loadCurrent.current = load;
 
   useEffect(() => {
     setEditing(null);
     setWhy(null);
     setNotice(null);
     if (!available) return;
-    const timer = setTimeout(() => void load(0), query ? 250 : 0);
+    const timer = setTimeout(() => void load(0), search ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [load, available, query]);
+  }, [load, available, search]);
 
   const apply = async (
     busy: string,
-    run: () => Promise<{ items: MemoryHubItem[]; error?: string; notice?: string }>,
+    run: () => Promise<{
+      items: MemoryHubItem[];
+      error?: string;
+      notice?: string;
+      cancelled?: boolean;
+    }>,
   ) => {
+    const previousItems = itemsRef.current;
     setBusyId(busy);
     try {
       const result = await run();
-      const delta = result.items.length - itemsRef.current.length;
-      setItems(result.items);
-      if (delta !== 0) setTotal((value) => Math.max(0, value + delta));
+      if (!result.error && !result.cancelled && result.items !== previousItems) {
+        if (activeRequest.current !== request || itemsRef.current !== previousItems) {
+          // Re-read the active filter instead of restoring the rows the action started with.
+          void loadCurrent.current(0);
+        } else {
+          const delta = result.items.length - previousItems.length;
+          setList((previous) =>
+            previous?.request === request
+              ? { ...previous, items: result.items, total: Math.max(0, previous.total + delta) }
+              : previous,
+          );
+        }
+      }
       setError(result.error ?? null);
       setNotice(result.error ? null : (result.notice ?? null));
       return result;
     } finally {
-      setBusyId(null);
+      setBusyId((current) => (current === busy ? null : current));
     }
   };
 
@@ -692,10 +744,10 @@ export function MemoryKnowledgeTab({
   return (
     <MemoryKnowledgeView
       items={items}
-      total={total}
-      hasMore={hasMore}
-      loading={loading}
-      error={error}
+      total={visibleList?.total ?? 0}
+      hasMore={visibleList?.hasMore ?? false}
+      loading={Boolean(workspaceId) && (visibleList?.loading ?? true)}
+      error={error ?? visibleList?.error ?? null}
       notice={notice}
       query={query}
       kindFilter={kindFilter}
@@ -733,7 +785,7 @@ export function MemoryKnowledgeTab({
         void apply(target.id, () =>
           editKnowledgeItem(api(), workspaceId, itemsRef.current, target.id, target.draft),
         ).then((result) => {
-          if (!result.error) setEditing(null);
+          if (!result.error) setEditing((current) => (current === target ? null : current));
         });
       }}
       onCancelEdit={() => setEditing(null)}
@@ -781,6 +833,9 @@ export function MemoryKnowledgeTab({
       onDismissMessage={() => {
         setError(null);
         setNotice(null);
+        setList((previous) =>
+          previous?.request === request ? { ...previous, error: undefined } : previous,
+        );
       }}
       folderView={
         folderReport

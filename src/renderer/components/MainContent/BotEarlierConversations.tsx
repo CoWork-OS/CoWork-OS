@@ -226,7 +226,7 @@ export function BotEarlierConversations({
       {error && (
         <div className="bot-history-status" role="alert">
           <span>Couldn’t load earlier messages.</span>
-          <button type="button" onClick={() => setError(null)}>
+          <button type="button" onClick={() => void loadMore({ keepPosition: true })}>
             Retry
           </button>
         </div>

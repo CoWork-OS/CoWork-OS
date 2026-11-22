@@ -9,7 +9,11 @@ import {
   type AttentionPlace,
   type AttentionTaskContext,
 } from "../../shared/attention";
-import { deriveCanonicalTaskStatus } from "../../shared/task-status";
+import {
+  deriveCanonicalTaskStatus,
+  isActiveTaskStatus,
+  isIdleFork,
+} from "../../shared/task-status";
 import type { Task, Workspace } from "../../shared/types";
 import { getSidebarSessionTitle, isSidebarRecentWorkspace } from "../components/Sidebar";
 
@@ -46,7 +50,7 @@ export interface WorkRun {
 }
 
 export interface WorkRow {
-  /** Stable while the runs change: the project and the normalized title. */
+  /** Stable while the runs and project labels load: the workspace and normalized title. */
   id: string;
   title: string;
   status: WorkStatus;
@@ -55,6 +59,8 @@ export interface WorkRow {
   task: Task;
   /** All runs of this work, newest first. More than one when repeated runs were collapsed. */
   runs: WorkRun[];
+  /** One representative task ID per other idle session that can be archived. */
+  archivableTaskIds: string[];
   /** The queue item waiting on the user for this work, when there is one. */
   decision?: AttentionItem;
   actor: AttentionActor;
@@ -120,6 +126,10 @@ function runAt(task: Task): number {
   return task.updatedAt || task.completedAt || task.createdAt;
 }
 
+function sessionIdForTask(task: Task): string {
+  return task.sessionId || task.id;
+}
+
 /** The first queue item per task: approvals and questions outrank a plain waiting session. */
 function decisionsByTask(attention: readonly AttentionItem[]): Map<string, AttentionItem> {
   const byTask = new Map<string, AttentionItem>();
@@ -157,13 +167,19 @@ export function buildWorkModel(input: {
   );
   const decisions = decisionsByTask(input.attention);
 
-  // Collapse repeated runs: same project, same title.
+  // The host refuses to archive a session while any task in its lineage is running.
+  const runningSessions = new Set(
+    input.tasks
+      .filter((task) => isActiveTaskStatus(task.status) && !isIdleFork(task))
+      .map(sessionIdForTask),
+  );
+  // Keep workspaces distinct, even when their rows share the "No project" group.
   const runsByKey = new Map<string, { projectId: string; title: string; runs: WorkRun[] }>();
   for (const task of input.tasks) {
     if (!isWorkSession(task)) continue;
     const projectId = projects.has(task.workspaceId) ? task.workspaceId : NO_PROJECT;
     const title = getSidebarSessionTitle({ task, displayTitle: undefined });
-    const key = `${projectId}:${normalizeTitle(title)}`;
+    const key = `${task.workspaceId || NO_PROJECT}:${normalizeTitle(title)}`;
     const run: WorkRun = { task, at: runAt(task), ...statusOf(task, decisions.get(task.id)) };
     const entry = runsByKey.get(key);
     if (entry) entry.runs.push(run);
@@ -177,6 +193,16 @@ export function buildWorkModel(input: {
       runs.find((run) => run.status === "needs") ??
       runs.find((run) => run.status === "running") ??
       runs[0];
+    // Archive acts on whole sessions. Keep every task in the shown session and send
+    // at most one task ID for each other session.
+    const seenSessions = new Set([sessionIdForTask(lead.task)]);
+    const archivableTaskIds: string[] = [];
+    for (const { task } of runs) {
+      const sessionId = sessionIdForTask(task);
+      if (seenSessions.has(sessionId) || runningSessions.has(sessionId)) continue;
+      seenSessions.add(sessionId);
+      archivableTaskIds.push(task.id);
+    }
     rows.push({
       id: key,
       projectId: entry.projectId,
@@ -185,6 +211,7 @@ export function buildWorkModel(input: {
       statusLabel: lead.statusLabel,
       task: lead.task,
       runs,
+      archivableTaskIds,
       decision: decisions.get(lead.task.id),
       actor: attentionActorForTask(lead.task, context),
       origin: attentionOriginForTask(lead.task),

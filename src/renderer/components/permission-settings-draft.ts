@@ -30,13 +30,16 @@ export function hasUnsavedPermissionChanges(
   return stableStringify(saved) !== stableStringify(draft);
 }
 
-/** The message of a save error from main, without Electron's "Error invoking remote method" prefix. */
-export function permissionSaveErrorMessage(error: unknown): string {
+/** A permission settings error from main, without Electron's "Error invoking remote method" prefix. */
+export function permissionSaveErrorMessage(
+  error: unknown,
+  fallback = "Failed to save permission settings.",
+): string {
   const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   const cleaned = raw
     .replace(/^Error invoking remote method '[^']+':\s*(?:\w*Error:\s*)?/, "")
     .trim();
-  return cleaned || "Failed to save permission settings.";
+  return cleaned || fallback;
 }
 
 let pendingLeaveSave: Promise<void> | null = null;

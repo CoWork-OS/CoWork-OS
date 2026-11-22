@@ -1979,7 +1979,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   };
 
   const openManualCompose = (mode: ManualComposeMode) => {
-    if (!selectedThread) return;
+    if (!selectedThread || manualComposeMode === mode) return;
     if (mode === "forward" && !canSelectedThread("forward")) {
       setError(selectedThreadCapabilityReason);
       return;
@@ -2038,7 +2038,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const closeManualCompose = () => setManualCompose(null);
 
   const sendManualCompose = async (draft: ManualComposeDraft) => {
-    if (!selectedThread || !manualComposeMode) return;
+    if (!selectedThread || busy || draft.mode !== manualComposeMode) return;
     await runAction(async () => {
       await window.electronAPI.applyMailboxAction({
         threadId: selectedThread.id,

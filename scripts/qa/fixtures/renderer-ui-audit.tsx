@@ -1,6 +1,7 @@
-import React, { Profiler, useState } from "react";
+import React, { Profiler, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ScheduledTasksSettings } from "../../../src/renderer/components/ScheduledTasksSettings";
+import { QueuedMessagesPanel } from "../../../src/renderer/components/QueuedMessagesPanel";
 import { InboxAgentPanel } from "../../../src/renderer/components/InboxAgentPanel";
 import { ImageLightbox } from "../../../src/renderer/components/ImageLightbox";
 import { FullAccessConfirmationDialog } from "../../../src/renderer/components/FullAccessConfirmationDialog";
@@ -9,12 +10,15 @@ import { MCPLaunchPlanReview } from "../../../src/renderer/components/MCPLaunchP
 import { CalmAccessMenu } from "../../../src/renderer/components/calm/CalmTopBar";
 import { SidebarRail } from "../../../src/renderer/components/sidebar/SidebarRail";
 import { DocumentArtifactCard } from "../../../src/renderer/components/DocumentArtifactCard";
+import { DocumentArtifactViewer } from "../../../src/renderer/components/DocumentArtifactViewer";
 import { SpreadsheetArtifactCard } from "../../../src/renderer/components/SpreadsheetArtifactCard";
 import { WebArtifactCard } from "../../../src/renderer/components/WebArtifactCard";
 import { PresentationArtifactCard } from "../../../src/renderer/components/PresentationArtifactCard";
 import { NotificationPanel } from "../../../src/renderer/components/NotificationPanel";
 import { ChatGPTImportWizard } from "../../../src/renderer/components/ChatGPTImportWizard";
 import { MCPRegistryBrowser } from "../../../src/renderer/components/MCPRegistryBrowser";
+import { MCPSettings } from "../../../src/renderer/components/MCPSettings";
+import { SkillHubBrowser } from "../../../src/renderer/components/SkillHubBrowser";
 import { FileHub } from "../../../src/renderer/components/FileHub";
 import AutomationStudioPanel from "../../../src/renderer/components/AutomationStudioPanel";
 import { SidebarArchivedSessions } from "../../../src/renderer/components/sidebar/SidebarArchivedSessions";
@@ -22,6 +26,16 @@ import { WorkView } from "../../../src/renderer/components/work/WorkView";
 import { RightPanel } from "../../../src/renderer/components/RightPanel";
 import { SearchSettings } from "../../../src/renderer/components/SearchSettings";
 import { WorkspaceDropdownMenu } from "../../../src/renderer/components/MainContent/WorkspaceDropdownMenu";
+import { UsageInsightsPanel } from "../../../src/renderer/components/UsageInsightsPanel";
+import { SpreadsheetArtifactViewer } from "../../../src/renderer/components/SpreadsheetArtifactViewer";
+import { AddToolsPanel } from "../../../src/renderer/components/AddToolsPanel";
+import { BuildChangesPanel } from "../../../src/renderer/components/calm/BuildChangesPanel";
+import { MemoryKnowledgeTab } from "../../../src/renderer/components/memory/MemoryKnowledgeTab";
+import { ModelDropdown } from "../../../src/renderer/components/MainContent/ModelDropdown";
+import { BotConversationHistory } from "../../../src/renderer/components/BotConversationHistory";
+import { BotEarlierConversations } from "../../../src/renderer/components/MainContent/BotEarlierConversations";
+import { MCIssueDetail } from "../../../src/renderer/components/mission-control/MCIssueDetail";
+import { useMissionControlData } from "../../../src/renderer/components/mission-control/useMissionControlData";
 import "../../../src/renderer/styles/index.css";
 import "../../../src/renderer/styles/calm-theme.css";
 import "../../../src/renderer/components/MainContent/main-content.css";
@@ -42,6 +56,32 @@ const qa = (window.qa = {
   resolveCompletedRunSteps: null,
   approvalRunCancelled: false,
   connectorChanges: [],
+  pendingRegistrySearches: new Map(),
+  pendingMcpTools: new Map(),
+  pendingSkillSearches: new Map(),
+  resolveManualSend: null,
+  cronEvents: new Set(),
+  queuedInputEvents: new Set(),
+  queuedInputs: [
+    { id: "first", kind: "follow_up", message: "First queued follow-up", revision: 1 },
+    { id: "second", kind: "follow_up", message: "Second queued follow-up", revision: 1 },
+  ],
+  holdCronRefresh: false,
+  resolveCronRefresh: null,
+  resolveMemorySearch: null,
+  resolveMemoryPin: null,
+  modelCatalogAttempts: 0,
+  botHistoryAttempts: 0,
+  holdMissionIssue: false,
+  resolveMissionIssue: null,
+  useFixtureImportFile: false,
+  finishFixtureImport: null,
+  importCancelAttempts: 0,
+  rejectUsageReport: null,
+  resolveWorkbookSave: null,
+  workbookValue: "Initial",
+  finishDocumentSave: null,
+  finishArtifactFollowup: null,
   searchPrimary: "google",
   resolveThread(id) {
     for (const done of this.pending.get(id) || []) done(detail(id));
@@ -107,6 +147,17 @@ function detail(id) {
     commitments: [],
   };
 }
+
+const documentPath = "/fixture/draft.docx";
+function documentData(content) {
+  return {
+    fileName: "draft.docx",
+    path: documentPath,
+    fileType: "docx",
+    content,
+    size: 10,
+  };
+}
 const status = {
   connected: true,
   accounts: [account],
@@ -167,6 +218,16 @@ const workTasks = Array.from({ length: 10 }, (_, index) => ({
   createdAt: 1000 - index,
   updatedAt: 1000 - index,
 }));
+const lineageTasks = ["displayed-run", "earlier-run", "other-session"].map((id, index) => ({
+  id,
+  title: "Recurring session",
+  prompt: "",
+  workspaceId: "fixture",
+  sessionId: index < 2 ? "retained-session" : "archivable-session",
+  status: "completed" as const,
+  createdAt: 1000 - index,
+  updatedAt: 1000 - index,
+}));
 const connectorTask = {
   id: "scope-fixture",
   title: "Connector scope fixture",
@@ -194,8 +255,218 @@ const reviewNotice = {
 };
 const notificationEvents = new Set();
 let notifications = [reviewNotice];
+const workbook = {
+  sessionId: "fixture-workbook",
+  filePath: "/fixture/save.xlsx",
+  fileName: "save.xlsx",
+  format: "xlsx",
+  sheets: [{ id: "sheet", name: "Sheet 1", rowCount: 1, columnCount: 1, columnWidths: [14] }],
+  activeSheetId: "sheet",
+  capabilities: { canEditCells: true, canEditStructure: true },
+};
+const scheduledReview = {
+  id: "job-1",
+  name: "Daily document review",
+  enabled: true,
+  schedule: { kind: "every", everyMs: 86400000, anchorMs: 1000 },
+  state: { totalRuns: 0, runHistory: [] },
+  taskPrompt: "Review documents",
+  payload: { kind: "agentTurn", message: "Review documents" },
+  sessionTarget: "isolated",
+  wakeMode: "now",
+  createdAtMs: 1,
+  updatedAtMs: 1,
+};
+const workbookPreview = () => ({
+  sheetCount: 1,
+  activeSheetName: "Sheet 1",
+  sheets: [
+    {
+      ...workbook.sheets[0],
+      rows: [[{ address: "A1", row: 1, column: 1, value: qa.workbookValue }]],
+    },
+  ],
+});
+const memoryItems = ["Cedar", "Quartz"].map((name) => ({
+  id: name.toLowerCase(),
+  content: `${name} fixture memory`,
+  workspaceId: "fixture",
+  scope: "workspace",
+  kind: "preference",
+  subjectKey: name.toLowerCase(),
+  source: "user_stated",
+  status: "active",
+  pinned: false,
+  trust: 1,
+  confidence: 1,
+  createdAt: 1,
+  updatedAt: 1,
+}));
+const memoryPage = (item) => ({ items: [item], total: 1, offset: 0, hasMore: false });
+const modelChoices = [
+  { key: "first-model", displayName: "First fixture model", description: "", reasoningEfforts: [] },
+  {
+    key: "selected-model",
+    displayName: "Selected fixture model",
+    description: "",
+    reasoningEfforts: [],
+  },
+];
+const botLatest = {
+  ...connectorTask,
+  id: "bot-latest",
+  title: "Latest fixture conversation",
+  assignedAgentRoleId: "fixture-bot",
+  createdAt: 1000,
+  updatedAt: 1000,
+  agentConfig: { botConversation: true },
+};
+const botOlder = {
+  ...botLatest,
+  id: "bot-older",
+  title: "Earlier fixture conversation",
+  createdAt: 10,
+  updatedAt: 10,
+};
+const missionCompany = { id: "fixture-company", name: "Fixture company" };
+const missionIssues = ["a", "b"].map((id) => ({
+  id,
+  title: `Issue ${id.toUpperCase()}`,
+  companyId: missionCompany.id,
+  status: "open",
+  metadata: { plannerManaged: true },
+}));
 window.electronAPI = new Proxy(
   {
+    getTempWorkspace: async () => null,
+    listCompanies: async () => [missionCompany],
+    listCompanyIssues: async () => missionIssues,
+    listIssueComments: async (id) => {
+      const comments = [
+        { id: `comment-${id}`, authorType: "user", body: `Comment for ${id}`, createdAt: 1 },
+      ];
+      if (id === "b" && qa.holdMissionIssue) {
+        return new Promise((resolve) => {
+          qa.resolveMissionIssue = () => resolve(comments);
+        });
+      }
+      return comments;
+    },
+    listBotMessages: async () => {
+      if (++qa.botHistoryAttempts === 1) throw new Error("Fixture history temporarily unavailable");
+      return {
+        messages: [
+          {
+            id: "bot-reply",
+            role: "bot",
+            text: "Recovered fixture reply",
+            conversationId: botOlder.id,
+            timestamp: 10,
+          },
+        ],
+        hasMore: false,
+        nextCursor: null,
+      };
+    },
+    getMemoryRepoEntries: async () => null,
+    getProviderModels: async (provider) => {
+      if (provider !== "anthropic") return [];
+      qa.modelCatalogAttempts++;
+      if (qa.modelCatalogAttempts === 1)
+        throw new Error("Fixture model source temporarily unavailable");
+      return [{ key: "retry-model", displayName: "Recovered fixture model", description: "" }];
+    },
+    listMemoryItems: async ({ query }) =>
+      query === "quartz"
+        ? qa.resolveMemorySearch
+          ? memoryPage(memoryItems[1])
+          : new Promise((resolve) => {
+              qa.resolveMemorySearch = () => resolve(memoryPage(memoryItems[1]));
+            })
+        : memoryPage(memoryItems[0]),
+    setMemoryItemPinned: async () =>
+      new Promise((resolve) => {
+        qa.resolveMemoryPin = () =>
+          resolve({ success: true, item: { ...memoryItems[0], pinned: true } });
+      }),
+    openSpreadsheetWorkbook: async () => ({
+      success: true,
+      session: workbook,
+      preview: workbookPreview(),
+    }),
+    applySpreadsheetPatches: async ({ patches }) => {
+      qa.calls.push({ method: "applySpreadsheetPatches", patches });
+      const cell = patches.find((patch) => patch.type === "setCell");
+      if (cell) qa.workbookValue = cell.input.value;
+      return { success: true, session: workbook };
+    },
+    saveSpreadsheetWorkbook: () =>
+      new Promise((resolve) => {
+        qa.resolveWorkbookSave = (success = true) => {
+          qa.resolveWorkbookSave = null;
+          resolve(
+            success
+              ? { success, session: workbook, preview: workbookPreview() }
+              : { success, error: "Fixture workbook save failed" },
+          );
+        };
+      }),
+    listWorkspaces: async () => [{ ...pickerFolders[0], id: "usage-beta", name: "Report Beta" }],
+    getUsageInsightsEarliest: async () => null,
+    getUsageInsights: async (workspaceId, days) => {
+      if (workspaceId === "usage-beta" && days === 7) {
+        return new Promise((_resolve, reject) => {
+          qa.rejectUsageReport = () => reject(new Error("Fixture report failed"));
+        });
+      }
+      return {
+        taskMetrics: {
+          totalCreated: 101,
+          completed: 101,
+          failed: 0,
+          cancelled: 0,
+          avgCompletionTimeMs: null,
+        },
+        executionMetrics: { totalTokens: 0, totalToolCalls: 0, totalLlmCalls: 0 },
+        topSkills: [],
+      };
+    },
+    archiveTask: async (id) => {
+      qa.calls.push({ method: "archiveTask", id });
+    },
+    getMCPSettings: async () => ({ servers: [] }),
+    getMCPStatus: async () =>
+      ["Alpha", "Beta"].map((name) => ({
+        id: name.toLowerCase(),
+        name,
+        status: "connected",
+        tools: [],
+      })),
+    getMCPServerTools: (serverId) =>
+      new Promise((resolve, reject) => {
+        qa.pendingMcpTools.set(serverId, { resolve, reject });
+      }),
+    getSkillStatus: async () => ({ skills: [] }),
+    listQuarantinedImports: async () => [],
+    searchSkillRegistry: (query) => {
+      if (query !== "old" && query !== "new") return Promise.resolve({ results: [] });
+      qa.calls.push({ method: "searchSkillRegistry", query });
+      return new Promise((resolve) => qa.pendingSkillSearches.set(query, resolve));
+    },
+    searchPackRegistry: async (query) => ({
+      results:
+        query === "workspace-retention"
+          ? [
+              {
+                id: "ops-audit",
+                name: "operations",
+                displayName: "Ops Audit",
+                description: "Review team queues",
+                category: "workspace-retention",
+              },
+            ]
+          : [],
+    }),
     getSessionMembers: async () => ({ members: [], invites: [], actor: { role: "owner" } }),
     getSessionProgress: async () => undefined,
     getActiveContext: async () => ({
@@ -261,6 +532,14 @@ window.electronAPI = new Proxy(
     fetchMCPRegistry: async () => ({ servers: [server] }),
     searchMCPRegistry: async (query, tags) => {
       qa.calls.push({ method: "searchMCPRegistry", query, tags });
+      if (["older", "newer"].includes(query)) {
+        return new Promise((resolve) => {
+          qa.pendingRegistrySearches.set(query, () =>
+            resolve([{ ...server, id: query, name: `${query} result` }]),
+          );
+        });
+      }
+      if (query === "unavailable") throw new Error("Fixture registry request failed");
       return [server];
     },
     listNotifications: async () => notifications,
@@ -282,8 +561,24 @@ window.electronAPI = new Proxy(
     },
     selectFiles: async () => {
       qa.calls.push({ method: "selectFiles" });
-      return [];
+      return qa.useFixtureImportFile
+        ? [{ name: "conversations.json", path: "/fixture/conversations.json", size: 512 }]
+        : [];
     },
+    importChatGPT: () =>
+      new Promise((resolve) => {
+        qa.finishFixtureImport = () =>
+          resolve({
+            success: false,
+            cancelled: true,
+            conversationsProcessed: 1,
+            memoriesCreated: 2,
+            errors: [],
+            skipped: 0,
+            sourceFileHash: "fixture",
+          });
+      }),
+    cancelChatGPTImport: async () => ({ cancelled: ++qa.importCancelAttempts > 1 }),
     getLLMSettings: async () => ({}),
     getHubSources: async () => ["local", "artifacts"],
     getRecentHubFiles: () =>
@@ -360,32 +655,68 @@ window.electronAPI = new Proxy(
     },
     getRoutine: async () => ({ instructions: "Review the pending approval." }),
     readFileForViewer: async (path) => {
+      if (path === documentPath) return { success: true, data: documentData("Initial draft") };
       const fileName = path.split("/").pop();
       return {
         success: true,
         data: { fileName, path, fileType: "markdown", content: previewFiles[fileName], size: 10 },
       };
     },
+    updateDocumentFile: ({ blocks }) => {
+      const text = blocks.map((block) => block.runs?.map((run) => run.text).join("")).join("\n");
+      qa.calls.push({ method: "updateDocumentFile", text });
+      return new Promise((resolve) => {
+        qa.finishDocumentSave = (success = true) => {
+          qa.finishDocumentSave = null;
+          resolve(
+            success
+              ? { success, data: documentData(text) }
+              : { success, error: "Fixture document save failed" },
+          );
+        };
+      });
+    },
     listSidebarTasks: async ({ limit, offset, archivedSessionsOnly }) =>
       archivedSessionsOnly ? archivedRows.slice(offset, offset + limit) : [],
     getCronStatus: async () => ({ enabled: true, scheduler: { state: "running" }, jobCount: 1 }),
-    listCronJobs: async () => [
-      {
-        id: "job-1",
-        name: "Daily document review",
-        enabled: true,
-        schedule: { kind: "every", everyMs: 86400000 },
-        state: { totalRuns: 0, runHistory: [] },
-        payload: { kind: "agentTurn", message: "Review documents" },
-        sessionTarget: "isolated",
-        wakeMode: "now",
-        createdAtMs: 1,
-        updatedAtMs: 1,
-      },
-    ],
+    getQueuedTaskInputs: async () => qa.queuedInputs,
+    editQueuedTaskInput: async (input) => {
+      qa.calls.push({ method: "editQueuedTaskInput", input });
+      const current = qa.queuedInputs.find((item) => item.id === input.id);
+      if (current?.revision !== input.expectedRevision) throw new Error("The queue changed");
+      const updated = { ...current, message: input.message, revision: current.revision + 1 };
+      qa.queuedInputs = qa.queuedInputs.map((item) => (item.id === input.id ? updated : item));
+      return updated;
+    },
+    onTaskEvent: (callback) => {
+      qa.queuedInputEvents.add(callback);
+      return () => qa.queuedInputEvents.delete(callback);
+    },
+    listCronJobs: async () =>
+      qa.holdCronRefresh
+        ? new Promise((resolve) => {
+            qa.resolveCronRefresh = () => {
+              qa.holdCronRefresh = false;
+              resolve([scheduledReview]);
+            };
+          })
+        : [scheduledReview],
+    onCronEvent: (callback) => {
+      qa.cronEvents.add(callback);
+      return () => qa.cronEvents.delete(callback);
+    },
+    updateCronJob: async (id, changes) => {
+      qa.calls.push({ method: "updateCronJob", id, changes });
+      return { ok: true };
+    },
     getCronRunHistory: async () => ({ jobId: "job-1", entries: [], totalRuns: 0 }),
     applyMailboxAction: async (options) => {
       qa.calls.push({ method: "applyMailboxAction", options });
+      if (options.type === "send_message") {
+        await new Promise((resolve) => {
+          qa.resolveManualSend = resolve;
+        });
+      }
     },
   },
   {
@@ -400,6 +731,48 @@ window.electronAPI = new Proxy(
   },
 );
 
+function BotHistoryFixture() {
+  const [selected, setSelected] = useState(botLatest.id);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  return (
+    <>
+      <BotConversationHistory
+        botName="Fixture Bot"
+        botRoleId={botLatest.assignedAgentRoleId}
+        selectedConversationId={selected}
+        conversations={[botLatest, botOlder]}
+        onSelectConversation={setSelected}
+      />
+      <div ref={scrollRef} style={{ height: 150, overflow: "auto" }}>
+        <BotEarlierConversations
+          currentTask={botLatest}
+          botName="Fixture Bot"
+          botMascot={null}
+          scrollContainerRef={scrollRef}
+          loadInitialPage
+          canLoadMore={false}
+          currentFirstMessageAt={null}
+          renderMarkdown={(message) => message}
+        />
+      </div>
+    </>
+  );
+}
+
+function MissionIssueFixture() {
+  const data = useMissionControlData();
+  return (
+    <>
+      {data.issues.map((issue) => (
+        <button key={issue.id} type="button" onClick={() => data.setSelectedIssueId(issue.id)}>
+          Open {issue.title}
+        </button>
+      ))}
+      {data.selectedIssueId && <MCIssueDetail data={data} issueId={data.selectedIssueId} />}
+    </>
+  );
+}
+
 function Fixture() {
   const [mode, setMode] = useState("dialogs");
   const [focusRoutine, setFocusRoutine] = useState<{ id: string } | null>(null);
@@ -409,6 +782,7 @@ function Fixture() {
   const [lightbox, setLightbox] = useState(false);
   const [mcp, setMcp] = useState(false);
   const [folderPicker, setFolderPicker] = useState(false);
+  const [buildChanges, setBuildChanges] = useState(false);
   return (
     <>
       <nav style={{ padding: 16, display: "flex", gap: 12 }}>
@@ -418,14 +792,28 @@ function Fixture() {
           "menus",
           "import",
           "registry",
+          "mcp-tools",
+          "skills",
           "scheduled",
+          "queued",
           "files",
           "automation",
           "archive",
           "work",
+          "work-archive",
           "workspace",
           "search",
           "folder-picker",
+          "usage",
+          "spreadsheet",
+          "document",
+          "document-followup",
+          "add-tools",
+          "build-changes",
+          "memory",
+          "model-picker",
+          "bot-history",
+          "mission-issue",
         ].map((id) => (
           <button key={id} onClick={() => setMode(id)}>
             Show {id}
@@ -544,6 +932,7 @@ function Fixture() {
         <ChatGPTImportWizard workspaceId="fixture" onClose={() => setMode("dialogs")} />
       )}
       {mode === "scheduled" && <ScheduledTasksSettings />}
+      {mode === "queued" && <QueuedMessagesPanel taskId="queue-fixture" />}
       {mode === "registry" && <MCPRegistryBrowser />}
       {mode === "files" && <FileHub workspaceId="fixture" />}
       {mode === "automation" && (
@@ -564,6 +953,84 @@ function Fixture() {
       )}
       {mode === "work" && (
         <WorkView tasks={workTasks} onOpenTask={() => {}} onTasksChanged={() => {}} />
+      )}
+      {mode === "work-archive" && (
+        <WorkView tasks={lineageTasks} onOpenTask={() => {}} onTasksChanged={() => {}} />
+      )}
+      {mode === "usage" && <UsageInsightsPanel />}
+      {mode === "mcp-tools" && <MCPSettings />}
+      {mode === "skills" && <SkillHubBrowser />}
+      {mode === "memory" && <MemoryKnowledgeTab workspaceId="fixture" />}
+      {mode === "bot-history" && <BotHistoryFixture />}
+      {mode === "mission-issue" && <MissionIssueFixture />}
+      {mode === "model-picker" && (
+        <div style={{ marginTop: 310, paddingLeft: 20 }}>
+          <ModelDropdown
+            models={modelChoices}
+            selectedModel="selected-model"
+            selectedProvider="openai"
+            providers={[
+              { type: "openai", name: "Fixture source", configured: true },
+              { type: "anthropic", name: "Retry source", configured: true },
+            ]}
+            onModelChange={(selection) => {
+              qa.calls.push({ method: "modelChange", selection });
+            }}
+          />
+        </div>
+      )}
+      {mode === "spreadsheet" && (
+        <SpreadsheetArtifactViewer
+          filePath={workbook.filePath}
+          workspacePath="/fixture"
+          mode="sidebar"
+          onClose={() => {}}
+          onFullscreen={() => {}}
+          onExitFullscreen={() => {}}
+        />
+      )}
+      {(mode === "document" || mode === "document-followup") && (
+        <DocumentArtifactViewer
+          filePath={documentPath}
+          workspacePath="/fixture"
+          mode={mode === "document-followup" ? "fullscreen" : "sidebar"}
+          onClose={() => {}}
+          onFullscreen={() => {}}
+          onExitFullscreen={() => {}}
+          onSendMessage={(message) =>
+            new Promise((resolve) => {
+              qa.calls.push({ method: "sendArtifactFollowup", message });
+              qa.finishArtifactFollowup = (accepted) => {
+                qa.finishArtifactFollowup = null;
+                resolve(accepted);
+              };
+            })
+          }
+        />
+      )}
+      {mode === "add-tools" && (
+        <AddToolsPanel
+          onNavigate={(route, selection) => {
+            qa.calls.push({ method: "navigateAddTools", route, selection });
+          }}
+        />
+      )}
+      {mode === "build-changes" && (
+        <>
+          <button type="button" onClick={() => setBuildChanges(true)}>
+            Review build changes
+          </button>
+          {buildChanges && (
+            <BuildChangesPanel
+              changes={[
+                { path: "updated.md", status: "modified", added: 1, removed: 0, hunks: [] },
+                { path: "removed.md", status: "deleted", added: 0, removed: 1, hunks: [] },
+              ]}
+              onClose={() => setBuildChanges(false)}
+              onOpenFile={() => {}}
+            />
+          )}
+        </>
       )}
       {mode === "workspace" && <RightPanel task={connectorTask} workspace={null} events={[]} />}
       {mode === "folder-picker" && (

@@ -15,6 +15,7 @@ import type { Workspace } from "../../shared/types";
 import {
   usageInsightsDayCount,
   usageInsightsRangeFromDates,
+  type UsageInsightsDateRange,
 } from "../../shared/usageInsightsDates";
 import { formatUsageCount } from "./usageInsightsFormatting";
 import { UsageInsightsLlmSection } from "./UsageInsightsLlmSection";
@@ -272,6 +273,12 @@ interface OverviewLoadState {
   data: UsageInsightsData;
 }
 
+type ReportLoadState = { key: string } & (
+  | { status: "loading" }
+  | { status: "ready"; data: UsageInsightsData }
+  | { status: "error"; message: string }
+);
+
 const ALL_WORKSPACES = "__all__";
 const OVERVIEW_PERIOD_DAYS = 365;
 
@@ -292,8 +299,12 @@ function isValidWorkspaceId(id: string | undefined): id is string {
   return !!id && (id === ALL_WORKSPACES || !id.startsWith("__temp_workspace__"));
 }
 
+function usageReportKey(workspaceId: string, periodDays: number, range?: UsageInsightsDateRange) {
+  return JSON.stringify([workspaceId, periodDays, range?.startMs, range?.endMs]);
+}
+
 export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageInsightsPanelProps) {
-  const [data, setData] = useState<UsageInsightsData | null>(null);
+  const [report, setReport] = useState<ReportLoadState | null>(null);
   const [overviewData, setOverviewData] = useState<OverviewLoadState | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -306,10 +317,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const [customEnd, setCustomEnd] = useState(() => toISODate(new Date()));
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const customPickerRef = useRef<HTMLDivElement>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [awuLineMetric, setAwuLineMetric] = useState<"tokens" | "cost">("tokens");
-  const [packAnalytics, setPackAnalytics] = useState<PackSkillMap[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>(ALL_WORKSPACES);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
@@ -323,7 +331,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     () => usageInsightsRangeFromDates(customStart, customEnd),
     [customStart, customEnd],
   );
-  const range = selectedPreset === "custom" ? customRange : undefined;
+  const range = selectedPreset === "custom" ? (customRange ?? undefined) : undefined;
   const invalidCustomRange = selectedPreset === "custom" && !customRange;
   const periodDays =
     selectedPreset === "custom"
@@ -349,6 +357,9 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   }, [visiblePresets, selectedPreset]);
 
   const workspaceId = selectedWorkspaceId;
+  const reportKey = invalidCustomRange ? null : usageReportKey(workspaceId, periodDays, range);
+  const activeReport = report?.key === reportKey ? report : null;
+  const data = activeReport?.status === "ready" ? activeReport.data : null;
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -372,40 +383,32 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const load = useCallback(async () => {
     if (!isValidWorkspaceId(workspaceId)) return;
     const requestId = ++requestSeqRef.current;
-    if (invalidCustomRange) {
-      setLoading(false);
-      return;
-    }
-    const cacheKey = `${workspaceId}|${periodDays}|${range?.startMs ?? ""}|${range?.endMs ?? ""}`;
-    const cached = cacheRef.current.get(cacheKey);
-    if (cached) {
-      setData(cached);
-    }
-    setLoading(!cached);
-    setError(null);
+    if (!reportKey) return;
+    const cached = cacheRef.current.get(reportKey);
+    setReport(
+      cached
+        ? { key: reportKey, status: "ready", data: cached }
+        : { key: reportKey, status: "loading" },
+    );
     try {
-      const result = await window.electronAPI.getUsageInsights(
-        workspaceId,
-        periodDays,
-        range ?? undefined,
-      );
-      cacheRef.current.set(cacheKey, result);
+      const result = await window.electronAPI.getUsageInsights(workspaceId, periodDays, range);
       if (requestSeqRef.current !== requestId) return;
-      setData(result);
+      cacheRef.current.set(reportKey, result);
+      setReport({ key: reportKey, status: "ready", data: result });
     } catch (err: unknown) {
       if (requestSeqRef.current !== requestId) return;
-      setError(err instanceof Error ? err.message : "Failed to load usage insights");
-    } finally {
-      if (requestSeqRef.current === requestId) {
-        setLoading(false);
-      }
+      setReport({
+        key: reportKey,
+        status: "error",
+        message: err instanceof Error ? err.message : "Failed to load usage insights",
+      });
     }
-  }, [workspaceId, periodDays, range, invalidCustomRange]);
+  }, [workspaceId, periodDays, range, reportKey]);
 
   const loadOverview = useCallback(async () => {
     if (!isValidWorkspaceId(workspaceId)) return;
     const requestId = ++overviewRequestSeqRef.current;
-    const cacheKey = `${workspaceId}|${OVERVIEW_PERIOD_DAYS}`;
+    const cacheKey = usageReportKey(workspaceId, OVERVIEW_PERIOD_DAYS);
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
       setOverviewData({ workspaceId, data: cached });
@@ -418,8 +421,8 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     setOverviewData((current) => (current?.workspaceId === workspaceId ? current : null));
     try {
       const result = await window.electronAPI.getUsageInsights(workspaceId, OVERVIEW_PERIOD_DAYS);
-      cacheRef.current.set(cacheKey, result);
       if (overviewRequestSeqRef.current !== requestId) return;
+      if (!cacheRef.current.has(cacheKey)) cacheRef.current.set(cacheKey, result);
       setOverviewData({ workspaceId, data: result });
     } catch (err: unknown) {
       if (overviewRequestSeqRef.current === requestId) {
@@ -514,12 +517,12 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
       (value): value is Exclude<UsageInsightsPeriodPreset, "custom"> => value !== undefined,
     );
     for (const preset of adjacent) {
-      const cacheKey = `${workspaceId}|${preset}`;
+      const cacheKey = usageReportKey(workspaceId, preset);
       if (cacheRef.current.has(cacheKey)) continue;
       void window.electronAPI
         .getUsageInsights(workspaceId, preset)
         .then((result) => {
-          cacheRef.current.set(cacheKey, result);
+          if (!cacheRef.current.has(cacheKey)) cacheRef.current.set(cacheKey, result);
         })
         .catch(() => {
           // Ignore prefetch failures.
@@ -527,11 +530,8 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     }
   }, [workspaceId, periodDays, selectedPreset, visiblePresets]);
 
-  useEffect(() => {
-    if (!data || data.topSkills.length === 0 || pluginPacks.length === 0) {
-      setPackAnalytics([]);
-      return;
-    }
+  const packAnalytics = useMemo(() => {
+    if (!data || data.topSkills.length === 0 || pluginPacks.length === 0) return [];
 
     const skillToPack = new Map<string, { packName: string; packIcon: string }>();
     for (const p of pluginPacks) {
@@ -557,7 +557,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
       entry.skills.push(s);
       entry.totalUsage += s.count;
     }
-    setPackAnalytics(Array.from(packMap.values()).sort((a, b) => b.totalUsage - a.totalUsage));
+    return Array.from(packMap.values()).sort((a, b) => b.totalUsage - a.totalUsage);
   }, [data, pluginPacks]);
 
   if (workspacesLoading) {
@@ -583,29 +583,6 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
       <div className="settings-panel insights-panel">
         <h2>Usage Insights</h2>
         <p className="settings-description">Select a workspace to view usage insights.</p>
-      </div>
-    );
-  }
-
-  if (loading && !data) {
-    return (
-      <div className="settings-panel insights-panel">
-        <h2>Usage Insights</h2>
-        <p className="settings-description">Loading\u2026</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="settings-panel insights-panel">
-        <h2>Usage Insights</h2>
-        <p className="settings-description" style={{ color: "var(--color-error, #ef4444)" }}>
-          {error}
-        </p>
-        <button type="button" className="button-secondary" onClick={load}>
-          Retry
-        </button>
       </div>
     );
   }
@@ -681,6 +658,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                 })
               }
               className="insights-workspace-select"
+              aria-label="Workspace"
             >
               <option value={ALL_WORKSPACES}>All Workspaces</option>
               {workspaces.map((w) => (
@@ -766,6 +744,31 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
           </div>
         </div>
       </div>
+
+      {reportKey !== null && (!activeReport || activeReport.status === "loading") && (
+        <p className="settings-description" role="status">
+          Loading usage report…
+        </p>
+      )}
+      {activeReport?.status === "error" && (
+        <div>
+          <p
+            className="settings-description"
+            role="alert"
+            style={{ color: "var(--color-error, #ef4444)" }}
+          >
+            {activeReport.message}
+          </p>
+          <button type="button" className="button-secondary" onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
+      {invalidCustomRange && !showCustomPicker && (
+        <p className="settings-description" role="alert">
+          Choose valid dates covering at most 365 days.
+        </p>
+      )}
 
       {/* Hero stats row */}
       {tm && (

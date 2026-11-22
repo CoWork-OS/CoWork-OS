@@ -1,5 +1,5 @@
 import { usePositionUpdates } from "../../hooks/usePositionUpdates";
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import type {
   LLMModelInfo,
   LLMProviderInfo,
@@ -55,6 +55,13 @@ function QuickModelPicker({
   onOpenAdvanced,
 }: QuickModelPickerProps) {
   const isCalm = useIsCalmTheme();
+  const effortRef = useRef<HTMLInputElement>(null);
+  const customRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const effort = effortRef.current;
+    const initialControl = effort && !effort.disabled ? effort : customRef.current;
+    initialControl?.focus({ preventScroll: true });
+  }, []);
   const fallbackIndex = Math.max(
     0,
     reasoningEffortOptions.findIndex((option) => option.value === "medium"),
@@ -116,6 +123,7 @@ function QuickModelPicker({
               ))}
             </div>
             <input
+              ref={effortRef}
               className="model-quick-effort-range"
               type="range"
               min={0}
@@ -125,7 +133,6 @@ function QuickModelPicker({
               disabled={isEffortLocked}
               aria-label="Reasoning effort"
               aria-valuetext={selectedOption?.label || "Default"}
-              autoFocus
               onChange={(event) => {
                 const nextOption = reasoningEffortOptions[Number(event.currentTarget.value)];
                 if (nextOption) onReasoningEffortChange(nextOption.value);
@@ -149,6 +156,7 @@ function QuickModelPicker({
       )}
 
       <button
+        ref={customRef}
         type="button"
         className="model-quick-custom"
         onClick={onOpenAdvanced}
@@ -191,16 +199,22 @@ export function ModelDropdown({
 }: ModelDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [pickerView, setPickerView] = useState<ModelPickerView>("quick");
-  const [search, setSearch] = useState("");
   const [providerModelCache, setProviderModelCache] = useState<Record<string, LLMModelInfo[]>>({});
-  const [loadingProviderModels, setLoadingProviderModels] = useState<string | null>(null);
+  const [providerLoads, setProviderLoads] = useState<
+    Record<string, "loading" | "error" | undefined>
+  >({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const closeDropdown = useCallback(() => {
     setIsOpen(false);
-    setSearch("");
     setPickerView("quick");
   }, []);
+
+  const closeAndRestoreFocus = useCallback(() => {
+    closeDropdown();
+    triggerRef.current?.focus({ preventScroll: true });
+  }, [closeDropdown]);
 
   useEffect(() => {
     setProviderModelCache((prev) => ({
@@ -244,18 +258,17 @@ export function ModelDropdown({
     if (!isOpen) containerRef.current?.style.removeProperty("--model-dropdown-room");
   }, [isOpen]);
 
-  // Escape closes the picker wherever focus is; the trigger's own key handler
-  // only sees it while the trigger is focused.
+  // Escape restores focus to the trigger from either picker surface.
   useEffect(() => {
     if (!isOpen) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       e.preventDefault();
-      closeDropdown();
+      closeAndRestoreFocus();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [closeDropdown, isOpen]);
+  }, [closeAndRestoreFocus, isOpen]);
 
   const configuredProviders = useMemo(() => {
     const seen = new Set<string>();
@@ -306,37 +319,22 @@ export function ModelDropdown({
         ? selectedModelDefaultEffort
         : undefined;
 
-  const normalizedSearch = search.trim().toLowerCase();
-  const filteredModels = currentProviderModels.filter((model) => {
-    if (!normalizedSearch) return true;
-    return (
-      model.displayName.toLowerCase().includes(normalizedSearch) ||
-      model.key.toLowerCase().includes(normalizedSearch) ||
-      model.description.toLowerCase().includes(normalizedSearch)
-    );
-  });
-
   const loadProviderModels = useCallback(
     async (providerType: LLMProviderType) => {
-      if (providerModelCache[providerType]) return;
+      if (providerModelCache[providerType] || providerLoads[providerType] === "loading") return;
+      setProviderLoads((previous) => ({ ...previous, [providerType]: "loading" }));
       try {
-        setLoadingProviderModels(providerType);
         const providerModels = await window.electronAPI.getProviderModels(providerType);
         setProviderModelCache((prev) => ({
           ...prev,
           [providerType]: providerModels || [],
         }));
-      } catch (error) {
-        console.error("Failed to load provider models:", error);
-        setProviderModelCache((prev) => ({
-          ...prev,
-          [providerType]: [],
-        }));
-      } finally {
-        setLoadingProviderModels((current) => (current === providerType ? null : current));
+        setProviderLoads((previous) => ({ ...previous, [providerType]: undefined }));
+      } catch {
+        setProviderLoads((previous) => ({ ...previous, [providerType]: "error" }));
       }
     },
-    [providerModelCache],
+    [providerModelCache, providerLoads],
   );
 
   const selectModel = (
@@ -362,30 +360,13 @@ export function ModelDropdown({
       modelKey,
       ...(reasoningEffort ? { reasoningEffort } : {}),
     });
-    closeDropdown();
+    closeAndRestoreFocus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!isOpen) {
-      if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
-        e.preventDefault();
-        setPickerView("quick");
-        setIsOpen(true);
-      }
-      return;
-    }
-
-    switch (e.key) {
-      case "Enter":
-        e.preventDefault();
-        if (filteredModels[0]) {
-          selectModel(selectedProvider, filteredModels[0].key, filteredModels[0]);
-        }
-        break;
-      case "Escape":
-        e.preventDefault();
-        closeDropdown();
-        break;
+    if (!isOpen && e.key === "ArrowDown") {
+      e.preventDefault();
+      setIsOpen(true);
     }
   };
 
@@ -393,21 +374,13 @@ export function ModelDropdown({
     closeDropdown();
     onOpenSettings?.("llm");
   };
-  const handleOpenAdvanced = () => {
-    setPickerView("advanced");
-    setSearch("");
-  };
-  const handleReturnToQuick = () => {
-    setPickerView("quick");
-    setSearch("");
-  };
-
   return (
     <div
       className={`model-dropdown-container ${align === "right" ? "align-right" : ""} ${variant === "label" ? "model-dropdown-container-label" : ""}`}
       ref={containerRef}
     >
       <button
+        ref={triggerRef}
         type="button"
         className={`${variant === "label" ? "model-label-subtle" : "model-selector"} ${isOpen ? "open" : ""}`}
         title={`${currentProviderLabel}: ${selectedModelLabel} (${currentAccess.label})`}
@@ -483,7 +456,7 @@ export function ModelDropdown({
                   reasoningEffort,
                 })
               }
-              onOpenAdvanced={handleOpenAdvanced}
+              onOpenAdvanced={() => setPickerView("advanced")}
             />
           ) : (
             <ModelSourcePicker
@@ -495,7 +468,7 @@ export function ModelDropdown({
                 selectedReasoningEfforts.includes(option.value),
               )}
               modelsByProvider={providerModelCache}
-              loadingProvider={loadingProviderModels}
+              providerLoads={providerLoads}
               onLoadProvider={(providerType) => void loadProviderModels(providerType)}
               onSelectModel={selectModel}
               onReasoningEffortChange={(reasoningEffort) =>
@@ -505,8 +478,8 @@ export function ModelDropdown({
                   reasoningEffort,
                 })
               }
-              onBack={handleReturnToQuick}
-              onClose={closeDropdown}
+              onBack={() => setPickerView("quick")}
+              onClose={closeAndRestoreFocus}
               onManageSources={handleOpenProviders}
             />
           )}

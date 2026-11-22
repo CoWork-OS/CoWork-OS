@@ -48,7 +48,7 @@ type WebArtifactViewerProps = {
   onClose: () => void;
   onFullscreen: () => void;
   onExitFullscreen: () => void;
-  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void>;
+  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void | boolean>;
   selectedModelLabel?: string;
   selectedModel?: string;
   selectedProvider?: LLMProviderType;
@@ -292,18 +292,19 @@ export function WebArtifactViewer({
     const message = fullscreenMessage.trim();
     if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
       return;
-    const previousMessage = fullscreenMessage;
-    const previousAttachments = fullscreenAttachments;
+    const submittedDraft = fullscreenMessage;
+    const submittedAttachments = fullscreenAttachments;
     setFullscreenSending(true);
-    setFullscreenMessage("");
-    setFullscreenAttachments([]);
     try {
       setAttachmentError("");
       const payload = await buildMessageWithAttachments(message);
-      await onSendMessage(payload.message, payload.images);
+      const accepted = await onSendMessage(payload.message, payload.images);
+      if (accepted === false) throw new Error("Artifact follow-up was rejected");
+      setFullscreenMessage((current) => (current === submittedDraft ? "" : current));
+      setFullscreenAttachments((current) =>
+        current.filter((attachment) => !submittedAttachments.includes(attachment)),
+      );
     } catch {
-      setFullscreenMessage(previousMessage);
-      setFullscreenAttachments(previousAttachments);
       setAttachmentError("Failed to send message. Please try again.");
     } finally {
       setFullscreenSending(false);
@@ -484,6 +485,7 @@ export function WebArtifactViewer({
                     className="input-field input-textarea"
                     placeholder="Ask for follow-up changes"
                     value={fullscreenMessage}
+                    readOnly={fullscreenSending}
                     rows={1}
                     onChange={(event) => setFullscreenMessage(event.target.value)}
                     onKeyDown={(event) => {

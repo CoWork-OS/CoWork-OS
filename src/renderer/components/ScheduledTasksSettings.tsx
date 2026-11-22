@@ -445,6 +445,11 @@ function getLocalTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
+function formatLocalDateTimeInput(timestampMs: number): string {
+  const date = new Date(timestampMs);
+  return new Date(timestampMs - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 function schedulerStateLabel(state?: CronSchedulerObservation["state"]): string {
   switch (state) {
     case "running":
@@ -902,16 +907,18 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
   );
   const [historyLoadingJobId, setHistoryLoadingJobId] = useState<string | null>(null);
   const appliedFocusJobId = useRef<string | null>(null);
+  const loadRequestId = useRef(0);
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadRequestId.current;
     try {
-      setLoading(true);
       setError(null);
       const [statusResult, jobsResult, workspacesResult] = await Promise.all([
         window.electronAPI.getCronStatus(),
         window.electronAPI.listCronJobs({ includeDisabled: true }),
         window.electronAPI.listWorkspaces(),
       ]);
+      if (requestId !== loadRequestId.current) return;
       setStatus(statusResult);
       setJobs(jobsResult);
       setWorkspaces(workspacesResult);
@@ -930,9 +937,11 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
         return next;
       });
     } catch (err: Any) {
-      setError(err.message || "Failed to load scheduled tasks");
+      if (requestId === loadRequestId.current) {
+        setError(err.message || "Failed to load scheduled tasks");
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestId.current) setLoading(false);
     }
   }, []);
 
@@ -989,7 +998,10 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
       loadData();
     });
 
-    return unsubscribe;
+    return () => {
+      loadRequestId.current++;
+      unsubscribe();
+    };
   }, [loadData]);
 
   const handleToggleJob = async (job: CronJob, e: React.MouseEvent) => {
@@ -1873,10 +1885,10 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
             setShowCreateModal(false);
             setEditingJob(null);
           }}
-          onSave={async () => {
-            await loadData();
+          onSave={() => {
             setShowCreateModal(false);
             setEditingJob(null);
+            void loadData();
           }}
         />
       )}
@@ -1990,9 +2002,10 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
   const [cronExpr, setCronExpr] = useState(
     job?.schedule.kind === "cron" ? job.schedule.expr : "0 9 * * *",
   );
-  const [atDateTime, setAtDateTime] = useState(
-    job?.schedule.kind === "at" ? new Date(job.schedule.atMs).toISOString().slice(0, 16) : "",
-  );
+  const previousSchedule = job?.schedule;
+  const initialAtDateTime =
+    previousSchedule?.kind === "at" ? formatLocalDateTimeInput(previousSchedule.atMs) : "";
+  const [atDateTime, setAtDateTime] = useState(initialAtDateTime);
 
   const [saving, setSaving] = useState(false);
 
@@ -2035,9 +2048,21 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
 
     let schedule: CronSchedule;
     if (scheduleType === "every") {
-      schedule = { kind: "every", everyMs, anchorMs: Date.now() };
+      schedule =
+        previousSchedule?.kind === "every" && previousSchedule.everyMs === everyMs
+          ? previousSchedule
+          : { kind: "every", everyMs, anchorMs: Date.now() };
     } else if (scheduleType === "cron") {
-      schedule = { kind: "cron", expr: cronExpr };
+      if (previousSchedule?.kind === "cron") {
+        schedule =
+          previousSchedule.expr === cronExpr
+            ? previousSchedule
+            : { ...previousSchedule, expr: cronExpr };
+      } else {
+        schedule = { kind: "cron", expr: cronExpr };
+      }
+    } else if (previousSchedule?.kind === "at" && atDateTime === initialAtDateTime) {
+      schedule = previousSchedule;
     } else {
       const atMs = new Date(atDateTime).getTime();
       if (isNaN(atMs) || atMs < Date.now()) {
@@ -2077,7 +2102,8 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
             : { accessProfileId: accessProfileSelection }),
           allowUserInput,
           deleteAfterRun,
-          schedule,
+          // Sending an unchanged schedule would recalculate the next run.
+          ...(schedule !== previousSchedule ? { schedule } : {}),
           delivery,
         });
         if (!result.ok) {
@@ -2265,7 +2291,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
     <div
       style={modalStyles.overlay}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !saving) onClose();
       }}
     >
       <div
@@ -2432,12 +2458,18 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
 
           {/* One-time Schedule */}
           {scheduleType === "at" && (
-            <input
-              type="datetime-local"
-              value={atDateTime}
-              onChange={(e) => setAtDateTime(e.target.value)}
-              style={modalStyles.input}
-            />
+            <>
+              <input
+                type="datetime-local"
+                aria-label="One-time run date and time"
+                value={atDateTime}
+                onChange={(e) => setAtDateTime(e.target.value)}
+                style={modalStyles.input}
+              />
+              <p style={{ ...modalStyles.hint, marginTop: "6px" }}>
+                Local time · {getLocalTimeZone()}
+              </p>
+            </>
           )}
         </div>
 

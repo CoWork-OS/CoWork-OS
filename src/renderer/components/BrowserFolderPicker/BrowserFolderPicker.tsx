@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowUp, ChevronRight, Folder, X } from "lucide-react";
 import type { Workspace } from "../../../shared/types";
 import {
@@ -6,6 +14,7 @@ import {
   registerBrowserHostFolderPicker,
 } from "../../host/browser-host-folders";
 import { useHostFolderBrowser } from "../../hooks/useHostFolderBrowser";
+import { ModalDialog } from "../ModalDialog";
 import "./browser-folder-picker.css";
 
 type PickerRequest = {
@@ -41,11 +50,11 @@ export function BrowserFolderPickerHost() {
     };
   }, []);
 
-  const finish = useCallback((workspace: Workspace | null) => {
-    const current = requestRef.current;
+  const finish = useCallback((request: PickerRequest, workspace: Workspace | null) => {
+    if (requestRef.current !== request) return;
     requestRef.current = null;
     setRequest(null);
-    current?.resolve(workspace);
+    request.resolve(workspace);
   }, []);
 
   if (!request) return null;
@@ -53,8 +62,8 @@ export function BrowserFolderPickerHost() {
     <BrowserFolderPickerDialog
       key={request.id}
       startWorkspaceId={request.startWorkspaceId}
-      onCancel={() => finish(null)}
-      onChoose={finish}
+      onCancel={() => finish(request, null)}
+      onChoose={(workspace) => finish(request, workspace)}
     />
   );
 }
@@ -73,6 +82,7 @@ export function BrowserFolderPickerDialog({
   const [filter, setFilter] = useState("");
   const [choosing, setChoosing] = useState(false);
   const [chooseError, setChooseError] = useState<string | null>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
   const locationKey = listing ? JSON.stringify([listing.rootId, listing.path]) : "";
 
   useEffect(() => {
@@ -80,13 +90,13 @@ export function BrowserFolderPickerDialog({
     setChooseError(null);
   }, [locationKey]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !choosing) onCancel();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [choosing, onCancel]);
+  useLayoutEffect(() => {
+    filterRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const close = () => {
+    if (!choosing) onCancel();
+  };
 
   const visibleFolders = useMemo(() => {
     const folders = listing?.folders ?? [];
@@ -126,14 +136,13 @@ export function BrowserFolderPickerDialog({
     <div
       className="modal-overlay"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !choosing) onCancel();
+        if (event.target === event.currentTarget) close();
       }}
     >
-      <div
+      <ModalDialog
         className="modal-content browser-folder-picker"
-        role="dialog"
-        aria-modal="true"
         aria-labelledby="browser-folder-picker-title"
+        onClose={close}
       >
         <div className="modal-header">
           <h2 id="browser-folder-picker-title">Choose a folder</h2>
@@ -179,7 +188,7 @@ export function BrowserFolderPickerDialog({
             className="browser-folder-picker-filter"
             aria-label="Filter folders"
             placeholder="Filter folders"
-            autoFocus
+            ref={filterRef}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
@@ -281,7 +290,7 @@ export function BrowserFolderPickerDialog({
             </button>
           </div>
         </div>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

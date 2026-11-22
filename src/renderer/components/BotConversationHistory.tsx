@@ -168,65 +168,57 @@ export function BotConversationHistory({
           <span>No conversations yet. Start one to keep this bot’s work together.</span>
         </div>
       ) : (
-        <div className="bot-conversation-history-list" role="list">
+        <ul className="bot-conversation-history-list">
           {visible.map((conversation, index) => {
             const archived = isArchived(conversation);
             const selected = conversation.id === selectedConversationId;
+            const projection = selected ? selectedConversationProjection : null;
+            const date = formatConversationDate(
+              getBotConversationHistoryTimestamp(conversation, selectedConversationId, projection),
+            );
+            const running =
+              !archived &&
+              (projection
+                ? projection.state === "working"
+                : conversation.status === "executing" || conversation.status === "planning");
             return (
-              <button
-                type="button"
-                role="listitem"
-                key={conversation.id}
-                className={`bot-conversation-history-row ${selected ? "selected" : ""} ${archived ? "archived" : ""}`}
-                aria-current={selected ? "true" : undefined}
-                onClick={() => void onSelectConversation?.(conversation.id)}
-              >
-                <span className="bot-conversation-history-row-icon" aria-hidden="true">
-                  {archived ? (
-                    <Archive size={15} />
-                  ) : selected ? (
-                    <Check size={15} />
-                  ) : (
-                    <MessageCircle size={15} />
-                  )}
-                </span>
-                <span className="bot-conversation-history-row-copy">
-                  <strong>{getBotConversationTitle(conversation, index, botName)}</strong>
-                  <span>
-                    {archived
-                      ? "Archived"
-                      : getBotConversationHistoryStatusLabel(
-                          conversation,
-                          selected ? selectedConversationProjection : null,
-                        )}
-                    {formatConversationDate(
-                      getBotConversationHistoryTimestamp(
-                        conversation,
-                        selectedConversationId,
-                        selected ? selectedConversationProjection : null,
-                      ),
-                    )
-                      ? ` · ${formatConversationDate(
-                          getBotConversationHistoryTimestamp(
-                            conversation,
-                            selectedConversationId,
-                            selected ? selectedConversationProjection : null,
-                          ),
-                        )}`
-                      : ""}
+              <li key={conversation.id}>
+                <button
+                  type="button"
+                  className={`bot-conversation-history-row ${selected ? "selected" : ""} ${archived ? "archived" : ""}`}
+                  aria-current={selected ? "true" : undefined}
+                  onClick={() => void onSelectConversation?.(conversation.id)}
+                >
+                  <span className="bot-conversation-history-row-icon" aria-hidden="true">
+                    {archived ? (
+                      <Archive size={15} />
+                    ) : selected ? (
+                      <Check size={15} />
+                    ) : (
+                      <MessageCircle size={15} />
+                    )}
                   </span>
-                </span>
-                {conversation.status === "executing" || conversation.status === "planning" ? (
-                  <Clock3
-                    className="bot-conversation-history-running"
-                    size={14}
-                    aria-label="Running"
-                  />
-                ) : null}
-              </button>
+                  <span className="bot-conversation-history-row-copy">
+                    <strong>{getBotConversationTitle(conversation, index, botName)}</strong>
+                    <span>
+                      {archived
+                        ? "Archived"
+                        : getBotConversationHistoryStatusLabel(conversation, projection)}
+                      {date ? ` · ${date}` : ""}
+                    </span>
+                  </span>
+                  {running ? (
+                    <Clock3
+                      className="bot-conversation-history-running"
+                      size={14}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </section>
   );

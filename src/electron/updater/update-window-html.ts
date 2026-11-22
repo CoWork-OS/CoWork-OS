@@ -231,6 +231,7 @@ export function buildUpdateWindowHtml(options: {
       var APP = ${appNameJson};
       var root = document.getElementById("root");
       var iconTemplate = document.getElementById("icon");
+      var progressControls = null;
 
       function send(message) { console.log(PREFIX + message); }
       function el(tag, className, text) {
@@ -285,28 +286,40 @@ export function buildUpdateWindowHtml(options: {
         root.appendChild(actions);
       }
 
-      function renderStatus(title, percent, detail, buttonLabel, action, primary, disabled) {
+      function renderStatus(buttonLabel, action, primary) {
         root.className = "progress-view";
         root.appendChild(titlebar("Updating " + APP));
         var content = el("div", "content");
         content.appendChild(icon());
         var body = el("div", "body");
-        body.appendChild(el("h1", "", title));
-        var bar = el("div", typeof percent === "number" ? "bar" : "bar indeterminate");
+        var heading = el("h1");
+        body.appendChild(heading);
+        var bar = el("div", "bar");
         bar.setAttribute("role", "progressbar");
-        bar.setAttribute("aria-label", title);
-        if (typeof percent === "number") bar.setAttribute("aria-valuenow", String(Math.round(percent)));
         var fill = el("div", "fill");
-        fill.style.width = (typeof percent === "number" ? Math.max(0, Math.min(100, percent)) : 0) + "%";
         bar.appendChild(fill);
         body.appendChild(bar);
         var row = el("div", "row");
-        row.appendChild(el("span", "detail muted", detail || ""));
-        var control = button(buttonLabel, action, primary, disabled);
+        var detail = el("span", "detail muted");
+        row.appendChild(detail);
+        var control = button(buttonLabel, action, primary);
         row.appendChild(control);
         body.appendChild(row);
         content.appendChild(body);
         root.appendChild(content);
+        return { heading: heading, bar: bar, fill: fill, detail: detail, button: control };
+      }
+
+      function updateStatus(parts, title, percent, detail, disabled) {
+        var determinate = typeof percent === "number";
+        parts.heading.textContent = title;
+        parts.bar.classList.toggle("indeterminate", !determinate);
+        parts.bar.setAttribute("aria-label", title);
+        if (determinate) parts.bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+        else parts.bar.removeAttribute("aria-valuenow");
+        parts.fill.style.width = (determinate ? Math.max(0, Math.min(100, percent)) : 0) + "%";
+        parts.detail.textContent = detail || "";
+        parts.button.disabled = disabled;
       }
 
       function renderMessage(title, detail) {
@@ -327,13 +340,21 @@ export function buildUpdateWindowHtml(options: {
       }
 
       window.__setUpdateState = function (state) {
-        root.textContent = "";
-        if (state.view === "available") renderAvailable(state);
-        else if (state.view === "progress")
-          renderStatus(state.title, state.percent, state.detail, "Cancel", "cancel", false, !state.cancellable);
-        else if (state.view === "ready")
-          renderStatus("Ready to Install", 100, "", "Install and Relaunch", "relaunch", true, false);
-        else renderMessage(state.title, state.detail);
+        // Keep the controls mounted while progress changes so a focused Cancel
+        // button stays usable and the progress bar can animate between values.
+        if (state.view !== "progress" || !progressControls) {
+          root.textContent = "";
+          progressControls = null;
+          if (state.view === "available") renderAvailable(state);
+          else if (state.view === "progress") progressControls = renderStatus("Cancel", "cancel", false);
+          else if (state.view === "ready") {
+            var readyControls = renderStatus("Install and Relaunch", "relaunch", true);
+            updateStatus(readyControls, "Ready to Install", 100, "", false);
+          } else renderMessage(state.title, state.detail);
+        }
+        if (state.view === "progress") {
+          updateStatus(progressControls, state.title, state.percent, state.detail, !state.cancellable);
+        }
         requestAnimationFrame(function () { send("height:" + root.getBoundingClientRect().bottom); });
       };
 

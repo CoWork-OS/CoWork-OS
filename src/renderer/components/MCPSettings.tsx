@@ -92,6 +92,12 @@ interface MCPServerStatus {
   blockedByPolicy?: boolean;
 }
 
+type ServerToolsDialog = { server: Pick<MCPServerStatus, "id" | "name"> } & (
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; tools: MCPTool[] }
+);
+
 interface MCPSettingsData {
   servers: MCPServerConfig[];
   storageStatus?:
@@ -218,8 +224,7 @@ export function MCPSettings({
   const [newTunnelReadOnly, setNewTunnelReadOnly] = useState(false);
 
   // Tools modal state
-  const [viewingToolsFor, setViewingToolsFor] = useState<string | null>(null);
-  const [serverTools, setServerTools] = useState<MCPTool[]>([]);
+  const [toolsDialog, setToolsDialog] = useState<ServerToolsDialog | null>(null);
 
   // Test result
   const [testingServer, setTestingServer] = useState<string | null>(null);
@@ -605,14 +610,21 @@ export function MCPSettings({
     }
   };
 
-  const handleViewTools = async (serverId: string) => {
+  const handleViewTools = async (server: Pick<MCPServerStatus, "id" | "name">) => {
+    const request = { server, status: "loading" } as const;
+    setToolsDialog(request);
+    let result: ServerToolsDialog;
     try {
-      const tools = await invokeMcpApi<MCPTool[]>("getMCPServerTools", serverId);
-      setServerTools(tools);
-      setViewingToolsFor(serverId);
+      const tools = await invokeMcpApi<MCPTool[]>("getMCPServerTools", server.id);
+      result = { server, status: "ready", tools };
     } catch (error) {
-      console.error("Failed to get server tools:", error);
+      result = {
+        server,
+        status: "error",
+        message: mcpErrorMessage(error, "Could not load tools for this server."),
+      };
     }
+    setToolsDialog((current) => (current === request ? result : current));
   };
 
   const handleToggleEnabled = async (serverId: string, enabled: boolean) => {
@@ -1511,7 +1523,7 @@ export function MCPSettings({
 
                         <button
                           className="button-small button-secondary"
-                          onClick={() => handleViewTools(serverStatus.id)}
+                          onClick={() => void handleViewTools(serverStatus)}
                           disabled={serverStatus.status !== "connected"}
                         >
                           View Tools
@@ -1898,17 +1910,22 @@ export function MCPSettings({
       )}
 
       {/* Tools Modal */}
-      {viewingToolsFor && (
-        <div className="mcp-modal-overlay" onClick={() => setViewingToolsFor(null)}>
+      {toolsDialog && (
+        <div className="mcp-modal-overlay" onClick={() => setToolsDialog(null)}>
           <ModalDialog
-            onClose={() => setViewingToolsFor(null)}
-            aria-label="Available tools"
+            onClose={() => setToolsDialog(null)}
+            aria-labelledby="mcp-server-tools-title"
             className="mcp-modal"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mcp-modal-header">
-              <h3>Available Tools</h3>
-              <button className="mcp-modal-close" onClick={() => setViewingToolsFor(null)}>
+              <h3 id="mcp-server-tools-title">Tools from {toolsDialog.server.name}</h3>
+              <button
+                type="button"
+                className="mcp-modal-close"
+                aria-label="Close tools"
+                onClick={() => setToolsDialog(null)}
+              >
                 <svg
                   width="20"
                   height="20"
@@ -1922,11 +1939,28 @@ export function MCPSettings({
               </button>
             </div>
             <div className="mcp-modal-content">
-              {serverTools.length === 0 ? (
+              {toolsDialog.status === "loading" ? (
+                <p className="mcp-no-tools" role="status">
+                  Loading tools…
+                </p>
+              ) : toolsDialog.status === "error" ? (
+                <>
+                  <p className="settings-alert settings-alert-error" role="alert">
+                    {toolsDialog.message}
+                  </p>
+                  <button
+                    type="button"
+                    className="button-small button-secondary"
+                    onClick={() => void handleViewTools(toolsDialog.server)}
+                  >
+                    Try again
+                  </button>
+                </>
+              ) : toolsDialog.tools.length === 0 ? (
                 <p className="mcp-no-tools">No tools available from this server.</p>
               ) : (
                 <div className="mcp-tools-list">
-                  {serverTools.map((tool) => (
+                  {toolsDialog.tools.map((tool) => (
                     <div key={tool.name} className="mcp-tool-item">
                       <div className="mcp-tool-name">{tool.name}</div>
                       {tool.description && (

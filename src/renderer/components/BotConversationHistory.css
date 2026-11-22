@@ -77,6 +77,9 @@
 
 .bot-conversation-history-list {
   display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
   max-height: 220px;
   overflow-y: auto;
 }
@@ -95,7 +98,7 @@
   cursor: pointer;
 }
 
-.bot-conversation-history-row:last-child {
+.bot-conversation-history-list > li:last-child > .bot-conversation-history-row {
   border-bottom: 0;
 }
 

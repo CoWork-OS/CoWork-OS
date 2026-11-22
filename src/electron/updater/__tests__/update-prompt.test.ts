@@ -215,6 +215,75 @@ describe("UpdatePrompt", () => {
     expect(t.last()).toEqual({ view: "ready", latestVersion: "0.5.61" });
   });
 
+  it("reopens an in-flight packaged update with its latest progress and cancel availability", async () => {
+    const t = setup();
+    await t.prompt.checkNow();
+    t.manager.downloadAndInstallUpdate.mockImplementationOnce(async () => {
+      t.prompt.handleClosed();
+      t.emit({
+        phase: "downloading",
+        percent: 50,
+        message: "Downloading update... 50%",
+        bytesDownloaded: 50_000_000,
+        bytesTotal: 100_000_000,
+      });
+      await t.prompt.checkNow();
+      expect(t.last()).toEqual({
+        view: "progress",
+        title: "Downloading update...",
+        percent: 50,
+        detail: "50.0 MB of 100.0 MB",
+        cancellable: true,
+      });
+      t.emit({ phase: "verifying", percent: 100, message: "Verifying update..." });
+      await t.prompt.checkNow();
+      expect(t.last()).toEqual({
+        view: "progress",
+        title: "Verifying update...",
+        cancellable: false,
+      });
+      t.manager.isUpdateReadyToInstall.mockReturnValue(true);
+    });
+    await t.prompt.handleAction("install");
+    expect(t.last()).toMatchObject({ view: "ready" });
+  });
+
+  it("preserves non-cancellable Git progress when reopening the update window", async () => {
+    const t = setup({ check: release({ updateMode: "git" }) });
+    await t.prompt.checkNow();
+    t.manager.downloadAndInstallUpdate.mockImplementationOnce(async () => {
+      t.emit({ phase: "installing", percent: 50, message: "Installing dependencies..." });
+      t.prompt.handleClosed();
+      await t.prompt.checkNow();
+      expect(t.last()).toEqual({
+        view: "progress",
+        title: "Installing dependencies...",
+        percent: 50,
+        cancellable: false,
+      });
+      t.manager.isUpdateReadyToInstall.mockReturnValue(true);
+    });
+    await t.prompt.handleAction("install");
+    expect(t.last()).toMatchObject({ view: "ready" });
+  });
+
+  it("keeps a manually dismissed check closed when that check fails", async () => {
+    const t = setup();
+    let failCheck: (error: Error) => void;
+    t.manager.checkForUpdates.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          failCheck = reject;
+        }),
+    );
+    const checking = t.prompt.checkNow();
+    t.prompt.handleClosed();
+    failCheck!(new Error("Offline"));
+    await checking;
+    expect(t.view.isOpen()).toBe(false);
+    expect(t.shown).toHaveLength(1);
+  });
+
   it("answers Check for Updates when current, ignoring a skipped version when not", async () => {
     const current = setup({ check: release({ available: false, latestVersion: "0.5.60" }) });
     await current.prompt.checkNow();
@@ -232,6 +301,14 @@ describe("UpdatePrompt", () => {
     const skipped = setup({ preferences: { autoDownload: false, skippedVersion: "0.5.61" } });
     await skipped.prompt.checkNow();
     expect(skipped.last()).toMatchObject({ view: "available", latestVersion: "0.5.61" });
+  });
+
+  it("distinguishes a missing published release from a verified current version", async () => {
+    const t = setup({
+      check: release({ available: false, provenance: { source: "no_release", checkedAt: 1 } }),
+    });
+    await t.prompt.checkNow();
+    expect(t.last()).toMatchObject({ view: "up-to-date", title: "No published release found." });
   });
 
   it("hides the auto-download option for npm installs", async () => {

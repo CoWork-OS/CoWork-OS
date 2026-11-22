@@ -1,5 +1,5 @@
 import { ModalDialog } from "./ModalDialog";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
 import { formatCount } from "../utils/plural";
@@ -56,6 +56,16 @@ interface MCPRegistryBrowserProps {
   initialServerName?: string;
 }
 
+interface RegistryResults {
+  servers: MCPRegistryEntry[];
+  failed?: true;
+}
+
+interface RegistrySearch {
+  query: string;
+  tag: string | null;
+}
+
 export function MCPRegistryBrowser({
   onInstall,
   installedServerIds = [],
@@ -63,12 +73,14 @@ export function MCPRegistryBrowser({
   initialServerId,
   initialServerName,
 }: MCPRegistryBrowserProps) {
-  const [servers, setServers] = useState<MCPRegistryEntry[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [registry, setRegistry] = useState<RegistryResults | null>(null);
+  const [searchResult, setSearchResult] = useState<
+    (RegistryResults & { request: RegistrySearch }) | null
+  >(null);
+  const [revision, setRevision] = useState(0);
   const [searchQuery, setSearchQuery] = useState(initialServerName || "");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [pendingInstall, setPendingInstall] = useState<{
@@ -78,64 +90,65 @@ export function MCPRegistryBrowser({
   const [viewingDetails, setViewingDetails] = useState<MCPRegistryEntry | null>(null);
   const focusedServerId = useRef<string | null>(null);
 
-  useEffect(() => {
-    loadRegistry();
-  }, []);
+  const query = searchQuery.trim();
+  const request = useMemo(
+    () => (query || selectedTag ? { query, tag: selectedTag, revision } : null),
+    [query, selectedTag, revision],
+  );
+  const results = request ? (searchResult?.request === request ? searchResult : null) : registry;
+  const servers = (results?.servers ?? []).filter(
+    (server) =>
+      (!selectedCategory || server.category === selectedCategory) &&
+      (!verifiedOnly || server.verified),
+  );
+  const categories = Array.from(
+    new Set(registry?.servers.flatMap((server) => (server.category ? [server.category] : []))),
+  ).sort();
 
   useEffect(() => {
-    searchServers();
-  }, [searchQuery, selectedCategory, selectedTags, verifiedOnly]);
+    let cancelled = false;
+    void invokeMcpApi<{ servers: MCPRegistryEntry[] }>("fetchMCPRegistry").then(
+      (data) => {
+        if (!cancelled) setRegistry({ servers: data.servers ?? [] });
+      },
+      () => {
+        if (!cancelled) setRegistry({ servers: [], failed: true });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [revision]);
 
-  const loadRegistry = async () => {
-    try {
-      setLoading(true);
-      const registry = await invokeMcpApi<{ servers: MCPRegistryEntry[] }>("fetchMCPRegistry");
-      setServers(registry.servers || []);
-      // Extract unique categories from servers
-      const uniqueCategories = new Set<string>();
-      (registry.servers || []).forEach((s: MCPRegistryEntry) => {
-        if (s.category) uniqueCategories.add(s.category);
-      });
-      setCategories(Array.from(uniqueCategories).sort());
-    } catch (error) {
-      console.error("Failed to load registry:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const searchServers = async () => {
-    try {
-      const results = await invokeMcpApi<MCPRegistryEntry[]>(
-        "searchMCPRegistry",
-        searchQuery,
-        selectedTags,
-      );
-      let filtered = results;
-
-      // Apply category filter
-      if (selectedCategory) {
-        filtered = filtered.filter((s: MCPRegistryEntry) => s.category === selectedCategory);
-      }
-
-      // Apply verified filter
-      if (verifiedOnly) {
-        filtered = filtered.filter((s: MCPRegistryEntry) => s.verified);
-      }
-
-      setServers(filtered);
-    } catch (error) {
-      console.error("Failed to search registry:", error);
-    }
-  };
+  useEffect(() => {
+    if (!request) return;
+    let cancelled = false;
+    void invokeMcpApi<MCPRegistryEntry[]>(
+      "searchMCPRegistry",
+      request.query,
+      request.tag ? [request.tag] : [],
+    ).then(
+      (matches) => {
+        if (!cancelled) setSearchResult({ request, servers: matches });
+      },
+      () => {
+        if (!cancelled) setSearchResult({ request, servers: [], failed: true });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [request]);
 
   useEffect(() => {
     if (!initialServerId || focusedServerId.current === initialServerId) return;
-    const selected = servers.find((server) => server.id === initialServerId);
+    const selected =
+      registry?.servers.find((server) => server.id === initialServerId) ??
+      results?.servers.find((server) => server.id === initialServerId);
     if (!selected) return;
     focusedServerId.current = initialServerId;
     setViewingDetails(selected);
-  }, [initialServerId, servers]);
+  }, [initialServerId, registry, results]);
 
   const handleInstall = async (entry: MCPRegistryEntry) => {
     if (installDisabled) return;
@@ -149,7 +162,7 @@ export function MCPRegistryBrowser({
       }
       await invokeMcpApi("installMCPServer", entry.id);
       onInstall?.(entry.id);
-      await loadRegistry();
+      setRevision((current) => current + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : "MCP installation failed.";
       alert(`Failed to prepare ${entry.name}: ${message}`);
@@ -166,7 +179,7 @@ export function MCPRegistryBrowser({
       await invokeMcpApi("installMCPServer", entry.id, preview.approvalToken);
       setPendingInstall(null);
       onInstall?.(entry.id);
-      await loadRegistry();
+      setRevision((current) => current + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : "MCP installation failed.";
       setPendingInstall(null);
@@ -191,10 +204,6 @@ export function MCPRegistryBrowser({
     return /^cowork-oss$/i.test(trimmed) ? "CoWork OS" : trimmed;
   };
 
-  if (loading) {
-    return <div className="registry-loading">Loading MCP servers registry...</div>;
-  }
-
   return (
     <div className="mcp-registry-browser">
       {/* Search and filters */}
@@ -212,7 +221,8 @@ export function MCPRegistryBrowser({
             <path d="M21 21l-4.35-4.35" />
           </svg>
           <input
-            type="text"
+            type="search"
+            aria-label="Search MCP servers"
             placeholder="Search servers..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -222,6 +232,7 @@ export function MCPRegistryBrowser({
         <div className="registry-filter-row">
           <select
             className="registry-category-select"
+            aria-label="MCP server category"
             value={selectedCategory || ""}
             onChange={(e) => setSelectedCategory(e.target.value || null)}
           >
@@ -241,11 +252,41 @@ export function MCPRegistryBrowser({
             />
             <span>Verified only</span>
           </label>
+          {selectedTag && (
+            <button
+              type="button"
+              className="registry-tag"
+              aria-label={`Clear tag filter for ${selectedTag}`}
+              onClick={() => setSelectedTag(null)}
+            >
+              {selectedTag} <span aria-hidden="true">×</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Server list */}
-      {servers.length === 0 ? (
+      {!results ? (
+        <div className="registry-loading" role="status">
+          {request ? "Searching MCP registry…" : "Loading MCP registry…"}
+        </div>
+      ) : results.failed ? (
+        <div className="registry-empty">
+          <p role="alert">
+            {request ? "Could not search the MCP registry." : "Could not load the MCP registry."}
+          </p>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => {
+              if (!request) setRegistry(null);
+              setRevision((current) => current + 1);
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      ) : servers.length === 0 ? (
         <div className="registry-empty">
           <p>No servers found matching your criteria.</p>
           <button
@@ -253,9 +294,8 @@ export function MCPRegistryBrowser({
             onClick={() => {
               setSearchQuery("");
               setSelectedCategory(null);
-              setSelectedTags([]);
+              setSelectedTag(null);
               setVerifiedOnly(false);
-              loadRegistry();
             }}
           >
             Clear filters
@@ -299,7 +339,8 @@ export function MCPRegistryBrowser({
                     type="button"
                     key={tag}
                     className="registry-tag"
-                    onClick={() => setSelectedTags([tag])}
+                    aria-pressed={selectedTag === tag}
+                    onClick={() => setSelectedTag(tag === selectedTag ? null : tag)}
                   >
                     {tag}
                   </button>
@@ -327,6 +368,7 @@ export function MCPRegistryBrowser({
                     target="_blank"
                     rel="noopener noreferrer"
                     className="registry-link"
+                    aria-label={`Open ${entry.name} homepage`}
                     onClick={(e) => {
                       e.preventDefault();
                       window.electronAPI.openExternal(entry.homepage!);
@@ -373,7 +415,12 @@ export function MCPRegistryBrowser({
                   </span>
                 )}
               </div>
-              <button className="mcp-modal-close" onClick={() => setViewingDetails(null)}>
+              <button
+                type="button"
+                className="mcp-modal-close"
+                aria-label="Close server details"
+                onClick={() => setViewingDetails(null)}
+              >
                 <svg
                   width="20"
                   height="20"

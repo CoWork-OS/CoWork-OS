@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { FileDiff, X } from "lucide-react";
+import { ModalDialog } from "../ModalDialog";
 import type { BuildFileChange } from "./build-changes";
 
 const STATUS_MARK: Record<BuildFileChange["status"], string> = {
@@ -39,20 +40,12 @@ export function BuildChangesPanel({
     [changes],
   );
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
   return createPortal(
     <div className="build-changes-overlay" onMouseDown={onClose}>
-      <section
+      <ModalDialog
         className="build-changes-panel"
-        role="dialog"
         aria-label="Build changes"
+        onClose={onClose}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="build-changes-head">
@@ -81,6 +74,7 @@ export function BuildChangesPanel({
                 type="button"
                 className={`build-changes-file${change === selected ? " selected" : ""}`}
                 onClick={() => setSelectedPath(change.path)}
+                aria-pressed={change === selected}
                 title={change.path}
               >
                 <span className={`build-changes-status status-${change.status}`}>
@@ -147,7 +141,7 @@ export function BuildChangesPanel({
             )}
           </div>
         </div>
-      </section>
+      </ModalDialog>
     </div>,
     document.body,
   );

@@ -54,6 +54,7 @@ export interface UpdatePromptDeps {
 }
 
 type FlowPhase = "idle" | "prompting" | "checking" | "installing" | "ready" | "message";
+type InstallProgress = Extract<UpdateWindowState, { view: "progress" }>;
 
 export class UpdatePrompt {
   private phase: FlowPhase = "idle";
@@ -63,6 +64,7 @@ export class UpdatePrompt {
   private remindLaterVersion: string | null = null;
   /** A background auto-download shows nothing until the update is ready. */
   private silent = false;
+  private installProgress: InstallProgress | null = null;
   private progressDetached: (() => void) | null = null;
   private timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -119,12 +121,6 @@ export class UpdatePrompt {
 
   /** "Check for Updates…": always answers, and ignores a skipped version. */
   async checkNow(): Promise<void> {
-    if (this.phase === "installing" && this.silent) {
-      // A quiet download is running: show it instead of starting another.
-      this.silent = false;
-      this.deps.view.show({ view: "progress", title: "Downloading update...", cancellable: true });
-      return;
-    }
     if (this.phase === "installing" || this.phase === "checking") {
       this.showCurrent();
       return;
@@ -140,7 +136,9 @@ export class UpdatePrompt {
     try {
       info = await this.deps.manager.checkForUpdates("manual");
     } catch (error) {
-      this.showMessage("error", "Update Error!", this.describeError(error));
+      if (this.phase === "checking") {
+        this.showMessage("error", "Update Error!", this.describeError(error));
+      }
       return;
     }
     if (this.phase !== "checking") return;
@@ -161,6 +159,14 @@ export class UpdatePrompt {
         "error",
         "Couldn't check for updates.",
         info.provenance.networkError || "Check your connection and try again.",
+      );
+      return;
+    }
+    if (info.provenance.source === "no_release") {
+      this.showMessage(
+        "up-to-date",
+        "No published release found.",
+        "Try checking for updates again later.",
       );
       return;
     }
@@ -225,8 +231,9 @@ export class UpdatePrompt {
     this.phase = "installing";
     this.silent = Boolean(options.silent);
     this.target = info;
+    this.installProgress = { view: "progress", title: "Preparing update...", cancellable: false };
     if (!this.silent) {
-      this.deps.view.show({ view: "progress", title: "Preparing update...", cancellable: false });
+      this.deps.view.show(this.installProgress);
     }
     this.progressDetached?.();
     this.progressDetached = this.deps.manager.onProgress((progress) => this.onProgress(progress));
@@ -254,18 +261,21 @@ export class UpdatePrompt {
       }
       this.showMessage("error", "Update Error!", this.describeError(error));
     } finally {
+      this.installProgress = null;
       this.progressDetached?.();
       this.progressDetached = null;
     }
   }
 
   private onProgress(progress: UpdateProgress): void {
-    if (this.phase !== "installing" || this.silent) return;
+    if (this.phase !== "installing") return;
     const state = this.progressState(progress);
-    if (state) this.deps.view.show(state);
+    if (!state) return;
+    this.installProgress = state;
+    if (!this.silent) this.deps.view.show(state);
   }
 
-  private progressState(progress: UpdateProgress): UpdateWindowState | null {
+  private progressState(progress: UpdateProgress): InstallProgress | null {
     switch (progress.phase) {
       case "downloading": {
         const packaged = this.target?.updateMode === "electron-updater";
@@ -329,9 +339,9 @@ export class UpdatePrompt {
         title: "Checking for updates...",
         cancellable: false,
       });
-    } else if (this.phase === "installing") {
+    } else if (this.installProgress) {
       this.silent = false;
-      this.deps.view.show({ view: "progress", title: "Downloading update...", cancellable: true });
+      this.deps.view.show(this.installProgress);
     }
   }
 

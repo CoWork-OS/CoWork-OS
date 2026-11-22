@@ -119,17 +119,22 @@ type BrowserSkillInstallApi = {
   getSkillInstallProgress?: () => Promise<BrowserSkillInstallProgress | null>;
 };
 
+type SkillCatalog = "browse" | "clawhub";
+type CatalogSearch = { query: string } & (
+  | { status: "loading" }
+  | { status: "done"; results: SkillRegistryEntry[] }
+  | { status: "error"; message: string }
+);
+
 export function SkillHubBrowser({
   onSkillInstalled,
   onClose,
   initialSelection,
 }: SkillHubBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SkillRegistryEntry[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [clawHubQuery, setClawHubQuery] = useState("");
-  const [clawHubResults, setClawHubResults] = useState<SkillRegistryEntry[]>([]);
-  const [isSearchingClawHub, setIsSearchingClawHub] = useState(false);
+  const [searches, setSearches] = useState<Partial<Record<SkillCatalog, CatalogSearch>>>({});
+  const searchRequests = useRef<Partial<Record<SkillCatalog, { query: string }>>>({});
   const [selectedSkill, setSelectedSkill] = useState<SkillRegistryEntry | null>(null);
   const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
   const [skillStatus, setSkillStatus] = useState<SkillStatusReport | null>(null);
@@ -243,46 +248,53 @@ export function SkillHubBrowser({
     return null;
   };
 
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
+  const searchCatalog = useCallback(
+    async (catalog: SkillCatalog, input: string, targetId?: string) => {
+      const query = input.trim();
+      if (!query && catalog === "browse") return;
+      if (!targetId && searchRequests.current[catalog]?.query === query) return;
 
-    setIsSearching(true);
-    setError(null);
+      const request = { query };
+      searchRequests.current[catalog] = request;
+      setSearches((current) => ({ ...current, [catalog]: { query, status: "loading" } }));
 
-    try {
-      const result = await window.electronAPI.searchSkillRegistry(searchQuery);
-      setSearchResults(result.results);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Search failed";
-      setError(message);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [searchQuery]);
+      let search: CatalogSearch;
+      try {
+        const { results } =
+          catalog === "browse"
+            ? await window.electronAPI.searchSkillRegistry(query)
+            : await window.electronAPI.searchClawHubSkills(
+                query,
+                query ? undefined : { pageSize: 10 },
+              );
+        search = { query, status: "done", results };
+      } catch (error: unknown) {
+        search = {
+          query,
+          status: "error",
+          message: error instanceof Error ? error.message : "Search failed",
+        };
+      }
 
-  const handleClawHubSearch = useCallback(async () => {
-    setIsSearchingClawHub(true);
-    setError(null);
+      if (searchRequests.current[catalog] !== request) return;
+      delete searchRequests.current[catalog];
+      setSearches((current) => ({ ...current, [catalog]: search }));
+      if (targetId && search.status === "done") {
+        setSelectedSkill(
+          search.results.find(
+            (skill) => skill.id === targetId || skill.name.toLowerCase() === query.toLowerCase(),
+          ) || null,
+        );
+      }
+    },
+    [],
+  );
 
-    try {
-      const trimmed = clawHubQuery.trim();
-      const result = await window.electronAPI.searchClawHubSkills(
-        trimmed,
-        trimmed ? undefined : { pageSize: 10 },
-      );
-      setClawHubResults(result.results);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "ClawHub search failed";
-      setError(message);
-      setClawHubResults([]);
-    } finally {
-      setIsSearchingClawHub(false);
-    }
-  }, [clawHubQuery]);
+  const trimmedClawHubQuery = clawHubQuery.trim();
+  const registrySearch = searches.browse?.query === searchQuery.trim() ? searches.browse : null;
+  const clawHubSearch = searches.clawhub?.query === trimmedClawHubQuery ? searches.clawhub : null;
+  const isSearching = registrySearch?.status === "loading";
+  const isSearchingClawHub = clawHubSearch?.status === "loading";
 
   useEffect(() => {
     if (!initialSelection || focusedSelection.current === initialSelection.id) return;
@@ -305,56 +317,16 @@ export function SkillHubBrowser({
     }
 
     focusedSelection.current = initialSelection.id;
-    if (isClawHub) {
-      setActiveTab("clawhub");
-      setError(null);
-      setIsSearchingClawHub(true);
-      setClawHubQuery(initialSelection.name);
-      void window.electronAPI
-        .searchClawHubSkills(initialSelection.name)
-        .then((result) => {
-          setClawHubResults(result.results);
-          setSelectedSkill(
-            result.results.find(
-              (skill) =>
-                skill.id === targetId ||
-                skill.name.toLowerCase() === initialSelection.name.toLowerCase(),
-            ) || null,
-          );
-        })
-        .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : "ClawHub search failed");
-          setClawHubResults([]);
-        })
-        .finally(() => setIsSearchingClawHub(false));
-    } else {
-      setActiveTab("browse");
-      setSearchQuery(initialSelection.name);
-      setIsSearching(true);
-      void window.electronAPI
-        .searchSkillRegistry(initialSelection.name)
-        .then((result) => {
-          setSearchResults(result.results);
-          setSelectedSkill(
-            result.results.find(
-              (skill) =>
-                skill.id === targetId ||
-                skill.name.toLowerCase() === initialSelection.name.toLowerCase(),
-            ) || null,
-          );
-        })
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Search failed"))
-        .finally(() => setIsSearching(false));
-    }
-  }, [initialSelection, skillStatus]);
+    setActiveTab(isClawHub ? "clawhub" : "browse");
+    (isClawHub ? setClawHubQuery : setSearchQuery)(initialSelection.name);
+    void searchCatalog(isClawHub ? "clawhub" : "browse", initialSelection.name, targetId);
+  }, [initialSelection, skillStatus, searchCatalog]);
 
   useEffect(() => {
-    if (activeTab !== "clawhub" || clawHubQuery.trim()) {
-      return;
+    if (activeTab === "clawhub" && !trimmedClawHubQuery) {
+      void searchCatalog("clawhub", "");
     }
-
-    void handleClawHubSearch();
-  }, [activeTab, clawHubQuery, handleClawHubSearch]);
+  }, [activeTab, trimmedClawHubQuery, searchCatalog]);
 
   const renderStatsLine = (skill: SkillRegistryEntry) => {
     const stars = formatCompactCount(skill.stars);
@@ -682,34 +654,44 @@ export function SkillHubBrowser({
     <div className="skillhub-tab">
       {renderExternalImportCard()}
 
-      <div className="input-with-button">
+      <form
+        className="input-with-button"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void searchCatalog("browse", searchQuery);
+        }}
+      >
         <input
           type="text"
           placeholder="Search CoWork registry..."
+          aria-label="Search CoWork registry"
           className="settings-input"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         />
         <button
+          type="submit"
           className="button-secondary button-small"
-          onClick={handleSearch}
-          disabled={isSearching}
+          disabled={!searchQuery.trim() || isSearching}
         >
           {isSearching ? "Searching..." : "Search"}
         </button>
-      </div>
+      </form>
 
-      {searchQuery && !isSearching ? (
-        searchResults.length > 0 ? (
-          renderSearchResults(searchResults, handleInstall)
+      {registrySearch?.status === "done" ? (
+        registrySearch.results.length > 0 ? (
+          renderSearchResults(registrySearch.results, handleInstall)
         ) : (
           <div className="settings-empty">
             No results were returned. The registry may have no matches or its search may be
             unavailable; try another term or refresh.
           </div>
         )
-      ) : searchQuery && isSearching ? (
+      ) : registrySearch?.status === "error" ? (
+        <div className="settings-alert settings-alert-error" role="alert">
+          {registrySearch.message}
+        </div>
+      ) : isSearching ? (
         <div className="settings-empty">Searching registry...</div>
       ) : (
         <div className="settings-empty">
@@ -734,45 +716,57 @@ export function SkillHubBrowser({
         </div>
       </div>
 
-      <div className="input-with-button">
+      <form
+        className="input-with-button"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void searchCatalog("clawhub", clawHubQuery);
+        }}
+      >
         <input
           type="text"
           placeholder="Search ClawHub skills..."
+          aria-label="Search ClawHub skills"
           className="settings-input"
           value={clawHubQuery}
           onChange={(e) => setClawHubQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleClawHubSearch()}
         />
         <button
+          type="submit"
           className="button-secondary button-small"
-          onClick={handleClawHubSearch}
           disabled={isSearchingClawHub}
         >
           {isSearchingClawHub ? "Searching..." : "Search"}
         </button>
-      </div>
+      </form>
 
-      {!clawHubQuery.trim() && clawHubResults.length > 0 && !isSearchingClawHub && (
-        <div className="settings-section-header">
-          <div>
-            <h4>Top Downloads</h4>
-            <p className="settings-description">
-              The 10 most-downloaded public ClawHub skills right now.
-            </p>
+      {clawHubSearch?.status === "done" &&
+        !clawHubSearch.query &&
+        clawHubSearch.results.length > 0 && (
+          <div className="settings-section-header">
+            <div>
+              <h4>Top Downloads</h4>
+              <p className="settings-description">
+                The 10 most-downloaded public ClawHub skills right now.
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {clawHubResults.length > 0 && !isSearchingClawHub ? (
-        renderSearchResults(clawHubResults, handleClawHubInstall)
-      ) : clawHubQuery && !isSearchingClawHub ? (
+      {clawHubSearch?.status === "done" && clawHubSearch.results.length > 0 ? (
+        renderSearchResults(clawHubSearch.results, handleClawHubInstall)
+      ) : clawHubSearch?.status === "error" ? (
+        <div className="settings-alert settings-alert-error" role="alert">
+          {clawHubSearch.message}
+        </div>
+      ) : clawHubSearch?.status === "done" && clawHubSearch.query ? (
         <div className="settings-empty">
           No results were returned. ClawHub may have no matches or its search may be unavailable;
           try the exact slug or paste a ClawHub page URL above.
         </div>
       ) : isSearchingClawHub ? (
         <div className="settings-empty">
-          {clawHubQuery.trim() ? "Searching ClawHub..." : "Loading popular ClawHub skills..."}
+          {trimmedClawHubQuery ? "Searching ClawHub..." : "Loading popular ClawHub skills..."}
         </div>
       ) : (
         <div className="settings-empty">

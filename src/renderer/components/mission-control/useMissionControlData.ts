@@ -48,6 +48,22 @@ const logger = createRendererLogger("MissionControlData");
 
 export const ALL_WORKSPACES_ID = "__all__";
 
+type IssueContext = {
+  companyId: string;
+  issueId: string;
+  comments: IssueComment[];
+  runs: HeartbeatRun[];
+  status: "ready" | "error";
+};
+
+type IssueRunTimeline = {
+  companyId: string;
+  issueId: string;
+  runId: string;
+  events: HeartbeatRunEvent[];
+  status: "ready" | "error";
+};
+
 export type MissionColumn = {
   id: string;
   label: string;
@@ -361,10 +377,42 @@ export function useMissionControlData(
 
   // ── Issue context ──
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
-  const [selectedIssueRunId, setSelectedIssueRunId] = useState<string | null>(null);
-  const [issueComments, setIssueComments] = useState<IssueComment[]>([]);
-  const [issueRuns, setIssueRuns] = useState<HeartbeatRun[]>([]);
-  const [runEvents, setRunEvents] = useState<HeartbeatRunEvent[]>([]);
+  const [issueContext, setIssueContext] = useState<IssueContext | null>(null);
+  const [issueRunTimeline, setIssueRunTimeline] = useState<IssueRunTimeline | null>(null);
+  const [runSelection, setRunSelection] = useState<{
+    companyId: string;
+    issueId: string;
+    runId: string;
+  } | null>(null);
+  const selectedIssue =
+    issues.find((issue) => issue.id === selectedIssueId && issue.companyId === selectedCompanyId) ??
+    null;
+  const activeIssueId = selectedIssue?.id ?? null;
+  const currentIssueContext =
+    issueContext?.companyId === selectedCompanyId && issueContext?.issueId === activeIssueId
+      ? issueContext
+      : null;
+  const issueComments = currentIssueContext?.comments ?? [];
+  const issueRuns = currentIssueContext?.runs ?? [];
+  const selectedRunId =
+    runSelection?.companyId === selectedCompanyId && runSelection?.issueId === activeIssueId
+      ? runSelection.runId
+      : null;
+  const selectedIssueRun =
+    issueRuns.find((run) => run.id === selectedRunId) ?? issueRuns[0] ?? null;
+  const selectedIssueRunId = selectedIssueRun?.id ?? null;
+  const currentTimeline =
+    issueRunTimeline?.companyId === selectedCompanyId &&
+    issueRunTimeline?.issueId === activeIssueId &&
+    issueRunTimeline?.runId === selectedIssueRunId
+      ? issueRunTimeline
+      : null;
+  const runEvents = currentTimeline?.events ?? [];
+  const setSelectedIssueRunId = (runId: string) => {
+    if (selectedCompanyId && activeIssueId) {
+      setRunSelection({ companyId: selectedCompanyId, issueId: activeIssueId, runId });
+    }
+  };
   const [selectedGoalFilter, setSelectedGoalFilter] = useState<string>("all");
   const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>("all");
 
@@ -680,26 +728,6 @@ export function useMissionControlData(
     }
   }, []);
 
-  const loadIssueContext = useCallback(async (companyId: string, issueId: string) => {
-    try {
-      const [comments, runs] = await Promise.all([
-        window.electronAPI.listIssueComments(issueId),
-        window.electronAPI.listCompanyRuns(companyId, issueId, 20),
-      ]);
-      setIssueComments(comments);
-      setIssueRuns(runs);
-      setSelectedIssueRunId((prev) =>
-        prev && runs.some((r) => r.id === prev) ? prev : runs[0]?.id || null,
-      );
-    } catch (err) {
-      logger.error("Failed to load issue context:", err);
-      setIssueComments([]);
-      setIssueRuns([]);
-      setSelectedIssueRunId(null);
-      setRunEvents([]);
-    }
-  }, []);
-
   const loadWorkspaceScopedData = useCallback(
     async (workspaceId: string, workspaceList: Workspace[]) => {
       const [loadedAgents, statuses, loadedTasks] = await Promise.all([
@@ -913,10 +941,9 @@ export function useMissionControlData(
       setIssues([]);
       setSelectedPlannerRunId(null);
       setSelectedIssueId(null);
-      setSelectedIssueRunId(null);
-      setIssueComments([]);
-      setIssueRuns([]);
-      setRunEvents([]);
+      setRunSelection(null);
+      setIssueContext(null);
+      setIssueRunTimeline(null);
     }
     setSelectedGoalFilter("all");
     setSelectedProjectFilter("all");
@@ -945,25 +972,49 @@ export function useMissionControlData(
   }, [companies, initialCompanyId]);
 
   useEffect(() => {
-    if (selectedCompanyId && selectedIssueId)
-      void loadIssueContext(selectedCompanyId, selectedIssueId);
-    else {
-      setIssueComments([]);
-      setIssueRuns([]);
-      setRunEvents([]);
-    }
-  }, [loadIssueContext, selectedCompanyId, selectedIssueId]);
+    if (!selectedCompanyId || !activeIssueId) return;
+    const key = { companyId: selectedCompanyId, issueId: activeIssueId };
+    let current = true;
+    void (async () => {
+      try {
+        const [comments, runs] = await Promise.all([
+          window.electronAPI.listIssueComments(key.issueId),
+          window.electronAPI.listCompanyRuns(key.companyId, key.issueId, 20),
+        ]);
+        if (current) setIssueContext({ ...key, comments, runs, status: "ready" });
+      } catch (err) {
+        if (!current) return;
+        logger.error("Failed to load issue context:", err);
+        setIssueContext({ ...key, comments: [], runs: [], status: "error" });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [selectedCompanyId, activeIssueId]);
 
   useEffect(() => {
-    if (selectedIssueRunId) {
-      void window.electronAPI
-        .listRunEvents(selectedIssueRunId)
-        .then((ev) => setRunEvents(ev))
-        .catch(() => setRunEvents([]));
-    } else {
-      setRunEvents([]);
-    }
-  }, [selectedIssueRunId]);
+    if (!selectedCompanyId || !activeIssueId || !selectedIssueRunId) return;
+    const key = {
+      companyId: selectedCompanyId,
+      issueId: activeIssueId,
+      runId: selectedIssueRunId,
+    };
+    let current = true;
+    void (async () => {
+      try {
+        const events = await window.electronAPI.listRunEvents(key.runId);
+        if (current) setIssueRunTimeline({ ...key, events, status: "ready" });
+      } catch (err) {
+        if (!current) return;
+        logger.error("Failed to load issue run events:", err);
+        setIssueRunTimeline({ ...key, events: [], status: "error" });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [selectedCompanyId, activeIssueId, selectedIssueRunId]);
 
   // ── Event subscriptions (stable, empty deps) ──
   useEffect(() => {
@@ -1547,16 +1598,6 @@ export function useMissionControlData(
     [issues],
   );
 
-  const selectedIssue = useMemo(
-    () => issues.find((i) => i.id === selectedIssueId) || null,
-    [issues, selectedIssueId],
-  );
-
-  const selectedIssueRun = useMemo(
-    () => issueRuns.find((r) => r.id === selectedIssueRunId) || null,
-    [issueRuns, selectedIssueRunId],
-  );
-
   const filteredIssues = useMemo(
     () =>
       plannerManagedIssues.filter((i) => {
@@ -1667,7 +1708,9 @@ export function useMissionControlData(
     setSelectedIssueRunId,
     issueComments,
     issueRuns,
+    issueContextStatus: currentIssueContext?.status ?? "loading",
     runEvents,
+    runTimelineStatus: currentTimeline?.status ?? "loading",
     selectedGoalFilter,
     setSelectedGoalFilter,
     selectedProjectFilter,

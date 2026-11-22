@@ -25,7 +25,7 @@ interface ModelSourcePickerProps {
   /** Reasoning levels the current model supports. */
   reasoningOptions: ReasoningOption[];
   modelsByProvider: Record<string, LLMModelInfo[]>;
-  loadingProvider: string | null;
+  providerLoads: Record<string, "loading" | "error" | undefined>;
   onLoadProvider: (providerType: LLMProviderType) => void;
   onSelectModel: (providerType: LLMProviderType, modelKey: string, model?: LLMModelInfo) => void;
   onReasoningEffortChange: (reasoningEffort: LLMReasoningEffort) => void;
@@ -45,7 +45,7 @@ export function ModelSourcePicker({
   selectedReasoningEffort,
   reasoningOptions,
   modelsByProvider,
-  loadingProvider,
+  providerLoads,
   onLoadProvider,
   onSelectModel,
   onReasoningEffortChange,
@@ -68,8 +68,9 @@ export function ModelSourcePicker({
   ];
   const browsing = providers.find((provider) => provider.type === browsingProvider);
   const browsingLabel = browsing?.name || browsingProvider;
-  const models = modelsByProvider[browsingProvider] || [];
-  const isLoading = loadingProvider === browsingProvider && models.length === 0;
+  const loadedModels = modelsByProvider[browsingProvider];
+  const models = loadedModels ?? [];
+  const loadState = loadedModels ? undefined : providerLoads[browsingProvider];
   const query = search.trim().toLowerCase();
   const filteredModels = query
     ? models.filter(
@@ -146,7 +147,8 @@ export function ModelSourcePicker({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && filteredModels[0]) {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === "Enter" && query && filteredModels[0]) {
               event.preventDefault();
               onSelectModel(browsingProvider, filteredModels[0].key, filteredModels[0]);
             } else if (event.key === "Escape") {
@@ -160,9 +162,26 @@ export function ModelSourcePicker({
         <span className="msp-search-count">{filteredModels.length}</span>
       </label>
 
-      <div className="msp-list" role="listbox" aria-label={`${browsingLabel} models`}>
-        {isLoading ? (
-          <div className="msp-empty">Loading models…</div>
+      <div
+        className="msp-list"
+        role={!loadState && filteredModels.length > 0 ? "listbox" : undefined}
+        aria-label={!loadState && filteredModels.length > 0 ? `${browsingLabel} models` : undefined}
+      >
+        {loadState === "loading" ? (
+          <div className="msp-empty" role="status">
+            Loading models…
+          </div>
+        ) : loadState === "error" ? (
+          <div className="msp-empty">
+            <p role="alert">Could not load models.</p>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => onLoadProvider(browsingProvider)}
+            >
+              Retry
+            </button>
+          </div>
         ) : filteredModels.length === 0 ? (
           <div className="msp-empty">
             {query ? `No models match “${search.trim()}”` : "No models available"}

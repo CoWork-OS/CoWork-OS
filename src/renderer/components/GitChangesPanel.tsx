@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Check, GitBranch, RefreshCw } from "lucide-react";
 import "./GitChangesPanel.css";
 import type {
+  BrowserGitApi,
   BrowserGitDiffSummary,
   BrowserGitFileStatus,
   BrowserGitStatusSummary,
@@ -12,6 +21,12 @@ import { getHostCapabilityReason, hasHostCapability } from "../host/browser-capa
 interface GitChangesPanelProps {
   workspace: Workspace | null;
 }
+
+type GitDiffRequest = Parameters<BrowserGitApi["diff"]>[0];
+type GitDiffState = { request: GitDiffRequest } & (
+  | { result: BrowserGitDiffSummary }
+  | { error: string }
+);
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The repository request failed.";
@@ -26,128 +41,7 @@ function fileStatusLabel(file: BrowserGitFileStatus): string {
 }
 
 export function GitChangesPanel({ workspace }: GitChangesPanelProps) {
-  const [status, setStatus] = useState<BrowserGitStatusSummary | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [showStagedDiff, setShowStagedDiff] = useState(false);
-  const [diff, setDiff] = useState<BrowserGitDiffSummary | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [busyPath, setBusyPath] = useState<string | null>(null);
-  const [committing, setCommitting] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const statusRequestId = useRef(0);
-
   const api = window.coworkBrowserGit;
-  const readAvailable = hasHostCapability("git.read");
-  const writeAvailable = hasHostCapability("git.write") && workspace?.permissions.write === true;
-  const writeReason =
-    workspace?.permissions.write === true
-      ? getHostCapabilityReason("git.write")
-      : "This workspace is read-only.";
-
-  const refresh = useCallback(async () => {
-    if (!workspace || !api) return;
-    const requestId = ++statusRequestId.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await api.status(workspace.id);
-      if (next.workspaceId !== workspace.id)
-        throw new Error("The host returned another workspace.");
-      if (requestId !== statusRequestId.current) return;
-      setStatus(next);
-      setSelectedPath((current) =>
-        next.files.some((file) => file.path === current) ? current : (next.files[0]?.path ?? null),
-      );
-    } catch (refreshError) {
-      if (requestId === statusRequestId.current) setError(errorMessage(refreshError));
-    } finally {
-      if (requestId === statusRequestId.current) setLoading(false);
-    }
-  }, [api, workspace]);
-
-  useEffect(() => {
-    setStatus(null);
-    setDiff(null);
-    setSelectedPath(null);
-    setCommitMessage("");
-    setNotice(null);
-    if (readAvailable) void refresh();
-  }, [readAvailable, refresh]);
-
-  const selectedFile = useMemo(
-    () => status?.files.find((file) => file.path === selectedPath) ?? null,
-    [selectedPath, status?.files],
-  );
-
-  useEffect(() => {
-    let current = true;
-    setDiff(null);
-    if (!workspace || !api || !selectedFile || !readAvailable) return;
-    void api
-      .diff({ workspaceId: workspace.id, relativePath: selectedFile.path, staged: showStagedDiff })
-      .then((result) => {
-        if (current) setDiff(result);
-      })
-      .catch((diffError: unknown) => {
-        if (current) setError(errorMessage(diffError));
-      });
-    return () => {
-      current = false;
-    };
-  }, [api, readAvailable, selectedFile, showStagedDiff, workspace]);
-
-  const mutateFile = async (action: "stage" | "unstage", file: BrowserGitFileStatus) => {
-    if (!workspace || !api || !status?.revision || !writeAvailable) return;
-    setBusyPath(file.path);
-    setError(null);
-    setNotice(null);
-    try {
-      await api[action]({
-        workspaceId: workspace.id,
-        expectedRevision: status.revision,
-        relativePaths: [file.path],
-      });
-      setNotice(`${file.path} ${action === "stage" ? "staged" : "unstaged"}.`);
-      await refresh();
-    } catch (mutationError) {
-      setError(errorMessage(mutationError));
-      if (/repository changed|refresh git changes/i.test(errorMessage(mutationError))) {
-        await refresh();
-      }
-    } finally {
-      setBusyPath(null);
-    }
-  };
-
-  const commit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!workspace || !api || !status?.revision || !writeAvailable || committing) return;
-    setCommitting(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await api.commit({
-        workspaceId: workspace.id,
-        expectedRevision: status.revision,
-        message: commitMessage.trim(),
-      });
-      setCommitMessage("");
-      setNotice(
-        result.commitSha ? `Created commit ${result.commitSha.slice(0, 8)}.` : "Commit completed.",
-      );
-      await refresh();
-    } catch (commitError) {
-      setError(errorMessage(commitError));
-      if (/repository changed|refresh git changes/i.test(errorMessage(commitError))) {
-        await refresh();
-      }
-    } finally {
-      setCommitting(false);
-    }
-  };
-
   if (!workspace) {
     return (
       <main className="main-content git-changes-view">
@@ -155,7 +49,7 @@ export function GitChangesPanel({ workspace }: GitChangesPanelProps) {
       </main>
     );
   }
-  if (!readAvailable || !api) {
+  if (!hasHostCapability("git.read") || !api) {
     return (
       <main className="main-content git-changes-view">
         <header className="git-changes-header">
@@ -172,11 +66,150 @@ export function GitChangesPanel({ workspace }: GitChangesPanelProps) {
       </main>
     );
   }
+  return <GitWorkspaceChanges key={workspace.id} workspace={workspace} api={api} />;
+}
+
+function GitWorkspaceChanges({ workspace, api }: { workspace: Workspace; api: BrowserGitApi }) {
+  const workspaceId = workspace.id;
+  const [status, setStatus] = useState<BrowserGitStatusSummary | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [showStagedDiff, setShowStagedDiff] = useState(false);
+  const [diff, setDiff] = useState<GitDiffState | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const statusRequestId = useRef(0);
+  const active = useRef(false);
+
+  const writeAvailable = hasHostCapability("git.write") && workspace.permissions.write === true;
+  const writeReason =
+    workspace.permissions.write === true
+      ? getHostCapabilityReason("git.write")
+      : "This workspace is read-only.";
+
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      statusRequestId.current++;
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!active.current) return;
+    const requestId = ++statusRequestId.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await api.status(workspaceId);
+      if (next.workspaceId !== workspaceId) throw new Error("The host returned another workspace.");
+      if (requestId !== statusRequestId.current) return;
+      setStatus(next);
+      setSelectedPath((current) =>
+        next.files.some((file) => file.path === current) ? current : (next.files[0]?.path ?? null),
+      );
+    } catch (refreshError) {
+      if (requestId === statusRequestId.current) setError(errorMessage(refreshError));
+    } finally {
+      if (requestId === statusRequestId.current) setLoading(false);
+    }
+  }, [api, workspaceId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const selectedFile = useMemo(
+    () => status?.files.find((file) => file.path === selectedPath) ?? null,
+    [selectedPath, status?.files],
+  );
+  const diffRequest = useMemo(
+    () =>
+      selectedFile && (!selectedFile.untracked || showStagedDiff)
+        ? { workspaceId, relativePath: selectedFile.path, staged: showStagedDiff }
+        : null,
+    [selectedFile, showStagedDiff, workspaceId],
+  );
+  const selectedDiff = diff?.request === diffRequest ? diff : null;
+
+  useEffect(() => {
+    if (!diffRequest) return;
+    let current = true;
+    void api
+      .diff(diffRequest)
+      .then((result) => {
+        if (current) setDiff({ request: diffRequest, result });
+      })
+      .catch((diffError: unknown) => {
+        if (current) setDiff({ request: diffRequest, error: errorMessage(diffError) });
+      });
+    return () => {
+      current = false;
+    };
+  }, [api, diffRequest]);
+
+  const mutateFile = async (action: "stage" | "unstage", file: BrowserGitFileStatus) => {
+    if (!status?.revision || !writeAvailable || busyPath !== null || committing) return;
+    setBusyPath(file.path);
+    setError(null);
+    setNotice(null);
+    try {
+      await api[action]({
+        workspaceId,
+        expectedRevision: status.revision,
+        relativePaths: [file.path],
+      });
+      if (!active.current) return;
+      setNotice(`${file.path} ${action === "stage" ? "staged" : "unstaged"}.`);
+      await refresh();
+    } catch (mutationError) {
+      if (!active.current) return;
+      setError(errorMessage(mutationError));
+      if (/repository changed|refresh git changes/i.test(errorMessage(mutationError))) {
+        await refresh();
+      }
+    } finally {
+      if (active.current) setBusyPath(null);
+    }
+  };
+
+  const commit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!status?.revision || !writeAvailable || committing || busyPath !== null) return;
+    setCommitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await api.commit({
+        workspaceId,
+        expectedRevision: status.revision,
+        message: commitMessage.trim(),
+      });
+      if (!active.current) return;
+      setCommitMessage("");
+      setNotice(
+        result.commitSha ? `Created commit ${result.commitSha.slice(0, 8)}.` : "Commit completed.",
+      );
+      await refresh();
+    } catch (commitError) {
+      if (!active.current) return;
+      setError(errorMessage(commitError));
+      if (/repository changed|refresh git changes/i.test(errorMessage(commitError))) {
+        await refresh();
+      }
+    } finally {
+      if (active.current) setCommitting(false);
+    }
+  };
 
   const stagedFiles = status?.files.filter((file) => file.staged) ?? [];
   const commitDisabled =
     !writeAvailable ||
     committing ||
+    busyPath !== null ||
     !commitMessage.trim() ||
     !status?.stagedChanges ||
     Boolean(status.filesTruncated) ||
@@ -272,7 +305,7 @@ export function GitChangesPanel({ workspace }: GitChangesPanelProps) {
                         type="button"
                         className="git-changes-inline-action"
                         onClick={() => void mutateFile("unstage", file)}
-                        disabled={!writeAvailable || busyPath !== null}
+                        disabled={!writeAvailable || committing || busyPath !== null}
                         title={writeReason ?? "Unstage this file"}
                       >
                         {busyPath === file.path ? "Working…" : "Unstage"}
@@ -282,7 +315,7 @@ export function GitChangesPanel({ workspace }: GitChangesPanelProps) {
                         type="button"
                         className="git-changes-inline-action"
                         onClick={() => void mutateFile("stage", file)}
-                        disabled={!writeAvailable || busyPath !== null}
+                        disabled={!writeAvailable || committing || busyPath !== null}
                         title={writeReason ?? "Stage this file"}
                       >
                         {busyPath === file.path ? "Working…" : "Stage"}
@@ -327,8 +360,14 @@ export function GitChangesPanel({ workspace }: GitChangesPanelProps) {
                   <pre className="git-changes-diff-empty">
                     Stage this new file to review its diff.
                   </pre>
-                ) : diff ? (
-                  <pre className="git-changes-diff">{diff.diff || "No changes in this diff."}</pre>
+                ) : selectedDiff && "error" in selectedDiff ? (
+                  <div className="git-changes-message error" role="alert">
+                    {selectedDiff.error}
+                  </div>
+                ) : selectedDiff ? (
+                  <pre className="git-changes-diff">
+                    {selectedDiff.result.diff || "No changes in this diff."}
+                  </pre>
                 ) : (
                   <pre className="git-changes-diff-empty">Loading diff…</pre>
                 )}

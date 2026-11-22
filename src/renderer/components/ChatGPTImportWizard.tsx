@@ -12,6 +12,7 @@ interface ChatGPTImportProgress {
 
 interface ChatGPTImportResult {
   success: boolean;
+  cancelled?: boolean;
   memoriesCreated: number;
   conversationsProcessed: number;
   skipped: number;
@@ -80,7 +81,9 @@ export function ChatGPTImportWizard({
   const [progress, setProgress] = useState<ChatGPTImportProgress | null>(null);
   const [result, setResult] = useState<ChatGPTImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const activeImport = useRef<symbol | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // Load available models for the current provider on mount
@@ -110,9 +113,9 @@ export function ChatGPTImportWizard({
 
   useEffect(() => {
     return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
+      activeImport.current = null;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
     };
   }, []);
 
@@ -139,17 +142,21 @@ export function ChatGPTImportWizard({
   };
 
   const handleStartImport = async () => {
-    if (!filePath) return;
+    if (!filePath || activeImport.current) return;
+    const request = Symbol();
+    activeImport.current = request;
 
     setStep("importing");
     setError(null);
-
-    // Subscribe to progress
-    unsubscribeRef.current = window.electronAPI.onChatGPTImportProgress((p) => {
-      setProgress(p);
-    });
+    setResult(null);
+    setCancelError(null);
+    setProgress(null);
+    setCancelling(false);
 
     try {
+      unsubscribeRef.current = window.electronAPI.onChatGPTImportProgress((p) => {
+        if (activeImport.current === request) setProgress(p);
+      });
       // Resolve distillation model from preset or custom field
       const distillOpts: { distillProvider?: string; distillModel?: string } = {};
       if (distillPreset === "custom") {
@@ -168,28 +175,41 @@ export function ChatGPTImportWizard({
         ...distillOpts,
       });
 
+      if (activeImport.current !== request) return;
       setResult(importResult);
       setStep("done");
       if (importResult.success) {
         onImportComplete?.();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed unexpectedly.");
-      setStep("done");
+      if (activeImport.current === request) {
+        setError(err instanceof Error ? err.message : "Import failed unexpectedly.");
+        setStep("done");
+      }
     } finally {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
+      if (activeImport.current === request) {
+        activeImport.current = null;
+        unsubscribeRef.current?.();
         unsubscribeRef.current = null;
+        setCancelling(false);
       }
     }
   };
 
   const handleCancel = async () => {
+    const request = activeImport.current;
+    if (!request || cancelling) return;
     setCancelling(true);
+    setCancelError(null);
+    let accepted = false;
     try {
-      await window.electronAPI.cancelChatGPTImport();
+      accepted = (await window.electronAPI.cancelChatGPTImport()).cancelled;
     } catch {
-      // Best-effort cancel
+      // The import remains active if the host does not accept the request.
+    }
+    if (activeImport.current === request && !accepted) {
+      setCancelError("Cancellation did not start. Try again.");
+      setCancelling(false);
     }
   };
 
@@ -205,8 +225,8 @@ export function ChatGPTImportWizard({
     <div className="settings-section">
       <h3 className="settings-section-title">Import ChatGPT History</h3>
       <p className="settings-section-description">
-        Bring your ChatGPT conversations into CoWork OS to build a richer memory. Your data is
-        processed locally and never leaves your machine.
+        CoWork reads your ChatGPT export on this device and sends condensed conversation text to
+        your configured model. When the model runs remotely, that text leaves your device.
       </p>
 
       {/* Step 1: Tutorial */}
@@ -286,13 +306,10 @@ export function ChatGPTImportWizard({
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
               <div>
-                <strong>Your privacy is protected</strong>
+                <strong>How CoWork uses the export</strong>
                 <p style={{ margin: "4px 0 0" }}>
-                  Your chat history is processed <strong>entirely on your device</strong>. The raw
-                  file is read once, key insights are extracted using your configured LLM, and only
-                  the distilled memories are stored. The original file is never copied or retained
-                  by CoWork OS. We strongly recommend <strong>deleting the export file</strong>{" "}
-                  after import.
+                  The configured model extracts memories from your conversations. Marking those
+                  memories private controls how CoWork shares the saved memories.
                 </p>
               </div>
             </div>
@@ -590,6 +607,11 @@ export function ChatGPTImportWizard({
               {cancelling ? "Cancelling..." : "Cancel Import"}
             </button>
           </div>
+          {cancelError && (
+            <p className="chatgpt-import-error" role="alert">
+              {cancelError}
+            </p>
+          )}
 
           <p
             style={{
@@ -684,26 +706,32 @@ export function ChatGPTImportWizard({
               )}
             </div>
           ) : (
-            <div className="chatgpt-import-result chatgpt-import-result-error">
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                style={{ color: "var(--color-error, #ef4444)" }}
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="15" y1="9" x2="9" y2="15" />
-                <line x1="9" y1="9" x2="15" y2="15" />
-              </svg>
+            <div
+              className={`chatgpt-import-result${result?.cancelled ? "" : " chatgpt-import-result-error"}`}
+            >
+              {!result?.cancelled && (
+                <svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  style={{ color: "var(--color-error, #ef4444)" }}
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+              )}
               <h4 style={{ margin: "12px 0 8px", color: "var(--color-text-primary)" }}>
-                Import failed
+                {result?.cancelled ? "Import cancelled" : "Import failed"}
               </h4>
-              <p style={{ color: "var(--color-text-secondary)", margin: 0 }}>
-                {error || result?.errors?.[0] || "An unexpected error occurred."}
-              </p>
+              {!result?.cancelled && (
+                <p style={{ color: "var(--color-text-secondary)", margin: 0 }}>
+                  {error || result?.errors?.[0] || "An unexpected error occurred."}
+                </p>
+              )}
               {result && result.memoriesCreated > 0 && (
                 <p
                   style={{
@@ -712,7 +740,9 @@ export function ChatGPTImportWizard({
                     marginTop: "8px",
                   }}
                 >
-                  {result.memoriesCreated} memories were created before the error occurred.
+                  {result.cancelled
+                    ? `${result.memoriesCreated} memories were created before cancellation.`
+                    : `${result.memoriesCreated} memories were created before the error occurred.`}
                 </p>
               )}
             </div>

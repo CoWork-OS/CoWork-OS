@@ -52,6 +52,14 @@ interface DiscoveryEntry {
   detail?: string;
   route: AddToolsRoute;
   attention?: boolean;
+  matchedCatalogSearch?: true;
+}
+
+interface DiscoverySearch {
+  term: string;
+  refreshKey: number;
+  entries: DiscoveryEntry[];
+  errors: string[];
 }
 
 interface AddToolsPanelProps {
@@ -145,6 +153,29 @@ const CHANNEL_ENTRIES: Array<{
   })),
 ];
 
+const LOCAL_DISCOVERY_ENTRIES: DiscoveryEntry[] = [
+  ...NATIVE_INTEGRATIONS.map((integration): DiscoveryEntry => ({
+    id: `native:${integration.key}`,
+    targetId: integration.key,
+    name: integration.name,
+    description: integration.description,
+    kind: "native",
+    source: "Native integration",
+    state: "Account and readiness unknown",
+    route: { tab: "integrations" },
+  })),
+  ...CHANNEL_ENTRIES.map((channel): DiscoveryEntry => ({
+    id: `channel:${channel.id}`,
+    targetId: channel.id,
+    name: channel.name,
+    description: channel.description,
+    kind: "channel",
+    source: "Channel settings",
+    state: "Configuration and message delivery readiness unknown",
+    route: channel.route,
+  })),
+];
+
 function missingSkillRequirements(skill: SkillStatusEntry): string | undefined {
   const missing = [
     ...skill.missing.bins,
@@ -159,12 +190,13 @@ function missingSkillRequirements(skill: SkillStatusEntry): string | undefined {
 export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
   const [query, setQuery] = useState("");
   const [installed, setInstalled] = useState<DiscoveryEntry[]>([]);
-  const [available, setAvailable] = useState<DiscoveryEntry[]>([]);
+  const [catalogSearch, setCatalogSearch] = useState<DiscoverySearch | null>(null);
   const [loadingInstalled, setLoadingInstalled] = useState(true);
-  const [loadingAvailable, setLoadingAvailable] = useState(true);
   const [errors, setErrors] = useState<string[]>([]);
-  const [registryErrors, setRegistryErrors] = useState<string[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const term = query.trim();
+  const currentSearch =
+    catalogSearch?.term === term && catalogSearch.refreshKey === refreshKey ? catalogSearch : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -262,8 +294,6 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(async () => {
-      setLoadingAvailable(true);
-      const term = query.trim();
       const [packs, skills, clawHubSkills, registry] = await Promise.all([
         window.electronAPI.searchPackRegistry(term, { page: 1, pageSize: 24 }).catch(() => null),
         term
@@ -288,30 +318,6 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
       if (term && !clawHubSkills) nextErrors.push("ClawHub search is unavailable");
       if (!registry) nextErrors.push("MCP registry is unavailable");
       const entries: DiscoveryEntry[] = [];
-      for (const integration of NATIVE_INTEGRATIONS) {
-        entries.push({
-          id: `native:${integration.key}`,
-          targetId: integration.key,
-          name: integration.name,
-          description: integration.description,
-          kind: "native",
-          source: "Native integration",
-          state: "Account and readiness unknown",
-          route: { tab: "integrations" },
-        });
-      }
-      for (const channel of CHANNEL_ENTRIES) {
-        entries.push({
-          id: `channel:${channel.id}`,
-          targetId: channel.id,
-          name: channel.name,
-          description: channel.description,
-          kind: "channel",
-          source: "Channel settings",
-          state: "Configuration and message delivery readiness unknown",
-          route: channel.route,
-        });
-      }
       for (const pack of packs?.results ?? []) {
         entries.push({
           id: `registry-pack:${pack.id}`,
@@ -323,6 +329,7 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
           state: "Setup and readiness unknown",
           detail: pack.skillCount ? `${pack.skillCount} listed skills` : undefined,
           route: { tab: "customize" },
+          matchedCatalogSearch: true,
         });
       }
       const registrySkills = [...(skills?.results ?? []), ...(clawHubSkills?.results ?? [])].filter(
@@ -341,6 +348,7 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
           source: skill.source === "clawhub" ? "ClawHub" : "Skill Store",
           state: "Requirements and readiness unknown",
           route: { tab: "skills" },
+          matchedCatalogSearch: true,
         });
       }
       for (const server of registry?.servers ?? []) {
@@ -356,21 +364,20 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
           route: { tab: "mcp" },
         });
       }
-      setAvailable(entries);
-      setRegistryErrors(nextErrors);
-      setLoadingAvailable(false);
+      setCatalogSearch({ term, refreshKey, entries, errors: nextErrors });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, refreshKey]);
+  }, [term, refreshKey]);
 
   const results = useMemo(() => {
-    const term = query.trim().toLowerCase();
+    const needle = term.toLowerCase();
     const installedKeys = new Set(
       installed.map((entry) => `${entry.kind}:${entry.name.toLowerCase()}`),
     );
+    const available = [...LOCAL_DISCOVERY_ENTRIES, ...(currentSearch?.entries ?? [])];
     return [
       ...installed,
       ...available.filter(
@@ -379,9 +386,11 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
     ]
       .filter(
         (entry) =>
-          !term ||
+          !needle ||
+          // Catalogs can match fields that do not appear on the result card.
+          entry.matchedCatalogSearch ||
           [entry.name, entry.description, entry.source, entry.detail || ""].some((value) =>
-            value.toLowerCase().includes(term),
+            value.toLowerCase().includes(needle),
           ),
       )
       .sort(
@@ -389,7 +398,10 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
           Number(Boolean(b.attention)) - Number(Boolean(a.attention)) ||
           a.name.localeCompare(b.name),
       );
-  }, [available, installed, query]);
+  }, [currentSearch, installed, term]);
+
+  const notices = [...errors, ...(currentSearch?.errors ?? [])];
+  const loading = loadingInstalled || !currentSearch;
 
   return (
     <div className="add-tools-panel">
@@ -444,22 +456,21 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
         })}
       </div>
 
-      {[...errors, ...registryErrors].length > 0 && (
+      {notices.length > 0 && (
         <div className="add-tools-notice" role="status">
-          {[...errors, ...registryErrors].join(". ")}. Open the relevant setup screen or refresh to
-          check again.
+          {notices.join(". ")}. Open the relevant setup screen or refresh to check again.
         </div>
       )}
       <div className="add-tools-results-heading">
         <div>
-          <h3>{query ? "Search results" : "Tools to explore"}</h3>
+          <h3>{term ? "Search results" : "Tools to explore"}</h3>
           <p>
             Labels reflect catalog or setup state. They do not confirm that an action will succeed.
           </p>
         </div>
-        {(loadingInstalled || loadingAvailable) && <span>Loading…</span>}
+        {loading && <span role="status">Loading…</span>}
       </div>
-      {results.length === 0 && !loadingInstalled && !loadingAvailable ? (
+      {results.length === 0 && !loading ? (
         <p className="add-tools-empty">
           No results were returned. A catalog may have no matches or its search may be unavailable;
           open the full catalog to verify.

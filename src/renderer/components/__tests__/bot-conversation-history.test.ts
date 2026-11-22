@@ -113,6 +113,7 @@ describe("BotConversationHistory", () => {
     expect(markup).toContain("Conversation history");
     expect(markup).toContain("Archived");
     expect(markup).toContain('aria-current="true"');
+    expect(markup).toContain('<li><button type="button"');
     expect(markup).toContain("bot-conversation-new-button");
     // Only the two conversations for this bot are counted.
     expect(markup).toContain('class="bot-conversation-history-count">2<');
@@ -136,12 +137,16 @@ describe("BotConversationHistory", () => {
           activityLabel: "Waiting for Forge to reply",
           lastActivityAt: 5_000,
         },
-        conversations: [conversation("current", 2_000), conversation("older", 4_000)],
+        conversations: [
+          conversation("current", 2_000, { status: "executing" }),
+          conversation("older", 4_000),
+        ],
       }),
     );
 
     expect(markup).toContain("Waiting for Forge to reply");
     expect(markup).not.toContain("Waiting on a teammate");
+    expect(markup).not.toContain("bot-conversation-history-running");
     expect(markup).not.toContain(">Completed<");
     expect(markup.indexOf("Conversation current")).toBeLessThan(
       markup.indexOf("Conversation older"),

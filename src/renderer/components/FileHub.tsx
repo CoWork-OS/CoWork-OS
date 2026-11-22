@@ -20,6 +20,7 @@ import { isTempWorkspaceId } from "../../shared/types";
 import { hasHostMethod } from "../host/browser-capabilities";
 import { triggerBrowserBlobDownload } from "../host/browser-download";
 import { DocumentAwareFileModal } from "./DocumentAwareFileModal";
+import { ModalDialog } from "./ModalDialog";
 import {
   createBrowserFileHubAdapter,
   type BrowserFileHubApi,
@@ -514,6 +515,12 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
   const workspaceIdRef = useRef(browserWorkspaceId);
   workspaceIdRef.current = browserWorkspaceId;
 
+  const closePreview = useCallback(() => {
+    previewRequestSeqRef.current += 1;
+    setPreview(null);
+    setPreviewError(null);
+  }, []);
+
   const loadFiles = useCallback(async () => {
     const requestId = ++loadRequestSeqRef.current;
     if (!browserWorkspaceId) {
@@ -562,21 +569,14 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
   }, [adapter, activeSource, browserWorkspaceId, currentPath, searchQuery]);
 
   useEffect(() => {
-    previewRequestSeqRef.current += 1;
+    closePreview();
     setCurrentPath("");
     setShowRecent(false);
     setRecentFiles([]);
-    setPreview(null);
-    setPreviewError(null);
-  }, [browserWorkspaceId]);
+  }, [browserWorkspaceId, closePreview]);
 
   useEffect(() => {
-    if (showRecent) {
-      loadRequestSeqRef.current += 1;
-      setLoading(false);
-      return;
-    }
-    void loadFiles();
+    if (!showRecent) void loadFiles();
   }, [loadFiles, showRecent]);
 
   const remember = (entry: FileHubEntry) => {
@@ -609,11 +609,16 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
     }
   };
 
+  const browseDirectory = (path: string) => {
+    if (path !== currentPath || searchQuery || showRecent) closePreview();
+    setCurrentPath(path);
+    setSearchQuery("");
+    setShowRecent(false);
+  };
+
   const openEntry = async (entry: FileHubEntry) => {
     if (entry.isDirectory) {
-      setCurrentPath(entry.path);
-      setSearchQuery("");
-      setShowRecent(false);
+      browseDirectory(entry.path);
       return;
     }
     setPreviewError(null);
@@ -680,6 +685,7 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
             aria-label="Search workspace files"
             value={searchQuery}
             onChange={(event) => {
+              closePreview();
               setSearchQuery(event.target.value);
               if (event.target.value.trim()) setShowRecent(false);
             }}
@@ -700,7 +706,10 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
           {searchQuery && (
             <button
               aria-label="Clear search"
-              onClick={() => setSearchQuery("")}
+              onClick={() => {
+                closePreview();
+                setSearchQuery("");
+              }}
               style={smallIconButton}
             >
               <X size={13} />
@@ -721,6 +730,11 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
       >
         <button
           onClick={() => {
+            closePreview();
+            loadRequestSeqRef.current += 1;
+            setLoading(false);
+            setTruncated(false);
+            setError(null);
             setSearchQuery("");
             setShowRecent((value) => !value);
           }}
@@ -730,6 +744,7 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
         </button>
         <button
           onClick={() => {
+            if (activeSource !== "local" || showRecent) closePreview();
             setActiveSource("local");
             setShowRecent(false);
           }}
@@ -745,6 +760,7 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
         </button>
         <button
           onClick={() => {
+            if (activeSource !== "artifacts" || showRecent) closePreview();
             setActiveSource("artifacts");
             setShowRecent(false);
           }}
@@ -785,13 +801,7 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
             fontSize: 12,
           }}
         >
-          <button
-            onClick={() => {
-              setCurrentPath("");
-              setSearchQuery("");
-            }}
-            style={breadcrumbButton}
-          >
+          <button onClick={() => browseDirectory("")} style={breadcrumbButton}>
             {workspaceName || "Workspace"}
           </button>
           {pathParts.map((part, index) => {
@@ -799,13 +809,7 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
             return (
               <React.Fragment key={path}>
                 <ChevronRight size={12} />
-                <button
-                  onClick={() => {
-                    setCurrentPath(path);
-                    setSearchQuery("");
-                  }}
-                  style={breadcrumbButton}
-                >
+                <button onClick={() => browseDirectory(path)} style={breadcrumbButton}>
                   {part}
                 </button>
               </React.Fragment>
@@ -884,11 +888,7 @@ function BrowserFileHub({ workspaceId }: { workspaceId?: string }) {
           preview={preview}
           error={previewError}
           onError={setPreviewError}
-          onClose={() => {
-            previewRequestSeqRef.current += 1;
-            setPreview(null);
-            setPreviewError(null);
-          }}
+          onClose={closePreview}
         />
       )}
     </div>
@@ -927,13 +927,8 @@ function BrowserFilePreview({
   }, [onError, preview]);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Preview ${preview.name}`}
-      style={modalBackdropStyle}
-    >
-      <section style={modalStyle}>
+    <div style={modalBackdropStyle}>
+      <ModalDialog aria-label={`Preview ${preview.name}`} style={modalStyle} onClose={onClose}>
         <header style={modalHeaderStyle}>
           <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {preview.name}
@@ -1006,7 +1001,7 @@ function BrowserFilePreview({
             <Download size={14} /> Download
           </button>
         </footer>
-      </section>
+      </ModalDialog>
     </div>
   );
 }

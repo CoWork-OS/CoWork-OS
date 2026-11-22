@@ -1363,16 +1363,36 @@ const SelectedTaskWorkspaceView = memo(
         requestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       });
     }, [openBrowserWorkbenchSidebar]);
-    const sendSpreadsheetFullscreenMessage = useCallback(
+    const sendBrowserWorkbenchMessage = useCallback(
       async (
         message: string,
         images?: ImageAttachment[],
         options?: { verbatim?: boolean; surfaceOrigin?: MessageSurfaceOrigin },
       ) => {
+        await onSendMessage(message, images, undefined, options);
+      },
+      [onSendMessage],
+    );
+    const sendArtifactFullscreenMessage = useCallback(
+      async (message: string, images?: ImageAttachment[]) => {
         const startedAt = Date.now();
         setSpreadsheetTurnStartedAt(startedAt);
         setSpreadsheetOptimisticWorkingStartedAt(startedAt);
-        await onSendMessage(message, images, undefined, options);
+        let accepted = false;
+        try {
+          const result = await onSendMessage(message, images, undefined, {
+            returnOnAccepted: true,
+          });
+          accepted = result !== false;
+          return result;
+        } finally {
+          if (!accepted) {
+            setSpreadsheetTurnStartedAt((current) => (current === startedAt ? null : current));
+            setSpreadsheetOptimisticWorkingStartedAt((current) =>
+              current === startedAt ? null : current,
+            );
+          }
+        }
       },
       [onSendMessage],
     );
@@ -1692,7 +1712,7 @@ const SelectedTaskWorkspaceView = memo(
               onFullscreen={showBrowserFullscreen}
               onExitFullscreen={showBrowserSidebar}
               onStatusChange={updateBrowserWorkbenchStatus}
-              onSendMessage={sendSpreadsheetFullscreenMessage}
+              onSendMessage={sendBrowserWorkbenchMessage}
               onOpenSettings={onOpenSettings}
               pendingApproval={dockedBrowserApproval}
               onApprovalRespond={onBrowserApprovalRespond}
@@ -1712,7 +1732,7 @@ const SelectedTaskWorkspaceView = memo(
             onClose: closeSpreadsheetArtifact,
             onFullscreen: showSpreadsheetFullscreen,
             onExitFullscreen: showSpreadsheetSidebar,
-            onSendMessage: sendSpreadsheetFullscreenMessage,
+            onSendMessage: sendArtifactFullscreenMessage,
             selectedModelLabel:
               availableModels.find((model) => model.key === selectedModel)?.displayName ||
               selectedModel,

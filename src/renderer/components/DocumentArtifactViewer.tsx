@@ -65,7 +65,7 @@ type DocumentArtifactViewerProps = {
   onClose: () => void;
   onFullscreen: () => void;
   onExitFullscreen: () => void;
-  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void>;
+  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void | boolean>;
   selectedModelLabel?: string;
   selectedModel?: string;
   selectedProvider?: LLMProviderType;
@@ -315,6 +315,7 @@ export function DocumentArtifactViewer({
   const [turnContextExpanded, setTurnContextExpanded] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const editRevisionRef = useRef(0);
   const fileName = fileData?.fileName || getFileName(filePath);
   const fullscreenLabel =
     mode === "fullscreen" ? "Exit full screen" : "Open document in full screen";
@@ -392,7 +393,7 @@ export function DocumentArtifactViewer({
   const documentIconKind = getDocumentIconKind(filePath, fileData?.fileType);
 
   useEffect(() => {
-    if (!canEditDirectly || !preview || !editorRef.current) return;
+    if (loading || !canEditDirectly || !preview || !editorRef.current) return;
     const key = `${filePath}:${preview.htmlContent || preview.text}`;
     if (editorInitializedKey === key) return;
     editorRef.current.innerHTML =
@@ -401,7 +402,7 @@ export function DocumentArtifactViewer({
       textToHtml(preview.text || "");
     setEditorInitializedKey(key);
     setDirty(false);
-  }, [canEditDirectly, editorInitializedKey, filePath, preview]);
+  }, [canEditDirectly, editorInitializedKey, filePath, loading, preview]);
 
   const handleCopyText = async () => {
     const text = preview?.text || "";
@@ -422,14 +423,19 @@ export function DocumentArtifactViewer({
     void window.electronAPI.showInFinder(filePath, workspacePath);
   };
 
+  const markDocumentEdited = () => {
+    editRevisionRef.current += 1;
+    setDirty(true);
+  };
+
   const runEditorCommand = (command: string, value?: string) => {
     editorRef.current?.focus();
-    document.execCommand(command, false, value);
-    setDirty(true);
+    if (document.execCommand(command, false, value)) markDocumentEdited();
   };
 
   const handleSaveDocument = async () => {
     if (!editorRef.current || saving || !canEditDirectly) return;
+    const savedRevision = editRevisionRef.current;
     setSaving(true);
     setCopyMessage("");
     try {
@@ -441,6 +447,10 @@ export function DocumentArtifactViewer({
       });
       if (!result.success || !result.data) {
         setCopyMessage(result.error || "Save failed");
+        return;
+      }
+      if (editRevisionRef.current !== savedRevision) {
+        setCopyMessage("Saved earlier edits. You have unsaved changes.");
         return;
       }
       setFileData(result.data);
@@ -512,18 +522,19 @@ export function DocumentArtifactViewer({
     const message = fullscreenMessage.trim();
     if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
       return;
-    const previousMessage = fullscreenMessage;
-    const previousAttachments = fullscreenAttachments;
+    const submittedDraft = fullscreenMessage;
+    const submittedAttachments = fullscreenAttachments;
     setFullscreenSending(true);
-    setFullscreenMessage("");
-    setFullscreenAttachments([]);
     try {
       setAttachmentError("");
       const payload = await buildMessageWithAttachments(message);
-      await onSendMessage(payload.message, payload.images);
+      const accepted = await onSendMessage(payload.message, payload.images);
+      if (accepted === false) throw new Error("Artifact follow-up was rejected");
+      setFullscreenMessage((current) => (current === submittedDraft ? "" : current));
+      setFullscreenAttachments((current) =>
+        current.filter((attachment) => !submittedAttachments.includes(attachment)),
+      );
     } catch {
-      setFullscreenMessage(previousMessage);
-      setFullscreenAttachments(previousAttachments);
       setAttachmentError("Failed to send message. Please try again.");
     } finally {
       setFullscreenSending(false);
@@ -556,8 +567,7 @@ export function DocumentArtifactViewer({
             contentEditable
             suppressContentEditableWarning
             spellCheck
-            onInput={() => setDirty(true)}
-            onBlur={() => setDirty(true)}
+            onInput={markDocumentEdited}
           />
         </div>
       );
@@ -738,7 +748,9 @@ export function DocumentArtifactViewer({
               <Save size={15} />
               {saving ? "Saving" : "Save"}
             </button>
-            {copyMessage && <div className="document-viewer-save-message">{copyMessage}</div>}
+            <div role="status" className={copyMessage ? "document-viewer-save-message" : undefined}>
+              {copyMessage}
+            </div>
           </>
         ) : (
           <>
@@ -872,6 +884,7 @@ export function DocumentArtifactViewer({
                     className="input-field input-textarea"
                     placeholder="Ask for follow-up changes"
                     value={fullscreenMessage}
+                    readOnly={fullscreenSending}
                     rows={1}
                     onChange={(event) => setFullscreenMessage(event.target.value)}
                     onKeyDown={(event) => {

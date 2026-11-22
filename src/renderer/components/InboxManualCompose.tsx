@@ -43,7 +43,7 @@ export function InboxManualCompose({
       splitMailboxRecipients(draft.bcc).length >
       0;
   return (
-    <div className="ibx-compose">
+    <div className="ibx-compose" aria-busy={busy}>
       <div className="ibx-compose-head">
         <div className="ibx-segmented" role="group" aria-label="Compose mode">
           {(["reply", "reply_all", "forward"] as const).map((mode) => (
@@ -74,6 +74,7 @@ export function InboxManualCompose({
         <input
           aria-label="To"
           value={draft.to}
+          readOnly={busy}
           onChange={(event) => update("to", event.target.value)}
         />
       </label>
@@ -83,6 +84,7 @@ export function InboxManualCompose({
           <input
             aria-label="Cc"
             value={draft.cc}
+            readOnly={busy}
             onChange={(event) => update("cc", event.target.value)}
           />
         </label>
@@ -91,6 +93,7 @@ export function InboxManualCompose({
           <input
             aria-label="Bcc"
             value={draft.bcc}
+            readOnly={busy}
             onChange={(event) => update("bcc", event.target.value)}
           />
         </label>
@@ -100,6 +103,7 @@ export function InboxManualCompose({
         <input
           aria-label="Subject"
           value={draft.subject}
+          readOnly={busy}
           onChange={(event) => update("subject", event.target.value)}
         />
       </label>
@@ -108,6 +112,7 @@ export function InboxManualCompose({
         placeholder="Write your message…"
         className={draft.mode === "forward" ? "is-tall" : undefined}
         value={draft.body}
+        readOnly={busy}
         onChange={(event) => update("body", event.target.value)}
       />
       <div className="ibx-compose-foot">

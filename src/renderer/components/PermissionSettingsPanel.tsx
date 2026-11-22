@@ -35,6 +35,16 @@ type RuleDraft = {
 
 type ApprovalExperiencePreset = "standard" | "fewer_prompts" | "custom";
 
+type WorkspaceRuleListing = { workspaceId: string } & (
+  | { state: "loading" }
+  | { state: "ready"; rules: PersistedPermissionRule[] }
+  | { state: "error"; message: string }
+);
+
+type WorkspaceRuleRemoval =
+  | { state: "removing"; ruleId: string }
+  | { state: "finished"; message: string; error: boolean };
+
 const DEFAULT_SETTINGS: PermissionSettingsData = {
   version: 1,
   defaultMode: "dangerous_only",
@@ -298,9 +308,17 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   const [saving, setSaving] = useState(false);
   const [ruleDraft, setRuleDraft] = useState<RuleDraft>(DEFAULT_RULE_DRAFT);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [workspaceRules, setWorkspaceRules] = useState<PersistedPermissionRule[]>([]);
-  const [workspaceRulesLoading, setWorkspaceRulesLoading] = useState(false);
-  const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
+  const [workspaceRuleListing, setWorkspaceRuleListing] = useState<WorkspaceRuleListing | null>(
+    null,
+  );
+  const [workspaceRuleRetry, setWorkspaceRuleRetry] = useState(0);
+  const [workspaceRuleRemovals, setWorkspaceRuleRemovals] = useState<
+    Partial<Record<string, WorkspaceRuleRemoval>>
+  >({});
+  const workspaceRemoval = workspaceId ? workspaceRuleRemovals[workspaceId] : undefined;
+  const deletingRuleId = workspaceRemoval?.state === "removing" ? workspaceRemoval.ruleId : null;
+  const workspaceListing =
+    workspaceRuleListing?.workspaceId === workspaceId ? workspaceRuleListing : null;
   const [newProfile, setNewProfile] = useState<AccessProfileDefinition>(DEFAULT_CUSTOM_PROFILE);
   // Secondary "add" forms stay collapsed until the user asks for them.
   const [profileFormOpen, setProfileFormOpen] = useState(false);
@@ -315,8 +333,31 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   }, []);
 
   useEffect(() => {
-    void loadWorkspaceRules(workspaceId);
-  }, [workspaceId]);
+    if (!workspaceId || deletingRuleId) return;
+    let current = true;
+    setWorkspaceRuleListing((previous) =>
+      previous?.workspaceId === workspaceId && previous.state === "ready"
+        ? previous
+        : { workspaceId, state: "loading" },
+    );
+    void (async () => {
+      try {
+        const rules = await window.electronAPI.getWorkspacePermissionRules(workspaceId);
+        if (current) setWorkspaceRuleListing({ workspaceId, state: "ready", rules });
+      } catch (error) {
+        if (current) {
+          setWorkspaceRuleListing({
+            workspaceId,
+            state: "error",
+            message: permissionSaveErrorMessage(error, "Couldn't load workspace rules."),
+          });
+        }
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [workspaceId, deletingRuleId, workspaceRuleRetry]);
 
   const isDirty = !loading && hasUnsavedPermissionChanges(savedSettings, settings);
 
@@ -447,23 +488,6 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
     }
   };
 
-  const loadWorkspaceRules = async (nextWorkspaceId?: string) => {
-    if (!nextWorkspaceId) {
-      setWorkspaceRules([]);
-      return;
-    }
-    try {
-      setWorkspaceRulesLoading(true);
-      const rules = await window.electronAPI.getWorkspacePermissionRules(nextWorkspaceId);
-      setWorkspaceRules(rules);
-    } catch (error) {
-      console.error("Failed to load workspace permission rules:", error);
-      setWorkspaceRules([]);
-    } finally {
-      setWorkspaceRulesLoading(false);
-    }
-  };
-
   const addRule = () => {
     const scope = buildScope(ruleDraft);
     const nextRule: PermissionRule = {
@@ -489,30 +513,36 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   };
 
   const removeWorkspaceRule = async (ruleId: string) => {
-    if (!workspaceId) return;
+    if (!workspaceId || deletingRuleId) return;
+    const setRemoval = (removal: WorkspaceRuleRemoval) =>
+      setWorkspaceRuleRemovals((previous) => ({ ...previous, [workspaceId]: removal }));
+    setRemoval({ state: "removing", ruleId });
     try {
-      setDeletingRuleId(ruleId);
       const result = await window.electronAPI.deleteWorkspacePermissionRule({
         workspaceId,
         ruleId,
       });
-      if (result.success && result.removed) {
-        setStatusMessage(
-          result.manifestRemoved
-            ? "Workspace rule removed from the database and manifest."
-            : result.manifestError
-              ? `Workspace rule removed from the database. Manifest removal failed: ${result.manifestError}`
-              : "Workspace rule removed.",
-        );
-        await loadWorkspaceRules(workspaceId);
-      } else {
-        setStatusMessage("Failed to remove workspace rule.");
-      }
+      if (!result.success || !result.removed) throw new Error("Failed to remove workspace rule.");
+      setWorkspaceRuleListing((previous) =>
+        previous?.workspaceId === workspaceId && previous.state === "ready"
+          ? { ...previous, rules: previous.rules.filter((rule) => rule.id !== ruleId) }
+          : previous,
+      );
+      setRemoval({
+        state: "finished",
+        message: result.manifestRemoved
+          ? "Workspace rule removed from the database and manifest."
+          : result.manifestError
+            ? `Workspace rule removed from the database. Manifest removal failed: ${result.manifestError}`
+            : "Workspace rule removed.",
+        error: Boolean(result.manifestError),
+      });
     } catch (error) {
-      console.error("Failed to delete workspace permission rule:", error);
-      setStatusMessage("Failed to remove workspace rule.");
-    } finally {
-      setDeletingRuleId(null);
+      setRemoval({
+        state: "finished",
+        message: permissionSaveErrorMessage(error, "Failed to remove workspace rule."),
+        error: true,
+      });
     }
   };
 
@@ -1193,15 +1223,35 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         <p className="settings-hint">
           These rules are persisted for the current workspace and can be removed directly here.
         </p>
+        {workspaceRemoval?.state === "finished" && (
+          <p className="settings-hint" role={workspaceRemoval.error ? "alert" : "status"}>
+            {workspaceRemoval.message}
+          </p>
+        )}
         {!workspaceId ? (
           <p className="settings-hint">Open a workspace to manage its local rules.</p>
-        ) : workspaceRulesLoading ? (
-          <p className="settings-hint">Loading workspace rules...</p>
-        ) : workspaceRules.length === 0 ? (
+        ) : !workspaceListing || workspaceListing.state === "loading" ? (
+          <p className="settings-hint" role="status">
+            {deletingRuleId ? "Removing workspace rule..." : "Loading workspace rules..."}
+          </p>
+        ) : workspaceListing.state === "error" ? (
+          <>
+            <p className="settings-hint" role="alert">
+              {workspaceListing.message}
+            </p>
+            <button
+              type="button"
+              className="button-small button-secondary"
+              onClick={() => setWorkspaceRuleRetry((retry) => retry + 1)}
+            >
+              Retry workspace rules
+            </button>
+          </>
+        ) : workspaceListing.rules.length === 0 ? (
           <p className="settings-hint">No workspace-local rules saved yet.</p>
         ) : (
           <div style={{ display: "grid", gap: "8px" }}>
-            {workspaceRules.map((rule) => (
+            {workspaceListing.rules.map((rule) => (
               <div
                 key={rule.id || `${rule.source}:${scopeToLabel(rule.scope)}`}
                 className="settings-list-row"
@@ -1213,9 +1263,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                   <div className="settings-hint">{scopeToLabel(rule.scope)}</div>
                 </div>
                 <button
+                  type="button"
                   className="button-small button-secondary"
                   onClick={() => void removeWorkspaceRule(rule.id || "")}
-                  disabled={!rule.id || deletingRuleId === rule.id}
+                  disabled={!rule.id || Boolean(deletingRuleId)}
                 >
                   {deletingRuleId === rule.id ? "Removing..." : "Remove"}
                 </button>

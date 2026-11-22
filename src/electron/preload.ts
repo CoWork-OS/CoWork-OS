@@ -1070,6 +1070,7 @@ interface ChatGPTImportProgress {
 
 interface ChatGPTImportResult {
   success: boolean;
+  cancelled?: boolean;
   memoriesCreated: number;
   conversationsProcessed: number;
   skipped: number;

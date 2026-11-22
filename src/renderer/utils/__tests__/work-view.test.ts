@@ -97,6 +97,40 @@ describe("buildWorkModel", () => {
     expect(row.at).toBe(NOW - 1 * MIN);
   });
 
+  it("archives only independent idle sessions and keeps all tasks in the shown session", () => {
+    const title = "Weekly rollup";
+    const tasks = [
+      task("shown", { title, sessionId: "retained", updatedAt: NOW }),
+      task("shown-companion", { title, sessionId: "retained", updatedAt: NOW - MIN }),
+      task("other", { title, sessionId: "older", updatedAt: NOW - 2 * MIN }),
+      task("other-companion", { title, sessionId: "older", updatedAt: NOW - 3 * MIN }),
+      task("busy", { title, sessionId: "active", updatedAt: NOW - 4 * MIN }),
+      task("busy-child", { parentTaskId: "busy", sessionId: "active", status: "executing" }),
+      task("legacy", { title, updatedAt: NOW - 5 * MIN }),
+    ];
+    const [row] = build(tasks).groups[0].rows;
+    expect(row.task.id).toBe("shown");
+    expect(row.archivableTaskIds).toEqual(["other", "legacy"]);
+  });
+
+  it("keeps matching titles in different workspaces separate while project details load", () => {
+    const tasks = [
+      task("report", { title: "Weekly rollup", workspaceId: "proj" }),
+      task("scratch", { title: "Weekly rollup", workspaceId: "tmp" }),
+    ];
+    const loading = buildWorkModel({
+      tasks,
+      workspaces: [],
+      attention: [],
+      context,
+      filters: DEFAULT_WORK_FILTERS,
+    });
+    const loaded = build(tasks);
+    const getRows = (model: typeof loaded) => model.groups.flatMap((group) => group.rows);
+    expect(getRows(loading).map((row) => row.id)).toEqual(getRows(loaded).map((row) => row.id));
+    expect(getRows(loading).map((row) => row.archivableTaskIds)).toEqual([[], []]);
+  });
+
   it("groups by project, newest first, with sessions outside a project last", () => {
     const model = build([
       task("scratch", { workspaceId: "tmp", updatedAt: NOW }),

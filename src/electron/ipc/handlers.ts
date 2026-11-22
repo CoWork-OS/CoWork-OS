@@ -13700,11 +13700,13 @@ function setupMemoryHandlers(
   ipcMain.handle(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT, async (event, options: unknown) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT, RATE_LIMIT_CONFIGS.limited);
     const validated = validateInput(ChatGPTImportSchema, options, "ChatGPT import");
+    if (activeImportAbort) {
+      throw new Error("An import is already in progress. Please wait for it to finish.");
+    }
+    const abort = new AbortController();
+    activeImportAbort = abort;
     try {
       const { ChatGPTImporter } = await import("../memory/ChatGPTImporter");
-
-      // Create an abort controller for cancellation
-      activeImportAbort = new AbortController();
 
       // Forward progress events to renderer
       const unsubscribe = ChatGPTImporter.onProgress((progress) => {
@@ -13717,16 +13719,17 @@ function setupMemoryHandlers(
       try {
         const result = await ChatGPTImporter.import({
           ...validated,
-          signal: activeImportAbort.signal,
+          signal: abort.signal,
         });
-        return result;
+        return { ...result, cancelled: !result.success && abort.signal.aborted };
       } finally {
         unsubscribe();
-        activeImportAbort = null;
       }
     } catch (error) {
       logger.error("[Memory] ChatGPT import failed:", error);
       throw error;
+    } finally {
+      activeImportAbort = null;
     }
   });
 

@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ProactiveSuggestion, Workspace } from "../../shared/types";
 
 interface SuggestionsPanelProps {
   workspaceId?: string;
   onCreateTask?: (title: string, prompt: string) => void;
 }
+
+type SuggestionList = { workspaceId: string; suggestions: ProactiveSuggestion[] } & (
+  | { status: "loading" | "refreshing" | "ready" }
+  | { status: "error"; message: string }
+);
 
 const TYPE_LABELS: Record<string, string> = {
   follow_up: "Follow-up",
@@ -42,10 +47,9 @@ export function SuggestionsPanel({
   workspaceId: _initialWorkspaceId,
   onCreateTask,
 }: SuggestionsPanelProps) {
-  const [suggestions, setSuggestions] = useState<ProactiveSuggestion[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [list, setList] = useState<SuggestionList | null>(null);
+  const requestId = useRef(0);
+  const workspaceFieldId = useId();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>(ALL_WORKSPACES_ID);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
@@ -75,6 +79,11 @@ export function SuggestionsPanel({
 
   const workspaceId = selectedWorkspaceId;
   const isAllWorkspacesSelected = workspaceId === ALL_WORKSPACES_ID;
+  const currentList = list?.workspaceId === workspaceId ? list : null;
+  const suggestions = currentList?.suggestions ?? [];
+  const loading = !currentList || currentList.status === "loading";
+  const refreshing = currentList?.status === "refreshing";
+  const error = currentList?.status === "error" ? currentList.message : null;
   const workspaceNameById = useMemo(() => {
     const names = new Map<string, string>();
     for (const workspace of workspaces) {
@@ -85,31 +94,21 @@ export function SuggestionsPanel({
 
   const load = useCallback(
     async (refresh = false) => {
-      if (!isAllWorkspacesSelected && !isValidWorkspaceId(workspaceId)) {
-        setSuggestions([]);
-        return;
-      }
-      if (refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      setError(null);
+      const request = ++requestId.current;
+      setList((current) => ({
+        workspaceId,
+        status: refresh ? "refreshing" : "loading",
+        suggestions: refresh && current?.workspaceId === workspaceId ? current.suggestions : [],
+      }));
       try {
-        if (isAllWorkspacesSelected) {
-          if (workspaces.length === 0) {
-            setSuggestions([]);
-            return;
-          }
+        let rows: ProactiveSuggestion[] = [];
+        if (isAllWorkspacesSelected && workspaces.length > 0) {
+          const workspaceIds = workspaces.map((workspace) => workspace.id);
           if (refresh) {
-            await window.electronAPI.refreshSuggestionsForWorkspaces(
-              workspaces.map((workspace) => workspace.id),
-            );
+            await window.electronAPI.refreshSuggestionsForWorkspaces(workspaceIds);
           }
-          const result = await window.electronAPI.listSuggestionsForWorkspaces(
-            workspaces.map((workspace) => workspace.id),
-          );
-          const flattened = (result || [])
+          const result = await window.electronAPI.listSuggestionsForWorkspaces(workspaceIds);
+          rows = (result || [])
             .flatMap((entry) =>
               entry.suggestions.map((suggestion) => ({
                 ...suggestion,
@@ -120,22 +119,23 @@ export function SuggestionsPanel({
               if (b.confidence !== a.confidence) return b.confidence - a.confidence;
               return b.createdAt - a.createdAt;
             });
-          setSuggestions(flattened);
-          return;
+        } else if (!isAllWorkspacesSelected && isValidWorkspaceId(workspaceId)) {
+          if (refresh) {
+            await window.electronAPI.refreshSuggestions(workspaceId);
+          }
+          rows = (await window.electronAPI.listSuggestions(workspaceId)) || [];
         }
-
-        if (refresh) {
-          await window.electronAPI.refreshSuggestions(workspaceId);
+        if (request === requestId.current) {
+          setList({ workspaceId, status: "ready", suggestions: rows });
         }
-        const result = await window.electronAPI.listSuggestions(workspaceId);
-        setSuggestions(result || []);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to load suggestions");
-      } finally {
-        if (refresh) {
-          setRefreshing(false);
-        } else {
-          setLoading(false);
+        if (request === requestId.current) {
+          setList((current) => ({
+            workspaceId,
+            status: "error",
+            message: err instanceof Error ? err.message : "Failed to load suggestions",
+            suggestions: current?.workspaceId === workspaceId ? current.suggestions : [],
+          }));
         }
       }
     },
@@ -144,7 +144,21 @@ export function SuggestionsPanel({
 
   useEffect(() => {
     void load();
+    return () => {
+      requestId.current += 1;
+    };
   }, [load]);
+
+  const removeSuggestion = (id: string) => {
+    setList((current) =>
+      current
+        ? {
+            ...current,
+            suggestions: current.suggestions.filter((suggestion) => suggestion.id !== id),
+          }
+        : current,
+    );
+  };
 
   const handleDismiss = async (id: string) => {
     const targetWorkspaceId =
@@ -152,7 +166,7 @@ export function SuggestionsPanel({
     if (!isValidWorkspaceId(targetWorkspaceId)) return;
     try {
       await window.electronAPI.dismissSuggestion(targetWorkspaceId, id);
-      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      removeSuggestion(id);
     } catch {
       // best-effort
     }
@@ -168,7 +182,7 @@ export function SuggestionsPanel({
         id,
         Date.now() + 24 * 60 * 60 * 1000,
       );
-      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      removeSuggestion(id);
     } catch {
       // best-effort
     }
@@ -182,7 +196,7 @@ export function SuggestionsPanel({
       if (result.actionPrompt && onCreateTask) {
         onCreateTask(suggestion.title, result.actionPrompt);
       }
-      setSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
+      removeSuggestion(suggestion.id);
     } catch {
       // best-effort
     }
@@ -227,8 +241,11 @@ export function SuggestionsPanel({
             }}
           >
             <div className="settings-form-group" style={{ marginBottom: 0, maxWidth: 260 }}>
-              <label className="settings-label">Workspace</label>
+              <label className="settings-label" htmlFor={workspaceFieldId}>
+                Workspace
+              </label>
               <select
+                id={workspaceFieldId}
                 value={selectedWorkspaceId}
                 onChange={(e) => setSelectedWorkspaceId(e.target.value)}
                 className="settings-select"
@@ -270,6 +287,7 @@ export function SuggestionsPanel({
 
           {error && (
             <div
+              role="alert"
               style={{
                 padding: 12,
                 borderRadius: 6,
@@ -283,7 +301,7 @@ export function SuggestionsPanel({
             </div>
           )}
 
-          {!loading && !error && suggestions.length === 0 && (
+          {!loading && !refreshing && !error && suggestions.length === 0 && (
             <div
               style={{
                 padding: 24,

@@ -29,6 +29,8 @@ export function useHostFolderBrowser(startWorkspaceId?: string): HostFolderBrows
   const load = useCallback(
     async (location: Location | null, hidden: boolean) => {
       const requestId = ++requestSeqRef.current;
+      // Retry the requested folder even if its listing never loaded.
+      locationRef.current = location;
       setLoading(true);
       setError(null);
       try {

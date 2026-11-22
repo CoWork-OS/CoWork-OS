@@ -92,7 +92,7 @@ type SpreadsheetArtifactViewerProps = {
   onClose: () => void;
   onFullscreen: () => void;
   onExitFullscreen: () => void;
-  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void>;
+  onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void | boolean>;
   selectedModelLabel?: string;
   selectedModel?: string;
   selectedProvider?: LLMProviderType;
@@ -220,6 +220,40 @@ function clearDerivedCellDisplay(cell: SpreadsheetPreviewCell): void {
   delete cell.displayValue;
   delete cell.valueType;
   delete cell.formulaPending;
+}
+
+function withCellValue(
+  preview: SpreadsheetPreview,
+  sheetIndex: number,
+  { row, column }: CellPosition,
+  value: string,
+): SpreadsheetPreview {
+  const next = clonePreview(preview);
+  const sheet = next.sheets[sheetIndex] || next.sheets[0];
+  if (!sheet) return preview;
+  ensureSheetBounds(sheet, row, column);
+  const cell = sheet.rows[row - 1][column - 1] || createCell(row, column);
+  clearDerivedCellDisplay(cell);
+  cell.value = value;
+  if (value.startsWith("=")) cell.formula = value.slice(1);
+  else delete cell.formula;
+  sheet.rows[row - 1][column - 1] = cell;
+  next.activeSheetName = sheet.name;
+  return next;
+}
+
+function appendPatch(patches: SpreadsheetPatch[], patch: SpreadsheetPatch): SpreadsheetPatch[] {
+  if (patch.type !== "setCell") return [...patches, patch];
+  const next = patches.filter(
+    (entry) =>
+      !(
+        entry.type === "setCell" &&
+        entry.sheetId === patch.sheetId &&
+        entry.row === patch.row &&
+        entry.column === patch.column
+      ),
+  );
+  return [...next, patch];
 }
 
 function normalizeRange(range: CellRange | null): CellRange | null {
@@ -479,21 +513,18 @@ export function SpreadsheetArtifactViewer({
   );
 
   const queuePatch = (patch: SpreadsheetPatch) => {
-    setPendingPatches((current) => {
-      if (patch.type !== "setCell") return [...current, patch];
-      const next = current.filter(
-        (entry) =>
-          !(
-            entry.type === "setCell" &&
-            entry.sheetId === patch.sheetId &&
-            entry.row === patch.row &&
-            entry.column === patch.column
-          ),
-      );
-      next.push(patch);
-      return next;
-    });
+    setPendingPatches((current) => appendPatch(current, patch));
   };
+
+  const cellPatch = (position: CellPosition, value: string): SpreadsheetPatch | null =>
+    activeSheetId
+      ? {
+          type: "setCell",
+          sheetId: activeSheetId,
+          ...position,
+          input: { value, ...(value.startsWith("=") ? { formula: value.slice(1) } : {}) },
+        }
+      : null;
 
   const selectCell = (position: CellPosition, extend = false) => {
     commitEditing(false);
@@ -581,46 +612,23 @@ export function SpreadsheetArtifactViewer({
   };
 
   const updateCellValue = (row: number, column: number, value: string) => {
+    if (saving) return;
     if (isSpreadsheetReadOnly) {
       setSaveMessage("Read-only");
       return;
     }
-    if (activeSheetId) {
-      queuePatch({
-        type: "setCell",
-        sheetId: activeSheetId,
-        row,
-        column,
-        input: {
-          value,
-          ...(value.startsWith("=") ? { formula: value.slice(1) } : {}),
-        },
-      });
-    }
-    setEditablePreview((current) => {
-      if (!current) return current;
-      const next = clonePreview(current);
-      const sheet = next.sheets[activeSheetIndex] || next.sheets[0];
-      if (!sheet) return current;
-      ensureSheetBounds(sheet, row, column);
-      const cell = sheet.rows[row - 1][column - 1] || createCell(row, column);
-      clearDerivedCellDisplay(cell);
-      if (value.startsWith("=")) {
-        cell.formula = value.slice(1);
-        cell.value = value;
-      } else {
-        delete cell.formula;
-        cell.value = value;
-      }
-      sheet.rows[row - 1][column - 1] = cell;
-      next.activeSheetName = sheet.name;
-      return next;
-    });
+    const position = { row, column };
+    const patch = cellPatch(position, value);
+    if (patch) queuePatch(patch);
+    setEditablePreview(
+      (current) => current && withCellValue(current, activeSheetIndex, position, value),
+    );
     setDirty(true);
     setSaveMessage("");
   };
 
   const startEditing = (position: CellPosition, initialValue?: string) => {
+    if (saving) return;
     if (isSpreadsheetReadOnly) {
       setSaveMessage("Read-only");
       return;
@@ -661,6 +669,7 @@ export function SpreadsheetArtifactViewer({
   };
 
   const addRows = (count = 1) => {
+    if (saving) return;
     if (isSpreadsheetStructureReadOnly) {
       setSaveMessage("Structural edits unavailable");
       return;
@@ -685,6 +694,7 @@ export function SpreadsheetArtifactViewer({
   };
 
   const addColumns = (count = 1) => {
+    if (saving) return;
     if (isSpreadsheetStructureReadOnly) {
       setSaveMessage("Structural edits unavailable");
       return;
@@ -711,6 +721,7 @@ export function SpreadsheetArtifactViewer({
   };
 
   const pasteTabularData = (text: string) => {
+    if (saving) return;
     if (isSpreadsheetReadOnly) {
       setSaveMessage("Read-only");
       return;
@@ -822,15 +833,29 @@ export function SpreadsheetArtifactViewer({
       setSaveMessage("Read-only");
       return;
     }
+    let previewToSave = editablePreview;
+    let patchesToSave = pendingPatches;
+    const draft = editingDraftRef.current;
+    if (draft) {
+      previewToSave = withCellValue(editablePreview, activeSheetIndex, draft.position, draft.value);
+      const patch = cellPatch(draft.position, draft.value);
+      if (patch) patchesToSave = appendPatch(pendingPatches, patch);
+      editingDraftRef.current = null;
+      setEditingCell(null);
+      setEditingValue("");
+      setEditablePreview(previewToSave);
+      setPendingPatches(patchesToSave);
+      setDirty(true);
+    }
     setSaving(true);
     setSaveMessage("");
     try {
       let currentSession = workbookSession;
       if (currentSession && window.electronAPI.saveSpreadsheetWorkbook) {
-        if (pendingPatches.length > 0) {
+        if (patchesToSave.length > 0) {
           const applyResult = await window.electronAPI.applySpreadsheetPatches({
             sessionId: currentSession.sessionId,
-            patches: pendingPatches,
+            patches: patchesToSave,
           });
           if (!applyResult.success) {
             if (applyResult.error === "Spreadsheet session not found") {
@@ -840,9 +865,13 @@ export function SpreadsheetArtifactViewer({
               setSaveMessage(applyResult.error || "Save failed");
               return;
             }
-          } else if (applyResult.session) {
-            setWorkbookSession(applyResult.session);
-            currentSession = applyResult.session;
+          } else {
+            // Applied edits already belong to this session, even if writing the file fails.
+            setPendingPatches([]);
+            if (applyResult.session) {
+              setWorkbookSession(applyResult.session);
+              currentSession = applyResult.session;
+            }
           }
         }
         if (currentSession) {
@@ -879,14 +908,15 @@ export function SpreadsheetArtifactViewer({
       const result = await window.electronAPI.updateSpreadsheetFile({
         filePath,
         workspacePath,
-        preview: editablePreview,
+        preview: previewToSave,
       });
       if (!result.success || !result.data) {
         setSaveMessage(result.error || "Save failed");
         return;
       }
       setFileData(result.data);
-      setEditablePreview(result.data.spreadsheetPreview || editablePreview);
+      setEditablePreview(result.data.spreadsheetPreview || previewToSave);
+      setPendingPatches([]);
       setDirty(false);
       setSaveMessage("Saved");
     } catch (err: unknown) {
@@ -969,11 +999,9 @@ export function SpreadsheetArtifactViewer({
     const message = fullscreenMessage.trim();
     if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
       return;
-    const previousMessage = fullscreenMessage;
-    const previousAttachments = fullscreenAttachments;
+    const submittedDraft = fullscreenMessage;
+    const submittedAttachments = fullscreenAttachments;
     setFullscreenSending(true);
-    setFullscreenMessage("");
-    setFullscreenAttachments([]);
     try {
       setAttachmentError("");
       if (pointedRange && taskId && activeSheet && message) {
@@ -998,10 +1026,13 @@ export function SpreadsheetArtifactViewer({
         }
       }
       const payload = await buildMessageWithAttachments(message);
-      await onSendMessage(payload.message, payload.images);
+      const accepted = await onSendMessage(payload.message, payload.images);
+      if (accepted === false) throw new Error("Artifact follow-up was rejected");
+      setFullscreenMessage((current) => (current === submittedDraft ? "" : current));
+      setFullscreenAttachments((current) =>
+        current.filter((attachment) => !submittedAttachments.includes(attachment)),
+      );
     } catch {
-      setFullscreenMessage(previousMessage);
-      setFullscreenAttachments(previousAttachments);
       setAttachmentError("Failed to send message. Please try again.");
     } finally {
       setFullscreenSending(false);
@@ -1065,7 +1096,7 @@ export function SpreadsheetArtifactViewer({
           type="button"
           className="spreadsheet-viewer-tool-btn"
           onClick={() => addRows(1)}
-          disabled={isSpreadsheetStructureReadOnly}
+          disabled={saving || isSpreadsheetStructureReadOnly}
           title={isSpreadsheetStructureReadOnly ? "Structural edits unavailable" : "Add row"}
         >
           + Row
@@ -1075,6 +1106,7 @@ export function SpreadsheetArtifactViewer({
           className="spreadsheet-viewer-tool-btn"
           onClick={() => addColumns(1)}
           disabled={
+            saving ||
             isSpreadsheetStructureReadOnly ||
             (activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS
           }
@@ -1095,12 +1127,15 @@ export function SpreadsheetArtifactViewer({
         <button
           type="button"
           className="spreadsheet-viewer-save-btn"
+          onMouseDown={(event) => {
+            if (editingDraftRef.current) event.preventDefault();
+          }}
           onClick={handleSave}
-          disabled={isSpreadsheetReadOnly || !dirty || saving || !editablePreview}
+          disabled={isSpreadsheetReadOnly || (!dirty && !editingCell) || saving || !editablePreview}
           title={isSpreadsheetReadOnly ? "This workbook is read-only" : "Save workbook"}
         >
           <Save size={15} />
-          {saving ? "Saving" : "Save"}
+          {saving ? "Saving…" : "Save"}
         </button>
         {saveMessage && <div className="spreadsheet-viewer-save-message">{saveMessage}</div>}
       </div>
@@ -1126,7 +1161,7 @@ export function SpreadsheetArtifactViewer({
           className="spreadsheet-viewer-formula-input"
           value={formulaText}
           placeholder={getWorkbookTitle(fileName)}
-          disabled={isSpreadsheetReadOnly}
+          disabled={saving || isSpreadsheetReadOnly}
           onChange={(event) => {
             const position = selectedCell || { row: 1, column: 1 };
             updateCellValue(position.row, position.column, event.target.value);
@@ -1140,7 +1175,7 @@ export function SpreadsheetArtifactViewer({
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
         onPaste={(event) => {
-          if (editingCell) return;
+          if (editingCell || saving) return;
           const text = event.clipboardData.getData("text/plain");
           if (!text) return;
           event.preventDefault();
@@ -1281,7 +1316,7 @@ export function SpreadsheetArtifactViewer({
                                 if (editingDraftRef.current) editingDraftRef.current.value = value;
                                 setEditingValue(value);
                               }}
-                              onBlur={() => commitEditing()}
+                              onBlur={() => commitEditing(false)}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === "Tab") {
                                   event.preventDefault();
@@ -1424,6 +1459,7 @@ export function SpreadsheetArtifactViewer({
                     className="input-field input-textarea"
                     placeholder="Ask for follow-up changes"
                     value={fullscreenMessage}
+                    readOnly={fullscreenSending}
                     rows={1}
                     onChange={(event) => setFullscreenMessage(event.target.value)}
                     onKeyDown={(event) => {

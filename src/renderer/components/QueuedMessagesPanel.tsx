@@ -13,24 +13,21 @@ export function QueuedMessagesPanel({
   const [items, setItems] = useState<QueuedTaskInput[]>([]);
   const [edit, setEdit] = useState<{ item: QueuedTaskInput; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const generation = useRef(0);
   const mounted = useRef(true);
-  const readFailed = useRef(false);
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
       const next = await window.electronAPI.getQueuedTaskInputs(taskId);
       if (mounted.current && request === generation.current) {
         setItems(next);
-        // A later read clears its own failure, never a save error the user still needs.
-        if (readFailed.current) setError(null);
-        readFailed.current = false;
+        setReadError(null);
       }
     } catch (cause) {
       if (mounted.current && request === generation.current) {
-        readFailed.current = true;
-        setError(cause instanceof Error ? cause.message : "Unable to read queued messages.");
+        setReadError(cause instanceof Error ? cause.message : "Unable to read queued messages.");
       }
     }
   }, [taskId]);
@@ -69,12 +66,22 @@ export function QueuedMessagesPanel({
     };
   }, [taskId, refresh]);
 
+  const queuedVersion = edit
+    ? items.find((item) => item.id === edit.item.id && item.kind === edit.item.kind)
+    : undefined;
+  const editConflict = edit
+    ? !queuedVersion
+      ? "This message is no longer queued."
+      : queuedVersion.revision !== edit.item.revision || queuedVersion.message !== edit.item.message
+        ? "This queued message changed while you were editing."
+        : null
+    : null;
+
   const save = async () => {
-    if (!edit || saving || !edit.text.trim()) return;
+    if (!edit || saving || editConflict || !edit.text.trim()) return;
     const submitted = edit;
     setSaving(true);
-    setError(null);
-    readFailed.current = false;
+    setSaveError(null);
     try {
       await window.electronAPI.editQueuedTaskInput({
         taskId,
@@ -89,28 +96,34 @@ export function QueuedMessagesPanel({
       onChanged?.();
       await refresh();
     } catch (cause) {
-      if (mounted.current)
-        setError(cause instanceof Error ? cause.message : "Unable to save this queued message.");
+      if (mounted.current) {
+        setSaveError(
+          cause instanceof Error ? cause.message : "Unable to save this queued message.",
+        );
+        await refresh();
+      }
     } finally {
       if (mounted.current) setSaving(false);
     }
   };
-  if (!items.length && !edit && !error) return null;
+  if (!items.length && !edit && !readError && !saveError) return null;
   return (
     <section className="queued-messages-panel" aria-label="Queued messages">
       <strong>Queued messages</strong>
-      <span className="queued-messages-hint">
-        Changes reach the agent before this message starts.
-      </span>
+      {items.length > 0 && (
+        <span className="queued-messages-hint">
+          Changes reach the agent before this message starts.
+        </span>
+      )}
       {items.map((item) => (
         <div className="queued-messages-row" key={`${item.kind}:${item.id}`}>
           <span>{item.message}</span>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || Boolean(edit)}
             onClick={() => {
               setEdit({ item, text: item.message });
-              setError(null);
+              setSaveError(null);
             }}
           >
             Edit
@@ -125,10 +138,13 @@ export function QueuedMessagesPanel({
             disabled={saving}
             onChange={(event) => setEdit({ ...edit, text: event.target.value })}
           />
+          {editConflict && !saving && (
+            <div role="status">{editConflict} Copy your draft before closing this editor.</div>
+          )}
           <div>
             <button
               type="button"
-              disabled={saving || !edit.text.trim()}
+              disabled={saving || Boolean(editConflict) || !edit.text.trim()}
               onClick={() => void save()}
             >
               {saving ? "Saving…" : "Save queued message"}
@@ -138,7 +154,7 @@ export function QueuedMessagesPanel({
               disabled={saving}
               onClick={() => {
                 setEdit(null);
-                setError(null);
+                setSaveError(null);
               }}
             >
               Cancel edit
@@ -146,10 +162,17 @@ export function QueuedMessagesPanel({
           </div>
         </div>
       )}
-      {error && (
+      {readError && (
         <div role="alert">
-          {error}{" "}
-          {edit && "Your edit is preserved here; copy it to send as a new message if needed."}
+          {readError}{" "}
+          <button type="button" onClick={() => void refresh()}>
+            Refresh queue
+          </button>
+        </div>
+      )}
+      {saveError && (
+        <div role="alert">
+          {saveError} {edit && "Your draft is preserved here."}
         </div>
       )}
     </section>

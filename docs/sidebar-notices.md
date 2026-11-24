@@ -44,6 +44,7 @@ Append an entry to `SIDEBAR_NOTICES`:
 | id | What it does |
 | --- | --- |
 | `google-search-ending-v1` | Shows while web search uses Google Custom Search as primary or fallback (`useClosingSearchProvider`, which re-checks after Search settings are saved). Its first-use tooltip says Google ends the API on 1 January 2027 and names alternatives; the notice opens Settings → AI Models → Web Search. Tracked in #914. |
+| `google-search-ended-v1` | Shows after web search was moved off Google on or after 1 January 2027 (`retiredProviderSwitch` in the search config status, via `useSearchProviderNotices`). Its tooltip says Google shut the API down and search now uses another provider or DuckDuckGo; the notice opens Settings → AI Models → Web Search. Tracked in #914. |
 | `meshy-3d-v1` | Announces 3D models with Meshy. Its first-use tooltip explains the feature and where to add the key; the notice opens Meshy's setup in Settings → Connectors. See [3D Models with Meshy](meshy-3d.md). |
 | `use-cases-gallery-v1` | Opens the "See how people use CoWork OS" gallery (`UseCasesGallery.tsx`) centered over the visible composer: the welcome screen or Build. Anywhere else it opens over the whole window. |
 | `composer-predictions-v1` | Appears after the first usable composer prediction. Its first-use tooltip explains Tab acceptance and the on/off setting. The notice and **Open settings** action open Appearance settings. Hidden on hosts without the prediction API. |

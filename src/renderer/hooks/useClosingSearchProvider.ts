@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
+import type {
+  RetiredSearchProviderSwitch,
+  SearchConfigStatus,
+  SearchProviderInfo,
+} from "../../shared/types";
 import {
   resolvePrimarySearchProvider,
   supportsSearchFallback,
@@ -27,16 +31,16 @@ export function findClosingSearchProvider(
   );
 }
 
-export function useClosingSearchProvider(): SearchProviderInfo | null {
-  const [provider, setProvider] = useState<SearchProviderInfo | null>(null);
+function useSearchConfigStatus(): SearchConfigStatus | null {
+  const [status, setStatus] = useState<SearchConfigStatus | null>(null);
   useEffect(() => {
     const getStatus = window.electronAPI?.getSearchConfigStatus;
     if (typeof getStatus !== "function") return;
     let cancelled = false;
     const refresh = () => {
       getStatus()
-        .then((status) => {
-          if (!cancelled) setProvider(findClosingSearchProvider(status));
+        .then((next) => {
+          if (!cancelled) setStatus(next as SearchConfigStatus);
         })
         .catch(() => {
           // Search settings unavailable: show no notice.
@@ -49,5 +53,24 @@ export function useClosingSearchProvider(): SearchProviderInfo | null {
       window.removeEventListener(SEARCH_SETTINGS_CHANGED, refresh);
     };
   }, []);
-  return provider;
+  return status;
+}
+
+export interface SearchProviderNotices {
+  /** A closing provider web search still relies on. */
+  closingProvider: SearchProviderInfo | null;
+  /** Set once web search was moved off a provider that shut down. */
+  retiredSwitch: RetiredSearchProviderSwitch | null;
+}
+
+export function useSearchProviderNotices(): SearchProviderNotices {
+  const status = useSearchConfigStatus();
+  return {
+    closingProvider: findClosingSearchProvider(status),
+    retiredSwitch: status?.retiredProviderSwitch ?? null,
+  };
+}
+
+export function useClosingSearchProvider(): SearchProviderInfo | null {
+  return useSearchProviderNotices().closingProvider;
 }

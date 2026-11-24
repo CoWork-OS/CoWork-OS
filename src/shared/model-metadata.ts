@@ -57,6 +57,11 @@ const BEDROCK_REGION_PREFIX = /^(?:us|eu|apac|au|jp|ca|global|us-gov)\./;
 // Route variants such as OpenRouter's ":free" / ":thinking" (not Bedrock's "-v1:0").
 const ROUTE_VARIANT_SUFFIX = /:(?:[a-z][a-z-]*)$/;
 const DATE_SUFFIX = /-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+// Ids a provider still serves after models.dev renamed the catalogue entry.
+const CATALOGUE_ALIASES: Record<string, string> = {
+  // Venice routes "qwen-4-max"; models.dev now lists it as "qwen4-max".
+  "qwen-4-max": "qwen4-max",
+};
 const CATALOG_CLAUDE_KEY = /^(?:opus|sonnet|haiku|fable)-\d/;
 
 /**
@@ -111,6 +116,7 @@ export function modelIdCandidates(modelId: string): string[] {
     // Dated previews priced like their GA model: "gemini-2.5-pro-preview-05-06".
     add(candidate.replace(/-preview-\d{2}-\d{2}$/, ""));
   }
+  for (const candidate of out.slice()) add(CATALOGUE_ALIASES[candidate]);
   return out;
 }
 

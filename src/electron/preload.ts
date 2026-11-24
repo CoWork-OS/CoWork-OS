@@ -6830,6 +6830,7 @@ export interface ElectronAPI {
       supportedTypes: Array<"web" | "news" | "images">;
     }>;
     isConfigured: boolean;
+    retiredProviderSwitch?: import("../shared/types").RetiredSearchProviderSwitch;
     searxng: {
       baseUrl?: string;
       allowPrivate: boolean;

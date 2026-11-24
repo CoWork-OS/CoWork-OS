@@ -745,6 +745,8 @@ Configure paid providers in **Settings** > **Web Search**.
 
 Google closed the Custom Search JSON API to new customers and shuts it down on 1 January 2027 ([Google's notice](https://developers.google.com/custom-search/v1/overview)). Settings no longer offers it for new setups. A saved Google key keeps working until then, with a warning; set up another provider as primary or fallback before that date (tracked in #914).
 
+From 1 January 2027 CoWork sends no requests to Google. A Google primary moves to your fallback, or to the next configured provider, or to DuckDuckGo; a Google fallback is cleared. The saved Google key stays in settings, Google drops out of the provider list, and a one-time sidebar notice says search moved.
+
 Keenable is off until you turn it on in **Settings** > **Web Search** > **Keenable**. It then works as a primary or fallback provider without an account: keyless calls go to `POST https://api.keenable.ai/v1/search/public` with an `X-Keenable-Title: CoWork OS` header and are limited to 1,000 requests an hour per IP. An optional API key switches to `/v1/search` and removes that cap. Keenable logs and stores queries for keyless use and on its default data policy ([data privacy](https://docs.keenable.ai/data-privacy)).
 
 ## Setup in Settings

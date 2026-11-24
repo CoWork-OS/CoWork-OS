@@ -10499,11 +10499,25 @@ export interface SearchProviderInfo {
   retirement?: SearchProviderRetirement;
 }
 
+/** Recorded when web search was moved off a provider whose service shut down. */
+export interface RetiredSearchProviderSwitch {
+  /** The shut-down provider that was primary or fallback. */
+  from: SearchProviderType;
+  fromName: string;
+  /** The provider now used as primary. */
+  to: SearchProviderType;
+  toName: string;
+  /** ISO timestamp of the switch. */
+  at: string;
+}
+
 export interface SearchConfigStatus {
   primaryProvider: SearchProviderType | null;
   fallbackProvider: SearchProviderType | null;
   providers: SearchProviderInfo[];
   isConfigured: boolean;
+  /** Set once search was moved off a shut-down provider, so the UI can say so. */
+  retiredProviderSwitch?: RetiredSearchProviderSwitch;
   searxng: {
     baseUrl?: string;
     allowPrivate: boolean;

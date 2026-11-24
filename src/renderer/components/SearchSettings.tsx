@@ -45,6 +45,8 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
   const [googleSearchEngineId, setGoogleSearchEngineId] = useState("");
   const [searxngBaseUrl, setSearxngBaseUrl] = useState("");
   const [searxngAllowPrivate, setSearxngAllowPrivate] = useState(false);
+  const [keenableEnabled, setKeenableEnabled] = useState(false);
+  const [keenableApiKey, setKeenableApiKey] = useState("");
 
   // Track which provider is active in the tab view
   const [activeProvider, setActiveProvider] = useState<SearchProviderType | null>(null);
@@ -62,6 +64,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setFallbackProvider(status.fallbackProvider);
       setSearxngBaseUrl(status.searxng.baseUrl || "");
       setSearxngAllowPrivate(status.searxng.allowPrivate);
+      setKeenableEnabled(status.keenable?.enabled === true);
       const offered = status.providers.filter(isProviderOffered);
       setActiveProvider((prev) => {
         if (prev && offered.some((provider) => provider.type === prev)) {
@@ -103,6 +106,10 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
           baseUrl: searxngBaseUrl.trim() || undefined,
           allowPrivate: searxngAllowPrivate,
         },
+        keenable: {
+          enabled: keenableEnabled,
+          apiKey: keenableApiKey.trim() || undefined,
+        },
       });
       // Clear the input fields after saving
       setTavilyApiKey("");
@@ -111,6 +118,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setSerpapiApiKey("");
       setGoogleApiKey("");
       setGoogleSearchEngineId("");
+      setKeenableApiKey("");
       await loadConfig();
       window.dispatchEvent(new Event(SEARCH_SETTINGS_CHANGED));
     } catch (error: Any) {
@@ -339,6 +347,43 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                       Allow a private or local instance (for example localhost or a home/server LAN)
                     </span>
                   </label>
+                </>
+              )}
+
+              {activeProviderConfig.type === "keenable" && (
+                <>
+                  <label className="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={keenableEnabled}
+                      onChange={(e) => setKeenableEnabled(e.target.checked)}
+                    />
+                    <span>Use Keenable for web search</span>
+                  </label>
+                  <div className="settings-field">
+                    <label>Keenable API Key (optional)</label>
+                    <input
+                      type="password"
+                      className="settings-input"
+                      placeholder={
+                        configStatus?.keenable?.hasApiKey ? "••••••••••••••••" : "keen_..."
+                      }
+                      value={keenableApiKey}
+                      onChange={(e) => setKeenableApiKey(e.target.value)}
+                    />
+                    <p className="settings-hint">
+                      Works without a key, limited to 1,000 searches an hour per IP address. A key
+                      removes that limit. Keenable logs and stores search queries for keyless use
+                      and on its default data policy.{" "}
+                      <a
+                        href="https://docs.keenable.ai/api-keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Get a Keenable API key
+                      </a>
+                    </p>
+                  </div>
                 </>
               )}
 

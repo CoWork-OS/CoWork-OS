@@ -10189,6 +10189,7 @@ export type SearchProviderType =
   | "serpapi"
   | "google"
   | "searxng"
+  | "keenable"
   | "duckduckgo";
 export type SearchType = "web" | "news" | "images";
 export type WebSearchMode = "disabled" | "cached" | "live";
@@ -10520,6 +10521,11 @@ export interface SearchConfigStatus {
   searxng: {
     baseUrl?: string;
     allowPrivate: boolean;
+  };
+  /** Keenable is opt-in; `hasApiKey` says a key is saved without exposing it. */
+  keenable?: {
+    enabled: boolean;
+    hasApiKey: boolean;
   };
 }
 

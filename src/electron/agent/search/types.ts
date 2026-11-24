@@ -11,6 +11,7 @@ export type SearchProviderType =
   | "serpapi"
   | "google"
   | "searxng"
+  | "keenable"
   | "duckduckgo";
 
 export type SearchType = "web" | "news" | "images";
@@ -31,6 +32,8 @@ export interface SearchProviderConfig {
   // SearXNG-specific
   searxngBaseUrl?: string;
   searxngAllowPrivate?: boolean;
+  // Keenable-specific (optional: without a key the keyless endpoint is used)
+  keenableApiKey?: string;
 }
 
 export interface SearchQuery {
@@ -170,6 +173,13 @@ export const SEARCH_PROVIDER_INFO = {
     description: "Self-hosted metasearch with no commercial API key required",
     supportedTypes: ["web", "news", "images"] as SearchType[],
     signupUrl: "https://docs.searxng.org/admin/installation.html",
+  },
+  keenable: {
+    displayName: "Keenable",
+    description: "Web search on Keenable's own index; works without an API key",
+    supportedTypes: ["web"] as SearchType[],
+    envVar: "KEENABLE_API_KEY",
+    signupUrl: "https://docs.keenable.ai/api-keys",
   },
   duckduckgo: {
     displayName: "DuckDuckGo",

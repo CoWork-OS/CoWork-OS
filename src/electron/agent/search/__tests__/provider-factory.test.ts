@@ -764,4 +764,93 @@ describe("SearchProviderFactory", () => {
       expect(braveProvider.search).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe("Keenable (#893)", () => {
+    const repo = () => SecureSettingsRepository.getInstance() as Any;
+
+    it("is offered but not configured or auto-selected until it is turned on", () => {
+      repo().load.mockReturnValue({ primaryProvider: null, fallbackProvider: null });
+
+      const status = SearchProviderFactory.getConfigStatus();
+
+      expect(status.primaryProvider).toBeNull();
+      expect(status.providers.find((p) => p.type === "keenable")).toMatchObject({
+        configured: false,
+        supportedTypes: ["web"],
+      });
+      expect(status.keenable).toEqual({ enabled: false, hasApiKey: false });
+    });
+
+    it("can be the fallback once turned on, without a key", () => {
+      const settings = {
+        primaryProvider: "tavily",
+        fallbackProvider: "keenable",
+        tavily: { apiKey: "tavily" },
+        keenable: { enabled: true },
+      } as Any;
+
+      expect((SearchProviderFactory as Any).getProviderExecutionOrder(settings)).toEqual([
+        "tavily",
+        "keenable",
+      ]);
+    });
+
+    it("keeps a saved key when only the switch is saved, and never returns the key", () => {
+      repo().load.mockReturnValueOnce({
+        primaryProvider: "keenable",
+        fallbackProvider: null,
+        keenable: { enabled: true, apiKey: "keen_saved" },
+      });
+
+      SearchProviderFactory.saveSettings({
+        primaryProvider: "keenable",
+        fallbackProvider: null,
+        keenable: { enabled: true },
+      });
+
+      expect(repo().save).toHaveBeenCalledWith(
+        "search",
+        expect.objectContaining({
+          primaryProvider: "keenable",
+          keenable: { enabled: true, apiKey: "keen_saved" },
+        }),
+      );
+      const status = SearchProviderFactory.getConfigStatus();
+      expect(status.keenable).toEqual({ enabled: true, hasApiKey: true });
+      expect(JSON.stringify(status)).not.toContain("keen_saved");
+    });
+
+    it("drops Keenable from routing when it is turned off", () => {
+      repo().load.mockReturnValueOnce({
+        primaryProvider: "brave",
+        fallbackProvider: "keenable",
+        brave: { apiKey: "brave" },
+        keenable: { enabled: true },
+      });
+
+      SearchProviderFactory.saveSettings({
+        primaryProvider: "brave",
+        fallbackProvider: "keenable",
+        keenable: { enabled: false },
+      });
+
+      expect(repo().save).toHaveBeenCalledWith(
+        "search",
+        expect.objectContaining({ fallbackProvider: null, keenable: { enabled: false } }),
+      );
+    });
+
+    it("passes the saved key to the provider", () => {
+      repo().load.mockReturnValue({
+        primaryProvider: "keenable",
+        fallbackProvider: null,
+        keenable: { enabled: true, apiKey: "keen_saved" },
+      });
+
+      const provider = SearchProviderFactory.createProvider();
+
+      expect(provider.type).toBe("keenable");
+      expect((provider as Any).apiKey).toBe("keen_saved");
+    });
+  });
 });

@@ -1130,6 +1130,7 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "search engine",
         "tavily",
         "exa",
+        "keenable",
         "duckduckgo",
         "google search",
       ],

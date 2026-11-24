@@ -16,6 +16,7 @@ import { SerpApiProvider } from "./serpapi-provider";
 import { GoogleProvider } from "./google-provider";
 import { SearXngProvider } from "./searxng-provider";
 import { DuckDuckGoProvider } from "./duckduckgo-provider";
+import { KeenableProvider } from "./keenable-provider";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 import { getUserDataDir } from "../../utils/user-data-dir";
 
@@ -46,6 +47,11 @@ export interface SearchSettings {
   searxng?: {
     baseUrl?: string;
     allowPrivate?: boolean;
+  };
+  /** Keenable is opt-in; the key is optional and only lifts the keyless rate limit. */
+  keenable?: {
+    enabled?: boolean;
+    apiKey?: string;
   };
 }
 
@@ -376,6 +382,9 @@ export class SearchProviderFactory {
     if (settings.searxng?.baseUrl) {
       configured.push("searxng");
     }
+    if (settings.keenable?.enabled === true) {
+      configured.push("keenable");
+    }
 
     return configured;
   }
@@ -419,6 +428,12 @@ export class SearchProviderFactory {
             ? { ...settings.searxng, baseUrl: settings.searxng.baseUrl.trim() }
             : undefined
           : existingSettings.searxng,
+        keenable: Object.prototype.hasOwnProperty.call(settings, "keenable")
+          ? {
+              enabled: settings.keenable?.enabled === true,
+              apiKey: settings.keenable?.apiKey?.trim() || existingSettings.keenable?.apiKey,
+            }
+          : existingSettings.keenable,
       };
 
       const configuredProviders = this.getConfiguredProvidersFromSettings(settingsToSave);
@@ -474,6 +489,7 @@ export class SearchProviderFactory {
       googleSearchEngineId: settings.google?.searchEngineId,
       searxngBaseUrl: settings.searxng?.baseUrl,
       searxngAllowPrivate: settings.searxng?.allowPrivate,
+      keenableApiKey: settings.keenable?.apiKey,
     };
   }
 
@@ -509,6 +525,8 @@ export class SearchProviderFactory {
         return new GoogleProvider(config);
       case "searxng":
         return new SearXngProvider(config);
+      case "keenable":
+        return new KeenableProvider(config);
       case "duckduckgo":
         return new DuckDuckGoProvider(config);
       default:
@@ -680,6 +698,13 @@ export class SearchProviderFactory {
         supportedTypes: [...SEARCH_PROVIDER_INFO.searxng.supportedTypes],
       },
       {
+        type: "keenable",
+        name: SEARCH_PROVIDER_INFO.keenable.displayName,
+        description: SEARCH_PROVIDER_INFO.keenable.description,
+        configured: settings.keenable?.enabled === true,
+        supportedTypes: [...SEARCH_PROVIDER_INFO.keenable.supportedTypes],
+      },
+      {
         type: "duckduckgo",
         name: SEARCH_PROVIDER_INFO.duckduckgo.displayName,
         description: SEARCH_PROVIDER_INFO.duckduckgo.description,
@@ -739,6 +764,7 @@ export class SearchProviderFactory {
     providers: SearchProviderInfo[];
     isConfigured: boolean;
     searxng: { baseUrl?: string; allowPrivate: boolean };
+    keenable: { enabled: boolean; hasApiKey: boolean };
   } {
     const settings = this.loadSettings();
     return {
@@ -749,6 +775,10 @@ export class SearchProviderFactory {
       searxng: {
         baseUrl: settings.searxng?.baseUrl,
         allowPrivate: settings.searxng?.allowPrivate === true,
+      },
+      keenable: {
+        enabled: settings.keenable?.enabled === true,
+        hasApiKey: !!settings.keenable?.apiKey,
       },
     };
   }

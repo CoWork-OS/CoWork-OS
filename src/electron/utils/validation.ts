@@ -1249,7 +1249,7 @@ export const LLMSettingsSchema = z.object({
 // ============ Search Settings Schemas ============
 
 export const SearchProviderTypeSchema = z
-  .enum(["tavily", "exa", "brave", "serpapi", "google", "searxng", "duckduckgo"])
+  .enum(["tavily", "exa", "brave", "serpapi", "google", "searxng", "keenable", "duckduckgo"])
   .nullable();
 
 export const SearchSettingsSchema = z.object({
@@ -1285,6 +1285,12 @@ export const SearchSettingsSchema = z.object({
     .object({
       baseUrl: z.string().url().max(2048).optional(),
       allowPrivate: z.boolean().optional(),
+    })
+    .optional(),
+  keenable: z
+    .object({
+      enabled: z.boolean().optional(),
+      apiKey: z.string().max(500).optional(),
     })
     .optional(),
 });

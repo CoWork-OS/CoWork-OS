@@ -6778,6 +6778,7 @@ export interface ElectronAPI {
       | "serpapi"
       | "google"
       | "searxng"
+      | "keenable"
       | "duckduckgo"
       | null;
     fallbackProvider:
@@ -6787,6 +6788,7 @@ export interface ElectronAPI {
       | "serpapi"
       | "google"
       | "searxng"
+      | "keenable"
       | "duckduckgo"
       | null;
   }>;
@@ -6799,6 +6801,7 @@ export interface ElectronAPI {
       | "serpapi"
       | "google"
       | "searxng"
+      | "keenable"
       | "duckduckgo"
       | null;
     fallbackProvider:
@@ -6808,10 +6811,19 @@ export interface ElectronAPI {
       | "serpapi"
       | "google"
       | "searxng"
+      | "keenable"
       | "duckduckgo"
       | null;
     providers: Array<{
-      type: "tavily" | "exa" | "brave" | "serpapi" | "google" | "searxng" | "duckduckgo";
+      type:
+        | "tavily"
+        | "exa"
+        | "brave"
+        | "serpapi"
+        | "google"
+        | "searxng"
+        | "keenable"
+        | "duckduckgo";
       name: string;
       description: string;
       configured: boolean;
@@ -6822,6 +6834,7 @@ export interface ElectronAPI {
       baseUrl?: string;
       allowPrivate: boolean;
     };
+    keenable?: { enabled: boolean; hasApiKey: boolean };
   }>;
   testSearchProvider: (providerType: string) => Promise<{ success: boolean; error?: string }>;
   listProfiles: () => Promise<AppProfileSummary[]>;

@@ -236,7 +236,7 @@
     "chokidar": "^6.0.0",
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
-    "electron": "45.3.3",
+    "electron": "45.4.1",
     "electron-updater": "^6.8.9",
     "elkjs": "0.12.1",
     "eventsource": "^5.1.1",

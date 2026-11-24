@@ -1194,6 +1194,32 @@ export interface ResolvedTaskModelSelection {
 /**
  * Factory for creating LLM providers
  */
+const OMLX_DISCOVERY_MESSAGES: Record<string, string> = {
+  authentication_rejected:
+    "oMLX requires a valid API key. Copy the key from oMLX Security settings into the API Key field, then refresh models again.",
+  valid_empty:
+    "oMLX is reachable but reported no models. Download a chat model in oMLX, then refresh again.",
+  unreachable:
+    "Could not reach oMLX at the configured URL. Check that the server is running and the Base URL matches oMLX settings.",
+  timeout: "oMLX model discovery timed out. Check the server and try again.",
+  invalid_response:
+    "oMLX returned an incompatible model list. Check the Base URL points to its OpenAI-compatible API.",
+  cancelled: "oMLX model discovery was cancelled.",
+};
+
+const RAPID_MLX_DISCOVERY_MESSAGES: Record<string, string> = {
+  authentication_rejected:
+    "Rapid-MLX requires a valid API key. Enter the RAPID_MLX_API_KEY the server was started with, then refresh models again.",
+  valid_empty:
+    "Rapid-MLX is reachable but reported no models. Start it with a model (rapid-mlx serve <model>), then refresh again.",
+  unreachable:
+    "Could not reach Rapid-MLX at the configured URL. Check that rapid-mlx serve is running and the Base URL port matches (8000 by default, up to 8009 if it was busy).",
+  timeout: "Rapid-MLX model discovery timed out. Check the server and try again.",
+  invalid_response:
+    "Rapid-MLX returned an incompatible model list. Check the Base URL points to its OpenAI-compatible API (ending in /v1).",
+  cancelled: "Rapid-MLX model discovery was cancelled.",
+};
+
 export class LLMProviderFactory {
   private static legacySettingsPath: string;
   private static cachedSettings: LLMSettings | null = null;
@@ -5050,22 +5076,15 @@ export class LLMProviderFactory {
     }
 
     let models: Array<{ id: string; name: string }>;
-    if (resolvedProviderType === "omlx" && provider instanceof OpenAICompatibleProvider) {
+    if (
+      (resolvedProviderType === "omlx" || resolvedProviderType === "rapid-mlx") &&
+      provider instanceof OpenAICompatibleProvider
+    ) {
       const discovery = await provider.getAvailableModelsDetailed({ timeoutMs: 5_000 });
       if (discovery.status !== "success") {
-        const messages: Record<string, string> = {
-          authentication_rejected:
-            "oMLX requires a valid API key. Copy the key from oMLX Security settings into the API Key field, then refresh models again.",
-          valid_empty:
-            "oMLX is reachable but reported no models. Download a chat model in oMLX, then refresh again.",
-          unreachable:
-            "Could not reach oMLX at the configured URL. Check that the server is running and the Base URL matches oMLX settings.",
-          timeout: "oMLX model discovery timed out. Check the server and try again.",
-          invalid_response:
-            "oMLX returned an incompatible model list. Check the Base URL points to its OpenAI-compatible API.",
-          cancelled: "oMLX model discovery was cancelled.",
-        };
-        throw new Error(messages[discovery.status] || "oMLX model discovery failed.");
+        const messages =
+          resolvedProviderType === "omlx" ? OMLX_DISCOVERY_MESSAGES : RAPID_MLX_DISCOVERY_MESSAGES;
+        throw new Error(messages[discovery.status] || `${entry.name} model discovery failed.`);
       }
       models = discovery.models;
     } else {

@@ -31,6 +31,7 @@ const LOCAL_MODEL_PROVIDERS = new Set([
   "openai-compatible",
   "mlx",
   "omlx",
+  "rapid-mlx",
   "hf-agents",
   "atomic-chat",
 ]);

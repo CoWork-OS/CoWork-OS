@@ -178,3 +178,17 @@ export const SEARCH_PROVIDER_INFO = {
     signupUrl: "https://duckduckgo.com/",
   },
 } as const;
+
+/**
+ * True once a provider's upstream service has shut down (its `retirement.endsOn` date
+ * has started, in local time). A retired provider gets no requests (#914).
+ */
+export function isSearchProviderRetired(
+  type: SearchProviderType,
+  nowMs: number = Date.now(),
+): boolean {
+  const info = SEARCH_PROVIDER_INFO[type] as { retirement?: { endsOn: string } };
+  if (!info.retirement) return false;
+  const endsAt = new Date(`${info.retirement.endsOn}T00:00:00`).getTime();
+  return Number.isFinite(endsAt) && nowMs >= endsAt;
+}

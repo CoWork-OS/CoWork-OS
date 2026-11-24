@@ -104,7 +104,11 @@ describe("composer prediction discovery", () => {
 
 describe("Google search ending notice (#914)", () => {
   const googleNotice = SIDEBAR_NOTICES.find((notice) => notice.id === "google-search-ending-v1")!;
-  const visibility = { composerPredictionAvailable: false, searchUsesClosingProvider: false };
+  const visibility = {
+    composerPredictionAvailable: false,
+    searchUsesClosingProvider: false,
+    searchMovedOffRetiredProvider: false,
+  };
 
   afterEach(() => vi.unstubAllGlobals());
 
@@ -128,5 +132,26 @@ describe("Google search ending notice (#914)", () => {
     events.addEventListener("open-settings", (event) => opened((event as CustomEvent).detail));
     googleNotice.onActivate({ openUseCasesFallback: vi.fn() });
     expect(opened).toHaveBeenCalledExactlyOnceWith({ tab: "search" });
+  });
+});
+
+describe("Google search ended notice (#914)", () => {
+  const endedNotice = SIDEBAR_NOTICES.find((notice) => notice.id === "google-search-ended-v1")!;
+  const visibility = {
+    composerPredictionAvailable: false,
+    searchUsesClosingProvider: false,
+    searchMovedOffRetiredProvider: false,
+  };
+
+  it("shows only after search was moved off Google", () => {
+    expect(endedNotice.isVisible?.(visibility)).toBe(false);
+    expect(endedNotice.isVisible?.({ ...visibility, searchMovedOffRetiredProvider: true })).toBe(
+      true,
+    );
+  });
+
+  it("explains the switch and points to Web Search settings", () => {
+    expect(endedNotice.tip?.description).toMatch(/1 January 2027/);
+    expect(endedNotice.tip?.description).toMatch(/Settings → AI Models → Web Search/);
   });
 });

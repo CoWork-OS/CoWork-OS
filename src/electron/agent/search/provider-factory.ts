@@ -7,14 +7,12 @@ import {
   SearchQuery,
   SearchResponse,
   SEARCH_PROVIDER_INFO,
-  isSearchProviderRetired,
 } from "./types";
 import type { RetiredSearchProviderSwitch, SearchProviderInfo } from "../../../shared/types";
 import { TavilyProvider } from "./tavily-provider";
 import { ExaProvider } from "./exa-provider";
 import { BraveProvider } from "./brave-provider";
 import { SerpApiProvider } from "./serpapi-provider";
-import { GoogleProvider } from "./google-provider";
 import { SearXngProvider } from "./searxng-provider";
 import { DuckDuckGoProvider } from "./duckduckgo-provider";
 import { KeenableProvider } from "./keenable-provider";
@@ -41,10 +39,6 @@ export interface SearchSettings {
   serpapi?: {
     apiKey?: string;
   };
-  google?: {
-    apiKey?: string;
-    searchEngineId?: string;
-  };
   searxng?: {
     baseUrl?: string;
     allowPrivate?: boolean;
@@ -57,6 +51,15 @@ export interface SearchSettings {
   /** Set when search was moved off a provider whose service shut down (#914). */
   retiredProviderSwitch?: RetiredSearchProviderSwitch;
 }
+
+/**
+ * Providers that were removed after their service shut down. Saved settings may still name
+ * them, so loading moves search off them (#914).
+ */
+const REMOVED_PROVIDERS: Record<string, { displayName: string; settingsKey: string }> = {
+  // Google closed the Custom Search JSON API on 1 January 2027.
+  google: { displayName: "Google Custom Search", settingsKey: "google" },
+};
 
 const DEFAULT_SETTINGS: SearchSettings = {
   primaryProvider: null,
@@ -78,50 +81,48 @@ export class SearchProviderFactory {
     }
   > = new Map();
 
-  /** Clock used for provider retirement dates; tests replace it. */
-  static now(): number {
-    return Date.now();
-  }
-
-  private static isRetired(provider: SearchProviderType): boolean {
-    return isSearchProviderRetired(provider, this.now());
+  private static isRemoved(provider: string | null): boolean {
+    return !!provider && Object.prototype.hasOwnProperty.call(REMOVED_PROVIDERS, provider);
   }
 
   /**
-   * Once a provider's service has shut down, move a primary or fallback that still points at
-   * it to the next configured provider, or to DuckDuckGo. Saved credentials stay untouched so
-   * the settings file keeps reading. Returns true when the settings changed.
+   * Move a primary or fallback that still names a removed provider to the fallback, the next
+   * configured provider or DuckDuckGo, and drop the removed provider's saved credentials.
+   * Returns true when the settings changed.
    */
-  private static migrateRetiredProviders(settings: SearchSettings): boolean {
-    const primaryRetired = !!settings.primaryProvider && this.isRetired(settings.primaryProvider);
-    const fallbackRetired =
-      !!settings.fallbackProvider && this.isRetired(settings.fallbackProvider);
-    if (!primaryRetired && !fallbackRetired) return false;
+  private static migrateRemovedProviders(settings: SearchSettings): boolean {
+    const stored = settings as SearchSettings & Record<string, unknown>;
+    const primary = settings.primaryProvider as string | null;
+    const fallback = settings.fallbackProvider as string | null;
+    const staleKeys = Object.values(REMOVED_PROVIDERS)
+      .map((removed) => removed.settingsKey)
+      .filter((key) => key in stored);
+    if (!this.isRemoved(primary) && !this.isRemoved(fallback) && staleKeys.length === 0) {
+      return false;
+    }
 
-    const usable = this.getConfiguredProvidersFromSettings(settings);
-    if (primaryRetired) {
-      const from = settings.primaryProvider as SearchProviderType;
-      const fallback = settings.fallbackProvider;
+    for (const key of staleKeys) delete stored[key];
+    if (this.isRemoved(fallback)) {
+      console.log(`[SearchProviderFactory] ${fallback} was removed; fallback cleared`);
+      settings.fallbackProvider = null;
+    }
+    if (this.isRemoved(primary)) {
+      const usable = this.getConfiguredProvidersFromSettings(settings);
+      const currentFallback = settings.fallbackProvider;
       const to: SearchProviderType =
-        fallback && !this.isRetired(fallback) && usable.includes(fallback)
-          ? fallback
+        currentFallback && usable.includes(currentFallback)
+          ? currentFallback
           : usable[0] || "duckduckgo";
       settings.primaryProvider = to;
       if (settings.fallbackProvider === to) settings.fallbackProvider = null;
       settings.retiredProviderSwitch = {
-        from,
-        fromName: SEARCH_PROVIDER_INFO[from].displayName,
+        from: primary as string,
+        fromName: REMOVED_PROVIDERS[primary as string].displayName,
         to,
         toName: SEARCH_PROVIDER_INFO[to].displayName,
-        at: new Date(this.now()).toISOString(),
+        at: new Date().toISOString(),
       };
-      console.log(`[SearchProviderFactory] ${from} has shut down; primary provider is now ${to}`);
-    }
-    if (settings.fallbackProvider && this.isRetired(settings.fallbackProvider)) {
-      console.log(
-        `[SearchProviderFactory] ${settings.fallbackProvider} has shut down; fallback cleared`,
-      );
-      settings.fallbackProvider = null;
+      console.log(`[SearchProviderFactory] ${primary} was removed; primary provider is now ${to}`);
     }
     if (settings.primaryProvider === "searxng") settings.fallbackProvider = null;
     return true;
@@ -378,7 +379,7 @@ export class SearchProviderFactory {
         const stored = repository.load<SearchSettings>("search");
         if (stored) {
           settings = { ...DEFAULT_SETTINGS, ...stored };
-          if (this.migrateRetiredProviders(settings)) {
+          if (this.migrateRemovedProviders(settings)) {
             repository.save("search", settings);
           }
         }
@@ -430,10 +431,6 @@ export class SearchProviderFactory {
     if (settings.serpapi?.apiKey) {
       configured.push("serpapi");
     }
-    // Check Google (requires both API key and Search Engine ID; never after it shuts down)
-    if (settings.google?.apiKey && settings.google?.searchEngineId && !this.isRetired("google")) {
-      configured.push("google");
-    }
     if (settings.searxng?.baseUrl) {
       configured.push("searxng");
     }
@@ -470,14 +467,6 @@ export class SearchProviderFactory {
         exa: settings.exa?.apiKey ? settings.exa : existingSettings.exa,
         brave: settings.brave?.apiKey ? settings.brave : existingSettings.brave,
         serpapi: settings.serpapi?.apiKey ? settings.serpapi : existingSettings.serpapi,
-        google:
-          settings.google?.apiKey || settings.google?.searchEngineId
-            ? {
-                apiKey: settings.google.apiKey || existingSettings.google?.apiKey,
-                searchEngineId:
-                  settings.google.searchEngineId || existingSettings.google?.searchEngineId,
-              }
-            : existingSettings.google,
         searxng: Object.prototype.hasOwnProperty.call(settings, "searxng")
           ? settings.searxng?.baseUrl
             ? { ...settings.searxng, baseUrl: settings.searxng.baseUrl.trim() }
@@ -541,8 +530,6 @@ export class SearchProviderFactory {
       exaApiKey: settings.exa?.apiKey,
       braveApiKey: settings.brave?.apiKey,
       serpApiKey: settings.serpapi?.apiKey,
-      googleApiKey: settings.google?.apiKey,
-      googleSearchEngineId: settings.google?.searchEngineId,
       searxngBaseUrl: settings.searxng?.baseUrl,
       searxngAllowPrivate: settings.searxng?.allowPrivate,
       keenableApiKey: settings.keenable?.apiKey,
@@ -568,15 +555,6 @@ export class SearchProviderFactory {
    * Create provider from explicit config
    */
   static createProviderFromConfig(config: SearchProviderConfig): SearchProvider {
-    if (this.isRetired(config.type)) {
-      const info = SEARCH_PROVIDER_INFO[config.type] as {
-        displayName: string;
-        retirement?: { endsOn: string };
-      };
-      throw new Error(
-        `${info.displayName} shut down on ${info.retirement?.endsOn}. Choose another search provider in Settings.`,
-      );
-    }
     switch (config.type) {
       case "tavily":
         return new TavilyProvider(config);
@@ -586,8 +564,6 @@ export class SearchProviderFactory {
         return new BraveProvider(config);
       case "serpapi":
         return new SerpApiProvider(config);
-      case "google":
-        return new GoogleProvider(config);
       case "searxng":
         return new SearXngProvider(config);
       case "keenable":
@@ -748,14 +724,6 @@ export class SearchProviderFactory {
         supportedTypes: [...SEARCH_PROVIDER_INFO.serpapi.supportedTypes],
       },
       {
-        type: "google",
-        name: SEARCH_PROVIDER_INFO.google.displayName,
-        description: SEARCH_PROVIDER_INFO.google.description,
-        configured: !!(settings.google?.apiKey && settings.google?.searchEngineId),
-        supportedTypes: [...SEARCH_PROVIDER_INFO.google.supportedTypes],
-        retirement: { ...SEARCH_PROVIDER_INFO.google.retirement },
-      },
-      {
         type: "searxng",
         name: SEARCH_PROVIDER_INFO.searxng.displayName,
         description: SEARCH_PROVIDER_INFO.searxng.description,
@@ -777,8 +745,7 @@ export class SearchProviderFactory {
         supportedTypes: [...SEARCH_PROVIDER_INFO.duckduckgo.supportedTypes],
       },
     ];
-    // A provider whose service has shut down is no longer offered at all.
-    return providers.filter((provider) => !this.isRetired(provider.type));
+    return providers;
   }
 
   /**

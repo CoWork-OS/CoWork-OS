@@ -6776,7 +6776,6 @@ export interface ElectronAPI {
       | "exa"
       | "brave"
       | "serpapi"
-      | "google"
       | "searxng"
       | "keenable"
       | "duckduckgo"
@@ -6786,7 +6785,6 @@ export interface ElectronAPI {
       | "exa"
       | "brave"
       | "serpapi"
-      | "google"
       | "searxng"
       | "keenable"
       | "duckduckgo"
@@ -6799,7 +6797,6 @@ export interface ElectronAPI {
       | "exa"
       | "brave"
       | "serpapi"
-      | "google"
       | "searxng"
       | "keenable"
       | "duckduckgo"
@@ -6809,21 +6806,12 @@ export interface ElectronAPI {
       | "exa"
       | "brave"
       | "serpapi"
-      | "google"
       | "searxng"
       | "keenable"
       | "duckduckgo"
       | null;
     providers: Array<{
-      type:
-        | "tavily"
-        | "exa"
-        | "brave"
-        | "serpapi"
-        | "google"
-        | "searxng"
-        | "keenable"
-        | "duckduckgo";
+      type: "tavily" | "exa" | "brave" | "serpapi" | "searxng" | "keenable" | "duckduckgo";
       name: string;
       description: string;
       configured: boolean;

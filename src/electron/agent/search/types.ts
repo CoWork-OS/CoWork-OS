@@ -1,6 +1,6 @@
 /**
  * Search Provider abstraction types
- * Allows switching between Tavily, Exa, Brave Search, SerpAPI, and Google Custom Search
+ * Allows switching between Tavily, Exa, Brave Search, SerpAPI, SearXNG, Keenable and DuckDuckGo
  */
 import type { AccessDomainRule, AccessNetworkMode } from "../../../shared/access-profiles";
 
@@ -9,7 +9,6 @@ export type SearchProviderType =
   | "exa"
   | "brave"
   | "serpapi"
-  | "google"
   | "searxng"
   | "keenable"
   | "duckduckgo";
@@ -26,9 +25,6 @@ export interface SearchProviderConfig {
   braveApiKey?: string;
   // SerpAPI-specific
   serpApiKey?: string;
-  // Google Custom Search-specific
-  googleApiKey?: string;
-  googleSearchEngineId?: string;
   // SearXNG-specific
   searxngBaseUrl?: string;
   searxngAllowPrivate?: boolean;
@@ -154,20 +150,6 @@ export const SEARCH_PROVIDER_INFO = {
     envVar: "SERPAPI_KEY",
     signupUrl: "https://serpapi.com/",
   },
-  google: {
-    displayName: "Google Custom Search",
-    description: "Google's Custom Search JSON API (closed to new customers)",
-    supportedTypes: ["web", "images"] as SearchType[],
-    envVars: ["GOOGLE_API_KEY", "GOOGLE_SEARCH_ENGINE_ID"],
-    signupUrl: "https://developers.google.com/custom-search/v1/overview",
-    // Google closed the API to new customers and ends it on 1 January 2027
-    // (https://developers.google.com/custom-search/v1/overview). Tracked in #914.
-    retirement: {
-      endsOn: "2027-01-01",
-      notice:
-        "Google no longer offers the Custom Search JSON API to new customers and shuts it down on 1 January 2027. Your saved key keeps working until then. Set up another provider and choose it as primary or fallback before that date.",
-    },
-  },
   searxng: {
     displayName: "SearXNG",
     description: "Self-hosted metasearch with no commercial API key required",
@@ -188,17 +170,3 @@ export const SEARCH_PROVIDER_INFO = {
     signupUrl: "https://duckduckgo.com/",
   },
 } as const;
-
-/**
- * True once a provider's upstream service has shut down (its `retirement.endsOn` date
- * has started, in local time). A retired provider gets no requests (#914).
- */
-export function isSearchProviderRetired(
-  type: SearchProviderType,
-  nowMs: number = Date.now(),
-): boolean {
-  const info = SEARCH_PROVIDER_INFO[type] as { retirement?: { endsOn: string } };
-  if (!info.retirement) return false;
-  const endsAt = new Date(`${info.retirement.endsOn}T00:00:00`).getTime();
-  return Number.isFinite(endsAt) && nowMs >= endsAt;
-}

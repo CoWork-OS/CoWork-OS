@@ -10189,7 +10189,6 @@ export type SearchProviderType =
   | "exa"
   | "brave"
   | "serpapi"
-  | "google"
   | "searxng"
   | "keenable"
   | "duckduckgo";
@@ -10483,28 +10482,18 @@ export interface SharePointConnectionTestResult {
   userId?: string;
 }
 
-/** A provider whose upstream service is closing. */
-export interface SearchProviderRetirement {
-  /** ISO date the upstream service stops working. */
-  endsOn: string;
-  /** Plain-English notice shown to users who still have it set up. */
-  notice: string;
-}
-
 export interface SearchProviderInfo {
   type: SearchProviderType;
   name: string;
   description: string;
   configured: boolean;
   supportedTypes: SearchType[];
-  /** Set when the provider is closing: hidden from new setups, kept for existing ones. */
-  retirement?: SearchProviderRetirement;
 }
 
 /** Recorded when web search was moved off a provider whose service shut down. */
 export interface RetiredSearchProviderSwitch {
-  /** The shut-down provider that was primary or fallback. */
-  from: SearchProviderType;
+  /** The shut-down provider that was primary or fallback; it may no longer be a known type. */
+  from: string;
   fromName: string;
   /** The provider now used as primary. */
   to: SearchProviderType;

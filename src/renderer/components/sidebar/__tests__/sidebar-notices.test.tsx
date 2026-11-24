@@ -102,44 +102,10 @@ describe("composer prediction discovery", () => {
   });
 });
 
-describe("Google search ending notice (#914)", () => {
-  const googleNotice = SIDEBAR_NOTICES.find((notice) => notice.id === "google-search-ending-v1")!;
-  const visibility = {
-    composerPredictionAvailable: false,
-    searchUsesClosingProvider: false,
-    searchMovedOffRetiredProvider: false,
-  };
-
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("shows only while web search uses a closing provider", () => {
-    expect(googleNotice.isVisible?.(visibility)).toBe(false);
-    expect(googleNotice.isVisible?.({ ...visibility, searchUsesClosingProvider: true })).toBe(true);
-  });
-
-  it("comes first, with a one-time tip that names the date and alternatives", () => {
-    expect(SIDEBAR_NOTICES[0]).toBe(googleNotice);
-    // Short enough to show the date untruncated at the default sidebar width.
-    expect(googleNotice.label).toBe("Google search ends 1 Jan");
-    expect(googleNotice.tip?.description).toMatch(/1 January 2027/);
-    expect(googleNotice.tip?.description).toMatch(/Brave/);
-  });
-
-  it("opens Web Search settings", () => {
-    const events = new EventTarget();
-    vi.stubGlobal("window", events);
-    const opened = vi.fn();
-    events.addEventListener("open-settings", (event) => opened((event as CustomEvent).detail));
-    googleNotice.onActivate({ openUseCasesFallback: vi.fn() });
-    expect(opened).toHaveBeenCalledExactlyOnceWith({ tab: "search" });
-  });
-});
-
 describe("Google search ended notice (#914)", () => {
   const endedNotice = SIDEBAR_NOTICES.find((notice) => notice.id === "google-search-ended-v1")!;
   const visibility = {
     composerPredictionAvailable: false,
-    searchUsesClosingProvider: false,
     searchMovedOffRetiredProvider: false,
   };
 
@@ -150,8 +116,20 @@ describe("Google search ended notice (#914)", () => {
     );
   });
 
-  it("explains the switch and points to Web Search settings", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("comes first, and explains the switch and points to Web Search settings", () => {
+    expect(SIDEBAR_NOTICES[0]).toBe(endedNotice);
     expect(endedNotice.tip?.description).toMatch(/1 January 2027/);
     expect(endedNotice.tip?.description).toMatch(/Settings → AI Models → Web Search/);
+  });
+
+  it("opens Web Search settings", () => {
+    const events = new EventTarget();
+    vi.stubGlobal("window", events);
+    const opened = vi.fn();
+    events.addEventListener("open-settings", (event) => opened((event as CustomEvent).detail));
+    endedNotice.onActivate({ openUseCasesFallback: vi.fn() });
+    expect(opened).toHaveBeenCalledExactlyOnceWith({ tab: "search" });
   });
 });

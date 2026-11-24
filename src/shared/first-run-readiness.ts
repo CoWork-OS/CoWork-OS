@@ -145,7 +145,8 @@ function hasConfiguredApiKeyProvider(
       );
     case "hf-agents":
     case "mlx":
-    case "omlx": {
+    case "omlx":
+    case "rapid-mlx": {
       const config = settings.customProviders?.[providerType];
       return hasText(config?.baseUrl) && hasText(config?.model);
     }

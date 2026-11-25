@@ -583,6 +583,7 @@ import {
 } from "../notifications/integration-auth";
 import type {
   NotificationType,
+  TraySettings,
   HooksSettingsData,
   HookMappingData,
   GmailHooksSettingsData,
@@ -12088,6 +12089,10 @@ function setupMCPHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.TRAY_SAVE_SETTINGS, async (_, settings) => {
     const { trayManager } = await import("../tray");
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      return { success: false, settings: trayManager.getSettings() };
+    }
+    // Values are coerced field by field in normalizeTraySettings; unknown keys are dropped.
     await trayManager.saveSettings(settings);
     return { success: true, settings: trayManager.getSettings() };
   });
@@ -12238,9 +12243,12 @@ function setupNotificationHandlers(): void {
       // Import lazily to avoid a startup dependency cycle with tray initialization.
       // oxlint-disable-next-line typescript/no-require-imports
       const { trayManager } = require("../tray");
-      return trayManager.getSettings();
+      return trayManager.getSettings() as Pick<
+        TraySettings,
+        "showNotifications" | "notificationSound"
+      >;
     } catch {
-      return { showNotifications: true };
+      return { showNotifications: true, notificationSound: "default" as const };
     }
   };
 
@@ -12272,6 +12280,7 @@ function setupNotificationHandlers(): void {
           message: event.notification.message,
           type: event.notification.type,
           taskId: event.notification.taskId,
+          sound: settings.notificationSound,
         });
         return { desktopRequested: true };
       }
@@ -12352,10 +12361,15 @@ function setupNotificationHandlers(): void {
         suggestionId?: string;
         recommendedDelivery?: "briefing" | "inbox" | "nudge";
         companionStyle?: "email" | "note";
+        desktopAlert?: boolean;
       },
     ) => {
       if (!notificationService) return null;
-      return notificationService.add(data);
+      // Renderer input: only an explicit `false` may suppress the desktop alert.
+      const { desktopAlert, ...rest } = data;
+      return notificationService.add(
+        desktopAlert === false ? { ...rest, desktopAlert: false } : rest,
+      );
     },
   );
 }

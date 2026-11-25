@@ -148,6 +148,7 @@ import {
   TaskEventDetailResult,
   BotNotificationPolicy,
   type MessageSurfaceOrigin,
+  wantsAttentionAlert,
 } from "../shared/types";
 import type { ComposerDraft, DraftAttachmentRef } from "../shared/composer-drafts";
 import { getTaskEventStatus } from "../shared/task-event-status-map";
@@ -4935,12 +4936,25 @@ export function App() {
               }
               return;
             }
+            // The inbox item is always added; the settings only decide the desktop alert.
+            let alertWanted = true;
+            try {
+              if (typeof window.electronAPI.getTraySettings === "function") {
+                alertWanted = wantsAttentionAlert(
+                  await window.electronAPI.getTraySettings(),
+                  isApproval ? "approval" : "question",
+                );
+              }
+            } catch {
+              alertWanted = true;
+            }
             await window.electronAPI.addNotification({
               type: "input_required",
               title,
               message,
               taskId: event.taskId,
               workspaceId: task?.workspaceId,
+              ...(alertWanted ? {} : { desktopAlert: false }),
             });
           } catch (error) {
             console.error("Failed to add input-required notification:", error);

@@ -526,3 +526,27 @@ task with a notification. It cancels only when the user allows it. Every decisio
 Electron `powerMonitor` suspend/resume (a wall-clock jump detector on the daemon) reclaims
 activity leases that expired while asleep, re-arms background-process completion delivery,
 excludes the slept time from the queue timeout, and resumes interrupted tasks.
+
+## Keep-awake, quit confirmation and completion alerts
+
+Three desktop behaviours follow the tray settings (Settings > System & Security > Menu Bar);
+all are on by default and none runs in headless mode.
+
+- **Keep-awake**: `KeepAwakeController` (`src/electron/power/keep-awake.ts`) holds an Electron
+  `powerSaveBlocker` of type `prevent-app-suspension` while `countWorkingTasks` finds a task
+  in `planning` or `executing`, and releases it otherwise. A task that holds a run slot while
+  it waits for an approval or an answer is not counted. This blocks idle system sleep only.
+- **Quit confirmation**: `createQuitConfirmation` (`src/electron/utils/quit-confirmation.ts`)
+  is asked by `installGracefulShutdown` before cleanup starts, and by the main window's
+  `close` event where closing the last window quits the app (not macOS, and not when the tray
+  hides the window). It asks only when a task is working, and never during a system shutdown
+  or a mock-keychain (test harness) launch.
+- **Completion alerts**: `attachCompletionAlerts`
+  (`src/electron/notifications/completion-alerts.ts`) listens for a finished or failed turn
+  and adds a `task_completed` or `task_failed` notification for a task a person started,
+  according to `completionNotifications` (`never`, `unfocused`, `always`). Sub-agents,
+  scheduled tasks, bots and channel tasks are excluded because they report on their own paths.
+
+Approval and question alerts are decided where the renderer adds the `input_required`
+notification: with the matching toggle off it passes `desktopAlert: false`, so the inbox item
+is stored and no banner is shown. The chosen alert sound is passed to `NativeNotificationCenter`.

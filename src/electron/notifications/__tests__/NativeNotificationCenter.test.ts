@@ -66,12 +66,31 @@ async function loadNotificationCenter() {
   return mod.NativeNotificationCenter.getInstance();
 }
 
+describe("nativeSoundOptions", () => {
+  it("maps the chosen sound to native options per platform", async () => {
+    const { nativeSoundOptions } = await import("../NativeNotificationCenter");
+    expect(nativeSoundOptions(undefined, "darwin")).toEqual({ silent: false });
+    expect(nativeSoundOptions("default", "darwin")).toEqual({ silent: false });
+    expect(nativeSoundOptions("none", "darwin")).toEqual({ silent: true });
+    expect(nativeSoundOptions("none", "win32")).toEqual({ silent: true });
+    expect(nativeSoundOptions("Glass", "darwin")).toEqual({ silent: false, sound: "Glass" });
+    // Named sounds are macOS system sounds; elsewhere the system default plays.
+    expect(nativeSoundOptions("Glass", "win32")).toEqual({ silent: false });
+  });
+});
+
 describe("NativeNotificationCenter", () => {
   beforeEach(() => {
     vi.resetModules();
     mockState.isSupported = true;
     mockState.shouldThrow = false;
     mockState.instances = [];
+  });
+
+  it("shows a silent notification when the sound is set to none", async () => {
+    const center = await loadNotificationCenter();
+    center.show({ id: "quiet", title: "Title", message: "Message", sound: "none" });
+    expect(mockState.instances[0]?.options).toMatchObject({ silent: true });
   });
 
   it("returns false when native notifications are not supported", async () => {

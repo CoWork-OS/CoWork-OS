@@ -3905,6 +3905,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     suggestionId?: string;
     recommendedDelivery?: "briefing" | "inbox" | "nudge";
     companionStyle?: "email" | "note";
+    desktopAlert?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_ADD, data),
   getUnreadNotificationCount: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_UNREAD_COUNT),
   markNotificationRead: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_MARK_READ, id),
@@ -7719,6 +7720,8 @@ export interface ElectronAPI {
     suggestionId?: string;
     recommendedDelivery?: "briefing" | "inbox" | "nudge";
     companionStyle?: "email" | "note";
+    /** False keeps the inbox item but shows no desktop alert. */
+    desktopAlert?: boolean;
   }) => Promise<AppNotification | null>;
   getUnreadNotificationCount: () => Promise<number>;
   markNotificationRead: (id: string) => Promise<AppNotification | null>;

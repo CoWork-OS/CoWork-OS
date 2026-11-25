@@ -78,6 +78,7 @@ import {
   webContents,
   WebContentsView,
   powerMonitor,
+  powerSaveBlocker,
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
@@ -181,6 +182,9 @@ import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
 import { MCPEventService } from "./mcp/events/MCPEventService";
 import { trayManager } from "./tray";
+import { attachCompletionAlerts } from "./notifications/completion-alerts";
+import { KeepAwakeController, countWorkingTasks } from "./power/keep-awake";
+import { createQuitConfirmation, quitConfirmationText } from "./utils/quit-confirmation";
 import {
   CRON_ACTIVE_TASK_STATUSES,
   CronService,
@@ -586,6 +590,9 @@ let coreLearningPipelineService: CoreLearningPipelineService | null = null;
 let detachTaskLifecycleSync: (() => void) | null = null;
 /** Stops the watchdog control loop and detaches its powerMonitor sleep recovery. */
 let stopWatchdog: (() => void) | null = null;
+let keepAwake: KeepAwakeController | null = null;
+/** Set when the system is shutting down or restarting: nobody is asked about quitting. */
+let systemShutdownInProgress = false;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
 let memoryRetentionService: MemoryRetentionService | null = null;
 /** Stops the memory engine's deferred jobs (lane migration, read-side syncs). */
@@ -616,6 +623,30 @@ const managedBriefingCleanupTimer = setInterval(
 const HEADLESS = isHeadlessMode();
 // Worker threads do not inherit argv; the env flag keeps their headless policy aligned.
 if (HEADLESS) process.env.COWORK_HEADLESS = "1";
+
+/** Asks before a quit would stop executing tasks (Settings > System & Security). */
+const quitConfirmation = createQuitConfirmation({
+  isEnabled: () => trayManager.getSettings().confirmQuitWhileRunning,
+  workingTaskCount: () => (agentDaemon ? countWorkingTasks(agentDaemon) : 0),
+  // A mock-keychain launch is a test harness: a blocking dialog would hang it.
+  isUnattended: () =>
+    HEADLESS || systemShutdownInProgress || app.commandLine.hasSwitch(MOCK_KEYCHAIN_SWITCH),
+  ask: (workingTaskCount) => {
+    const options = {
+      type: "question" as const,
+      buttons: ["Quit", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      ...quitConfirmationText(workingTaskCount),
+    };
+    const parent =
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ? mainWindow : null;
+    const choice = parent
+      ? dialog.showMessageBoxSync(parent, options)
+      : dialog.showMessageBoxSync(options);
+    return choice === 0;
+  },
+});
 const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
 const PRINT_CONTROL_PLANE_TOKEN = shouldPrintControlPlaneTokenFromArgsOrEnv();
 const IMPORT_ENV_SETTINGS = shouldImportEnvSettingsFromArgsOrEnv();
@@ -2257,6 +2288,13 @@ if (isMacSafeStorageMigrationWorker) {
       // Load the app
       loadMainWindowContent();
 
+      mainWindow.on("close", (event) => {
+        // Outside macOS, closing the last window quits the app unless the tray hides it.
+        // Ask here, while the window is still there to return to.
+        if (process.platform === "darwin" || trayManager.hidesWindowOnClose()) return;
+        if (!quitConfirmation.confirmClose()) event.preventDefault();
+      });
+
       mainWindow.on("closed", () => {
         // Native tab views live in this window; a new window starts without them.
         browserTabViewHost?.closeAll();
@@ -2933,6 +2971,40 @@ if (isMacSafeStorageMigrationWorker) {
         db: dbManager.getDatabase(),
         log: (...args) => logger.warn(...args),
       });
+      // Desktop alert when a task the person started finishes (Settings > System & Security).
+      {
+        const alertDaemon = agentDaemon;
+        attachCompletionAlerts({
+          daemon: alertDaemon,
+          getSettings: () => trayManager.getSettings(),
+          isAppFocused: () =>
+            BrowserWindow.getAllWindows().some(
+              (window) => !window.isDestroyed() && window.isFocused(),
+            ),
+          isRoutedElsewhere: async (task) =>
+            task.assignedAgentRoleId && task.workspaceId
+              ? (
+                  await new BotNotificationService(dbManager.getDatabase()).get({
+                    workspaceId: task.workspaceId,
+                    agentRoleId: task.assignedAgentRoleId,
+                  })
+                ).enabled
+              : false,
+          notify: (notification) => getNotificationService()?.add(notification),
+          reportError: (error) => logger.warn("Could not raise a completion alert:", error),
+        });
+        // Keep the computer from idle-sleeping while a task executes (Settings > System & Security).
+        if (!HEADLESS) {
+          keepAwake = new KeepAwakeController({
+            isEnabled: () => trayManager.getSettings().preventSleepWhileRunning,
+            hasWorkingTask: () => countWorkingTasks(alertDaemon) > 0,
+            blocker: powerSaveBlocker,
+            log: (message) => logger.info(message),
+          });
+          keepAwake.start();
+        }
+      }
+
       // Watchdog control loop (off until enabled in Settings) and sleep recovery (always on).
       try {
         const watchdog = startAgentDaemonWatchdog(agentDaemon, {
@@ -5159,6 +5231,10 @@ if (isMacSafeStorageMigrationWorker) {
       }
     }
 
+    powerMonitor.on("shutdown", () => {
+      systemShutdownInProgress = true;
+    });
+
     installGracefulShutdown(
       app,
       [
@@ -5301,6 +5377,13 @@ if (isMacSafeStorageMigrationWorker) {
             stopWatchdog = null;
           },
         },
+        {
+          name: "keep awake",
+          run: () => {
+            keepAwake?.stop();
+            keepAwake = null;
+          },
+        },
         { name: "agent daemon", run: () => agentDaemon?.shutdown() },
         {
           name: "task lifecycle sync",
@@ -5387,6 +5470,8 @@ if (isMacSafeStorageMigrationWorker) {
         },
       ],
       (name, error) => console.error(`[Main] Failed to stop ${name}:`, error),
+      undefined,
+      () => quitConfirmation.confirmQuit(),
     );
 
     // Window control handlers (used by custom title bar buttons on Windows)

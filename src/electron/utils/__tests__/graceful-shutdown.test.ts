@@ -26,6 +26,29 @@ class TestApp extends EventEmitter {
 }
 
 describe("graceful Electron shutdown", () => {
+  it("leaves the app running when the quit is declined and asks again on the next request", async () => {
+    const app = new TestApp();
+    const cleanup = vi.fn();
+    const confirmQuit = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    installGracefulShutdown(
+      app,
+      [{ name: "cleanup", run: cleanup }],
+      vi.fn(),
+      undefined,
+      confirmQuit,
+    );
+
+    app.quit();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(app.exits).toBe(0);
+
+    app.quit();
+    await vi.waitFor(() => expect(app.exits).toBe(1));
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(confirmQuit).toHaveBeenCalledTimes(2);
+  });
+
   it("finishes explicit quit when native window closure falls back to window-all-closed", async () => {
     class NativeCloseApp extends EventEmitter {
       closed = false;

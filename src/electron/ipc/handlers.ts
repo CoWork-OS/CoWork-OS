@@ -6291,6 +6291,7 @@ export async function setupIpcHandlers(
           ...(validated.expectedTurnId ? { expectedTurnId: validated.expectedTurnId } : {}),
           ...(validated.interactionMode ? { interactionMode: validated.interactionMode } : {}),
           ...(validated.deliveryMode ? { deliveryMode: validated.deliveryMode } : {}),
+          ...(validated.waitForTurn ? { waitForTurn: true } : {}),
           messageSource: "user" as const,
           ...(validated.returnOnAccepted ? { returnOnAccepted: true } : {}),
           ...(validated.messageId ? { messageId: validated.messageId } : {}),

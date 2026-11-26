@@ -35,6 +35,13 @@ export type TimelineVerbosity = "summary" | "verbose";
 export const COMMAND_OUTPUT_STYLES = ["terminal", "minimal"] as const;
 export type CommandOutputStyle = (typeof COMMAND_OUTPUT_STYLES)[number];
 
+/**
+ * What Enter does with a message sent while the agent is working: "steer" gives it to the
+ * running loop at its next step, "queue" holds it until the run finishes. Cmd/Ctrl+Enter does
+ * the other one.
+ */
+export type RunningSendMode = "steer" | "queue";
+
 export interface AppearanceSettings {
   themeMode: ThemeMode;
   visualTheme: VisualTheme;
@@ -47,6 +54,7 @@ export interface AppearanceSettings {
   homeResearchVaultEnabled?: boolean;
   homeNextActionsEnabled?: boolean;
   costReceiptEnabled?: boolean; // Show the Cost section in the right panel (default: off)
+  runningSendMode?: RunningSendMode; // Enter while the agent works: steer now or send after the run (default: steer)
   autoOpenTurnOutput?: boolean; // Open a turn's single new document/sheet/deck/page in the right panel when the turn finishes (default: off)
   subAgentStatsEnabled?: boolean; // Show sub-agent totals in the right panel (default: off)
   language?: string; // Persisted language preference (e.g. 'en', 'ja', 'zh')
@@ -3385,6 +3393,12 @@ export interface TaskFollowUpInput {
   message: string;
   /** Optional optimistic-concurrency guard for steering the active turn. */
   expectedTurnId?: string;
+  /**
+   * Sent while the task was working: hold it until the current run finishes and then start a
+   * new turn with it, instead of steering the running loop at its next step. Ignored when the
+   * task is idle. Later messages stay behind it, so the queue keeps the order they were sent.
+   */
+  waitForTurn?: boolean;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
   permissionMode?: PermissionMode;

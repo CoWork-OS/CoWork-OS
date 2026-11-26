@@ -188,6 +188,19 @@ describe("AppearanceManager settings", () => {
     expect(AppearanceManager.loadSettings().autoOpenTurnOutput).toBe(true);
   });
 
+  it("steers by default while the agent works and persists the queue choice", () => {
+    mocks.storedSettings = { themeMode: "system", visualTheme: "warm", accentColor: "cyan" };
+    expect(AppearanceManager.loadSettings().runningSendMode).toBe("steer");
+
+    AppearanceManager.saveSettings({ runningSendMode: "queue" });
+    AppearanceManager.clearCache();
+    expect(AppearanceManager.loadSettings().runningSendMode).toBe("queue");
+
+    AppearanceManager.saveSettings({ runningSendMode: "later" as never });
+    AppearanceManager.clearCache();
+    expect(AppearanceManager.loadSettings().runningSendMode).toBe("queue");
+  });
+
   it("falls back to the terminal command output style when the stored value is invalid", () => {
     mocks.storedSettings = {
       themeMode: "system",

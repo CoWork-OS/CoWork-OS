@@ -118,6 +118,7 @@ export function QueuedMessagesPanel({
       {items.map((item) => (
         <div className="queued-messages-row" key={`${item.kind}:${item.id}`}>
           <span>{item.message}</span>
+          {item.waitsForTurn && <em className="queued-messages-when">After this run</em>}
           <button
             type="button"
             disabled={saving || Boolean(edit)}

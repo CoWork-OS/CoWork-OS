@@ -188,3 +188,30 @@ describe("AgentDaemon follow-up text provenance", () => {
     });
   });
 });
+
+describe("AgentDaemon follow-up sent to wait for the run", () => {
+  /** queueFollowUp's positional waitForTurn argument. */
+  const WAIT_FOR_TURN_ARG = 16;
+
+  it("queues it held for the turn boundary and records that on its receipts", async () => {
+    const { daemon, executor, send } = createDaemon({ busy: true });
+    await send("Then summarise it", { waitForTurn: true });
+    expect(executor.queueFollowUp.mock.calls[0][WAIT_FOR_TURN_ARG]).toBe(true);
+    const logged = (daemon.logEvent as ReturnType<typeof vi.fn>).mock.calls;
+    for (const type of ["agent_follow_up_scheduled", "user_message"]) {
+      expect(logged.find(([, eventType]) => eventType === type)?.[2]).toMatchObject({
+        waitForTurn: true,
+      });
+    }
+  });
+
+  it("steers by default", async () => {
+    const { daemon, executor, send } = createDaemon({ busy: true });
+    await send("Use the other file");
+    expect(executor.queueFollowUp.mock.calls[0][WAIT_FOR_TURN_ARG]).toBe(false);
+    const userMessage = (daemon.logEvent as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([, eventType]) => eventType === "user_message",
+    );
+    expect(userMessage?.[2]).not.toHaveProperty("waitForTurn");
+  });
+});

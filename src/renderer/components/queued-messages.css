@@ -23,6 +23,12 @@
   max-height: 100px;
   overflow-y: auto;
 }
+.queued-messages-when {
+  flex: none;
+  font-style: normal;
+  opacity: 0.7;
+  white-space: nowrap;
+}
 .queued-messages-panel button {
   padding: 4px 8px;
   color: inherit;

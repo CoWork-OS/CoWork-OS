@@ -244,6 +244,8 @@ describe("AgentDaemon follow-up permission overrides", () => {
       undefined,
       undefined,
       undefined,
+      // Steers the running turn: not held for the turn boundary.
+      false,
     );
   });
 
@@ -346,6 +348,7 @@ describe("AgentDaemon follow-up permission overrides", () => {
       // An automation's wake is not the user's words: no text provenance.
       undefined,
       undefined,
+      false,
     );
   });
 

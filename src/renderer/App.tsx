@@ -54,6 +54,7 @@ import {
   sessionPositionFromShortcut,
 } from "./components/CommandMenu/keyboard-shortcuts";
 import { nextAttentionSessionId, sessionIdAtPosition } from "./utils/session-navigation";
+import { DEFAULT_RUNNING_SEND_MODE, isRunningSendMode } from "./utils/running-send";
 import {
   EMPTY_HOME_SESSIONS,
   buildHomeSessions,
@@ -163,6 +164,7 @@ import {
   TaskEventDetailResult,
   BotNotificationPolicy,
   type MessageSurfaceOrigin,
+  type RunningSendMode,
   wantsAttentionAlert,
 } from "../shared/types";
 import type { ComposerDraft, DraftAttachmentRef } from "../shared/composer-drafts";
@@ -917,6 +919,7 @@ type SelectedTaskWorkspaceViewProps = {
   costReceiptEnabled: boolean;
   subAgentStatsEnabled: boolean;
   autoOpenTurnOutput: boolean;
+  runningSendMode: RunningSendMode;
   rendererPerfLoggingEnabled: boolean;
   taskSwitchId: string | null;
   hasMoreTimelineHistory: boolean;
@@ -962,6 +965,7 @@ type SelectedTaskWorkspaceViewProps = {
     options?: {
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       deliveryMode?: "message" | "follow_up";
+      waitForTurn?: boolean;
       messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
@@ -1100,6 +1104,7 @@ const SelectedTaskWorkspaceView = memo(
     costReceiptEnabled,
     subAgentStatsEnabled,
     autoOpenTurnOutput,
+    runningSendMode,
     rendererPerfLoggingEnabled,
     taskSwitchId,
     hasMoreTimelineHistory,
@@ -1831,6 +1836,7 @@ const SelectedTaskWorkspaceView = memo(
               <MainContent
                 key={task?.id || "empty"}
                 autoOpenTurnOutput={autoOpenTurnOutput}
+                runningSendMode={runningSendMode}
                 headerPlacement="title-bar"
                 rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
                 task={task}
@@ -2116,6 +2122,7 @@ const SelectedTaskWorkspaceView = memo(
     prev.costReceiptEnabled === next.costReceiptEnabled &&
     prev.subAgentStatsEnabled === next.subAgentStatsEnabled &&
     prev.autoOpenTurnOutput === next.autoOpenTurnOutput &&
+    prev.runningSendMode === next.runningSendMode &&
     prev.subAgentsFocusRequest === next.subAgentsFocusRequest &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
@@ -2547,6 +2554,8 @@ export function App() {
   const [costReceiptEnabled, setCostReceiptEnabled] = useState(false);
   const [subAgentStatsEnabled, setSubAgentStatsEnabled] = useState(false);
   const [autoOpenTurnOutput, setAutoOpenTurnOutput] = useState(false);
+  const [runningSendMode, setRunningSendMode] =
+    useState<RunningSendMode>(DEFAULT_RUNNING_SEND_MODE);
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -3713,6 +3722,11 @@ export function App() {
         setCostReceiptEnabled(settings.costReceiptEnabled === true);
         setSubAgentStatsEnabled(settings.subAgentStatsEnabled === true);
         setAutoOpenTurnOutput(settings.autoOpenTurnOutput === true);
+        setRunningSendMode(
+          isRunningSendMode(settings.runningSendMode)
+            ? settings.runningSendMode
+            : DEFAULT_RUNNING_SEND_MODE,
+        );
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
         setOnboardingCompleted(settings.onboardingCompleted ?? false);
         setOnboardingCompletedAt(settings.onboardingCompletedAt);
@@ -7108,6 +7122,8 @@ export function App() {
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
       deliveryMode?: "message" | "follow_up";
+      /** Hold this message until the running turn finishes instead of steering it. */
+      waitForTurn?: boolean;
       messageId?: string;
       /** Send exactly this text (an approved answer action), never a rewritten reply. */
       verbatim?: boolean;
@@ -7559,6 +7575,11 @@ export function App() {
     void window.electronAPI?.saveAppearanceSettings?.({
       costReceiptEnabled: enabled,
     });
+  };
+
+  const handleRunningSendModeChange = (mode: RunningSendMode) => {
+    setRunningSendMode(mode);
+    void window.electronAPI?.saveAppearanceSettings?.({ runningSendMode: mode });
   };
 
   const handleAutoOpenTurnOutputChange = (enabled: boolean) => {
@@ -9317,6 +9338,7 @@ export function App() {
                   costReceiptEnabled={costReceiptEnabled}
                   subAgentStatsEnabled={subAgentStatsEnabled}
                   autoOpenTurnOutput={autoOpenTurnOutput}
+                  runningSendMode={runningSendMode}
                   rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
                   taskSwitchId={selectedTaskSwitchId}
                   hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}
@@ -9476,6 +9498,8 @@ export function App() {
               onSubAgentStatsEnabledChange={handleSubAgentStatsEnabledChange}
               autoOpenTurnOutput={autoOpenTurnOutput}
               onAutoOpenTurnOutputChange={handleAutoOpenTurnOutputChange}
+              runningSendMode={runningSendMode}
+              onRunningSendModeChange={handleRunningSendModeChange}
               initialTab={settingsTab}
               initialConnector={settingsConnector}
               memoryReviewRequest={memoryReviewRequest}

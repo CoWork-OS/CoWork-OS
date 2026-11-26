@@ -41822,6 +41822,7 @@ Return ONLY a JSON object:
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
     textProvenance?: TaskFollowUpInput["textProvenance"],
     notificationKind?: TaskFollowUpInput["notificationKind"],
+    waitForTurn?: boolean,
   ): void {
     if (this.shutdownRequested) {
       throw new Error("Task executor is shutting down; follow-up was not queued.");
@@ -41843,6 +41844,7 @@ Return ONLY a JSON object:
       surfaceOrigin,
       textProvenance,
       notificationKind,
+      waitForTurn,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,

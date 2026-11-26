@@ -133,6 +133,7 @@ function appearance(themeMode: ThemeMode): AppearanceSettings {
     costReceiptEnabled: false,
     subAgentStatsEnabled: false,
     autoOpenTurnOutput: false,
+    runningSendMode: "steer",
   };
 }
 

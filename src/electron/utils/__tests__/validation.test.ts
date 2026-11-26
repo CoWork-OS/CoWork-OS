@@ -347,6 +347,14 @@ describe("TaskMessageSchema", () => {
     expect(TaskMessageSchema.safeParse({ ...base, surfaceOrigin: "agent" }).success).toBe(false);
   });
 
+  it("accepts a boolean waitForTurn and nothing else", () => {
+    const base = { taskId: "550e8400-e29b-41d4-a716-446655440000", message: "Then this" };
+    expect(TaskMessageSchema.safeParse({ ...base, waitForTurn: true }).data?.waitForTurn).toBe(
+      true,
+    );
+    expect(TaskMessageSchema.safeParse({ ...base, waitForTurn: "yes" }).success).toBe(false);
+  });
+
   it("accepts a quoted assistant message payload", () => {
     const result = TaskMessageSchema.safeParse({
       taskId: "550e8400-e29b-41d4-a716-446655440000",

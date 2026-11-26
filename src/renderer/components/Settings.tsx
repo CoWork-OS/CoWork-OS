@@ -88,6 +88,7 @@ import {
   type LLMProviderFallbackConfig,
   type MoaModelSlot,
   type MoaPreset,
+  type RunningSendMode,
 } from "../../shared/types";
 import {
   CUSTOM_PROVIDER_MAP,
@@ -409,6 +410,8 @@ interface SettingsProps {
   onSubAgentStatsEnabledChange: (enabled: boolean) => void;
   autoOpenTurnOutput: boolean;
   onAutoOpenTurnOutputChange: (enabled: boolean) => void;
+  runningSendMode: RunningSendMode;
+  onRunningSendModeChange: (mode: RunningSendMode) => void;
   initialTab?: SettingsTab;
   /** A connector (registry id) to open on the Connectors tab, e.g. from a sidebar notice. */
   initialConnector?: string;
@@ -1521,6 +1524,8 @@ export function Settings({
   onSubAgentStatsEnabledChange,
   autoOpenTurnOutput,
   onAutoOpenTurnOutputChange,
+  runningSendMode,
+  onRunningSendModeChange,
   initialTab = "appearance",
   initialConnector,
   memoryReviewRequest = 0,
@@ -9495,6 +9500,8 @@ export function Settings({
                   onSubAgentStatsEnabledChange={onSubAgentStatsEnabledChange}
                   autoOpenTurnOutput={autoOpenTurnOutput}
                   onAutoOpenTurnOutputChange={onAutoOpenTurnOutputChange}
+                  runningSendMode={runningSendMode}
+                  onRunningSendModeChange={onRunningSendModeChange}
                   onShowOnboarding={onShowOnboarding}
                   onboardingCompletedAt={onboardingCompletedAt}
                 />

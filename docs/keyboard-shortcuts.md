@@ -15,6 +15,24 @@ Press **Cmd+/** (macOS) or **Ctrl+/** (Windows, Linux, and the app in a browser)
 - **Next session that needs you** opens the next session, in sidebar order, that waits on an approval or a question, or that finished while you were elsewhere and is still marked unread. It wraps to the top, and also reaches waiting sessions the sidebar is not showing. If nothing waits, a short notice says so.
 - **Mark all sessions as read** (command menu action, no shortcut) clears the unread dot on every finished session. Sessions waiting on an approval or a question stay marked until you answer.
 
+## Sending while the agent works
+
+While the agent is working, a message you send can go two ways:
+
+- **Steer now**: the agent reads it at its next step, inside the run it is doing. This is what Enter does by default and what CoWork always did.
+- **Send after this run**: it waits until the agent finishes, then starts a new turn with it. It shows under **Queued messages** marked **After this run**, and you can edit it there until it starts.
+
+| | macOS | Windows / Linux |
+|---|---|---|
+| Send the default way | Enter | Enter |
+| Send the other way | Cmd+Enter | Ctrl+Enter |
+
+Pick which one Enter does in **Settings > Appearance > Composer**. A hint under the message box says what each key does while the agent works. When the agent is idle both keys simply send.
+
+Messages keep the order you sent them: anything you send after a message that waits for the run also waits behind it.
+
+In the app served in a browser, a message sent while the agent works always steers.
+
 ## Where the full list lives
 
 The list in the app covers shortcuts for the app window, the composer, question cards, the built-in browser, the Inbox, the video player, the image viewer, presentations and the Live Canvas preview. Details for some of them:

@@ -40,6 +40,7 @@ export function listQueuedTaskInputs(
       kind: "follow_up",
       message: p.message,
       revision: p.queuedEditRevision ?? 0,
+      ...(p.waitForTurn === true ? { waitsForTurn: true } : {}),
     }));
 }
 

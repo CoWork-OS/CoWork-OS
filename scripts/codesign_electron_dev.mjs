@@ -26,6 +26,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { brandElectronApp, refreshLaunchServices } from "./brand_electron_dev_app.mjs";
 
 const ELECTRON_APP = path.resolve(
   import.meta.dirname,
@@ -37,6 +38,8 @@ const ELECTRON_APP = path.resolve(
 );
 
 const ENTITLEMENTS = path.resolve(import.meta.dirname, "..", "build", "entitlements.mac.plist");
+const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const APP_ICON = path.join(REPO_ROOT, "build", "icon.icns");
 
 function log(msg) {
   process.stdout.write(`[codesign-dev] ${msg}\n`);
@@ -106,6 +109,38 @@ function checkCurrentSignature() {
   }
 }
 
+/**
+ * Branding is for local source checkouts (npm run dev, worktrees, the production recipe),
+ * not for npm installs of the package or CI. It runs here, before signing, because every fresh
+ * node_modules (npm ci, npm install) restores the stock Electron.app, and launches that skip
+ * scripts/dev_start.mjs would otherwise show the Electron logo on CoWork notifications.
+ */
+export function shouldBrandElectronApp(env = process.env, repoRoot = REPO_ROOT) {
+  const raw = String(env.COWORK_DEV_BRAND_APP || "")
+    .trim()
+    .toLowerCase();
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  // CI packages releases from this Electron.app; keep it stock there.
+  if (env.CI) return false;
+  return existsSync(path.join(repoRoot, ".git"));
+}
+
+function brandBeforeSigning(env) {
+  if (!shouldBrandElectronApp(env)) return false;
+  try {
+    const { changed, bundleId } = brandElectronApp({
+      electronApp: ELECTRON_APP,
+      iconPath: APP_ICON,
+      env,
+    });
+    if (changed) log(`Branded Electron.app as CoWork OS (${bundleId}).`);
+    return changed;
+  } catch (err) {
+    log(`Branding failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 export function selectSigningPlan(currentSig, identity, signingEnabled = false) {
   if (currentSig === "invalid") {
     return {
@@ -163,12 +198,14 @@ export function main(env = process.env) {
     return 0;
   }
 
+  const branded = brandBeforeSigning(env);
   const currentSig = checkCurrentSignature();
   const identity = detectIdentity(env);
   const plan = selectSigningPlan(currentSig, identity, isSigningEnabled(env));
   log(plan.message);
 
   if (plan.action === "skip") {
+    if (branded) refreshLaunchServices(ELECTRON_APP);
     return 0;
   }
 
@@ -195,6 +232,7 @@ export function main(env = process.env) {
     log(`Signing failed: ${err.message}`);
     log("Development will still work, but EDR may flag the unsigned binary.");
   }
+  if (branded) refreshLaunchServices(ELECTRON_APP);
 
   return 0;
 }

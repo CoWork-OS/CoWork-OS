@@ -136,6 +136,7 @@ import {
   type TaskTimelineItem,
   type TranscriptMode,
 } from "./task-feed-logic";
+import { feedRowSignaturesChanged } from "./effect-update-guards";
 import {
   canStepEventOwnParallelChildren,
   getAgentLifecycleRecapLine,
@@ -493,6 +494,9 @@ const TaskConversationRenderedRows = memo(
       );
       const previousSignatures = feedRowHeightSignaturesRef.current;
       feedRowHeightSignaturesRef.current = activeSignatures;
+      // Only a row that changed or left the feed can hold a stale height, and the parent
+      // hands over a new rows array on every keystroke.
+      if (!feedRowSignaturesChanged(previousSignatures, activeSignatures)) return;
       setFeedRowHeights((prev) => {
         let changed = false;
         const next = new Map<string, number>();
@@ -622,11 +626,17 @@ const TaskConversationRenderedRows = memo(
       scrollAnchorKey: taskId ?? "new",
     });
     useEffect(() => {
+      // Setting the count it already has still queues a parent render. This effect runs
+      // after every keystroke in a running session's composer, and those queued renders
+      // stacked into "Maximum update depth exceeded", which dropped the typed key.
+      const clearNewActivity = () => {
+        if (newActivityCount !== 0) onNewActivityCountChange?.(0);
+      };
       if (previousFeedTaskIdRef.current !== taskId) {
         previousFeedTaskIdRef.current = taskId;
         previousFeedRowCountRef.current = renderableFeedRows.length;
         previousFeedLastRowKeyRef.current = renderableFeedRows[renderableFeedRows.length - 1]?.key;
-        onNewActivityCountChange?.(0);
+        clearNewActivity();
         return;
       }
       const added = Math.max(0, renderableFeedRows.length - previousFeedRowCountRef.current);
@@ -639,15 +649,22 @@ const TaskConversationRenderedRows = memo(
       // Older history loads in above the reader; only rows after the latest one are new.
       if (added > 0 && lastRowKey === previousLastRowKey) return;
       if (!useVirtualizedFeed || added === 0) {
-        if (isAtBottom) onNewActivityCountChange?.(0);
+        if (isAtBottom) clearNewActivity();
         return;
       }
       if (isAtBottom) {
-        onNewActivityCountChange?.(0);
+        clearNewActivity();
       } else {
         onNewActivityCountChange?.((count) => count + added);
       }
-    }, [isAtBottom, onNewActivityCountChange, renderableFeedRows, taskId, useVirtualizedFeed]);
+    }, [
+      isAtBottom,
+      newActivityCount,
+      onNewActivityCountChange,
+      renderableFeedRows,
+      taskId,
+      useVirtualizedFeed,
+    ]);
     // A short feed is not virtualized, so the virtual list cannot report reaching the top.
     // Track it from the scroll container instead; a feed that does not overflow shows its top.
     const [isNearFeedTop, setIsNearFeedTop] = useState(false);

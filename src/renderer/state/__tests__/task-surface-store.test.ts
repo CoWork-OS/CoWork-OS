@@ -99,6 +99,37 @@ describe("TaskSurfaceStore", () => {
 });
 
 describe("TaskViewCache", () => {
+  it("keeps the disclosure state stable across draft, task, timeline and projection writes", () => {
+    // The task view subscribes to this with useSyncExternalStore, which re-renders at sync
+    // priority whenever the value changes. Each composer keystroke is mirrored by setDraft;
+    // if that changed the value, typing in a running session stacked sync renders until
+    // React threw "Maximum update depth exceeded" and dropped the key.
+    const store = new TaskSurfaceStore();
+    const a = store.switchTo(key("a"));
+    const before = store.getDisclosureState(a.cacheKey);
+    expect(before).toEqual({ groups: {}, activities: {} });
+
+    store.setDraft(a.key, {
+      ...createEmptyComposerDraft({ scope: "local", workspaceId: "workspace-1", taskId: "a" }),
+      text: "summary",
+    });
+    store.setTask(a.key, null);
+    store.setTimeline(a.key, {
+      events: [event("a-1", "a", 1, 1)],
+      cursor: null,
+      hasMoreHistory: false,
+    });
+    store.setProjection(a.key, undefined);
+    expect(store.getDisclosureState(a.cacheKey)).toBe(before);
+
+    store.update(a.key, (snapshot) => ({
+      ...snapshot,
+      disclosureState: { groups: { turn: "expanded" }, activities: {} },
+    }));
+    expect(store.getDisclosureState(a.cacheKey)).not.toBe(before);
+    expect(store.getDisclosureState(null)).toBeNull();
+  });
+
   it("evicts least recently used surfaces by task count", () => {
     const cache = new TaskViewCache({ maxTasks: 2, maxBytes: 1024 * 1024 });
     cache.set(key("a"), { ...new TaskSurfaceStore().switchTo(key("a")).snapshot });

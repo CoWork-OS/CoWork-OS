@@ -1,5 +1,6 @@
 import { Notification } from "electron";
 import { toPlainAnswerText } from "../../shared/answer-surfaces/blocks";
+import type { NotificationSound } from "../../shared/types";
 import { getDesktopIconImage } from "../branding";
 
 interface NativeNotificationInput {
@@ -8,6 +9,20 @@ interface NativeNotificationInput {
   message: string;
   type?: string;
   taskId?: string;
+  sound?: NotificationSound;
+}
+
+/**
+ * Sound options for a native alert. "none" is silent everywhere; a named sound is a
+ * macOS system sound, so other platforms play their own default instead.
+ */
+export function nativeSoundOptions(
+  sound: NotificationSound | undefined,
+  platform: NodeJS.Platform = process.platform,
+): { silent: boolean; sound?: string } {
+  if (sound === "none") return { silent: true };
+  if (sound && sound !== "default" && platform === "darwin") return { silent: false, sound };
+  return { silent: false };
 }
 
 export class NativeNotificationCenter {
@@ -42,7 +57,7 @@ export class NativeNotificationCenter {
         title: notification.title,
         body: toPlainAnswerText(notification.message),
         ...(icon ? { icon } : {}),
-        silent: false,
+        ...nativeSoundOptions(notification.sound),
         timeoutType: "default",
       });
 

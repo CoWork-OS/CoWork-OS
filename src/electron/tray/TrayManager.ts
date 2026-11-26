@@ -37,6 +37,9 @@ import {
   IPC_CHANNELS,
   Workspace,
   isTempWorkspaceId,
+  COMPLETION_NOTIFICATION_MODES,
+  isNotificationSound,
+  type TraySettings as SharedTraySettings,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -88,14 +91,7 @@ export interface TrayManagerOptions {
   closeToTray?: boolean;
 }
 
-export interface TraySettings {
-  enabled: boolean;
-  showDockIcon: boolean;
-  startMinimized: boolean;
-  closeToTray: boolean;
-  showNotifications: boolean;
-  showApprovalSavedNotifications: boolean;
-}
+export type TraySettings = SharedTraySettings;
 
 const DEFAULT_SETTINGS: TraySettings = {
   enabled: false,
@@ -104,6 +100,12 @@ const DEFAULT_SETTINGS: TraySettings = {
   closeToTray: true,
   showNotifications: true,
   showApprovalSavedNotifications: false,
+  showApprovalNotifications: true,
+  showQuestionNotifications: true,
+  completionNotifications: "unfocused",
+  notificationSound: "default",
+  preventSleepWhileRunning: true,
+  confirmQuitWhileRunning: true,
 };
 
 /**
@@ -154,6 +156,28 @@ export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefi
       typeof merged.showApprovalSavedNotifications === "boolean"
         ? merged.showApprovalSavedNotifications
         : DEFAULT_SETTINGS.showApprovalSavedNotifications,
+    showApprovalNotifications:
+      typeof merged.showApprovalNotifications === "boolean"
+        ? merged.showApprovalNotifications
+        : DEFAULT_SETTINGS.showApprovalNotifications,
+    showQuestionNotifications:
+      typeof merged.showQuestionNotifications === "boolean"
+        ? merged.showQuestionNotifications
+        : DEFAULT_SETTINGS.showQuestionNotifications,
+    completionNotifications: COMPLETION_NOTIFICATION_MODES.includes(merged.completionNotifications)
+      ? merged.completionNotifications
+      : DEFAULT_SETTINGS.completionNotifications,
+    notificationSound: isNotificationSound(merged.notificationSound)
+      ? merged.notificationSound
+      : DEFAULT_SETTINGS.notificationSound,
+    preventSleepWhileRunning:
+      typeof merged.preventSleepWhileRunning === "boolean"
+        ? merged.preventSleepWhileRunning
+        : DEFAULT_SETTINGS.preventSleepWhileRunning,
+    confirmQuitWhileRunning:
+      typeof merged.confirmQuitWhileRunning === "boolean"
+        ? merged.confirmQuitWhileRunning
+        : DEFAULT_SETTINGS.confirmQuitWhileRunning,
   };
 }
 
@@ -896,10 +920,7 @@ export class TrayManager {
     if (!this.mainWindow) return;
 
     this.mainWindow.on("close", (event) => {
-      if (this.shuttingDown || !this.settings.closeToTray) return;
-      // Without a tray icon only macOS can bring a hidden window back (from the Dock),
-      // so elsewhere the window closes normally.
-      if (!this.tray && process.platform !== "darwin") return;
+      if (!this.hidesWindowOnClose()) return;
 
       event.preventDefault();
       this.mainWindow?.hide();
@@ -909,6 +930,16 @@ export class TrayManager {
         app.dock?.hide();
       }
     });
+  }
+
+  /**
+   * True when closing the main window hides it and the app keeps running. Without a tray
+   * icon only macOS can bring a hidden window back (from the Dock), so elsewhere the
+   * window closes normally.
+   */
+  hidesWindowOnClose(): boolean {
+    if (this.shuttingDown || !this.settings.closeToTray) return false;
+    return !!this.tray || process.platform === "darwin";
   }
 
   /**
@@ -1074,6 +1105,7 @@ export class TrayManager {
       title,
       message: body,
       taskId,
+      sound: this.settings.notificationSound,
     };
     showDesktopNotification(notification);
   }

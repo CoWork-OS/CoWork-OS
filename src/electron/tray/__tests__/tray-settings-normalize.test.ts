@@ -41,6 +41,46 @@ describe("normalizeTraySettings", () => {
     expect(s.showNotifications).toBe(true);
     expect(s.showApprovalSavedNotifications).toBe(false);
     expect(s.startMinimized).toBe(false);
+    expect(s.showApprovalNotifications).toBe(true);
+    expect(s.showQuestionNotifications).toBe(true);
+    expect(s.completionNotifications).toBe("unfocused");
+    expect(s.notificationSound).toBe("default");
+    expect(s.preventSleepWhileRunning).toBe(true);
+    expect(s.confirmQuitWhileRunning).toBe(true);
+  });
+
+  it("keeps valid alert, sleep and quit choices", () => {
+    const s = normalizeTraySettings({
+      showApprovalNotifications: false,
+      showQuestionNotifications: false,
+      completionNotifications: "always",
+      notificationSound: "Glass",
+      preventSleepWhileRunning: false,
+      confirmQuitWhileRunning: false,
+    });
+    expect(s).toMatchObject({
+      showApprovalNotifications: false,
+      showQuestionNotifications: false,
+      completionNotifications: "always",
+      notificationSound: "Glass",
+      preventSleepWhileRunning: false,
+      confirmQuitWhileRunning: false,
+    });
+  });
+
+  it("replaces values the renderer could send but the app does not offer", () => {
+    const s = normalizeTraySettings({
+      completionNotifications: "sometimes",
+      notificationSound: "../../etc/passwd",
+      preventSleepWhileRunning: "yes",
+      confirmQuitWhileRunning: null,
+      showApprovalNotifications: 1,
+    } as unknown as Partial<TraySettings>);
+    expect(s.completionNotifications).toBe("unfocused");
+    expect(s.notificationSound).toBe("default");
+    expect(s.preventSleepWhileRunning).toBe(true);
+    expect(s.confirmQuitWhileRunning).toBe(true);
+    expect(s.showApprovalNotifications).toBe(true);
   });
 });
 

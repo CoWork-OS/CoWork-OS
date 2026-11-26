@@ -6,11 +6,23 @@ import {
   detectIdentity,
   isSigningEnabled,
   selectSigningPlan,
+  shouldBrandElectronApp,
 } from "../scripts/codesign_electron_dev.mjs";
 
 const NO_CONFIG = path.join(os.tmpdir(), "cowork-missing-dev-codesign.json");
 
 describe("codesign_electron_dev", () => {
+  it("brands Electron.app in a source checkout so notifications show the CoWork icon", () => {
+    const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-checkout-"));
+    fs.writeFileSync(path.join(checkout, ".git"), "gitdir: elsewhere");
+    const installed = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-npm-install-"));
+
+    expect(shouldBrandElectronApp({}, checkout)).toBe(true);
+    expect(shouldBrandElectronApp({}, installed)).toBe(false);
+    expect(shouldBrandElectronApp({ CI: "true" }, checkout)).toBe(false);
+    expect(shouldBrandElectronApp({ COWORK_DEV_BRAND_APP: "0" }, checkout)).toBe(false);
+  });
+
   it("does not infer a signing identity when the env var is absent", () => {
     expect(detectIdentity({}, NO_CONFIG)).toBeNull();
   });

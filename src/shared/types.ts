@@ -57,6 +57,48 @@ export interface AppearanceSettings {
 }
 
 // Tray (Menu Bar) Settings
+/**
+ * When a finished task raises a desktop alert: never, only while no CoWork window has
+ * focus, or always. Applies to tasks a person started; automations and bots alert on
+ * their own paths.
+ */
+export type CompletionNotificationMode = "never" | "unfocused" | "always";
+
+export const COMPLETION_NOTIFICATION_MODES: readonly CompletionNotificationMode[] = [
+  "never",
+  "unfocused",
+  "always",
+];
+
+/** macOS system alert sounds a desktop alert can play by name. */
+export const NOTIFICATION_SOUND_NAMES = [
+  "Basso",
+  "Blow",
+  "Bottle",
+  "Frog",
+  "Funk",
+  "Glass",
+  "Hero",
+  "Morse",
+  "Ping",
+  "Pop",
+  "Purr",
+  "Sosumi",
+  "Submarine",
+  "Tink",
+] as const;
+
+/** "default" is the system's own alert sound, "none" is silent; names are macOS only. */
+export type NotificationSound = "default" | "none" | (typeof NOTIFICATION_SOUND_NAMES)[number];
+
+export function isNotificationSound(value: unknown): value is NotificationSound {
+  return (
+    value === "default" ||
+    value === "none" ||
+    (NOTIFICATION_SOUND_NAMES as readonly unknown[]).includes(value)
+  );
+}
+
 export interface TraySettings {
   enabled: boolean;
   showDockIcon: boolean;
@@ -64,6 +106,30 @@ export interface TraySettings {
   closeToTray: boolean;
   showNotifications: boolean;
   showApprovalSavedNotifications: boolean;
+  /** Desktop alert when a task needs an approval. The inbox item is added either way. */
+  showApprovalNotifications: boolean;
+  /** Desktop alert when a task asks a question or pauses for input. */
+  showQuestionNotifications: boolean;
+  completionNotifications: CompletionNotificationMode;
+  notificationSound: NotificationSound;
+  /** Keep the computer from idle-sleeping while a task is executing. */
+  preventSleepWhileRunning: boolean;
+  /** Ask before quitting while tasks are still running. */
+  confirmQuitWhileRunning: boolean;
+}
+
+/** Which toggle decides a desktop alert for a task that is waiting on the person. */
+export function wantsAttentionAlert(
+  settings: Pick<
+    TraySettings,
+    "showNotifications" | "showApprovalNotifications" | "showQuestionNotifications"
+  >,
+  kind: "approval" | "question",
+): boolean {
+  if (!settings.showNotifications) return false;
+  return kind === "approval"
+    ? settings.showApprovalNotifications
+    : settings.showQuestionNotifications;
 }
 
 /** One team memory repo: a local folder (a memory repo), optionally for some workspaces only. */

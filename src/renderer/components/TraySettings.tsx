@@ -1,5 +1,16 @@
 import { useState, useEffect } from "react";
-import { TraySettings as TraySettingsType } from "../../shared/types";
+import {
+  NOTIFICATION_SOUND_NAMES,
+  type CompletionNotificationMode,
+  type NotificationSound,
+  TraySettings as TraySettingsType,
+} from "../../shared/types";
+
+const COMPLETION_MODE_LABELS: Array<[CompletionNotificationMode, string]> = [
+  ["never", "Never"],
+  ["unfocused", "When CoWork is in the background"],
+  ["always", "Always"],
+];
 
 interface TraySettingsProps {
   onStatusChange?: (enabled: boolean) => void;
@@ -68,6 +79,7 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
   const trayHeading = isMacOS ? "Menu Bar" : "System Tray";
   const trayLabel = isMacOS ? "menu bar" : "system tray";
   const trayIconOn = settings?.enabled ?? false;
+  const alertsOn = settings?.showNotifications ?? true;
 
   if (!supportsTraySettings) {
     return (
@@ -230,6 +242,53 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
           <div className="settings-form-group tray-settings-option">
             <div className="tray-settings-option-inner">
               <div className="tray-settings-option-text">
+                <span className="tray-settings-option-title">
+                  Ask before quitting while tasks run
+                </span>
+                <p className="tray-settings-option-desc">
+                  Quitting stops any task that is still running. With this on, CoWork asks first.
+                </p>
+              </div>
+              <label className="settings-toggle tray-settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings?.confirmQuitWhileRunning ?? true}
+                  onChange={(e) => void handleSave({ confirmQuitWhileRunning: e.target.checked })}
+                  disabled={saving}
+                  aria-label="Ask before quitting while tasks run"
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-form-group tray-settings-option">
+            <div className="tray-settings-option-inner">
+              <div className="tray-settings-option-text">
+                <span className="tray-settings-option-title">
+                  Keep the computer awake while tasks run
+                </span>
+                <p className="tray-settings-option-desc">
+                  Stops the computer from going to sleep on its own while a task is running. The
+                  display can still sleep, and closing the lid still puts it to sleep.
+                </p>
+              </div>
+              <label className="settings-toggle tray-settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings?.preventSleepWhileRunning ?? true}
+                  onChange={(e) => void handleSave({ preventSleepWhileRunning: e.target.checked })}
+                  disabled={saving}
+                  aria-label="Keep the computer awake while tasks run"
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-form-group tray-settings-option">
+            <div className="tray-settings-option-inner">
+              <div className="tray-settings-option-text">
                 <span className="tray-settings-option-title">Banner notifications</span>
                 <p className="tray-settings-option-desc">
                   Show short alerts for task updates, completions, and items that need your
@@ -246,6 +305,110 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
                 />
                 <span className="toggle-slider" />
               </label>
+            </div>
+          </div>
+
+          <div className="settings-form-group tray-settings-option">
+            <div className="tray-settings-option-inner">
+              <div className="tray-settings-option-text">
+                <span className="tray-settings-option-title">When a task finishes</span>
+                <p className="tray-settings-option-desc">
+                  Alert you when a task you started finishes or fails. Scheduled tasks and bots
+                  follow their own notification settings.
+                </p>
+              </div>
+              <select
+                className="settings-select tray-settings-select"
+                value={settings?.completionNotifications ?? "unfocused"}
+                onChange={(e) =>
+                  void handleSave({
+                    completionNotifications: e.target.value as CompletionNotificationMode,
+                  })
+                }
+                disabled={saving || !alertsOn}
+                aria-label="When a task finishes"
+              >
+                {COMPLETION_MODE_LABELS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="settings-form-group tray-settings-option">
+            <div className="tray-settings-option-inner">
+              <div className="tray-settings-option-text">
+                <span className="tray-settings-option-title">Approval alerts</span>
+                <p className="tray-settings-option-desc">
+                  Alert you when a task is waiting for your approval. The request stays in your
+                  inbox either way.
+                </p>
+              </div>
+              <label className="settings-toggle tray-settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={alertsOn && (settings?.showApprovalNotifications ?? true)}
+                  onChange={(e) => void handleSave({ showApprovalNotifications: e.target.checked })}
+                  disabled={saving || !alertsOn}
+                  aria-label="Show approval alerts"
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-form-group tray-settings-option">
+            <div className="tray-settings-option-inner">
+              <div className="tray-settings-option-text">
+                <span className="tray-settings-option-title">Question alerts</span>
+                <p className="tray-settings-option-desc">
+                  Alert you when a task asks a question or pauses for your input. The question stays
+                  in your inbox either way.
+                </p>
+              </div>
+              <label className="settings-toggle tray-settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={alertsOn && (settings?.showQuestionNotifications ?? true)}
+                  onChange={(e) => void handleSave({ showQuestionNotifications: e.target.checked })}
+                  disabled={saving || !alertsOn}
+                  aria-label="Show question alerts"
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-form-group tray-settings-option">
+            <div className="tray-settings-option-inner">
+              <div className="tray-settings-option-text">
+                <span className="tray-settings-option-title">Alert sound</span>
+                <p className="tray-settings-option-desc">
+                  {isMacOS
+                    ? "The sound an alert plays. System default follows your macOS notification settings."
+                    : "Whether an alert plays the system notification sound."}
+                </p>
+              </div>
+              <select
+                className="settings-select tray-settings-select"
+                value={settings?.notificationSound ?? "default"}
+                onChange={(e) =>
+                  void handleSave({ notificationSound: e.target.value as NotificationSound })
+                }
+                disabled={saving || !alertsOn}
+                aria-label="Alert sound"
+              >
+                <option value="default">System default</option>
+                <option value="none">None</option>
+                {isMacOS &&
+                  NOTIFICATION_SOUND_NAMES.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+              </select>
             </div>
           </div>
 

@@ -1,3 +1,4 @@
+import type { NotificationSound } from "../../shared/types";
 import { NativeNotificationCenter } from "./NativeNotificationCenter";
 
 export interface DesktopNotificationInput {
@@ -6,6 +7,8 @@ export interface DesktopNotificationInput {
   message: string;
   type?: string;
   taskId?: string;
+  /** The person's chosen alert sound; absent plays the system default. */
+  sound?: NotificationSound;
 }
 
 /**

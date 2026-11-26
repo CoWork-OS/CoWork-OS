@@ -83,6 +83,8 @@ export function installGracefulShutdown(
   steps: readonly ShutdownStep[],
   reportError: (step: string, error: unknown) => void,
   stepTimeoutMs = 10_000,
+  /** Asked once before cleanup starts; false cancels this quit request. */
+  confirmQuit?: () => boolean,
 ): void {
   let started = false;
   let completed = false;
@@ -101,6 +103,8 @@ export function installGracefulShutdown(
     if (completed) return;
     event.preventDefault();
     if (started) return;
+    // Declining leaves the app running; a later quit request asks again.
+    if (confirmQuit && !confirmQuit()) return;
     started = true;
 
     void (async () => {

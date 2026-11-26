@@ -1,0 +1,209 @@
+/* Command menu: a search overlay opened with Cmd/Ctrl+K. */
+.command-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 14vh 16px 16px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.command-menu {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 100%);
+  max-height: min(520px, 70vh);
+  overflow: hidden;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  outline: none;
+}
+
+.command-menu-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.command-menu-input-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.command-menu-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 15px;
+}
+
+.command-menu-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.command-menu-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.command-menu-section + .command-menu-section {
+  margin-top: 6px;
+}
+
+.command-menu-section-label {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.command-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-menu-item.is-selected {
+  background: var(--color-bg-hover);
+}
+
+.command-menu-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.command-menu-item-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.command-menu-item-title,
+.command-menu-item-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-menu-item-title {
+  line-height: 1.35;
+}
+
+.command-menu-item-subtitle {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+.command-menu-item-shortcut {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+.command-menu-empty {
+  padding: 22px 8px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.command-menu-scopes {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.command-menu-scope {
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-menu-scope:hover {
+  color: var(--color-text-primary);
+}
+
+.command-menu-scope.is-active {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.command-menu-scope:focus-visible,
+.command-menu-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+html.visual-calm .command-menu {
+  background: var(--calm-surface-raised);
+  border-color: var(--calm-border);
+  border-radius: var(--calm-radius-card);
+  box-shadow: var(--calm-shadow-pop);
+  color: var(--calm-text);
+}
+
+html.visual-calm .command-menu-input-row,
+html.visual-calm .command-menu-scopes {
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .command-menu-input {
+  color: var(--calm-text);
+}
+
+html.visual-calm .command-menu-item,
+html.visual-calm .command-menu-scope {
+  border-radius: var(--calm-radius-item);
+}
+
+html.visual-calm .command-menu-item.is-selected,
+html.visual-calm .command-menu-scope.is-active {
+  background: var(--calm-accent-subtle);
+}
+
+html.visual-calm .command-menu-section-label,
+html.visual-calm .command-menu-item-subtitle,
+html.visual-calm .command-menu-empty,
+html.visual-calm .command-menu-input::placeholder {
+  color: var(--calm-text-muted);
+}

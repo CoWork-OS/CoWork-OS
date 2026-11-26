@@ -408,7 +408,8 @@ describe("Sidebar top-level destinations", () => {
       }),
     );
     expect(markup).toContain('placeholder="Search"');
-    expect(markup).toContain("aria-keyshortcuts=");
+    // Cmd/Ctrl+K opens the command menu, so the sidebar search no longer claims a shortcut.
+    expect(markup).not.toContain("aria-keyshortcuts=");
     expect(markup).toContain('aria-label="Session status"');
     expect(markup).toContain('aria-pressed="true"><span>All</span>');
     expect(markup).toContain('aria-pressed="false"><span>Running</span>');

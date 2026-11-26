@@ -38,7 +38,8 @@ See [Release Notes 0.5.61](release-notes-0.5.61.md).
 
 - [x] Memory folder: what CoWork knows about you and your workspaces as markdown notes in a local git repo (`~/CoWork Memory`), with daily Dreaming, review and undo, private git sync, read-only team memory, and four memory tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`)
 - [x] Bots page with responsibilities (trigger, sources, mode, review boundary, budget; saved paused) and a per-bot work view
-- [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, Cmd/Ctrl+K search, and **Running** / **Needs you** filters
+- [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, session search, and **Running** / **Needs you** filters
+- [x] Command menu (Cmd/Ctrl+K) over actions, loaded sessions, Settings sections and message text
 - [x] Opt-in Calm visual style with Library and Build views
 - [x] Sandboxed `cowork-preview://` web previews and the `preview_web_page` tool
 - [x] Interactive answer components, a per-task Cost panel with a $10 default cap, an Automation Library, and **Settings > Add tools**

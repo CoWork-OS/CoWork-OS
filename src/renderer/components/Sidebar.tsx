@@ -1031,8 +1031,6 @@ function SidebarComponent({
   );
   const hasSessionSearch = normalizedSessionSearch.length > 0;
   const hasSessionStateFilter = sessionStateFilter !== "all";
-  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
-  const sessionSearchShortcut = isMac ? "⌘K" : "Ctrl K";
 
   const loadSidebarWorkspaces = useCallback(async () => {
     if (!window.electronAPI?.listWorkspaces) return;
@@ -2368,27 +2366,6 @@ function SidebarComponent({
     return null;
   };
 
-  useEffect(() => {
-    if (isDevicesActive || visibleSidebarTab !== "sessions") return;
-    const focusSessionSearch = (event: KeyboardEvent) => {
-      if (
-        !(event.metaKey || event.ctrlKey) ||
-        event.altKey ||
-        event.shiftKey ||
-        event.key.toLowerCase() !== "k"
-      )
-        return;
-      if (document.querySelector('[role="dialog"], dialog[open], .modal-overlay')) return;
-      const input = sessionSearchInputRef.current;
-      if (!input) return;
-      event.preventDefault();
-      input.focus();
-      input.select();
-    };
-    window.addEventListener("keydown", focusSessionSearch);
-    return () => window.removeEventListener("keydown", focusSessionSearch);
-  }, [isDevicesActive, visibleSidebarTab]);
-
   const handleNewTask = () => {
     if (onNewSession) {
       onNewSession();
@@ -3442,12 +3419,11 @@ function SidebarComponent({
                       ref={sessionSearchInputRef}
                       type="search"
                       aria-label="Search sessions"
-                      aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
                       placeholder={showArchivedSessions ? "Search archived" : "Search"}
                       title={
                         hasMoreTasks
-                          ? `Search loaded sessions by title, prompt, or ID (${sessionSearchShortcut}). Load older sessions to search more history.`
-                          : `Search sessions by title, prompt, or ID (${sessionSearchShortcut})`
+                          ? "Search loaded sessions by title, prompt, or ID. Load older sessions to search more history."
+                          : "Search sessions by title, prompt, or ID"
                       }
                       value={sessionSearch}
                       onChange={(event) => setSessionSearch(event.target.value)}

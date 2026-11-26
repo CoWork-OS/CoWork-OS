@@ -39,7 +39,13 @@ import { useBrowserNotifications } from "./hooks/useBrowserNotifications";
 import { attentionWaitingByTask, type AttentionItem } from "../shared/attention";
 import { ArrowLeft, ArrowRight, Globe, Moon, PanelTop, SquareTerminal, Sun } from "lucide-react";
 import { TitleBarMoreMenu } from "./components/TitleBarMoreMenu";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, shouldShowTaskInSidebarSessions } from "./components/Sidebar";
+import type { SettingsTab } from "./components/Settings";
+import {
+  isCommandMenuShortcut,
+  type CommandMenuAction,
+  type CommandMenuActionSpec,
+} from "./components/CommandMenu/command-menu-model";
 import {
   EMPTY_HOME_SESSIONS,
   buildHomeSessions,
@@ -50,6 +56,7 @@ import { SidebarRail } from "./components/sidebar/SidebarRail";
 import { TITLE_BAR_CONTEXT_SLOT_ID } from "./utils/title-bar-slot";
 import { useMainColumnRightEdge } from "./hooks/useMainColumnRightEdge";
 import {
+  SIDEBAR_DESTINATIONS,
   getActiveSidebarDestination,
   getSidebarDestination,
   isSidebarDestinationAvailable,
@@ -309,6 +316,11 @@ const SideChatPanel = lazy(() =>
 );
 const TerminalTabsDock = lazy(() =>
   import("./components/TerminalTabsDock").then((module) => ({ default: module.TerminalTabsDock })),
+);
+const CommandMenu = lazy(() =>
+  import("./components/CommandMenu/CommandMenu").then((module) => ({
+    default: module.CommandMenu,
+  })),
 );
 const SpreadsheetArtifactViewer = lazy(() =>
   import("./components/SpreadsheetArtifactViewer").then((module) => ({
@@ -2367,38 +2379,10 @@ export function App() {
   const [memoryReviewRequest, setMemoryReviewRequest] = useState(0);
   // A connector a sidebar notice asked Settings to open (registry id).
   const [settingsConnector, setSettingsConnector] = useState<string | undefined>(undefined);
-  const [settingsTab, setSettingsTab] = useState<
-    | "memory"
-    | "appearance"
-    | "llm"
-    | "image"
-    | "search"
-    | "telegram"
-    | "slack"
-    | "whatsapp"
-    | "teams"
-    | "morechannels"
-    | "integrations"
-    | "automations"
-    | "routines"
-    | "hooks"
-    | "tools"
-    | "addtools"
-    | "updates"
-    | "system"
-    | "queue"
-    | "skills"
-    | "scheduled"
-    | "voice"
-    | "mcp"
-    | "triggers"
-    | "subconscious"
-    | "suggestions"
-    | "insights"
-    | "pulse"
-    | "traces"
-    | "customize"
-  >("appearance");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
+  // Bumped to remount Settings on a new tab while it is already open; it reads the tab once.
+  const [settingsNavKey, setSettingsNavKey] = useState(0);
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
   const [focusAutomationRoutine, setFocusAutomationRoutine] = useState<{ id: string } | null>(null);
   const [focusAutomationOwner, setFocusAutomationOwner] = useState<{
@@ -8110,6 +8094,73 @@ export function App() {
     [clearRemoteTaskView, markTaskSwitchStart, selectTaskAfterDraftFlush],
   );
 
+  // Command menu (Cmd/Ctrl+K): actions, loaded sessions, Settings sections and message text.
+  const commandMenuActions = useMemo<CommandMenuActionSpec[]>(() => {
+    const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+    return [
+      {
+        id: "new-session",
+        title: "New session",
+        keywords: ["new task", "create", "start", "chat"],
+        shortcut: isMac ? "⌘N" : undefined,
+        action: { type: "new-session" },
+      },
+      {
+        id: "open-settings",
+        title: "Open Settings",
+        keywords: ["preferences", "options", "configure"],
+        shortcut: isMac ? "⌘," : undefined,
+        action: { type: "open-settings" },
+      },
+      ...SIDEBAR_DESTINATIONS.filter(
+        (destination) =>
+          (destination.isVisible?.(sidebarDestinationContext) ?? true) &&
+          isSidebarDestinationAvailable(destination),
+      ).map((destination) => ({
+        id: `go-${destination.id}`,
+        title: `Go to ${destination.label}`,
+        keywords: ["open", "show", "navigate"],
+        action: { type: "navigate" as const, destination: destination.id },
+      })),
+    ];
+  }, [sidebarDestinationContext]);
+  const commandMenuTasks = useMemo(
+    () => tasks.filter((task) => !task.parentTaskId && shouldShowTaskInSidebarSessions(task)),
+    [tasks],
+  );
+  const closeCommandMenu = useCallback(() => setCommandMenuOpen(false), []);
+  const handleCommandMenuAction = useCallback(
+    (action: CommandMenuAction) => {
+      if (action.type === "new-session") void handleNewSessionRef.current();
+      else if (action.type === "open-settings") setCurrentView("settings");
+      else handleSidebarNavigate(action.destination as SidebarDestinationId);
+    },
+    [handleSidebarNavigate],
+  );
+  const handleCommandMenuOpenSettingsTab = useCallback((tab: string) => {
+    setSettingsTab(tab as SettingsTab);
+    setSettingsNavKey((key) => key + 1);
+    setCurrentView("settings");
+  }, []);
+  useEffect(() => {
+    const toggleCommandMenu = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isCommandMenuShortcut(event)) return;
+      const menuOpen = !!document.querySelector(".command-menu");
+      // A modal owns the keyboard; the menu's own dialog may be toggled closed. Non-modal
+      // dialogs, such as a sidebar notice tip, do not block the menu.
+      if (
+        !menuOpen &&
+        document.querySelector('[aria-modal="true"], dialog[open], .modal-overlay')
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setCommandMenuOpen((open) => !open);
+    };
+    window.addEventListener("keydown", toggleCommandMenu);
+    return () => window.removeEventListener("keydown", toggleCommandMenu);
+  }, []);
+
   const handleSelectBotConversation = useCallback(
     async (conversationId: string) => {
       const workspaceId = currentWorkspaceRef.current?.id || currentWorkspace?.id;
@@ -9275,6 +9326,7 @@ export function App() {
           {sidebarRail}
           <Suspense fallback={<LazyViewFallback />}>
             <Settings
+              key={settingsNavKey}
               onBack={closeSettings}
               onSettingsChanged={loadLLMConfig}
               themeMode={themeMode}
@@ -9324,6 +9376,20 @@ export function App() {
       {currentView === "browser" && (
         <Suspense fallback={<LazyViewFallback />}>
           <BrowserView initialUrl={browserUrl} onBack={() => setCurrentView("main")} />
+        </Suspense>
+      )}
+      {commandMenuOpen && (
+        <Suspense fallback={null}>
+          <CommandMenu
+            tasks={commandMenuTasks}
+            workspaceId={currentWorkspace?.id}
+            actions={commandMenuActions}
+            onClose={closeCommandMenu}
+            onRunAction={handleCommandMenuAction}
+            onOpenSession={handleSelectTaskFromShell}
+            onOpenMessageHit={(taskId) => void openTaskById(taskId)}
+            onOpenSettingsTab={handleCommandMenuOpenSettingsTab}
+          />
         </Suspense>
       )}
     </div>

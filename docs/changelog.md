@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Command menu**: **Cmd/Ctrl+K** opens a search box over actions (new session, Settings, every sidebar destination), your loaded sessions, Settings sections and message text in the current workspace. Arrow keys move, Enter opens, Escape closes; the tabs at the bottom narrow the search to one kind. Cmd/Ctrl+K used to focus the sidebar session search, which is still there to click. See [Command menu](command-menu.md).
 - **Browser app: sign-ins survive a restart**: a browser signed in to the full app in a browser stays signed in when CoWork restarts. Through the public HTTPS address it is signed out after 30 days without use, or 90 days after signing in (before: 30 minutes idle and 24 hours at most). On this computer over `http://127.0.0.1` those shorter limits stay. The host keeps only a hash of each session cookie, in its encrypted settings. **Sign out all browsers**, turning the app off and changing its public address still end every sign-in. After a restart an open tab reloads itself once; file, artifact and terminal handles from before the restart stop working. See [Browser application preview](browser-preview.md).
 
 ## [0.5.63] - 2026-11-15

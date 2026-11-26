@@ -87,7 +87,7 @@ const SHORTCUTS: readonly ShortcutDefinition[] = [
     title: "Attach the window in front to your message",
     keys: { mac: "⌘⇧2" },
     where: "From any app",
-    keywords: ["screenshot", "capture", "window", "appshot", "screen", "attach"],
+    keywords: ["screenshot", "capture", "window", "screen", "attach"],
   },
   {
     id: "rail-reorder",

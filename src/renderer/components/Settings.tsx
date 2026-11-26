@@ -279,7 +279,7 @@ const TaskTraceDebuggerPanel = lazySettingsPanel(
   () => import("./TaskTraceDebuggerPanel"),
   "TaskTraceDebuggerPanel",
 );
-type SettingsTab =
+export type SettingsTab =
   | "appearance"
   | "personality"
   | "system"

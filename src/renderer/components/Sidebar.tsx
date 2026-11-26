@@ -53,6 +53,7 @@ import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, isTempWorkspaceId } from "../../shared/types";
 import { isActiveTaskStatus, isIdleFork } from "../../shared/task-status";
 import { formatCount } from "../utils/plural";
+import { sessionOrderFromSidebarRows } from "../utils/session-navigation";
 import { ipcErrorMessage } from "../utils/ipc-error-message";
 import { promptForText } from "./TextPromptDialog";
 import { isAutomatedTaskLike, isSpeculativeTask } from "../../shared/automated-task-detection";
@@ -156,6 +157,8 @@ interface SidebarProps {
 
   onTasksChanged: () => void;
   onLoadMoreTasks?: () => void;
+  /** Reports the sessions in the list, top to bottom, for keyboard navigation. */
+  onSessionOrderChange?: (taskIds: readonly string[]) => void;
   /** Reports the folders shown as project groups so their sessions get loaded. */
   onProjectWorkspaceIdsChange?: (workspaceIds: string[]) => void;
   hasMoreTasks?: boolean;
@@ -910,6 +913,7 @@ export function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): bo
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
     prev.onProjectWorkspaceIdsChange === next.onProjectWorkspaceIdsChange &&
+    prev.onSessionOrderChange === next.onSessionOrderChange &&
     prev.onOpenBotMemory === next.onOpenBotMemory &&
     prev.attentionWaiting === next.attentionWaiting
   );
@@ -949,6 +953,7 @@ function SidebarComponent({
   onTasksChanged,
   onLoadMoreTasks,
   onProjectWorkspaceIdsChange,
+  onSessionOrderChange,
   hasMoreTasks = false,
   uiDensity = "focused",
   onBotUpdated,
@@ -1929,6 +1934,13 @@ function SidebarComponent({
   ]);
 
   const useVirtualizedTaskRows = sidebarVirtualRows.length > SIDEBAR_VIRTUALIZATION_MIN_ROWS;
+  const sessionOrderSignature = useMemo(
+    () => sessionOrderFromSidebarRows(sidebarVirtualRows).join("\n"),
+    [sidebarVirtualRows],
+  );
+  useEffect(() => {
+    onSessionOrderChange?.(sessionOrderSignature ? sessionOrderSignature.split("\n") : []);
+  }, [onSessionOrderChange, sessionOrderSignature]);
   const hasSessionResults = filteredTaskTree.length > 0 || filteredAutomatedTaskTree.length > 0;
 
   // Multi-agent sessions start collapsed: a parent is collapsed the first time it is

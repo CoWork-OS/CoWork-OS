@@ -1,7 +1,13 @@
 import type { Task, UnifiedRecallResult } from "../../../shared/types";
 
 /** What the menu searches. "all" shows a short list from every scope. */
-export type CommandMenuScope = "all" | "actions" | "sessions" | "settings" | "messages";
+export type CommandMenuScope =
+  | "all"
+  | "actions"
+  | "sessions"
+  | "settings"
+  | "messages"
+  | "shortcuts";
 
 export const COMMAND_MENU_SCOPES: ReadonlyArray<{ id: CommandMenuScope; label: string }> = [
   { id: "all", label: "All" },
@@ -9,12 +15,16 @@ export const COMMAND_MENU_SCOPES: ReadonlyArray<{ id: CommandMenuScope; label: s
   { id: "sessions", label: "Sessions" },
   { id: "settings", label: "Settings" },
   { id: "messages", label: "Messages" },
+  { id: "shortcuts", label: "Shortcuts" },
 ];
 
 export type CommandMenuAction =
   | { type: "new-session" }
   | { type: "open-settings" }
-  | { type: "navigate"; destination: string };
+  | { type: "navigate"; destination: string }
+  | { type: "show-shortcuts" }
+  | { type: "next-attention-session" }
+  | { type: "mark-all-read" };
 
 /** An action the app offers, before any query is applied. */
 export interface CommandMenuActionSpec {
@@ -25,6 +35,18 @@ export interface CommandMenuActionSpec {
   /** Shortcut shown on the right, such as "⌘N". */
   shortcut?: string;
   action: CommandMenuAction;
+}
+
+/** A keyboard shortcut in the searchable list. Rows with an action run it on Enter. */
+export interface CommandMenuShortcutSpec {
+  id: string;
+  title: string;
+  /** Keys as shown on this platform, such as "⌘⇧B" or "Ctrl+Shift+B". */
+  keys: string;
+  /** Where the shortcut works, such as "Anywhere" or "Composer". */
+  where: string;
+  keywords?: readonly string[];
+  action?: CommandMenuAction;
 }
 
 /** One Settings section the menu can open. */
@@ -46,7 +68,15 @@ export type CommandMenuItem =
     }
   | { kind: "session"; id: string; title: string; subtitle?: string; taskId: string }
   | { kind: "setting"; id: string; title: string; subtitle?: string; tab: string }
-  | { kind: "message"; id: string; title: string; subtitle?: string; taskId: string };
+  | { kind: "message"; id: string; title: string; subtitle?: string; taskId: string }
+  | {
+      kind: "shortcut";
+      id: string;
+      title: string;
+      subtitle?: string;
+      shortcut: string;
+      action?: CommandMenuAction;
+    };
 
 export interface CommandMenuSection {
   id: Exclude<CommandMenuScope, "all">;
@@ -55,7 +85,15 @@ export interface CommandMenuSection {
 }
 
 /** Rows per section in "all", and in a single scope. */
-const ALL_SCOPE_LIMITS = { actions: 5, sessions: 6, settings: 5, messages: 5 } as const;
+const ALL_SCOPE_LIMITS = {
+  actions: 5,
+  sessions: 6,
+  settings: 5,
+  messages: 5,
+  shortcuts: 4,
+} as const;
+/** The shortcut list is short enough to show whole. */
+const SHORTCUT_SCOPE_LIMIT = 100;
 const SINGLE_SCOPE_LIMIT = 50;
 /** Message search starts at this many characters; shorter queries match too much. */
 export const MIN_MESSAGE_QUERY_LENGTH = 3;
@@ -118,6 +156,31 @@ export function buildActionItems(
         action: spec.action,
       },
       score: commandMenuMatchScore(spec.title, (spec.keywords ?? []).join(" "), query),
+    })),
+    limit,
+  );
+}
+
+export function buildShortcutItems(
+  shortcuts: readonly CommandMenuShortcutSpec[],
+  query: string,
+  limit: number,
+): CommandMenuItem[] {
+  return rankByScore(
+    shortcuts.map((spec) => ({
+      item: {
+        kind: "shortcut" as const,
+        id: `shortcut:${spec.id}`,
+        title: spec.title,
+        subtitle: spec.where,
+        shortcut: spec.keys,
+        ...(spec.action ? { action: spec.action } : {}),
+      },
+      score: commandMenuMatchScore(
+        spec.title,
+        [spec.where, spec.keys, ...(spec.keywords ?? [])].join(" "),
+        query,
+      ),
     })),
     limit,
   );
@@ -253,11 +316,12 @@ export interface CommandMenuSources {
   tasks: readonly SessionTask[];
   settings: readonly CommandMenuSettingsEntry[];
   messages: readonly UnifiedRecallResult[];
+  shortcuts?: readonly CommandMenuShortcutSpec[];
 }
 
 /**
  * The sections to show. With an empty query "all" lists the actions and the most recent
- * sessions; settings and messages appear once something is typed.
+ * sessions; settings, messages and shortcuts appear once something is typed.
  */
 export function buildCommandMenuSections(sources: CommandMenuSources): CommandMenuSection[] {
   const { scope, query } = sources;
@@ -286,6 +350,17 @@ export function buildCommandMenuSections(sources: CommandMenuSources): CommandMe
       id: "sessions",
       label: hasQuery ? "Sessions" : "Recent sessions",
       items: buildSessionItems(sources.tasks, query, limitFor("sessions")),
+    });
+  }
+  if (wants("shortcuts") && (hasQuery || scope === "shortcuts")) {
+    sections.push({
+      id: "shortcuts",
+      label: "Shortcuts",
+      items: buildShortcutItems(
+        sources.shortcuts ?? [],
+        query,
+        scope === "all" ? ALL_SCOPE_LIMITS.shortcuts : SHORTCUT_SCOPE_LIMIT,
+      ),
     });
   }
   if (wants("messages") && hasQuery) {

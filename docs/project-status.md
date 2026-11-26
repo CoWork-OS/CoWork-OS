@@ -40,6 +40,7 @@ See [Release Notes 0.5.61](release-notes-0.5.61.md).
 - [x] Bots page with responsibilities (trigger, sources, mode, review boundary, budget; saved paused) and a per-bot work view
 - [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, session search, and **Running** / **Needs you** filters
 - [x] Command menu (Cmd/Ctrl+K) over actions, loaded sessions, Settings sections and message text
+- [x] Searchable keyboard shortcut list (Cmd/Ctrl+/), session 1–9 and next-session-that-needs-you shortcuts, mark all sessions as read
 - [x] Opt-in Calm visual style with Library and Build views
 - [x] Sandboxed `cowork-preview://` web previews and the `preview_web_page` tool
 - [x] Interactive answer components, a per-task Cost panel with a $10 default cap, an Automation Library, and **Settings > Add tools**

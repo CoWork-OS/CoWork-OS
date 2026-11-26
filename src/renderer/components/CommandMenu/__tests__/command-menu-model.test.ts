@@ -7,6 +7,7 @@ import {
   buildSessionItems,
   buildSettingItems,
   buildSettingsIndex,
+  buildShortcutItems,
   commandMenuMatchScore,
   flattenCommandMenuSections,
   isCommandMenuShortcut,
@@ -14,6 +15,7 @@ import {
   normalizeCommandMenuQuery,
   type CommandMenuActionSpec,
   type CommandMenuSettingsEntry,
+  type CommandMenuShortcutSpec,
 } from "../command-menu-model";
 
 const actions: CommandMenuActionSpec[] = [
@@ -269,5 +271,51 @@ describe("keyboard", () => {
     expect(isCommandMenuShortcut({ ...base, metaKey: true, shiftKey: true })).toBe(false);
     expect(isCommandMenuShortcut({ ...base, metaKey: true, altKey: true })).toBe(false);
     expect(isCommandMenuShortcut({ ...base, key: "j", metaKey: true })).toBe(false);
+  });
+});
+
+describe("shortcuts", () => {
+  const shortcuts: CommandMenuShortcutSpec[] = [
+    { id: "menu", title: "Open the command menu", keys: "⌘K", where: "Anywhere" },
+    {
+      id: "next",
+      title: "Next session that needs you",
+      keys: "⌘⇧U",
+      where: "Anywhere",
+      keywords: ["unread"],
+      action: { type: "next-attention-session" },
+    },
+    { id: "tab", title: "New tab", keys: "⌘T", where: "Browser" },
+  ];
+
+  it("finds a shortcut by title, keyword, place or keys, and keeps its action", () => {
+    expect(buildShortcutItems(shortcuts, "unread", 10)).toEqual([
+      {
+        kind: "shortcut",
+        id: "shortcut:next",
+        title: "Next session that needs you",
+        subtitle: "Anywhere",
+        shortcut: "⌘⇧U",
+        action: { type: "next-attention-session" },
+      },
+    ]);
+    expect(buildShortcutItems(shortcuts, "browser", 10).map((item) => item.id)).toEqual([
+      "shortcut:tab",
+    ]);
+    expect(buildShortcutItems(shortcuts, "⌘t", 10).map((item) => item.id)).toEqual([
+      "shortcut:tab",
+    ]);
+    expect(buildShortcutItems(shortcuts, "menu", 10)[0]).not.toHaveProperty("action");
+  });
+
+  it("lists every shortcut in the Shortcuts scope, and a few in All once something is typed", () => {
+    const base = { actions: [], tasks: [], settings: [], messages: [], shortcuts };
+    const scoped = buildCommandMenuSections({ ...base, scope: "shortcuts", query: "" });
+    expect(scoped.map((section) => section.id)).toEqual(["shortcuts"]);
+    expect(scoped[0].items).toHaveLength(3);
+    expect(buildCommandMenuSections({ ...base, scope: "all", query: "" })).toEqual([]);
+    expect(
+      buildCommandMenuSections({ ...base, scope: "all", query: "tab" }).map((s) => s.id),
+    ).toEqual(["shortcuts"]);
   });
 });

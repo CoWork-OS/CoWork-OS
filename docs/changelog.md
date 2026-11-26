@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Keyboard shortcut list and session shortcuts**: **Cmd/Ctrl+/** opens every keyboard shortcut in a searchable list (the command menu's new **Shortcuts** tab). **Ctrl+1–9** on macOS, **Alt+1–9** on Windows and Linux, open the session at that place in the sidebar list; **Cmd/Ctrl+Shift+U** goes to the next session waiting on an approval or a question, or finished and unread. The command menu also gains **Mark all sessions as read**. See [Keyboard shortcuts](keyboard-shortcuts.md).
 - **Alert when a task finishes**: a task you started now raises a desktop alert when it finishes or fails while CoWork is in the background. **Settings > System & Security > Menu Bar > When a task finishes** chooses Never, When CoWork is in the background (the default) or Always. Scheduled tasks and bots keep their own notification settings.
 - **Separate alerts for approvals and questions, and an alert sound**: **Approval alerts** and **Question alerts** turn the desktop alert off for each kind of request while the request stays in your inbox. **Alert sound** picks the system default, no sound or, on macOS, a named system sound.
 - **The computer stays awake while a task runs**: CoWork holds off idle sleep while a task is executing and lets go when it ends or waits on you. The display can still sleep, and closing the lid still sleeps. Turn it off with **Keep the computer awake while tasks run**.

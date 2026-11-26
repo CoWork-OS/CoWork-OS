@@ -132,4 +132,14 @@ describe("server-owned queued inputs", () => {
     });
     expect(listQueuedTaskInputs({ ...task, status: "cancelled" }, false, [receipt])).toEqual([]);
   });
+  it("marks a message that waits for the run to finish", () => {
+    const { receipt, runtime } = setup({ waitForTurn: true });
+    const task = { id: "task-1", status: "executing" } as Task;
+    expect(listQueuedTaskInputs(task, false, [receipt], runtime)[0]).toMatchObject({
+      waitsForTurn: true,
+    });
+    expect(listQueuedTaskInputs(task, false, [setup().receipt], runtime)[0]).not.toHaveProperty(
+      "waitsForTurn",
+    );
+  });
 });

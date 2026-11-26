@@ -31,6 +31,7 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".web
 export function sanitizeTaskMessageParams(params: unknown): {
   interactionMode?: import("../../shared/interaction-mode").InteractionModeSelection;
   deliveryMode?: "message" | "follow_up";
+  waitForTurn?: boolean;
   returnOnAccepted?: boolean;
   messageId?: string;
   taskId: string;
@@ -57,6 +58,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
   const deliveryMode =
     p.deliveryMode === "message" || p.deliveryMode === "follow_up" ? p.deliveryMode : undefined;
   const returnOnAccepted = p.returnOnAccepted === true ? true : undefined;
+  const waitForTurn = p.waitForTurn === true ? true : undefined;
   const messageId =
     typeof p.messageId === "string" && p.messageId.trim().length > 0
       ? p.messageId.trim().slice(0, 200)
@@ -158,6 +160,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
     message,
     interactionMode: modeResult.data,
     deliveryMode,
+    ...(waitForTurn ? { waitForTurn } : {}),
     returnOnAccepted,
     messageId,
     expectedTurnId,

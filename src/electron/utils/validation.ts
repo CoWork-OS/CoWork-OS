@@ -582,6 +582,7 @@ export const TaskMessageSchema = z
     message: z.string().min(1).max(MAX_PROMPT_LENGTH),
     interactionMode: InteractionModeSchema.optional(),
     deliveryMode: z.enum(["message", "follow_up"]).optional(),
+    waitForTurn: z.boolean().optional(),
     returnOnAccepted: z.boolean().optional(),
     messageId: z.string().trim().min(1).max(200).optional(),
     expectedTurnId: z.string().trim().min(1).max(200).optional(),

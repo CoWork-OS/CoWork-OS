@@ -7,6 +7,7 @@ import {
   UiDensity,
   CommandOutputStyle,
   ACCENT_COLORS,
+  type RunningSendMode,
 } from "../../shared/types";
 import {
   SUPPORTED_LANGUAGES,
@@ -40,6 +41,8 @@ interface AppearanceSettingsProps {
   onSubAgentStatsEnabledChange: (enabled: boolean) => void;
   autoOpenTurnOutput: boolean;
   onAutoOpenTurnOutputChange: (enabled: boolean) => void;
+  runningSendMode: RunningSendMode;
+  onRunningSendModeChange: (mode: RunningSendMode) => void;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
 }
@@ -69,10 +72,13 @@ export function AppearanceSettings({
   onSubAgentStatsEnabledChange,
   autoOpenTurnOutput,
   onAutoOpenTurnOutputChange,
+  runningSendMode,
+  onRunningSendModeChange,
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
   const [predictionsEnabled, setPredictionsEnabled] = useComposerPredictionsEnabled();
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>("en");
   const isModernVisualTheme = visualTheme === "warm" || visualTheme === "oblivion";
   const formatCompletedDate = (isoString?: string) => {
@@ -137,6 +143,29 @@ export function AppearanceSettings({
           Suggest your next message after a response. Press Tab to accept, then review and send.
           Uses your selected LLM provider and consumes tokens, even when you do not accept a
           suggestion. Your provider's normal usage limits and charges apply.
+        </p>
+        <p className="settings-description">When you press Enter while the agent is working:</p>
+        <label className="settings-checkbox">
+          <input
+            type="radio"
+            name="running-send-mode"
+            checked={runningSendMode === "steer"}
+            onChange={() => onRunningSendModeChange("steer")}
+          />
+          <span>Steer now: the agent reads it at its next step</span>
+        </label>
+        <label className="settings-checkbox">
+          <input
+            type="radio"
+            name="running-send-mode"
+            checked={runningSendMode === "queue"}
+            onChange={() => onRunningSendModeChange("queue")}
+          />
+          <span>Send after this run: it starts a new turn once the agent finishes</span>
+        </label>
+        <p className="settings-description">
+          {isMac ? "⌘Enter" : "Ctrl+Enter"} does the other one. Queued messages can be edited until
+          they start.
         </p>
       </div>
       {/* Visual Style */}

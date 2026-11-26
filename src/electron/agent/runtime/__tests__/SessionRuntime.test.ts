@@ -586,6 +586,39 @@ describe("SessionRuntime", () => {
     expect(harness.runtime.takeNextFollowUpAtTurnBoundary()?.message).toBe("Plan first");
     expect(harness.runtime.takeNextFollowUpAtTurnBoundary()?.message).toBe("Then continue");
   });
+  it("holds a message sent to wait for the run, and keeps later messages behind it", () => {
+    const harness = createHarness();
+    const queue = (message: string, waitForTurn?: boolean) =>
+      harness.runtime.queueFollowUp(
+        message,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        waitForTurn,
+      );
+    queue("Steer now");
+    queue("After this run", true);
+    queue("Then this");
+    expect(harness.runtime.drainPendingFollowUp()?.message).toBe("Steer now");
+    expect(harness.runtime.drainPendingFollowUp()).toBeUndefined();
+    expect(harness.runtime.takeNextFollowUpAtTurnBoundary()).toMatchObject({
+      message: "After this run",
+      waitForTurn: true,
+    });
+    expect(harness.runtime.drainPendingFollowUp()?.message).toBe("Then this");
+  });
   it("preserves scoped Claude context and signed thinking through real snapshot save and restoration", () => {
     const source = createHarness();
     const messages = source.runtime.state.transcript.conversationHistory;

@@ -17,6 +17,7 @@ import {
   TimelineVerbosity,
   COMMAND_OUTPUT_STYLES,
   CommandOutputStyle,
+  RunningSendMode,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -38,6 +39,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   costReceiptEnabled: false,
   subAgentStatsEnabled: false,
   autoOpenTurnOutput: false,
+  runningSendMode: "steer",
   disclaimerAccepted: false,
   onboardingCompleted: false,
   onboardingCompletedAt: undefined,
@@ -159,7 +161,8 @@ export class AppearanceManager {
             typeof stored.homeNextActionsEnabled !== "boolean" ||
             typeof stored.costReceiptEnabled !== "boolean" ||
             typeof stored.subAgentStatsEnabled !== "boolean" ||
-            typeof stored.autoOpenTurnOutput !== "boolean"
+            typeof stored.autoOpenTurnOutput !== "boolean" ||
+            !isValidRunningSendMode(stored.runningSendMode)
           ) {
             needsWrite = true;
           }
@@ -220,6 +223,10 @@ export class AppearanceManager {
         settings.autoOpenTurnOutput = DEFAULT_SETTINGS.autoOpenTurnOutput;
         needsWrite = true;
       }
+      if (!isValidRunningSendMode(settings.runningSendMode)) {
+        settings.runningSendMode = DEFAULT_SETTINGS.runningSendMode;
+        needsWrite = true;
+      }
     } catch (error) {
       console.error("[AppearanceManager] Failed to load settings:", error);
       settings = { ...DEFAULT_SETTINGS };
@@ -245,6 +252,7 @@ export class AppearanceManager {
             costReceiptEnabled: settings.costReceiptEnabled,
             subAgentStatsEnabled: settings.subAgentStatsEnabled,
             autoOpenTurnOutput: settings.autoOpenTurnOutput,
+            runningSendMode: settings.runningSendMode,
           }),
         );
       } catch {
@@ -371,6 +379,9 @@ export class AppearanceManager {
           typeof settings.autoOpenTurnOutput === "boolean"
             ? settings.autoOpenTurnOutput
             : existingSettings.autoOpenTurnOutput,
+        runningSendMode: isValidRunningSendMode(settings.runningSendMode)
+          ? settings.runningSendMode
+          : existingSettings.runningSendMode,
       };
 
       const repository = SecureSettingsRepository.getInstance();
@@ -457,6 +468,10 @@ function isValidTimelineVerbosity(value: unknown): value is TimelineVerbosity {
 
 function isValidCommandOutputStyle(value: unknown): value is CommandOutputStyle {
   return COMMAND_OUTPUT_STYLES.includes(value as CommandOutputStyle);
+}
+
+function isValidRunningSendMode(value: unknown): value is RunningSendMode {
+  return value === "steer" || value === "queue";
 }
 
 function syncDevLogSettingsFile(captureEnabled: boolean): void {

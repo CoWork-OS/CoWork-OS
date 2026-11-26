@@ -2786,6 +2786,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       expectedTurnId?: string;
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       deliveryMode?: "message" | "follow_up";
+      waitForTurn?: boolean;
       returnOnAccepted?: boolean;
       messageId?: string;
       permissionMode?: PermissionMode;
@@ -2804,6 +2805,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}),
       ...(options?.interactionMode ? { interactionMode: options.interactionMode } : {}),
       ...(options?.deliveryMode ? { deliveryMode: options.deliveryMode } : {}),
+      ...(options?.waitForTurn ? { waitForTurn: true } : {}),
       ...(options?.returnOnAccepted ? { returnOnAccepted: true } : {}),
       ...(options?.messageId ? { messageId: options.messageId } : {}),
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
@@ -7182,6 +7184,7 @@ export interface ElectronAPI {
     homeNextActionsEnabled?: boolean;
     costReceiptEnabled?: boolean;
     autoOpenTurnOutput?: boolean;
+    runningSendMode?: "steer" | "queue";
     subAgentStatsEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
@@ -7216,6 +7219,7 @@ export interface ElectronAPI {
     homeNextActionsEnabled?: boolean;
     costReceiptEnabled?: boolean;
     autoOpenTurnOutput?: boolean;
+    runningSendMode?: "steer" | "queue";
     subAgentStatsEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;

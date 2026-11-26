@@ -1612,6 +1612,7 @@ export class SessionRuntime {
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
     textProvenance?: TaskFollowUpInput["textProvenance"],
     notificationKind?: TaskFollowUpInput["notificationKind"],
+    waitForTurn?: boolean,
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1631,6 +1632,7 @@ export class SessionRuntime {
       // Kept with the queued item so a drain after this turn still knows who wrote it.
       ...(textProvenance !== undefined ? { textProvenance } : {}),
       ...(notificationKind !== undefined ? { notificationKind } : {}),
+      ...(waitForTurn ? { waitForTurn: true } : {}),
     });
     this.saveSnapshot();
   }
@@ -1757,6 +1759,9 @@ export class SessionRuntime {
     // Only a change in user preference requires a new turn. Keep ordinary
     // same-mode steering available, without letting later messages jump the queue.
     const pending = this.state.queues.pendingFollowUps[0];
+    // The user asked this message to wait for the run to finish: the turn-boundary drain
+    // starts it as a new turn. Messages sent after it wait too, so none overtakes it.
+    if (pending?.waitForTurn) return undefined;
     const requested = pending?.interactionMode;
     const active = getInteractionModeSelection(this.deps.getTask().agentConfig);
     if (

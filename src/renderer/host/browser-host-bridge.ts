@@ -2235,6 +2235,9 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
     "permissionMode",
     "shellAccess",
     "expectedTurnId",
+    // Accepted but not forwarded: the browser session's follow-up path always steers the
+    // running turn, so a message sent to wait is delivered at the next step instead.
+    "waitForTurn",
     // Accepted so approved answer actions can be sent, but not forwarded: the browser
     // session does not carry the surface-action note (desktop only).
     "surfaceOrigin",
@@ -2242,6 +2245,7 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
   if (Object.keys(options).some((key) => !allowed.has(key))) return false;
   if (options.returnOnAccepted !== undefined && options.returnOnAccepted !== true) return false;
   if (options.deliveryMode !== undefined && options.deliveryMode !== "follow_up") return false;
+  if (options.waitForTurn !== undefined && typeof options.waitForTurn !== "boolean") return false;
   if (options.messageId !== undefined && typeof options.messageId !== "string") return false;
   if (options.accessProfileId !== undefined && typeof options.accessProfileId !== "string")
     return false;
@@ -2424,6 +2428,9 @@ function sanitizeBrowserAppearance(value: Record<string, unknown>): Partial<Appe
   }
   if (typeof value.autoOpenTurnOutput === "boolean") {
     result.autoOpenTurnOutput = value.autoOpenTurnOutput;
+  }
+  if (value.runningSendMode === "steer" || value.runningSendMode === "queue") {
+    result.runningSendMode = value.runningSendMode;
   }
   if (typeof value.subAgentStatsEnabled === "boolean") {
     result.subAgentStatsEnabled = value.subAgentStatsEnabled;

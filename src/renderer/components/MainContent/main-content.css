@@ -12142,6 +12142,13 @@ button.collab-timeline-thought-agent:hover {
   margin-bottom: 8px;
 }
 
+/* While the agent works: what Enter and Cmd/Ctrl+Enter do with a new message. */
+.composer-running-send-hint {
+  margin: 6px 12px 0;
+  font-size: 11px;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+}
+
 @container (max-width: 900px) {
   .density-focused .input-actions .model-dropdown-container-label .model-dropdown {
     right: -48px;

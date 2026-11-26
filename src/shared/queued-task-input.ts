@@ -4,6 +4,8 @@ export interface QueuedTaskInput {
   kind: "initial" | "follow_up";
   message: string;
   revision: number;
+  /** Sent to wait until the current run finishes rather than steer it. */
+  waitsForTurn?: boolean;
 }
 
 export interface EditQueuedTaskInput {

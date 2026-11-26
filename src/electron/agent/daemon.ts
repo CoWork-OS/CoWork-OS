@@ -815,6 +815,7 @@ type DaemonFollowUpOptions = Pick<
   | "inReplyToTaskId"
   | "surfaceOrigin"
   | "textProvenance"
+  | "waitForTurn"
 > & {
   /** Internal lifecycle fence for process notifications; never accepted from renderer input. */
   admissionGuard?: () => void;
@@ -18154,10 +18155,12 @@ export class AgentDaemon extends EventEmitter {
         effectiveOptions?.integrationMentions ?? effectiveTask.agentConfig?.integrationMentions;
       const deliveryMode = effectiveOptions?.deliveryMode || "follow_up";
       const durableQueueReceipt = Boolean(effectiveOptions?.messageId);
+      const waitForTurn = effectiveOptions?.waitForTurn === true;
       this.logEvent(taskId, "agent_follow_up_scheduled", {
         message,
         ...(effectiveOptions?.messageId ? { messageId: effectiveOptions.messageId } : {}),
         deliveryMode,
+        ...(waitForTurn ? { waitForTurn: true } : {}),
         deliveryStatus: "queued",
         acceptedAt,
         queuedAt: acceptedAt,
@@ -18196,6 +18199,7 @@ export class AgentDaemon extends EventEmitter {
           : {}),
         ...(effectiveOptions?.messageId ? { messageId: effectiveOptions.messageId } : {}),
         deliveryMode,
+        ...(waitForTurn ? { waitForTurn: true } : {}),
         ...(durableQueueReceipt ? { deliveryStatus: "queued" } : {}),
         acceptedAt,
         queuedAt: acceptedAt,
@@ -18249,6 +18253,7 @@ export class AgentDaemon extends EventEmitter {
         // result text the user did not type; such an item does not carry their provenance.
         effectiveMessage === message ? effectiveOptions?.textProvenance : undefined,
         effectiveOptions?.notificationKind,
+        waitForTurn,
       );
       // queueFollowUp snapshots the pending item; include that row in the return
       // boundary so the accepted queue item survives an immediate restart.

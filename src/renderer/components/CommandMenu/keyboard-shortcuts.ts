@@ -107,6 +107,13 @@ const SHORTCUTS: readonly ShortcutDefinition[] = [
     keywords: ["line break", "return"],
   },
   {
+    id: "send-other-way",
+    title: "While the agent works: send the other way (steer now, or after this run)",
+    keys: mod("⌘Enter", "Ctrl+Enter"),
+    where: "Composer",
+    keywords: ["queue", "steer", "later", "after", "running", "interrupt"],
+  },
+  {
     id: "accept-suggestion",
     title: "Accept the suggested prompt",
     keys: same("Tab"),

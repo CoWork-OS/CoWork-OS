@@ -15,6 +15,20 @@ Press **Cmd+/** (macOS) or **Ctrl+/** (Windows, Linux, and the app in a browser)
 - **Next session that needs you** opens the next session, in sidebar order, that waits on an approval or a question, or that finished while you were elsewhere and is still marked unread. It wraps to the top, and also reaches waiting sessions the sidebar is not showing. If nothing waits, a short notice says so.
 - **Mark all sessions as read** (command menu action, no shortcut) clears the unread dot on every finished session. Sessions waiting on an approval or a question stay marked until you answer.
 
+## Attaching the window you are looking at (macOS)
+
+From any app, press **Cmd+Shift+2**. CoWork takes a picture of the window in front, comes forward, and attaches two files to the message box of the open session (or a new one):
+
+- the picture of the window, and
+- a short note with the app, the window title, the page address for Safari, Chrome, Edge, Brave and Arc, and the text read from the picture when Tesseract OCR is installed.
+
+Nothing is sent to a model until you type your question and send. Remove either attachment first if you don't want it sent.
+
+- The first capture asks for **Screen Recording** permission (System Settings > Privacy & Security > Screen & System Audio Recording). Without it, CoWork says so and attaches nothing.
+- Pressing it while CoWork itself is in front attaches nothing; switch to the window first.
+- Turn the shortcut off in **Settings > System & Security > Menu Bar > Capture the window in front with ⌘⇧2**. If another app already uses Cmd+Shift+2, CoWork can't register it.
+- Windows and Linux don't have it yet.
+
 ## Sending while the agent works
 
 While the agent is working, a message you send can go two ways:

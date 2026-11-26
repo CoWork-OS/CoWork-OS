@@ -47,6 +47,17 @@ describe("normalizeTraySettings", () => {
     expect(s.notificationSound).toBe("default");
     expect(s.preventSleepWhileRunning).toBe(true);
     expect(s.confirmQuitWhileRunning).toBe(true);
+    expect(s.windowCaptureShortcut).toBe(true);
+  });
+
+  it("keeps the window-capture shortcut off once turned off, and ignores non-booleans", () => {
+    expect(normalizeTraySettings({ windowCaptureShortcut: false }).windowCaptureShortcut).toBe(
+      false,
+    );
+    expect(
+      normalizeTraySettings({ windowCaptureShortcut: "no" } as unknown as Partial<TraySettings>)
+        .windowCaptureShortcut,
+    ).toBe(true);
   });
 
   it("keeps valid alert, sleep and quit choices", () => {

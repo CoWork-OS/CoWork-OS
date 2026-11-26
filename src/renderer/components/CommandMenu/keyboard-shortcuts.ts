@@ -83,6 +83,13 @@ const SHORTCUTS: readonly ShortcutDefinition[] = [
     keywords: ["global", "hotkey", "quick input"],
   },
   {
+    id: "window-capture",
+    title: "Attach the window in front to your message",
+    keys: { mac: "⌘⇧2" },
+    where: "From any app",
+    keywords: ["screenshot", "capture", "window", "appshot", "screen", "attach"],
+  },
+  {
     id: "rail-reorder",
     title: "Move a sidebar destination up or down",
     keys: mod("⌥↑ / ⌥↓", "Alt+↑ / Alt+↓"),

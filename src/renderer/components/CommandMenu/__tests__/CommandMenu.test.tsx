@@ -35,7 +35,7 @@ describe("CommandMenu", () => {
     expect(html).toContain('role="combobox"');
     expect(html).toContain('aria-activedescendant="command-menu-action:new"');
     expect(html).toMatch(/aria-selected="true"[^>]*class="command-menu-item is-selected"/);
-    for (const scope of ["All", "Actions", "Sessions", "Settings", "Messages"]) {
+    for (const scope of ["All", "Actions", "Sessions", "Settings", "Messages", "Shortcuts"]) {
       expect(html).toContain(`>${scope}</button>`);
     }
   });
@@ -49,6 +49,18 @@ describe("CommandMenu", () => {
     expect(html).toContain("Quarterly report");
     // Settings rows wait for a query in the combined view.
     expect(html).not.toContain("Voice Mode");
+  });
+
+  it("opens on the Shortcuts scope with each shortcut's keys", () => {
+    const html = render({
+      initialScope: "shortcuts",
+      shortcuts: [{ id: "tab", title: "New tab", keys: "⌘T", where: "Browser" }],
+    });
+    expect(html).toMatch(/aria-selected="true"[^>]*>Shortcuts<\/button>/);
+    expect(html).toContain("New tab");
+    expect(html).toContain("Browser");
+    expect(html).toContain("⌘T");
+    expect(html).not.toContain("Quarterly report");
   });
 
   it("says so when there is nothing to show", () => {
@@ -66,6 +78,13 @@ describe("command menu wiring", () => {
     const sidebar = read("components/Sidebar.tsx");
     expect(sidebar).not.toContain("focusSessionSearch");
     expect(sidebar).not.toContain("aria-keyshortcuts");
+  });
+
+  it("passes the sidebar's session order to the keyboard navigation", () => {
+    expect(read("App.tsx")).toContain("onSessionOrderChange={handleSidebarSessionOrderChange}");
+    expect(read("components/Sidebar.tsx")).toContain(
+      "sessionOrderFromSidebarRows(sidebarVirtualRows)",
+    );
   });
 
   it("remounts Settings so a section picked while Settings is open takes effect", () => {

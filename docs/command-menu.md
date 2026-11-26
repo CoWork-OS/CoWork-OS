@@ -10,8 +10,11 @@ Press **Cmd+K** (macOS) or **Ctrl+K** (Windows, Linux, and the app in a browser)
 | Sessions | Sessions already loaded in the app, matched by title, prompt, result summary or ID | The session |
 | Settings | Every Settings section, matched by its name and the same search terms the Settings search box uses | Settings on that section |
 | Messages | Message text in the current workspace | The session the message is in |
+| Shortcuts | Every keyboard shortcut, matched by name, where it works or its keys | Runs it, when the row is an action; otherwise reference only |
 
-With nothing typed, the menu lists the actions and your most recently updated sessions. Type to search everything at once; the combined view shows a few rows per kind. The tabs at the bottom (**All**, **Actions**, **Sessions**, **Settings**, **Messages**) narrow the search to one kind and show up to 50 rows.
+With nothing typed, the menu lists the actions and your most recently updated sessions. Type to search everything at once; the combined view shows a few rows per kind. The tabs at the bottom (**All**, **Actions**, **Sessions**, **Settings**, **Messages**, **Shortcuts**) narrow the search to one kind and show up to 50 rows (the whole list for Shortcuts). **Cmd/Ctrl+/** opens the menu straight on **Shortcuts**; see [Keyboard shortcuts](keyboard-shortcuts.md).
+
+Actions include **Next session that needs you**, **Mark all sessions as read** and **Keyboard shortcuts**.
 
 ## Keys
 

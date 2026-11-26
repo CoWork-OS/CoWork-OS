@@ -45,7 +45,15 @@ import {
   isCommandMenuShortcut,
   type CommandMenuAction,
   type CommandMenuActionSpec,
+  type CommandMenuScope,
 } from "./components/CommandMenu/command-menu-model";
+import {
+  buildKeyboardShortcuts,
+  isNextAttentionShortcut,
+  isShortcutListShortcut,
+  sessionPositionFromShortcut,
+} from "./components/CommandMenu/keyboard-shortcuts";
+import { nextAttentionSessionId, sessionIdAtPosition } from "./utils/session-navigation";
 import {
   EMPTY_HOME_SESSIONS,
   buildHomeSessions,
@@ -2384,6 +2392,14 @@ export function App() {
   // Bumped to remount Settings on a new tab while it is already open; it reads the tab once.
   const [settingsNavKey, setSettingsNavKey] = useState(0);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  // The scope the menu opens on, and a counter that remounts it on every open.
+  const [commandMenuScope, setCommandMenuScope] = useState<CommandMenuScope>("all");
+  const [commandMenuOpenCount, setCommandMenuOpenCount] = useState(0);
+  // Sessions in the sidebar list, top to bottom, for Ctrl/Alt+1–9 and "next that needs you".
+  const sidebarSessionOrderRef = useRef<readonly string[]>([]);
+  const handleSidebarSessionOrderChange = useCallback((taskIds: readonly string[]) => {
+    sidebarSessionOrderRef.current = taskIds;
+  }, []);
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
   const [focusAutomationRoutine, setFocusAutomationRoutine] = useState<{ id: string } | null>(null);
   const [focusAutomationOwner, setFocusAutomationOwner] = useState<{
@@ -8136,20 +8152,76 @@ export function App() {
         keywords: ["open", "show", "navigate"],
         action: { type: "navigate" as const, destination: destination.id },
       })),
+      {
+        id: "next-attention-session",
+        title: "Next session that needs you",
+        keywords: ["unread", "attention", "waiting", "approval", "question", "finished"],
+        shortcut: isMac ? "⌘⇧U" : "Ctrl+Shift+U",
+        action: { type: "next-attention-session" },
+      },
+      {
+        id: "mark-all-read",
+        title: "Mark all sessions as read",
+        keywords: ["clear", "unread", "dots", "seen"],
+        action: { type: "mark-all-read" },
+      },
+      {
+        id: "show-shortcuts",
+        title: "Keyboard shortcuts",
+        keywords: ["keys", "hotkeys", "help"],
+        shortcut: isMac ? "⌘/" : "Ctrl+/",
+        action: { type: "show-shortcuts" },
+      },
     ];
   }, [sidebarDestinationContext]);
+  const keyboardShortcuts = useMemo(
+    () =>
+      buildKeyboardShortcuts(typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)),
+    [],
+  );
   const commandMenuTasks = useMemo(
     () => tasks.filter((task) => !task.parentTaskId && shouldShowTaskInSidebarSessions(task)),
     [tasks],
   );
   const closeCommandMenu = useCallback(() => setCommandMenuOpen(false), []);
+  const openCommandMenu = useCallback((scope: CommandMenuScope) => {
+    setCommandMenuScope(scope);
+    setCommandMenuOpenCount((count) => count + 1);
+    setCommandMenuOpen(true);
+  }, []);
+  // Waiting sessions (approvals, questions) and finished ones not yet opened.
+  const attentionWaitingIdsRef = useRef<string[]>([]);
+  attentionWaitingIdsRef.current = [...attentionWaiting.keys(), ...unseenCompletedTaskIds];
+  const goToNextAttentionSession = useCallback(() => {
+    const next = nextAttentionSessionId(
+      sidebarSessionOrderRef.current,
+      attentionWaitingIdsRef.current,
+      currentViewRef.current === "main" ? selectedTaskIdRef.current : null,
+    );
+    if (next) {
+      void openTaskById(next);
+      return;
+    }
+    addToastRef.current({
+      type: "info",
+      title:
+        attentionWaitingIdsRef.current.length > 0
+          ? "No other session needs you"
+          : "No sessions need you",
+      durationMs: 2500,
+    });
+  }, [openTaskById]);
   const handleCommandMenuAction = useCallback(
     (action: CommandMenuAction) => {
       if (action.type === "new-session") void handleNewSessionRef.current();
       else if (action.type === "open-settings") setCurrentView("settings");
+      else if (action.type === "next-attention-session") goToNextAttentionSession();
+      else if (action.type === "mark-all-read") setUnseenCompletedTaskIds([]);
+      // The menu closes after running a row; reopen it on the shortcut list.
+      else if (action.type === "show-shortcuts") queueMicrotask(() => openCommandMenu("shortcuts"));
       else handleSidebarNavigate(action.destination as SidebarDestinationId);
     },
-    [handleSidebarNavigate],
+    [goToNextAttentionSession, handleSidebarNavigate, openCommandMenu],
   );
   const handleCommandMenuOpenSettingsTab = useCallback((tab: string) => {
     setSettingsTab(tab as SettingsTab);
@@ -8169,11 +8241,47 @@ export function App() {
         return;
       }
       event.preventDefault();
-      setCommandMenuOpen((open) => !open);
+      if (document.querySelector(".command-menu")) setCommandMenuOpen(false);
+      else openCommandMenu("all");
     };
     window.addEventListener("keydown", toggleCommandMenu);
     return () => window.removeEventListener("keydown", toggleCommandMenu);
-  }, []);
+  }, [openCommandMenu]);
+  // Cmd/Ctrl+/ shortcut list, Cmd/Ctrl+Shift+U next session that needs you, and
+  // Ctrl+1–9 (macOS) / Alt+1–9 (elsewhere) for the session at that place in the sidebar.
+  useEffect(() => {
+    const isMac = /Mac/i.test(navigator.platform);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      const menuOpen = !!document.querySelector(".command-menu");
+      if (isShortcutListShortcut(event)) {
+        if (
+          !menuOpen &&
+          document.querySelector('[aria-modal="true"], dialog[open], .modal-overlay')
+        ) {
+          return;
+        }
+        event.preventDefault();
+        openCommandMenu("shortcuts");
+        return;
+      }
+      // The rest act on the page behind, so a dialog (the menu included) blocks them.
+      if (document.querySelector('[aria-modal="true"], dialog[open], .modal-overlay')) return;
+      if (isNextAttentionShortcut(event, isMac)) {
+        event.preventDefault();
+        goToNextAttentionSession();
+        return;
+      }
+      const position = sessionPositionFromShortcut(event, isMac);
+      if (position === null) return;
+      const taskId = sessionIdAtPosition(sidebarSessionOrderRef.current, position);
+      if (!taskId) return;
+      event.preventDefault();
+      void openTaskById(taskId);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [goToNextAttentionSession, openCommandMenu, openTaskById]);
 
   const handleSelectBotConversation = useCallback(
     async (conversationId: string) => {
@@ -8883,6 +8991,7 @@ export function App() {
                 onTasksChanged={refreshTaskLists}
                 onLoadMoreTasks={loadMoreTasks}
                 onProjectWorkspaceIdsChange={handleSidebarProjectWorkspaceIdsChange}
+                onSessionOrderChange={handleSidebarSessionOrderChange}
                 hasMoreTasks={hasMoreTasks}
                 uiDensity={uiDensity}
               />
@@ -9395,6 +9504,9 @@ export function App() {
       {commandMenuOpen && (
         <Suspense fallback={null}>
           <CommandMenu
+            key={commandMenuOpenCount}
+            initialScope={commandMenuScope}
+            shortcuts={keyboardShortcuts}
             tasks={commandMenuTasks}
             workspaceId={currentWorkspace?.id}
             actions={commandMenuActions}

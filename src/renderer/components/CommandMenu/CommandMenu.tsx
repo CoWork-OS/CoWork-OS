@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   ArrowRight,
+  Keyboard,
   MessageSquare,
   Search,
   Settings as SettingsIcon,
@@ -21,6 +22,7 @@ import {
   type CommandMenuItem,
   type CommandMenuScope,
   type CommandMenuSettingsEntry,
+  type CommandMenuShortcutSpec,
 } from "./command-menu-model";
 import "./command-menu.css";
 
@@ -34,6 +36,10 @@ export interface CommandMenuProps {
   /** Message search covers this workspace. Without one the Messages scope stays empty. */
   workspaceId?: string;
   actions: readonly CommandMenuActionSpec[];
+  /** The keyboard shortcut list, for the Shortcuts scope. */
+  shortcuts?: readonly CommandMenuShortcutSpec[];
+  /** Scope to open on. "Keyboard shortcuts" opens the menu on the Shortcuts scope. */
+  initialScope?: CommandMenuScope;
   /** Settings sections, for hosts that already have them. Loaded on open otherwise. */
   settingsIndex?: readonly CommandMenuSettingsEntry[];
   onClose: () => void;
@@ -49,6 +55,7 @@ function ItemIcon({ kind }: { kind: CommandMenuItem["kind"] }) {
   if (kind === "session") return <MessageSquare {...props} />;
   if (kind === "setting") return <SettingsIcon {...props} />;
   if (kind === "message") return <TextSearch {...props} />;
+  if (kind === "shortcut") return <Keyboard {...props} />;
   return <ArrowRight {...props} />;
 }
 
@@ -60,6 +67,8 @@ export function CommandMenu({
   tasks,
   workspaceId,
   actions,
+  shortcuts,
+  initialScope = "all",
   settingsIndex: providedSettingsIndex,
   onClose,
   onRunAction,
@@ -68,7 +77,7 @@ export function CommandMenu({
   onOpenSettingsTab,
 }: CommandMenuProps) {
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<CommandMenuScope>("all");
+  const [scope, setScope] = useState<CommandMenuScope>(initialScope);
   const [activeIndex, setActiveIndex] = useState(0);
   const [loadedSettingsIndex, setLoadedSettingsIndex] = useState<
     readonly CommandMenuSettingsEntry[]
@@ -141,8 +150,16 @@ export function CommandMenu({
 
   const sections = useMemo(
     () =>
-      buildCommandMenuSections({ scope, query, actions, tasks, settings: settingsIndex, messages }),
-    [scope, query, actions, tasks, settingsIndex, messages],
+      buildCommandMenuSections({
+        scope,
+        query,
+        actions,
+        tasks,
+        settings: settingsIndex,
+        messages,
+        shortcuts,
+      }),
+    [scope, query, actions, tasks, settingsIndex, messages, shortcuts],
   );
   const items = useMemo(() => flattenCommandMenuSections(sections), [sections]);
   const selectedIndex = Math.min(activeIndex, Math.max(items.length - 1, 0));
@@ -160,7 +177,11 @@ export function CommandMenu({
   }, [selectedItem]);
 
   const runItem = (item: CommandMenuItem) => {
-    if (item.kind === "action") onRunAction(item.action);
+    // A shortcut row without an action is reference only: the menu stays open.
+    if (item.kind === "shortcut") {
+      if (!item.action) return;
+      onRunAction(item.action);
+    } else if (item.kind === "action") onRunAction(item.action);
     else if (item.kind === "session") onOpenSession(item.taskId);
     else if (item.kind === "message") onOpenMessageHit(item.taskId);
     else onOpenSettingsTab(item.tab);
@@ -256,7 +277,7 @@ export function CommandMenu({
                         <span className="command-menu-item-subtitle">{item.subtitle}</span>
                       )}
                     </span>
-                    {item.kind === "action" && item.shortcut && (
+                    {(item.kind === "action" || item.kind === "shortcut") && item.shortcut && (
                       <kbd className="command-menu-item-shortcut">{item.shortcut}</kbd>
                     )}
                   </button>

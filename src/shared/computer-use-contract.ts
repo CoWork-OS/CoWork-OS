@@ -30,6 +30,18 @@ export interface ComputerUseAutomationSettings {
   nativeComputerUseMode: NativeComputerUseMode;
 }
 
+/**
+ * An app computer use may control without asking, in sessions the user started. Added when the
+ * user answers "Always allow" for it; removed in Settings > Built-in Tools > Computer use.
+ */
+export interface AlwaysAllowedComputerUseApp {
+  /** macOS bundle identifier, such as `com.apple.Safari`. */
+  bundleId: string;
+  /** The name the approval showed, such as "Safari". */
+  name: string;
+  addedAt: number;
+}
+
 export function normalizeBrowserAutomationMode(value: unknown): BrowserAutomationMode {
   return value === "visible" || value === "ask" ? value : "background";
 }

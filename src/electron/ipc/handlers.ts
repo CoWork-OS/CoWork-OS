@@ -541,6 +541,7 @@ import { CoWorkHostProvider } from "../mcp/host/CoWorkHostProvider";
 import { SecureMcpTunnelSettingsManager } from "../tunnels/settings";
 import { SecureMcpTunnelSupervisor } from "../tunnels/TunnelSupervisor";
 import { BuiltinToolsSettingsManager } from "../agent/tools/builtin-settings";
+import { ComputerUseAppAllowlist, isValidBundleId } from "../computer-use/always-allowed-apps";
 import {
   ChronicleCaptureService,
   ChronicleMemoryService,
@@ -6404,7 +6405,8 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.INPUT_REQUEST_RESPOND, async (_, data) => {
     const validated = validateInput(InputRequestResponseSchema, data, "input request response");
-    return agentDaemon.respondToInputRequest(validated);
+    // Answered in this app's window: the origin is set here, never by the renderer.
+    return agentDaemon.respondToInputRequest({ ...validated, origin: "desktop" });
   });
 
   // Session auto-approve handlers
@@ -11821,6 +11823,17 @@ function setupMCPHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.BUILTIN_TOOLS_GET_CATEGORIES, async () => {
     return BuiltinToolsSettingsManager.getToolsByCategory();
+  });
+
+  // The renderer can list and remove always-allowed apps, never add one: an app is added only
+  // when the user answers "Always allow" on a computer use approval (AgentDaemon).
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_ALLOWED_APPS_LIST, async () => {
+    return ComputerUseAppAllowlist.list();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_ALLOWED_APPS_REMOVE, async (_, rawBundleId: unknown) => {
+    if (!isValidBundleId(rawBundleId)) throw new Error("A valid app bundle ID is required");
+    return ComputerUseAppAllowlist.remove(rawBundleId);
   });
 
   // Chronicle IPC input validation: renderer data is untrusted, so every

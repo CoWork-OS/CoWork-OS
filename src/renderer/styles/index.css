@@ -11587,6 +11587,81 @@ a,
   color: var(--color-text-secondary);
 }
 
+.builtin-tool-allowed-apps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.builtin-tool-allowed-apps-empty {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.builtin-tool-allowed-apps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.builtin-tool-allowed-app {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.builtin-tool-allowed-app-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.builtin-tool-allowed-app-name {
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.builtin-tool-allowed-app-id {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.builtin-tool-allowed-app-remove {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.builtin-tool-allowed-app-remove:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.builtin-tool-allowed-app-remove:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.builtin-tool-allowed-apps-error {
+  font-size: 11px;
+  color: var(--color-error);
+}
+
 .builtin-tool-timeout-input {
   width: 110px;
   padding: 4px 6px;

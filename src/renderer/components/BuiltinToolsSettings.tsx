@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { AlwaysAllowedAppsList } from "./AlwaysAllowedAppsList";
 import {
   FileText,
   Globe,
@@ -645,6 +646,8 @@ export function BuiltinToolsSettings() {
                       <option value="visible">Visible control</option>
                     </select>
                   </div>
+
+                  <AlwaysAllowedAppsList disabled={!config.enabled} />
                 </div>
               )}
 

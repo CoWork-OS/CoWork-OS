@@ -182,6 +182,8 @@ export type SettingsCategory =
   | "browser-sessions"
   // Computer Use backend that drives a Cua Space; holds its bearer token.
   | "cua-space"
+  // Apps computer use may control without asking in sessions the user started.
+  | "computer-use-apps"
   // Opt-in Camofox browser provider (loopback server); holds its access and API keys.
   | "camofox"
   | "adaptive-style-engine"

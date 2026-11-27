@@ -41,6 +41,7 @@ See [Release Notes 0.5.61](release-notes-0.5.61.md).
 - [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, session search, and **Running** / **Needs you** filters
 - [x] Command menu (Cmd/Ctrl+K) over actions, loaded sessions, Settings sections and message text
 - [x] Searchable keyboard shortcut list (Cmd/Ctrl+/), session 1–9 and next-session-that-needs-you shortcuts, mark all sessions as read
+- [x] Always allowed apps for computer use (your sessions only; never list for password managers, terminals, settings)
 - [x] Undo a turn's file changes from its file line (file tools only; blocked when a file changed after the turn)
 - [x] Usage Insights split by kind of work (your sessions, sub-agents, automations, bots, API and hooks, background) and top sessions
 - [x] Sidebar Group by activity: Needs you first, then by day across projects, with each finished session's result line

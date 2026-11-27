@@ -28,6 +28,7 @@ import type {
   SandboxType,
   WatchdogSettings,
 } from "../shared/types";
+import type { AlwaysAllowedComputerUseApp } from "../shared/computer-use-contract";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   CuaSpaceConnectionResult,
@@ -3791,6 +3792,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) =>
     ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_SAVE_SETTINGS, settings),
   getBuiltinToolsCategories: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_CATEGORIES),
+  listAlwaysAllowedApps: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_ALLOWED_APPS_LIST) as Promise<
+      AlwaysAllowedComputerUseApp[]
+    >,
+  removeAlwaysAllowedApp: (bundleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_ALLOWED_APPS_REMOVE, bundleId) as Promise<
+      AlwaysAllowedComputerUseApp[]
+    >,
   getChronicleSettings: () => ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_GET_SETTINGS),
   saveChronicleSettings: (settings: Partial<ChronicleSettings>) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_SAVE_SETTINGS, settings),
@@ -7631,6 +7640,9 @@ export interface ElectronAPI {
   // Built-in Tools Settings
   getBuiltinToolsSettings: () => Promise<BuiltinToolsSettings>;
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => Promise<{ success: boolean }>;
+  /** Apps computer use controls without asking in sessions the user started. */
+  listAlwaysAllowedApps: () => Promise<AlwaysAllowedComputerUseApp[]>;
+  removeAlwaysAllowedApp: (bundleId: string) => Promise<AlwaysAllowedComputerUseApp[]>;
   getBuiltinToolsCategories: () => Promise<Record<string, string[]>>;
   getChronicleSettings: () => Promise<ChronicleSettings>;
   saveChronicleSettings: (

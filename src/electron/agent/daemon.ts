@@ -262,6 +262,11 @@ import {
 } from "./resource-claims";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import {
+  ComputerUseAppAllowlist,
+  computerUseAlwaysAllowCandidate,
+  type AlwaysAllowAppCandidate,
+} from "../computer-use/always-allowed-apps";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
 import { findUnfinishedBotUserTurn, findUnfinishedUserFollowUp } from "../agents/bot-turn-recovery";
 import {
@@ -303,6 +308,7 @@ import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
   canOfferAssistantAlwaysAllow,
+  getAlwaysAllowApp,
   isHighImpactApprovalDecision,
   isAssistantApprovalInputRequest,
   findAssistantApprovalOptionLabel,
@@ -8959,10 +8965,20 @@ export class AgentDaemon extends EventEmitter {
           ? parseAssistantApprovalAction(response.answers, isResponsibilityActionReview)
           : "deny_once";
       // Answers come from the renderer: an "Always allow" the card never offered is refused.
-      const action =
+      let action: ApprovalResponseAction =
         requestedAction === "allow_workspace" && !canOfferAssistantAlwaysAllow(details)
           ? "deny_once"
           : requestedAction;
+      // Always allowing an app is a standing grant: only an answer given in this app's own
+      // window adds it. From the browser app or another client it allows this once.
+      if (
+        action === "allow_workspace" &&
+        getAlwaysAllowApp(details) &&
+        response.status === "submitted" &&
+        (response as { origin?: string }).origin !== "desktop"
+      ) {
+        action = "allow_once";
+      }
       let approved = action !== "deny_once";
       if (validateDecision) approved = await validateDecision(approved, action);
       if (signal?.aborted) {
@@ -9639,6 +9655,14 @@ export class AgentDaemon extends EventEmitter {
       details && typeof details === "object" && !Array.isArray(details)
         ? { ...details }
         : { value: details };
+    // Only this method marks a request as one the card may offer "Always allow <app>" for.
+    delete enrichedDetails.alwaysAllowApp;
+    const alwaysAllowApp = computerUseAlwaysAllowCandidate(
+      this.taskRepo,
+      taskId,
+      type,
+      enrichedDetails,
+    );
     const acceptCreatedApproval = (approval: ApprovalRequest): boolean => {
       try {
         return opts?.onApprovalCreated?.(approval) !== false;
@@ -9698,8 +9722,28 @@ export class AgentDaemon extends EventEmitter {
       });
       return false;
     }
+    // An app the user always allowed is controlled without asking, after every deny rule,
+    // profile ceiling and bot gate above has had its say, and only in the user's own sessions.
+    if (
+      alwaysAllowApp &&
+      !isResponsibilityActionReview &&
+      !opts?.noStandingApproval &&
+      permission.evaluation.decision === "ask" &&
+      ComputerUseAppAllowlist.has(alwaysAllowApp.bundleId)
+    ) {
+      permission.runtime?.recordPermissionSuccess(permission.trackingKey);
+      this.logEvent(taskId, "log", {
+        type: "tool_authorization",
+        decision: "allow",
+        reason: "always_allowed_app",
+        approvalType: type,
+        bundleId: alwaysAllowApp.bundleId,
+      });
+      return true;
+    }
     const permissionDetails = {
       ...enrichedDetails,
+      ...(alwaysAllowApp ? { alwaysAllowApp } : {}),
       permissionPrompt: permission.promptDetails,
       ...(permission.authorizationKey
         ? { authorization: { version: 1, key: permission.authorizationKey } }
@@ -10072,7 +10116,23 @@ export class AgentDaemon extends EventEmitter {
         // the dialog's workspace scope. It runs only after the decision passed validation, so a
         // stale or superseded card never leaves a rule behind. A failed save keeps the one-time
         // allow: the person approved this operation either way.
-        if (approved && chosenAction === "allow_workspace") {
+        const approvedApp = (permissionDetails as { alwaysAllowApp?: AlwaysAllowAppCandidate })
+          .alwaysAllowApp;
+        if (approved && chosenAction === "allow_workspace" && approvedApp) {
+          // "Always allow" on a computer use card puts the app on the always-allowed list.
+          try {
+            ComputerUseAppAllowlist.add(approvedApp.bundleId, approvedApp.name);
+            this.logEvent(taskId, "log", {
+              type: "tool_authorization",
+              decision: "allow",
+              reason: "always_allowed_app_added",
+              approvalId: approval.id,
+              bundleId: approvedApp.bundleId,
+            });
+          } catch (error) {
+            log.warn("Failed to always allow an app:", error);
+          }
+        } else if (approved && chosenAction === "allow_workspace") {
           try {
             const persistence = await this.persistApprovalActionRule(chosenAction, approval);
             this.logEvent(taskId, "log", {

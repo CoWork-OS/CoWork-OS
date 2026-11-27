@@ -132,6 +132,18 @@ granting those OS permissions does not widen the task's filesystem, network,
 or command-tool profile. A remote or fallback computer-use route cannot use
 its transport to bypass the local profile.
 
+## Always allowed apps
+
+When computer use asks to control an app (once per task for background control with `native_app`, or per window before visible control), the approval card offers **Always allow** next to **Allow for this task**. Choosing it puts the app on **Settings > Built-in Tools > Computer Use (macOS) > Always allowed apps**, and from then on that app is controlled without asking, in the background and visibly:
+
+- **Only in sessions you start.** Sessions started by a bot, a schedule or heartbeat, the API, a hook, a bot panel, a messaging channel or `cowork run`, sessions set to never ask a person, and sub-agents under any of them, keep asking.
+- **Never past a deny.** Deny rules, the access profile (a profile that never asks still refuses), administrator policy, the **Background only** mode and the operating-system permissions all apply as before. The list only answers the question a person would otherwise be asked.
+- **Some apps can't be listed:** CoWork itself; password managers (Passwords, Keychain Access, 1Password, Bitwarden, LastPass, Dashlane, KeePassXC, Enpass, Keeper, Proton Pass); terminals, scripting and automation apps (Terminal, iTerm, Warp, Ghostty, kitty, Alacritty, Hyper, WezTerm, Tabby, Script Editor, Script Debugger, Automator, Shortcuts, Keyboard Maestro, Hammerspoon); code editors with a built-in terminal (VS Code, Cursor, Xcode, Zed, JetBrains IDEs); Finder, Screen Sharing and Docker; and System Settings, Activity Monitor, Disk Utility and Console. The card doesn't offer **Always allow** for them.
+- **Only from the card, in the app.** An app is added only by your answer on the inline approval card in CoWork's own window; the card names the app and its bundle ID. The same answer from the browser app or another client allows that one request. The approval dialog doesn't add apps, and Settings can only remove them.
+- It covers CoWork's built-in computer use tools, not an external computer use MCP connection, whose app consent stays per task.
+
+The list is kept in CoWork's encrypted settings on this computer (`computer-use-apps`). Each automatic approval is logged on the task as `tool_authorization` with reason `always_allowed_app`.
+
 ## macOS permissions
 
 Two system permissions gate computer use:
@@ -224,7 +236,8 @@ Rough order the stack encourages:
 1. **Built-in tools**: Confirm the `computer_use` category is enabled if you want the agent to use this lane at all.
 2. **Permissions / platform status**: On macOS, Accessibility + Screen Recording granted for the helper binary; restart after Screen Recording changes if needed. On Windows, confirm the helper is installed and the target window is visible/non-minimized.
 3. **Operational model**: On macOS the default is **Background only**: `native_app` targets an exact app window without taking the foreground, pointer, keyboard or clipboard (see [Local background app control](local-background-app-control.md)). Foreground modes are explicit opt-ins; on Windows, expect the visible controlled-window loop centered on `screenshot()` and the latest `captureId`.
-4. **Chronicle**: If your goal is contextual screen understanding rather than GUI control, enable **Settings > Tools > Chronicle**, keep the dedicated **Chronicle** built-in tool category enabled, and test `screen_context_resolve` before forcing a computer-use flow.
+4. **Always allowed apps**: Under **Computer Use (macOS)**, check the apps CoWork may control without asking in your sessions, and remove any you no longer want (see [Always allowed apps](#always-allowed-apps)).
+5. **Chronicle**: If your goal is contextual screen understanding rather than GUI control, enable **Settings > Tools > Chronicle**, keep the dedicated **Chronicle** built-in tool category enabled, and test `screen_context_resolve` before forcing a computer-use flow.
 
 ## Security and abuse considerations
 

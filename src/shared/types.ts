@@ -5328,6 +5328,12 @@ export interface InputRequestResponse {
   requestId: string;
   status: "submitted" | "dismissed";
   answers?: Record<string, InputRequestAnswer>;
+  /**
+   * Set by the main process for answers given in the desktop app's own window, never taken
+   * from the answer payload (the IPC schema drops it). Standing grants such as always allowing
+   * an app need it.
+   */
+  origin?: "desktop";
 }
 
 export interface InputRequest {
@@ -8802,6 +8808,9 @@ export const IPC_CHANNELS = {
   BUILTIN_TOOLS_GET_SETTINGS: "builtinTools:getSettings",
   BUILTIN_TOOLS_SAVE_SETTINGS: "builtinTools:saveSettings",
   BUILTIN_TOOLS_GET_CATEGORIES: "builtinTools:getCategories",
+  // Apps computer use may control without asking (added only by an approved "Always allow")
+  COMPUTER_USE_ALLOWED_APPS_LIST: "computerUse:allowedApps:list",
+  COMPUTER_USE_ALLOWED_APPS_REMOVE: "computerUse:allowedApps:remove",
 
   // Chronicle (desktop passive screen context)
   CHRONICLE_GET_SETTINGS: "chronicle:getSettings",

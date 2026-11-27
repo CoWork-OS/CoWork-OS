@@ -1081,6 +1081,7 @@ The computer-use family (`screenshot`, `click`, `type_text`, `keypress`, and rel
 - **Safety UX**: Active sessions use a single-session lock, **Esc** abort, and shortcut guarding to reduce accidental cross-window effects and disruptive global hotkeys during automation.
 - **Tool gating**: Policy defers the computer-use lane unless the task signals **native desktop GUI intent**, so gateway and general tasks default to safer tool lanes.
 - **Key chord blocklist**: Certain OS-level shortcuts are rejected at the tool layer to avoid session or system disruption.
+- **Always allowed apps**: an app the user chose **Always allow** for on the approval card is controlled without asking, only in sessions the user started (bots, automations, API and hook sessions keep asking), and only after deny rules, the access profile and administrator policy have allowed the request to be asked at all. Password managers, terminals and scripting apps, System Settings and CoWork itself can never be listed. The renderer can list and remove apps but not add one. See [Always allowed apps](computer-use.md#always-allowed-apps).
 
 Full operator and troubleshooting guidance: [Computer use](computer-use.md).
 

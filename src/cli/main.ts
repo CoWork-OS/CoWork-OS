@@ -1767,7 +1767,7 @@ async function importCommand(ctx: CommandContext): Promise<number> {
   const source = getFlag(ctx.parsed, "--from") || ctx.parsed.rest[0];
   if (!source) {
     return usageError(
-      "Usage: cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]",
+      "Usage: cowork import --from hermes|openclaw|claude-code|cursor [--dry-run] [--with-secrets] [--workspace-id <id>]",
     );
   }
   const workspaceId = getFlag(ctx.parsed, "--workspace-id");
@@ -2481,7 +2481,7 @@ function usage(): void {
       "  cowork agent-card [publish on|off]",
       "  cowork models list",
       "  cowork backup create|restore",
-      "  cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]",
+      "  cowork import --from hermes|openclaw|claude-code|cursor [--dry-run] [--with-secrets] [--workspace-id <id>]",
       "  cowork security audit",
       "  cowork security rules list|remove",
       "  cowork security status|findings|decisions|inventory|scan|check-rules",

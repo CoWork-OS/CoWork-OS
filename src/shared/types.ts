@@ -13758,10 +13758,18 @@ export interface StrategicPlannerRunRequest {
   trigger?: StrategicPlannerRun["trigger"];
 }
 
-// Importing another agent's home (docs/migrating-from-hermes.md, docs/migrating-from-openclaw.md)
+// Importing another agent's home (docs/migrating-from-hermes.md, docs/migrating-from-openclaw.md,
+// docs/migrating-from-claude-code-and-cursor.md)
 
-export const AGENT_IMPORT_SOURCES = ["hermes", "openclaw"] as const;
+export const AGENT_IMPORT_SOURCES = ["hermes", "openclaw", "claude-code", "cursor"] as const;
 export type AgentImportSource = (typeof AGENT_IMPORT_SOURCES)[number];
+
+export const AGENT_IMPORT_SOURCE_NAMES: Record<AgentImportSource, string> = {
+  hermes: "Hermes Agent",
+  openclaw: "OpenClaw",
+  "claude-code": "Claude Code",
+  cursor: "Cursor",
+};
 
 export type AgentImportCategory =
   | "persona"
@@ -13773,7 +13781,10 @@ export type AgentImportCategory =
   | "channel"
   | "command_rule"
   | "scheduled_task"
-  | "workspace_instructions";
+  | "workspace_instructions"
+  /** Standing guidance for every session (Settings > Personality > Response guidance). */
+  | "custom_instructions"
+  | "mcp_server";
 
 /** One thing an import would bring over. Never carries a secret value. */
 export interface AgentImportPreviewItem {

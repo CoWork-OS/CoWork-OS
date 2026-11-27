@@ -1,18 +1,32 @@
 /**
- * Import a Hermes Agent or OpenClaw home into CoWork (docs/migrating-from-hermes.md,
- * docs/migrating-from-openclaw.md). Used by Settings > Import, onboarding and
+ * Import a Hermes Agent, OpenClaw, Claude Code or Cursor home into CoWork
+ * (docs/migrating-from-hermes.md, docs/migrating-from-openclaw.md,
+ * docs/migrating-from-claude-code-and-cursor.md). Used by Settings > Import, onboarding and
  * `cowork import`.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type {
-  AgentImportDetection,
-  AgentImportPreview,
-  AgentImportResult,
-  AgentImportSource,
+import {
+  AGENT_IMPORT_SOURCES,
+  type AgentImportDetection,
+  type AgentImportPreview,
+  type AgentImportResult,
+  type AgentImportSource,
 } from "../../shared/types";
 import { applyImportPlan, type AgentImportTargets } from "./apply";
+import {
+  claudeCodeHomeExists,
+  readClaudeCodeHome,
+  resolveClaudeCodeHome,
+} from "./claude-code-reader";
+import {
+  cursorHomeExists,
+  cursorStateDbPath,
+  readCursorHome,
+  readCursorUserRules,
+  resolveCursorHome,
+} from "./cursor-reader";
 import { hermesHomeExists, readHermesHome, resolveHermesHome } from "./hermes-reader";
 import { openClawHomeExists, readOpenClawHome, resolveOpenClawHome } from "./openclaw-reader";
 import { toPreview, type ImportPlan } from "./plan";
@@ -31,46 +45,105 @@ export function resolveAgentHome(
   source: AgentImportSource,
   locations: AgentImportLocations = {},
 ): string {
-  return source === "hermes" ? resolveHermesHome(locations) : resolveOpenClawHome(locations);
+  switch (source) {
+    case "hermes":
+      return resolveHermesHome(locations);
+    case "openclaw":
+      return resolveOpenClawHome(locations);
+    case "claude-code":
+      return resolveClaudeCodeHome(locations);
+    case "cursor":
+      return resolveCursorHome(locations);
+  }
+}
+
+function agentHomeExists(
+  source: AgentImportSource,
+  home: string,
+  locations: AgentImportLocations,
+): boolean {
+  switch (source) {
+    case "hermes":
+      return hermesHomeExists(home);
+    case "openclaw":
+      return openClawHomeExists(home);
+    case "claude-code":
+      return claudeCodeHomeExists(home);
+    case "cursor":
+      return cursorHomeExists(home, locations);
+  }
 }
 
 /** Which agent homes exist on this machine (onboarding offers the import for these). */
 export function detectAgentImports(locations: AgentImportLocations = {}): AgentImportDetection[] {
-  const hermes = resolveHermesHome(locations);
-  const openclaw = resolveOpenClawHome(locations);
-  return [
-    { source: "hermes", home: hermes, found: hermesHomeExists(hermes) },
-    { source: "openclaw", home: openclaw, found: openClawHomeExists(openclaw) },
-  ];
+  return AGENT_IMPORT_SOURCES.map((source) => {
+    const home = resolveAgentHome(source, locations);
+    return { source, home, found: agentHomeExists(source, home, locations) };
+  });
+}
+
+export interface BuildImportPlanOptions extends AgentImportLocations {
+  withSecrets: boolean;
+  nowMs?: number;
+  /** The chosen workspace: Claude Code memory and Cursor project rules are read from it. */
+  workspacePath?: string;
+  /**
+   * Cursor's User Rules. `previewAgentImport` and `runAgentImport` read them when this is
+   * left out; a plan built directly has none.
+   */
+  cursorUserRules?: string | null;
+}
+
+/** Reads what a plan needs asynchronously (Cursor's User Rules) before it is built. */
+async function withAsyncInputs(
+  source: AgentImportSource,
+  options: BuildImportPlanOptions,
+): Promise<BuildImportPlanOptions> {
+  if (source !== "cursor" || options.cursorUserRules !== undefined) return options;
+  const home = resolveAgentHome(source, options);
+  if (!cursorHomeExists(home, options)) return options;
+  return { ...options, cursorUserRules: await readCursorUserRules(cursorStateDbPath(options)) };
 }
 
 export function buildImportPlan(
   source: AgentImportSource,
-  options: { withSecrets: boolean; nowMs?: number } & AgentImportLocations,
+  options: BuildImportPlanOptions,
 ): ImportPlan {
   const home = resolveAgentHome(source, options);
-  return source === "hermes"
-    ? readHermesHome(home, options)
-    : readOpenClawHome(home, { ...options, homedir: options.homedir });
+  switch (source) {
+    case "hermes":
+      return readHermesHome(home, options);
+    case "openclaw":
+      return readOpenClawHome(home, { ...options, homedir: options.homedir });
+    case "claude-code":
+      return readClaudeCodeHome(home, options);
+    case "cursor":
+      return readCursorHome(home, { ...options, userRules: options.cursorUserRules });
+  }
 }
 
-export function previewAgentImport(
+export async function previewAgentImport(
   source: AgentImportSource,
-  options: { withSecrets: boolean } & AgentImportLocations,
-): AgentImportPreview {
-  return toPreview(buildImportPlan(source, options));
+  options: BuildImportPlanOptions,
+): Promise<AgentImportPreview> {
+  return toPreview(buildImportPlan(source, await withAsyncInputs(source, options)));
 }
 
 export async function runAgentImport(
   source: AgentImportSource,
   targets: AgentImportTargets,
   options: {
-    withSecrets: boolean;
     dryRun: boolean;
     excludeItemIds?: readonly string[];
-  } & AgentImportLocations,
+  } & BuildImportPlanOptions,
 ): Promise<AgentImportResult> {
-  const plan = buildImportPlan(source, options);
+  const plan = buildImportPlan(
+    source,
+    await withAsyncInputs(source, {
+      ...options,
+      workspacePath: options.workspacePath ?? targets.workspace?.path,
+    }),
+  );
   if (!plan.found) {
     return {
       source,

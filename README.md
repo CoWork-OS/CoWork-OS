@@ -127,7 +127,7 @@ cowork import --from hermes --dry-run
 cowork import --from hermes
 ```
 
-Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-run setup offers it when it finds either folder. You can also keep running your existing Hermes and hand tasks to it from CoWork over ACP. Guides: [Migrating from Hermes](docs/migrating-from-hermes.md) · [Migrating from OpenClaw](docs/migrating-from-openclaw.md)
+Use `--from openclaw` for OpenClaw, `--from claude-code` or `--from cursor` for your coding tools' instructions, skills, MCP servers and allowed commands, or **Settings > Import** in the app; first-run setup offers it when it finds any of them. You can also keep running your existing Hermes and hand tasks to it from CoWork over ACP. Guides: [Migrating from Hermes](docs/migrating-from-hermes.md) · [Migrating from OpenClaw](docs/migrating-from-openclaw.md) · [Importing from Claude Code and Cursor](docs/migrating-from-claude-code-and-cursor.md)
 
 ## Documentation
 
@@ -137,7 +137,7 @@ Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-r
 | [Feature Tour](docs/feature-tour.md) | Why CoWork OS, how a task runs, and the full feature inventory |
 | [Features](docs/features.md) | Categorized feature reference |
 | [Models & Access](docs/providers.md) | Provider routes, sign-ins, local models, fallbacks |
-| [Migrating from Hermes](docs/migrating-from-hermes.md) · [OpenClaw](docs/migrating-from-openclaw.md) | Import persona, memory, skills, bots and schedules |
+| [Migrating from Hermes](docs/migrating-from-hermes.md) · [OpenClaw](docs/migrating-from-openclaw.md) · [Claude Code and Cursor](docs/migrating-from-claude-code-and-cursor.md) | Import persona, memory, skills, MCP servers, bots and schedules |
 | [Access Profiles](docs/access-profiles.md) | Approvals, sandbox, network and filesystem policy |
 | [Security Guide](docs/security-guide.md) | Threat model, guardrails, sandboxing, credential storage |
 | [Self-Hosting](docs/self-hosting.md) | Linux server, Docker and remote access |

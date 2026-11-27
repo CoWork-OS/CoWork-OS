@@ -23,6 +23,9 @@ export const WORKER_MODULE_PATTERNS = [
   /^src\/electron\/database\/fts-worker\.ts$/,
   // Imported only by fts-worker.ts: the worker's own embedding cache (DB4).
   /^src\/electron\/memory\/memory-embedding-cache\.ts$/,
+  // Its SQLite calls run in an eval worker: a read-only look at Cursor's own state
+  // database for Settings > Import, never CoWork's database.
+  /^src\/electron\/agent-import\/cursor-state-worker\.ts$/,
 ];
 
 const isWorkerModule = (path) => WORKER_MODULE_PATTERNS.some((pattern) => pattern.test(path));

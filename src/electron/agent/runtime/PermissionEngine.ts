@@ -25,6 +25,7 @@ import { TOOL_GROUPS } from "../../../shared/types";
 import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import {
+  commandMatchesPrefix,
   getPermissionScopeSpecificity,
   normalizeCommandPrefix,
   normalizePermissionPath,
@@ -1757,7 +1758,7 @@ export class PermissionEngine {
           facts.normalizedPath.startsWith(`${scope.path}/`)
         );
       case "command_prefix":
-        return !!facts.normalizedCommand && facts.normalizedCommand.startsWith(scope.prefix);
+        return commandMatchesPrefix(facts.normalizedCommand, scope.prefix);
       case "mcp_server":
         return !!facts.normalizedServerName && facts.normalizedServerName === scope.serverName;
       default:

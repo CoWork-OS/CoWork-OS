@@ -3,8 +3,8 @@ import type { AgentImportResult } from "../../../shared/types";
 import { AgentImportPanel } from "../AgentImport/AgentImportPanel";
 
 /**
- * Onboarding step shown before provider setup when a Hermes Agent or OpenClaw home exists
- * on this machine: the same preview-then-import list as Settings > Import.
+ * Onboarding step shown before provider setup when a Hermes Agent, OpenClaw, Claude Code or
+ * Cursor setup exists on this machine: the same preview-then-import list as Settings > Import.
  */
 export function OnboardingImportStep({
   workspaceId,

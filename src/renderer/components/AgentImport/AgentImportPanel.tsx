@@ -6,13 +6,10 @@ import type {
   AgentImportSource,
   Workspace,
 } from "../../../shared/types";
-import { isTempWorkspaceId } from "../../../shared/types";
+import { AGENT_IMPORT_SOURCE_NAMES, isTempWorkspaceId } from "../../../shared/types";
 import "./agent-import.css";
 
-const SOURCE_NAMES: Record<AgentImportSource, string> = {
-  hermes: "Hermes Agent",
-  openclaw: "OpenClaw",
-};
+const SOURCE_NAMES = AGENT_IMPORT_SOURCE_NAMES;
 
 const STATUS_LABELS: Record<AgentImportItemResult["status"], string> = {
   imported: "Imported",
@@ -184,8 +181,9 @@ export function AgentImportPanel({ workspaceId, compact, onImported }: AgentImpo
         <div className="settings-section">
           <h3>Import</h3>
           <p className="settings-description">
-            Bring your persona, memory, skills and settings over from Hermes Agent or OpenClaw. You
-            see everything first; nothing is written until you import.
+            Bring your instructions, memory, skills, MCP servers and settings over from Hermes
+            Agent, OpenClaw, Claude Code or Cursor. You see everything first; nothing is written
+            until you import.
           </p>
         </div>
       )}
@@ -194,7 +192,7 @@ export function AgentImportPanel({ workspaceId, compact, onImported }: AgentImpo
 
       {detections !== null && listed.length === 0 && (
         <p className="settings-description">
-          No Hermes Agent or OpenClaw home was found on this Mac.
+          No Hermes Agent, OpenClaw, Claude Code or Cursor setup was found on this Mac.
         </p>
       )}
 
@@ -229,7 +227,7 @@ export function AgentImportPanel({ workspaceId, compact, onImported }: AgentImpo
                 disabled={busy}
                 onChange={(event) => changeOptions({ withSecrets: event.target.checked })}
               />
-              <span>Include API keys and bot tokens</span>
+              <span>Include API keys, bot tokens and server credentials</span>
             </label>
             <label className="agent-import-option">
               <span>Workspace</span>
@@ -248,8 +246,8 @@ export function AgentImportPanel({ workspaceId, compact, onImported }: AgentImpo
             </label>
           </div>
           <p className="agent-import-hint">
-            Keys are stored encrypted. Scheduled tasks and workspace instructions need a workspace;
-            imported tasks start paused.
+            Keys are stored encrypted. Scheduled tasks, workspace instructions and project memory
+            need a workspace; imported tasks start paused and MCP servers start switched off.
           </p>
 
           {ready.length > 0 ? (

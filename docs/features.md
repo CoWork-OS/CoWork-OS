@@ -882,6 +882,7 @@ The workspace dropdown at the top lets you filter insights to a single workspace
 | Section                    | Description                                                                                                             |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | **Cost & Tokens**          | Total cost, input/output token counts, cached-token totals, cache-read rate when available, and cost breakdown by model |
+| **Usage by kind of work**  | Usage split by session kind and the five top-level sessions that used the most; see below                               |
 | **Agent Efficiency (AWU)** | Agentic Work Unit metrics — see below                                                                                   |
 | **Activity by Day**        | Tasks per day-of-week with peak day indicator                                                                           |
 | **Activity by Hour**       | Hourly task histogram with peak hour indicator                                                                          |
@@ -889,6 +890,20 @@ The workspace dropdown at the top lets you filter insights to a single workspace
 | **Skill Usage by Pack**    | Skills grouped by their parent plugin pack with aggregated usage counts and mini bar charts                             |
 | **Persona Performance**    | Per-persona totals, success/failure mix, retry behavior, and cost attribution                                           |
 | **Feedback & Quality**     | Feedback satisfaction rate, top rejection reasons, retried-task count, and average attempts                             |
+
+### Usage by kind of work
+
+**Where usage went** splits the period's model usage by the kind of work it paid for. The split is by cost, or by tokens when nothing in the period had a price (local models, for example):
+
+- **Your sessions**: sessions you started, including from a suggestion or a side chat.
+- **Sub-agents**: helper agents a session started.
+- **Scheduled and automated**: scheduled tasks, heartbeats and other work CoWork started on its own.
+- **Bots**: conversations with bots and work given to a bot.
+- **API and hooks**: sessions started through the API or a hook.
+- **Background work**: model calls outside any session, such as inbox replies and memory summaries.
+- **Deleted sessions**: usage from sessions deleted since.
+
+**Top sessions** lists the five top-level sessions that used the most, with the usage of their sub-agents added in. Click one to open it. Both read successful calls from the local `llm_call_events` table (`src/electron/reports/usage-session-breakdown.ts`).
 
 ### Agentic Work Units (AWU)
 

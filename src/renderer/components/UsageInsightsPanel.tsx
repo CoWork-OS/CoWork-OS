@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import { messageFeedbackReasonLabel } from "../../shared/message-feedback-reasons";
 import type { Workspace } from "../../shared/types";
+import type { UsageSessionBreakdown } from "../../shared/usageSessionBreakdown";
 import {
   usageInsightsDayCount,
   usageInsightsRangeFromDates,
@@ -20,6 +21,7 @@ import {
 import { formatUsageCount } from "./usageInsightsFormatting";
 import { UsageInsightsLlmSection } from "./UsageInsightsLlmSection";
 import { UsageInsightsOverview } from "./UsageInsightsOverview";
+import { UsageInsightsSessionsSection } from "./UsageInsightsSessionsSection";
 import {
   DEFAULT_USAGE_INSIGHTS_PERIOD_PRESET,
   getVisibleUsageInsightsPeriodPresets,
@@ -184,6 +186,7 @@ interface UsageInsightsData {
   llmSuccessRate?: number | null;
   llmSummary?: LlmSummary;
   jevSummary?: JevSummary;
+  sessionUsage?: UsageSessionBreakdown;
   requestsByDay?: RequestDayRow[];
   providerBreakdown?: ProviderSlice[];
   personaMetrics?: Array<{
@@ -215,6 +218,8 @@ interface UsageInsightsData {
 
 interface UsageInsightsPanelProps {
   workspaceId?: string;
+  /** Opens a session from the Top sessions list. */
+  onOpenTask?: (taskId: string) => void;
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -303,7 +308,10 @@ function usageReportKey(workspaceId: string, periodDays: number, range?: UsageIn
   return JSON.stringify([workspaceId, periodDays, range?.startMs, range?.endMs]);
 }
 
-export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageInsightsPanelProps) {
+export function UsageInsightsPanel({
+  workspaceId: initialWorkspaceId,
+  onOpenTask,
+}: UsageInsightsPanelProps) {
   const [report, setReport] = useState<ReportLoadState | null>(null);
   const [overviewData, setOverviewData] = useState<OverviewLoadState | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -936,6 +944,10 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
             costKnown: m.costKnown,
           }))}
         />
+      )}
+
+      {data && (
+        <UsageInsightsSessionsSection sessionUsage={data.sessionUsage} onOpenTask={onOpenTask} />
       )}
 
       {/* Token/Runtime + AWU row */}

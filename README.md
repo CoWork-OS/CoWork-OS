@@ -161,13 +161,13 @@ Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-r
 |---|---:|---:|
 | GitHub stars | 554 | n/a |
 | GitHub forks | 101 | n/a |
-| Installer/server downloads | 3,971 | 3,971 |
-| Download delta | +44 | n/a |
-| npm downloads | 133 (last week) | 11,257 |
-| GitHub views, last 14-ish days | 1,514 total / 791 unique | n/a |
-| GitHub clones, last 14-ish days | 4,152 total / 638 unique | n/a |
+| Installer/server downloads | 4,020 | 4,020 |
+| Download delta | +49 | n/a |
+| npm downloads | 135 (last week) | 11,281 |
+| GitHub views, last 14-ish days | 1,426 total / 775 unique | n/a |
+| GitHub clones, last 14-ish days | 4,058 total / 635 unique | n/a |
 
-Generated 2026-11-26T12:25:59.946Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
+Generated 2026-11-27T12:12:03.803Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
 <!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
 
 ## License

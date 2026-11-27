@@ -10,6 +10,8 @@
  * - command allowlist → profile permission rules (PermissionSettingsManager)
  * - scheduled tasks → CronService, or the cron store when no service runs (CLI)
  * - workspace instructions → the workspace kit (.cowork/AGENTS.md, with revision history)
+ * - response guidance → PersonalityManager custom instructions (encrypted settings)
+ * - MCP servers → MCPSettingsManager (encrypted settings), added switched off
  */
 
 import * as fs from "node:fs";
@@ -25,22 +27,19 @@ import { loadCronStore, saveCronStore } from "../cron/store";
 import { validateCronExpression, validateCronTimeZone } from "../cron/schedule";
 import type { CronJob, CronService } from "../cron";
 import { ChannelRepository } from "../database/repository-facades";
+import { MCPSettingsManager } from "../mcp/settings";
 import { MemoryRepoService, type MemoryRepoSkipReason } from "../memory/repo/MemoryRepoService";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { permissionRuleFingerprint } from "../security/permission-utils";
 import { PersonalityManager } from "../settings/personality-manager";
-import type {
-  AgentImportTargets,
-  ImportWorkspace,
-  ImportedScheduledTask,
-  TargetOutcome,
+import {
+  SOURCE_LABELS,
+  type AgentImportTargets,
+  type ImportWorkspace,
+  type ImportedScheduledTask,
+  type TargetOutcome,
 } from "./apply";
-import type { ImportChannelType, ImportModelProviderId } from "./plan";
-
-const SOURCE_LABELS: Record<AgentImportSource, string> = {
-  hermes: "Hermes",
-  openclaw: "OpenClaw",
-};
+import type { ImportChannelType, ImportMcpServer, ImportModelProviderId } from "./plan";
 
 const MEMORY_SKIP_LABELS: Record<MemoryRepoSkipReason, string> = {
   empty: "empty",
@@ -72,6 +71,33 @@ export interface DefaultImportTargetDeps {
   db: Database.Database;
   workspace: ImportWorkspace | null;
   cron: ImportCronTarget | null;
+  /**
+   * The CLI while the desktop app is open: the app keeps MCP settings in memory and would
+   * write over servers added from here.
+   */
+  desktopRunning?: boolean;
+}
+
+function mcpCommandLine(server: { command?: string; args?: string[] }): string {
+  return JSON.stringify([server.command ?? "", ...(server.args ?? [])]);
+}
+
+/** Same name, same command line or same address as a server CoWork already has. */
+export function mcpServerExists(
+  existing: ReadonlyArray<{ name: string; command?: string; args?: string[]; url?: string }>,
+  server: ImportMcpServer,
+): boolean {
+  const name = server.name.trim().toLowerCase();
+  const commandLine = server.command ? mcpCommandLine(server) : "";
+  const url = server.url?.trim().replace(/\/+$/, "") ?? "";
+  return existing.some(
+    (entry) =>
+      entry.name.trim().toLowerCase() === name ||
+      (commandLine !== "" &&
+        entry.command !== undefined &&
+        mcpCommandLine(entry) === commandLine) ||
+      (url !== "" && (entry.url ?? "").trim().replace(/\/+$/, "") === url),
+  );
 }
 
 /**
@@ -389,6 +415,45 @@ export function createDefaultImportTargets(deps: DefaultImportTargetDeps): Agent
         }
         writeKitFileWithSnapshot(absPath, next, "user", `import:${source}`);
         return { ok: true, note: "Added to the workspace's existing instructions." };
+      },
+    },
+
+    customInstructions: {
+      existing: () => PersonalityManager.loadConfigV2().customInstructions?.responseGuidance || "",
+      save: (text) => {
+        const config = PersonalityManager.loadConfigV2();
+        PersonalityManager.saveConfigV2({
+          ...config,
+          customInstructions: { ...config.customInstructions, responseGuidance: text },
+        });
+      },
+    },
+
+    mcpServers: {
+      exists: (server) => mcpServerExists(MCPSettingsManager.loadSettings().servers, server),
+      add: async (server, source) => {
+        if (deps.desktopRunning) {
+          return {
+            ok: false,
+            reason:
+              "CoWork is open; import from Settings > Import, or quit CoWork and run this again.",
+          };
+        }
+        // Encrypted with the rest of the MCP settings. Switched off: the user checks the
+        // command or address before CoWork starts or calls it.
+        MCPSettingsManager.addServer({
+          name: server.name,
+          description: `Imported from ${SOURCE_LABELS[source]}`,
+          enabled: false,
+          transport: server.transport,
+          ...(server.command ? { command: server.command } : {}),
+          ...(server.args ? { args: server.args } : {}),
+          ...(server.env ? { env: server.env } : {}),
+          ...(server.cwd ? { cwd: server.cwd } : {}),
+          ...(server.url ? { url: server.url } : {}),
+          ...(server.headers ? { headers: server.headers } : {}),
+        });
+        return { ok: true, note: "Added switched off; turn it on in Settings > MCP Servers." };
       },
     },
   };

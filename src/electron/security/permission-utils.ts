@@ -17,6 +17,25 @@ export function normalizeCommandPrefix(input: string): string {
     .trim();
 }
 
+/**
+ * Whether a shell command falls under a `command_prefix` rule. The command must be the
+ * rule itself, or the rule followed by a space and more arguments that chain, pipe or
+ * redirect nothing: a rule for `git status` covers `git status --short`, but not
+ * `git statusx`, `git status; rm -rf x` or `git status | sh`. An exact match is always
+ * covered, so a rule saved from one full command still matches that command.
+ *
+ * Security: this was a plain `startsWith`, which let a rule ride along with a chained
+ * command and match longer program names. Rules imported from other tools
+ * (agent-import) made broad prefixes common, so matching is word- and operator-aware.
+ */
+export function commandMatchesPrefix(command: string, prefix: string): boolean {
+  if (!command || !prefix) return false;
+  if (command === prefix) return true;
+  if (!command.startsWith(`${prefix} `)) return false;
+  const rest = command.slice(prefix.length);
+  return !/[;&|`<>\n\r]|\$\(/.test(rest);
+}
+
 export function normalizeServerName(input: string): string {
   return String(input || "")
     .trim()

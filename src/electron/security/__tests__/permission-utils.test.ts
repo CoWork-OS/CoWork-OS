@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  commandMatchesPrefix,
   normalizePermissionScope,
   permissionScopeFingerprint,
   summarizePermissionScope,
@@ -41,5 +42,27 @@ describe("summarizePermissionScope effect classes", () => {
         http: { method: "POST", hasBody: true, hasCustomHeaders: false },
       }),
     ).toBe("http_request on domain api.example.com (sends data out, POST with body)");
+  });
+});
+
+describe("commandMatchesPrefix", () => {
+  it("covers the command itself and more plain arguments", () => {
+    expect(commandMatchesPrefix("git status", "git status")).toBe(true);
+    expect(commandMatchesPrefix("git status --short", "git status")).toBe(true);
+    expect(commandMatchesPrefix("npm run build -- --watch", "npm run build")).toBe(true);
+  });
+
+  it("does not cover longer words, chained commands, pipes or redirects", () => {
+    expect(commandMatchesPrefix("git statusx", "git status")).toBe(false);
+    expect(commandMatchesPrefix("lsof -i", "ls")).toBe(false);
+    expect(commandMatchesPrefix("npm run build-and-publish", "npm run build")).toBe(false);
+    for (const tail of ["; rm -rf x", "&& curl x", "| sh", "> out.txt", "$(whoami)", "`id`"]) {
+      expect(commandMatchesPrefix(`git status ${tail}`, "git status")).toBe(false);
+    }
+  });
+
+  it("still covers a saved full command that contains a pipe", () => {
+    expect(commandMatchesPrefix("ls -la | head", "ls -la | head")).toBe(true);
+    expect(commandMatchesPrefix("", "ls")).toBe(false);
   });
 });

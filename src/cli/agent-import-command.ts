@@ -1,5 +1,5 @@
 /**
- * `cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]`
+ * `cowork import --from hermes|openclaw|claude-code|cursor [--dry-run] [--with-secrets] [--workspace-id <id>]`
  * (docs/cli.md, docs/migrating-from-hermes.md). Runs in the direct runner against the
  * profile's own stores; the desktop app does not need to be running.
  */
@@ -39,6 +39,15 @@ export interface AgentImportCommandDeps {
 const SOURCE_LABELS: Record<AgentImportSource, string> = {
   hermes: "Hermes",
   openclaw: "OpenClaw",
+  "claude-code": "Claude Code",
+  cursor: "Cursor",
+};
+
+/** Other spellings people type for a source. */
+const SOURCE_ALIASES: Record<string, AgentImportSource> = {
+  claude: "claude-code",
+  claudecode: "claude-code",
+  claude_code: "claude-code",
 };
 
 const STATUS_MARKS: Record<AgentImportItemResult["status"], string> = {
@@ -49,9 +58,10 @@ const STATUS_MARKS: Record<AgentImportItemResult["status"], string> = {
 };
 
 export function parseAgentImportSource(value: string | undefined): AgentImportSource | null {
-  const normalized = String(value || "")
+  const typed = String(value || "")
     .trim()
     .toLowerCase();
+  const normalized = SOURCE_ALIASES[typed] ?? typed;
   return (AGENT_IMPORT_SOURCES as readonly string[]).includes(normalized)
     ? (normalized as AgentImportSource)
     : null;
@@ -75,9 +85,11 @@ export function formatAgentImportResult(result: AgentImportResult, withSecrets: 
   );
   if (
     !withSecrets &&
-    result.items.some((item) => item.category === "provider_key" || item.category === "channel")
+    result.items.some((item) => item.secret === true && item.status === "skipped")
   ) {
-    lines.push("API keys and bot tokens were left out; add --with-secrets to bring them over.");
+    lines.push(
+      "API keys, bot tokens and MCP server credentials were left out; add --with-secrets to bring them over.",
+    );
   }
   return lines.join("\n");
 }
@@ -89,10 +101,11 @@ export async function runAgentImportCommand(
   const source = parseAgentImportSource(args.source);
   if (!source) {
     throw new Error(
-      "Usage: cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]",
+      "Usage: cowork import --from hermes|openclaw|claude-code|cursor [--dry-run] [--with-secrets] [--workspace-id <id>]",
     );
   }
   const workspace = args.workspaceId ? await deps.findWorkspace(args.workspaceId) : null;
+  const desktopRunning = isDesktopAppRunning(getUserDataDir());
   if (args.workspaceId && !workspace) throw new Error(`Workspace not found: ${args.workspaceId}`);
 
   // The memory folder runs only for the import: no export, no sync timer left behind.
@@ -106,11 +119,8 @@ export async function runAgentImportCommand(
     const targets = createDefaultImportTargets({
       db: deps.db,
       workspace,
-      cron: {
-        kind: "store",
-        storePath: getCronStorePath(),
-        desktopRunning: isDesktopAppRunning(getUserDataDir()),
-      },
+      cron: { kind: "store", storePath: getCronStorePath(), desktopRunning },
+      desktopRunning,
     });
     if (args.dryRun) {
       // The folder runs read-only for a dry run; whether it is on decides the verdict.

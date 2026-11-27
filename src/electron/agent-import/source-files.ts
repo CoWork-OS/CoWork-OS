@@ -1,5 +1,5 @@
 /**
- * File helpers shared by the Hermes and OpenClaw readers. Reads only; every helper fails
+ * File helpers shared by the import readers. Reads only; every helper fails
  * soft (a missing or unreadable file reads as absent).
  */
 
@@ -13,11 +13,41 @@ export const MAX_IMPORT_TEXT_BYTES = 512 * 1024;
 const MAX_SKILL_SCAN_DEPTH = 4;
 const MAX_SKILLS = 500;
 
+/**
+ * Like `readTextIfExists`, but a symbolic link reads as absent. For files in a workspace,
+ * which may come from a cloned repository: a link there could point anywhere on disk.
+ */
+export function readRegularTextFile(filePath: string): string | null {
+  try {
+    if (!fs.lstatSync(filePath).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return readTextIfExists(filePath);
+}
+
 export function readTextIfExists(filePath: string): string | null {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile() || stat.size > MAX_IMPORT_TEXT_BYTES) return null;
     return fs.readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** Config JSON can be larger than notes (`~/.claude.json` keeps project history). */
+const MAX_IMPORT_JSON_BYTES = 8 * 1024 * 1024;
+
+/** A JSON object from disk, or null when missing, too large, unreadable or not an object. */
+export function readJsonObjectIfExists(filePath: string): Record<string, unknown> | null {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > MAX_IMPORT_JSON_BYTES) return null;
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -42,6 +72,17 @@ export function isFile(filePath: string): boolean {
 /** Keys whose values are credentials. Values of other keys (allowed user ids) are kept. */
 export function isSecretEnvKey(key: string): boolean {
   return /(KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIALS?|NSEC|JSON)$/i.test(key);
+}
+
+/** Values shaped like an API key or token (`sk-…`, `ghp_…`, long random strings). */
+export function looksLikeSecret(value: string): boolean {
+  const text = value.trim();
+  if (
+    /^(sk|pk|rk)[-_]|^(ghp|gho|ghu|ghs|github_pat|glpat|xox[abpr])[-_]|^AKIA[0-9A-Z]{12}/.test(text)
+  ) {
+    return true;
+  }
+  return /[A-Za-z0-9]{20,}/.test(text) && /\d/.test(text) && /[A-Za-z]/.test(text);
 }
 
 /** Stands in for a credential that was set but not read in (secrets not opted in). */
@@ -180,6 +221,22 @@ export interface FoundSkillBundle {
   description?: string;
 }
 
+/** A markdown file's YAML frontmatter (empty when it has none) and the text after it. */
+export function splitFrontmatter(raw: string): { data: Record<string, unknown>; body: string } {
+  const normalized = raw.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return { data: {}, body: normalized };
+  const end = normalized.indexOf("\n---", 4);
+  if (end === -1) return { data: {}, body: normalized };
+  let data: Record<string, unknown> = {};
+  try {
+    data = parseFrontmatterBlock(normalized.slice(4, end));
+  } catch {
+    data = {};
+  }
+  const after = normalized.indexOf("\n", end + 4);
+  return { data, body: after === -1 ? "" : normalized.slice(after + 1) };
+}
+
 function readSkillFrontmatter(skillMdPath: string): Record<string, unknown> {
   const raw = readTextIfExists(skillMdPath);
   if (!raw) return {};
@@ -232,6 +289,20 @@ export function findSkillBundles(root: string): FoundSkillBundle[] {
   return found;
 }
 
+/**
+ * Skill folders under `root` that are symbolic links. `findSkillBundles` never follows
+ * them, so they are counted to tell the user they were left alone.
+ */
+export function countLinkedSkillDirs(root: string): number {
+  try {
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isSymbolicLink() && !entry.name.startsWith(".")).length;
+  } catch {
+    return 0;
+  }
+}
+
 export function shortDescription(text: string | undefined, max = 90): string | undefined {
   if (!text) return undefined;
   const oneLine = text.replace(/\s+/g, " ").trim();
@@ -280,7 +351,25 @@ const UNSAFE_ALLOWLIST_PROGRAMS = new Set([
   "scp",
   "rm",
   "dd",
+  // Package runners fetch and run any package by name.
+  "npx",
+  "pnpx",
+  "bunx",
+  "uvx",
+  "pipx",
 ]);
+
+/** Package runners: allowed only with a named package (`npx tsc`), never bare. */
+const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx", "uvx", "pipx"]);
+
+function unsafeProgramReason(program: string): string | null {
+  const base = (program.split(/[\\/]/).pop() || "").replace(/\.(exe|cmd|bat)$/i, "");
+  const lower = base.toLowerCase();
+  const versionless = lower.replace(/[\d.]+$/, "");
+  return UNSAFE_ALLOWLIST_PROGRAMS.has(lower) || UNSAFE_ALLOWLIST_PROGRAMS.has(versionless)
+    ? `${base} can run any command, so it stays approval-gated.`
+    : null;
+}
 
 /**
  * Turn one OpenClaw exec allowlist pattern into a CoWork command prefix, or explain why
@@ -300,14 +389,36 @@ export function commandPrefixFromAllowlistPattern(
   const program = trimmed.split(/[\\/]/).pop() || "";
   const base = program.replace(/\.(exe|cmd|bat)$/i, "");
   if (!/^[A-Za-z0-9._+-]+$/.test(base)) return { reason: "Not a program name CoWork can match." };
-  const versionless = base.toLowerCase().replace(/[\d.]+$/, "");
-  if (
-    UNSAFE_ALLOWLIST_PROGRAMS.has(base.toLowerCase()) ||
-    UNSAFE_ALLOWLIST_PROGRAMS.has(versionless)
-  ) {
-    return { reason: `${base} can run any command, so it stays approval-gated.` };
-  }
+  const unsafe = unsafeProgramReason(base);
+  if (unsafe) return { reason: unsafe };
   return { prefix: base };
+}
+
+/**
+ * Turn the inside of a Claude Code `Bash(...)` or Cursor `Shell(...)` allow rule into a
+ * CoWork command prefix, or explain why not. `npm run test:*`, `npm run test *` and
+ * `git status` become `npm run test` and `git status`. Anything with another wildcard,
+ * shell syntax or a program that runs arbitrary code stays approval-gated; a package
+ * runner is allowed only with the package named (`npx tsc`, not `npx` or `npx -y`).
+ */
+export function commandPrefixFromShellRule(rule: string): { prefix: string } | { reason: string } {
+  const trimmed = rule.replace(/\s+/g, " ").trim();
+  const withoutTail = trimmed.replace(/(?::\*| \*|\*)$/, "").trim();
+  if (!withoutTail) return { reason: "Allows every command; approve commands as they come up." };
+  if (/[*?]/.test(withoutTail)) {
+    return {
+      reason: "Wildcard patterns are too broad to allow; approve commands as they come up.",
+    };
+  }
+  if (/[;&|`$<>(){}\\'"\n]/.test(withoutTail)) return { reason: "Not a plain command." };
+  const [program, next] = withoutTail.split(" ");
+  if (program.includes("=")) return { reason: "Not a plain command." };
+  if (PACKAGE_RUNNERS.has(program.toLowerCase()) && next && !next.startsWith("-")) {
+    return { prefix: withoutTail };
+  }
+  const unsafe = unsafeProgramReason(program);
+  if (unsafe) return { reason: unsafe };
+  return { prefix: withoutTail };
 }
 
 /** Split free-form markdown into memory entries: list items and paragraphs, no headings. */

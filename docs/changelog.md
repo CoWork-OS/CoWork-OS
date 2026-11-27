@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Import from Claude Code and Cursor**: **Settings > Import**, `cowork import --from claude-code|cursor` and the first-run offer now read `~/.claude` and `~/.cursor`. Your global `CLAUDE.md` or Cursor's User Rules become **Response guidance**; skills install through the security scan; MCP servers arrive switched off; `Bash(...)` and `Shell(...)` allow rules become command rules (shells, interpreters, wildcards and shell syntax stay approval-gated); and, for a chosen workspace, Claude Code's memory notes go to the memory inbox and Cursor's always-on project rules to the workspace's instructions. API keys and MCP servers that need a token come over only with the credentials box. See [Importing from Claude Code and Cursor](migrating-from-claude-code-and-cursor.md).
 - **File tabs in the side panel**: opening another document, sheet, deck or page keeps the first as a tab, so you can switch back without finding it in the conversation again. Tabs show with two or more files (up to 8), name files with the same name by their folder, and close with × or a middle-click. Switching away from a file with unsaved changes now asks first, as closing it already did. See [Everything Workbench](everything-workbench.md#core-model).
 - **Chronicle timeline and apps it never captures**: **Settings > Built-in Tools > Chronicle** shows the recent-screen buffer as a timeline (thumbnail, app, window and time, newest first) with delete, clear and **Don't capture <app>**. Chronicle takes no picture while an app on **Never capture these apps** is in front; password managers are on it by default. See [Chronicle](chronicle.md#what-the-ui-shows).
 - **Always allowed apps for computer use**: when computer use asks to control an app, the card offers **Always allow**. That app is then controlled without asking (in the background and visibly) in sessions you start; bots and automated sessions still ask. Password managers, terminals, System Settings and CoWork itself can't be always allowed. **Settings > Built-in Tools > Computer Use (macOS)** lists the apps and removes them. See [Computer use](computer-use.md#always-allowed-apps).
@@ -24,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Asks before quitting while tasks run**: quitting CoWork while a task is executing now asks first, because quitting stops the task. Turn it off with **Ask before quitting while tasks run**.
 - **Command menu**: **Cmd/Ctrl+K** opens a search box over actions (new session, Settings, every sidebar destination), your loaded sessions, Settings sections and message text in the current workspace. Arrow keys move, Enter opens, Escape closes; the tabs at the bottom narrow the search to one kind. Cmd/Ctrl+K used to focus the sidebar session search, which is still there to click. See [Command menu](command-menu.md).
 - **Browser app: sign-ins survive a restart**: a browser signed in to the full app in a browser stays signed in when CoWork restarts. Through the public HTTPS address it is signed out after 30 days without use, or 90 days after signing in (before: 30 minutes idle and 24 hours at most). On this computer over `http://127.0.0.1` those shorter limits stay. The host keeps only a hash of each session cookie, in its encrypted settings. **Sign out all browsers**, turning the app off and changing its public address still end every sign-in. After a restart an open tab reloads itself once; file, artifact and terminal handles from before the restart stop working. See [Browser application preview](browser-preview.md).
+
+### Changed
+
+- **Command rules match whole commands, not chains**: an allow rule for a command (from **Always allow** or an import) now covers that command with more arguments, but not a longer program name (`git statusx`) or anything chained, piped or redirected after it (`git status; …`, `| sh`, `> file`). Those ask again. See [Access Profiles](access-profiles.md).
+
+### Fixed
+
+- **Settings > Import no longer stops with "Too many requests"**: previewing several sources, or changing the workspace or credentials box a few times, counted against the limit for real imports (5 a minute). Previews write nothing and now have their own, higher limit.
 
 ## [0.5.63] - 2026-11-15
 
@@ -128,6 +137,7 @@ See [Release Notes 0.5.62](release-notes-0.5.62.md) for upgrade notes and valida
 - **OpenAI-compatible video provider replaces Sora**: OpenAI shut down its Videos API and the Sora 2 models on 24 September 2026, so the **OpenAI Sora 2** and **Azure OpenAI Sora 2** video providers are gone and an OpenAI API key no longer counts as a video provider. Settings > AI & Models > Video Model gains an **OpenAI-compatible** provider instead: point it at any service that speaks the OpenAI Videos API (base URL, model name, API key) for text-to-video and image-to-video. Saved Sora settings are ignored; Gemini Veo, Vertex AI Veo, Kling and the local model are unchanged.
 
 - **Waiting decisions no longer lapse after 5 minutes**: an approval card (in a session, on Today or in a chat channel) now stays answerable for 24 hours, and the task waits for you instead of being denied and carrying on without the action. Time spent waiting for your decision no longer counts against a tool's time limit or the task watchdog. A granted approval still has to be used within 5 minutes, unattended runs still deny instead of waiting, and high-impact requests still fail closed if the app restarts before you answer.
+
 ### Fixed
 
 - **Read-only requests stay read-only**: a question that names an existing file, such as "Explain what README.md covers", no longer makes the model write that file; before, the task could fail after more than 100 model calls. "Don't make any changes", "don't touch anything" and similar wording now count as read-only, and reminders to write a required file stop after three. (#810)

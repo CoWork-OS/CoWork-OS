@@ -52,6 +52,9 @@ export interface AgentImportHandlerDeps {
   onSkillsInstalled: () => Promise<void>;
 }
 
+/** Rate-limit key for dry runs: the panel's preview, which writes nothing. */
+const AGENT_IMPORT_DRY_RUN_LIMIT_KEY = `${IPC_CHANNELS.AGENT_IMPORT_APPLY}:dryRun`;
+
 function limit(channel: string): void {
   if (!rateLimiter.check(channel)) {
     throw new Error("Too many requests. Please wait a moment.");
@@ -63,6 +66,9 @@ export function setupAgentImportHandlers(deps: AgentImportHandlerDeps): void {
   rateLimiter.configure(IPC_CHANNELS.AGENT_IMPORT_PREVIEW, RATE_LIMIT_CONFIGS.standard);
   // Writes settings, memory and skills; the Import button is the only caller.
   rateLimiter.configure(IPC_CHANNELS.AGENT_IMPORT_APPLY, RATE_LIMIT_CONFIGS.limited);
+  // The preview is a dry run on the same channel and runs again whenever the source,
+  // workspace or credentials box changes; it writes nothing, so it gets the standard limit.
+  rateLimiter.configure(AGENT_IMPORT_DRY_RUN_LIMIT_KEY, RATE_LIMIT_CONFIGS.standard);
 
   ipcMain.handle(IPC_CHANNELS.AGENT_IMPORT_DETECT, async (): Promise<AgentImportDetection[]> => {
     limit(IPC_CHANNELS.AGENT_IMPORT_DETECT);
@@ -81,8 +87,10 @@ export function setupAgentImportHandlers(deps: AgentImportHandlerDeps): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_IMPORT_APPLY,
     async (_event, raw: unknown): Promise<AgentImportResult> => {
-      limit(IPC_CHANNELS.AGENT_IMPORT_APPLY);
       const request = validateInput(AgentImportApplySchema, raw, "agent import");
+      limit(
+        request.dryRun === true ? AGENT_IMPORT_DRY_RUN_LIMIT_KEY : IPC_CHANNELS.AGENT_IMPORT_APPLY,
+      );
       const workspace = request.workspaceId ? await deps.findWorkspace(request.workspaceId) : null;
       if (request.workspaceId && !workspace) throw new Error("Workspace not found.");
       const cronService = deps.getCronService();

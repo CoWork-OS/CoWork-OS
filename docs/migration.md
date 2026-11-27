@@ -19,7 +19,8 @@ See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 
 To bring your OpenClaw persona, memory, skills and settings over in one step, see
 [Migrating from OpenClaw](migrating-from-openclaw.md). Hermes Agent users can do the same with
-[Migrating from Hermes](migrating-from-hermes.md).
+[Migrating from Hermes](migrating-from-hermes.md), and Claude Code and Cursor users with
+[Importing from Claude Code and Cursor](migrating-from-claude-code-and-cursor.md).
 
 ### Practical Migration Plan
 

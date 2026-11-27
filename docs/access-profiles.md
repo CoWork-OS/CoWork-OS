@@ -46,6 +46,11 @@ is saved only after the decision passes the same checks as **Allow once**, and
 never for task-scoped consent or an exact-write review. Remove it from the
 workspace-local rules in the permission settings.
 
+A command rule covers the saved command and the same command with more arguments:
+a rule for `git status` covers `git status --short`, but not `git statusx`, and not a
+command that goes on to chain, pipe or redirect (`;`, `&&`, `|`, `>`, `$(…)`, backticks).
+Those ask again.
+
 Private Browser Workbench dialogs and native credential confirmations are separate from the
 tool-approval queue. Automatic review cannot suppress them, and agent card fills require fresh
 approval without a standing grant. See [Private browser credentials and checkout](security-guide.md#private-browser-credentials-and-checkout).

@@ -1,7 +1,8 @@
 /**
- * What an import of a Hermes or OpenClaw home would bring over.
+ * What an import of a Hermes, OpenClaw, Claude Code or Cursor home would bring over.
  *
- * The readers (hermes-reader.ts, openclaw-reader.ts) build a plan from files on disk and
+ * The readers (hermes-reader.ts, openclaw-reader.ts, claude-code-reader.ts,
+ * cursor-reader.ts) build a plan from files on disk and
  * write nothing; the applier (apply.ts) writes it through CoWork's own managers. A plan
  * item carries its payload in the main process only: the renderer and the CLI see the
  * preview (`toPreview`), which never holds a secret value.
@@ -65,6 +66,20 @@ export type ImportSchedule =
   | { kind: "every"; everyMs: number }
   | { kind: "at"; atMs: number };
 
+/** An MCP server from another tool's config, in CoWork's terms. */
+export interface ImportMcpServer {
+  name: string;
+  transport: "stdio" | "sse" | "streamable-http";
+  command?: string;
+  args?: string[];
+  /** Present with credential values only when secrets were opted in. */
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  /** Present only when secrets were opted in (headers usually carry a token). */
+  headers?: Record<string, string>;
+}
+
 export type ImportPayload =
   | { kind: "persona"; text: string }
   /** Short curated facts; `user` facts go to me.md, `agent` notes to the agent's notes. */
@@ -91,6 +106,8 @@ export type ImportPayload =
   | { kind: "command_rule"; prefix: string }
   | { kind: "scheduled_task"; name: string; prompt: string; schedule: ImportSchedule }
   | { kind: "workspace_instructions"; text: string }
+  | { kind: "custom_instructions"; text: string }
+  | { kind: "mcp_server"; server: ImportMcpServer }
   | { kind: "none" };
 
 export interface PlannedImportItem extends AgentImportPreviewItem {
@@ -181,6 +198,14 @@ export function planSecretValues(plan: ImportPlan): string[] {
     if (payload.kind === "channel" && payload.tokens) {
       values.push(payload.tokens.botToken);
       if (payload.tokens.appToken) values.push(payload.tokens.appToken);
+    }
+    if (payload.kind === "mcp_server") {
+      // Every header, env value and argument, and the address: a server's error text may
+      // echo any of them, and an address or argument can hold a key.
+      values.push(...Object.values(payload.server.headers ?? {}));
+      values.push(...Object.values(payload.server.env ?? {}));
+      values.push(...(payload.server.args ?? []));
+      if (payload.server.url) values.push(payload.server.url);
     }
   }
   return values.filter((value) => value.length >= 4);

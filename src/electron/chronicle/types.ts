@@ -18,6 +18,28 @@ export interface ChronicleSettings {
   backgroundGenerationEnabled: boolean;
   respectWorkspaceMemory: boolean;
   consentAcceptedAt?: number | null;
+  /**
+   * Apps Chronicle never captures: while one of them is in front, the capture is skipped.
+   * Password managers by default.
+   */
+  excludedApps: ChronicleExcludedApp[];
+}
+
+export interface ChronicleExcludedApp {
+  /** macOS bundle identifier, such as `com.1password.1password`. */
+  bundleId: string;
+  name: string;
+}
+
+/** One frame of the recent-screen buffer, as the timeline in Settings shows it. */
+export interface ChronicleTimelineFrame {
+  id: string;
+  capturedAt: number;
+  appName: string;
+  bundleId?: string;
+  windowTitle: string;
+  /** A small JPEG of the frame, or null when it could not be read. */
+  thumbnailDataUrl: string | null;
 }
 
 export interface ChronicleCaptureStatus {
@@ -33,6 +55,8 @@ export interface ChronicleCaptureStatus {
   frameCount: number;
   bufferBytes: number;
   lastCaptureAt: number | null;
+  /** The last time a capture was skipped because an excluded app was in front. */
+  lastExclusionSkipAt?: number | null;
   lastGeneratedAt: number | null;
   consentRequired: boolean;
   accessibilityTrusted: boolean;
@@ -46,6 +70,8 @@ export interface ChronicleBufferedFrame {
   capturedAt: number;
   displayId: string;
   appName: string;
+  /** The app in front when the frame was taken; absent on frames from before it was kept. */
+  bundleId?: string;
   windowTitle: string;
   imagePath: string;
   localTextSnippet?: string;

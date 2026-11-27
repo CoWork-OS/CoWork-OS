@@ -3,6 +3,7 @@ import { History, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { DesktopOnlyCard } from "./DesktopOnlyCard";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ChronicleExcludedApps, ChronicleTimeline } from "./ChronicleTimeline";
 import type {
   ChronicleCaptureScope,
   ChronicleCaptureStatus,
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS: ChronicleSettings = {
   backgroundGenerationEnabled: true,
   respectWorkspaceMemory: true,
   consentAcceptedAt: null,
+  excludedApps: [],
 };
 
 function formatScreenStatus(status: ChronicleCaptureStatus["screenCaptureStatus"]): string {
@@ -272,6 +274,12 @@ function ChronicleSettingsPanel() {
               Last capture: {formatTimestamp(status?.lastCaptureAt)} • Last memory generation:{" "}
               {formatTimestamp(status?.lastGeneratedAt)}
             </div>
+            {status?.lastExclusionSkipAt ? (
+              <div className="computer-use-session-id">
+                Last skipped because an excluded app was in front:{" "}
+                {formatTimestamp(status.lastExclusionSkipAt)}
+              </div>
+            ) : null}
           </div>
           <div className="computer-use-active-actions">
             <button
@@ -379,6 +387,25 @@ function ChronicleSettingsPanel() {
           injection attempts, so verify it before acting on it.
         </p>
       </div>
+
+      <ChronicleExcludedApps
+        apps={settings.excludedApps ?? []}
+        disabled={saving}
+        onRemove={(bundleId) =>
+          void save({
+            ...settings,
+            excludedApps: (settings.excludedApps ?? []).filter((app) => app.bundleId !== bundleId),
+          })
+        }
+      />
+
+      <ChronicleTimeline
+        settings={settings}
+        onSettingsChange={(next) => {
+          setSettings(next);
+          void window.electronAPI.getChronicleStatus().then(setStatus, () => undefined);
+        }}
+      />
 
       {consentPatch ? (
         <ConfirmDialog

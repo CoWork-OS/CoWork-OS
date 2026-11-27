@@ -286,6 +286,7 @@ import type {
   UnifiedRecallSourceType,
   ChronicleSettings,
   ChronicleCaptureStatus,
+  ChronicleTimelineFrame,
   ShellSessionInfo,
   TerminalTabRunResult,
   TerminalTabOutputEvent,
@@ -3810,6 +3811,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_DELETE_OBSERVATION, input),
   clearChronicleObservations: (input: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, input),
+  listChronicleTimeline: (input?: { limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_LIST_TIMELINE, input ?? {}) as Promise<
+      ChronicleTimelineFrame[]
+    >,
+  deleteChronicleFrame: (frameId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_DELETE_FRAME, { frameId }) as Promise<{
+      deleted: boolean;
+    }>,
+  clearChronicleTimeline: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_TIMELINE) as Promise<{ success: boolean }>,
+  excludeChronicleApp: (app: { bundleId: string; name: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_EXCLUDE_APP, app) as Promise<{
+      settings: ChronicleSettings;
+      deletedFrames: number;
+    }>,
 
   computerEnvironmentAction: (taskId: string, action: "status" | "reconcile" | "finish") =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_ENVIRONMENT_ACTION, taskId, action),
@@ -7657,6 +7673,15 @@ export interface ElectronAPI {
   clearChronicleObservations: (input: {
     workspaceId: string;
   }) => Promise<{ success: boolean; deleted?: number }>;
+  /** The recent-screen buffer, newest first, with small thumbnails. */
+  listChronicleTimeline: (input?: { limit?: number }) => Promise<ChronicleTimelineFrame[]>;
+  deleteChronicleFrame: (frameId: string) => Promise<{ deleted: boolean }>;
+  clearChronicleTimeline: () => Promise<{ success: boolean }>;
+  /** Never capture this app again, and delete its buffered frames. */
+  excludeChronicleApp: (app: {
+    bundleId: string;
+    name: string;
+  }) => Promise<{ settings: ChronicleSettings; deletedFrames: number }>;
   getComputerUseStatus: () => Promise<{
     activeTaskId: string | null;
     platform: string;

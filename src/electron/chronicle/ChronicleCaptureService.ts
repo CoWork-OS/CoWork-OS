@@ -15,7 +15,7 @@ import {
 } from "../ipc/image-viewer-ocr";
 import { ChronicleMemoryService } from "./ChronicleMemoryService";
 import { ChronicleSelector } from "./ChronicleSelector";
-import { ChronicleSettingsManager } from "./ChronicleSettingsManager";
+import { ChronicleSettingsManager, isChronicleExcludedApp } from "./ChronicleSettingsManager";
 import { ChronicleSourceResolver, type ChronicleFrontmostContext } from "./ChronicleSourceResolver";
 import type {
   ChronicleBufferedFrame,
@@ -23,6 +23,7 @@ import type {
   ChronicleQueryOptions,
   ChronicleResolvedContext,
   ChronicleSettings,
+  ChronicleTimelineFrame,
 } from "./types";
 
 type Any = any; // oxlint-disable-line typescript-eslint/no-explicit-any
@@ -38,7 +39,13 @@ type ChronicleCaptureDeps = {
   runOcr: (imagePath: string, maxChars: number) => Promise<string | null>;
   detectFrontmostContext: () => Promise<ChronicleFrontmostContext>;
   isOcrAvailable: () => Promise<boolean>;
+  /** A small JPEG data URL of an image file, for the timeline; null when it can't be read. */
+  makeThumbnail: (imagePath: string) => Promise<string | null>;
 };
+
+/** Timeline thumbnails: wide enough to recognise a window, small enough to list dozens. */
+const THUMBNAIL_WIDTH = 320;
+const MAX_TIMELINE_FRAMES = 240;
 
 const logger = createLogger("ChronicleCaptureService");
 const OCR_CHARS = resolveImageOcrChars(600);
@@ -73,6 +80,18 @@ function defaultDeps(): ChronicleCaptureDeps {
     runOcr: (imagePath: string, maxChars: number) => runOcrFromImagePath(imagePath, maxChars),
     detectFrontmostContext: () => ChronicleSourceResolver.resolveFrontmostContext(),
     isOcrAvailable: () => isTesseractInstalled(),
+    makeThumbnail: async (imagePath: string) => {
+      try {
+        // oxlint-disable-next-line typescript-eslint/no-require-imports
+        const { nativeImage } = require("electron") as Any;
+        const image = nativeImage?.createFromPath?.(imagePath);
+        if (!image || image.isEmpty()) return null;
+        const jpeg = image.resize({ width: THUMBNAIL_WIDTH }).toJPEG(70) as Buffer;
+        return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+      } catch {
+        return null;
+      }
+    },
   };
 }
 
@@ -99,6 +118,7 @@ export class ChronicleCaptureService {
   private timer: NodeJS.Timeout | null = null;
   private settings = ChronicleSettingsManager.loadSettings();
   private lastCaptureAt: number | null = null;
+  private lastSkippedForExclusionAt: number | null = null;
 
   constructor(private readonly deps: ChronicleCaptureDeps = defaultDeps()) {}
 
@@ -186,6 +206,7 @@ export class ChronicleCaptureService {
       frameCount: frames.length,
       bufferBytes,
       lastCaptureAt: this.lastCaptureAt,
+      lastExclusionSkipAt: this.lastSkippedForExclusionAt,
       lastGeneratedAt: ChronicleMemoryService.getInstance().getLastGeneratedAt(),
       consentRequired,
       accessibilityTrusted,
@@ -201,7 +222,10 @@ export class ChronicleCaptureService {
     }
     await this.pruneBuffer();
     const cutoff = this.retentionCutoff();
-    const frames = (await this.loadFrames()).filter((frame) => frame.capturedAt >= cutoff);
+    const frames = (await this.loadFrames()).filter(
+      (frame) =>
+        frame.capturedAt >= cutoff && !isChronicleExcludedApp(this.settings, frame.bundleId),
+    );
     const recent = frames
       .sort((a, b) => b.capturedAt - a.capturedAt)
       .slice(0, this.settings.maxFrames);
@@ -222,6 +246,62 @@ export class ChronicleCaptureService {
       }
     }
     return ranked;
+  }
+
+  /** The recent-screen buffer, newest first, with small thumbnails (Settings > Chronicle). */
+  async listTimeline(limit = 60): Promise<ChronicleTimelineFrame[]> {
+    await this.pruneBuffer();
+    const frames = (await this.loadBufferFrames())
+      .sort((a, b) => b.capturedAt - a.capturedAt)
+      .slice(0, Math.max(1, Math.min(MAX_TIMELINE_FRAMES, Math.round(limit))));
+    return Promise.all(
+      frames.map(async (frame) => ({
+        id: frame.id,
+        capturedAt: frame.capturedAt,
+        appName: frame.appName,
+        ...(frame.bundleId ? { bundleId: frame.bundleId } : {}),
+        windowTitle: frame.windowTitle,
+        thumbnailDataUrl: await this.deps.makeThumbnail(frame.imagePath).catch(() => null),
+      })),
+    );
+  }
+
+  /**
+   * Take a new excluded-apps list without restarting capture (applySettings would capture at
+   * once, or clear the whole buffer while Chronicle is off or paused).
+   */
+  setExcludedApps(excludedApps: ChronicleSettings["excludedApps"]): void {
+    this.settings = { ...this.settings, excludedApps: [...excludedApps] };
+  }
+
+  /** Delete one frame of the buffer. Returns whether it was there. */
+  async deleteFrame(frameId: string): Promise<boolean> {
+    const frame = (await this.loadFrames()).find((entry) => entry.id === frameId);
+    if (!frame) return false;
+    await this.removeFrameFiles(frame);
+    return true;
+  }
+
+  /** Delete every buffered frame taken while this app was in front. Returns how many. */
+  async deleteFramesForApp(bundleId: string): Promise<number> {
+    const key = bundleId.toLowerCase();
+    const frames = (await this.loadFrames()).filter(
+      (frame) => frame.bundleId?.toLowerCase() === key,
+    );
+    await Promise.all(frames.map((frame) => this.removeFrameFiles(frame)));
+    return frames.length;
+  }
+
+  /** Delete the whole recent-screen buffer; capture goes on as set. */
+  async clearTimeline(): Promise<void> {
+    await this.clearRawBuffer();
+  }
+
+  private async removeFrameFiles(frame: ChronicleBufferedFrame): Promise<void> {
+    await Promise.all([
+      fs.rm(frame.imagePath, { force: true }),
+      fs.rm(this.metaPathForImage(frame.imagePath), { force: true }),
+    ]);
   }
 
   async captureOnce(): Promise<ChronicleBufferedFrame | null> {
@@ -248,6 +328,19 @@ export class ChronicleCaptureService {
     if (!desktopCapturer || !electronScreen) return [];
     const status = this.deps.getScreenCaptureStatus();
     if (status === "denied") return [];
+
+    // The app in front decides whether this capture may happen at all: nothing is taken, not
+    // even an in-memory picture, while an excluded app is in front.
+    const frontmostContext = await this.deps.detectFrontmostContext().catch(() => ({
+      appName: "Desktop",
+      bundleId: "",
+      windowTitle: "Screen",
+      sourceRef: { kind: "app" as const, value: "Desktop", label: "Desktop" },
+    }));
+    if (isChronicleExcludedApp(this.settings, frontmostContext.bundleId)) {
+      this.lastSkippedForExclusionAt = this.deps.now();
+      return [];
+    }
 
     const targetDisplays = this.resolveTargetDisplays(electronScreen);
     const largestDisplay = targetDisplays.reduce<Any | null>((best, display) => {
@@ -277,12 +370,6 @@ export class ChronicleCaptureService {
             .filter((entry: Any) => displayIds.has(String(entry.display_id || "")))
             .slice(0, 1);
     const selectedSources = filteredSources.length > 0 ? filteredSources : [sources[0]];
-    const frontmostContext = await this.deps.detectFrontmostContext().catch(() => ({
-      appName: "Desktop",
-      bundleId: "",
-      windowTitle: "Screen",
-      sourceRef: { kind: "app" as const, value: "Desktop", label: "Desktop" },
-    }));
 
     const frames = await Promise.all(
       selectedSources.map(async (source: Any) => {
@@ -301,6 +388,7 @@ export class ChronicleCaptureService {
           capturedAt: this.deps.now(),
           displayId: String(source.display_id || targetDisplays[0]?.id || "primary"),
           appName: frontmostContext.appName || "Desktop",
+          ...(frontmostContext.bundleId ? { bundleId: frontmostContext.bundleId } : {}),
           windowTitle: frontmostContext.windowTitle || String(source.name || "Screen"),
           imagePath,
           sourceRef: frontmostContext.sourceRef || null,
@@ -346,11 +434,17 @@ export class ChronicleCaptureService {
     return frames.map((frame) => byId.get(frame.id) || frame);
   }
 
-  private async loadFrames(): Promise<ChronicleBufferedFrame[]> {
-    const dirs = [
+  /** Passive frames only (not the ones taken on demand for a query). */
+  private async loadBufferFrames(): Promise<ChronicleBufferedFrame[]> {
+    return this.loadFrames([path.join(this.getChronicleRoot(), "buffer")]);
+  }
+
+  private async loadFrames(
+    dirs: string[] = [
       path.join(this.getChronicleRoot(), "buffer"),
       path.join(this.getChronicleRoot(), "fallback"),
-    ];
+    ],
+  ): Promise<ChronicleBufferedFrame[]> {
     const frames: ChronicleBufferedFrame[] = [];
     for (const dir of dirs) {
       try {

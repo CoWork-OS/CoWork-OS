@@ -75,6 +75,7 @@ The same Chronicle card is also mirrored under **Settings > Tools** so the scree
 | Capture scope                     | `frontmost_display` |
 | Background memory generation      | `true`              |
 | Respect workspace memory settings | `true`              |
+| Never capture these apps          | password managers   |
 
 ## What the UI shows
 
@@ -88,6 +89,9 @@ The Chronicle settings card exposes:
 - last capture time
 - last memory-generation time
 - capture interval, retention window, frame cap, and capture scope
+- when a capture was last skipped because an excluded app was in front
+- **Never capture these apps**, with **Remove** for each
+- **Recent timeline**: the frames Chronicle is holding, newest first, each with a thumbnail, the app and window in front, and the time. **Don't capture <app>** adds that app to the never-capture list and deletes its frames; the trash button deletes one frame; **Clear timeline** deletes them all (capture goes on as set). Frames taken on demand for a `screen_context_resolve` fallback are not listed.
 
 If the tray/menu-bar surface is enabled, Chronicle also exposes a quick **Pause Chronicle / Resume Chronicle** action there.
 
@@ -139,6 +143,7 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 
 Chronicle can observe whatever is visible on screen during its capture window. If you are about to view sensitive material that you do not want Chronicle to use as context:
 
+- keep the app out with **Never capture these apps** (password managers are on the list by default: Passwords, Keychain Access, 1Password, Bitwarden, LastPass, KeePassXC, Dashlane). While one of them is in front, Chronicle takes no picture at all. Chronicle captures the whole display, so a listed app's window can still show in a capture taken while another app is in front; `screen_context_resolve` never returns a frame taken while a listed app was in front, or
 - pause it from the Chronicle settings card or tray menu, or
 - turn it off entirely from **Settings > Tools > Chronicle**
 

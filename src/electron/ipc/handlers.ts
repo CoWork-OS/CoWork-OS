@@ -548,6 +548,10 @@ import {
   ChronicleObservationRepository,
   ChronicleSettingsManager,
 } from "../chronicle";
+import {
+  isValidChronicleBundleId,
+  normalizeExcludedApps,
+} from "../chronicle/ChronicleSettingsManager";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
 import { ComputerViewService } from "../computer-use/computer-view-service";
 import { BotDesktopManager, findBotDesktopResources } from "../computer-use/bot-desktop-manager";
@@ -11880,6 +11884,10 @@ function setupMCPHandlers(): void {
     ) {
       out.consentAcceptedAt = input.consentAcceptedAt as number | null;
     }
+    // Shape-checked and capped again by ChronicleSettingsManager; an empty list is allowed.
+    if (Array.isArray(input.excludedApps)) {
+      out.excludedApps = normalizeExcludedApps(input.excludedApps.slice(0, 500));
+    }
     return out;
   };
 
@@ -11896,6 +11904,43 @@ function setupMCPHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.CHRONICLE_GET_STATUS, async (): Promise<ChronicleCaptureStatus> => {
     return ChronicleCaptureService.getInstance().getStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_LIST_TIMELINE, async (_, input: unknown) => {
+    const limit = chronicleIsPlainObject(input) ? chronicleClampInt(input.limit, 60, 1, 240) : 60;
+    return ChronicleCaptureService.getInstance().listTimeline(limit);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_DELETE_FRAME, async (_, input: unknown) => {
+    const frameId = chronicleIsPlainObject(input) ? input.frameId : undefined;
+    if (typeof frameId !== "string" || !/^[0-9a-f-]{36}$/i.test(frameId)) {
+      throw new Error("A valid frame id is required");
+    }
+    return { deleted: await ChronicleCaptureService.getInstance().deleteFrame(frameId) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_CLEAR_TIMELINE, async () => {
+    await ChronicleCaptureService.getInstance().clearTimeline();
+    return { success: true };
+  });
+
+  // Keep an app out of Chronicle: add it to the excluded apps and delete its buffered frames.
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_EXCLUDE_APP, async (_, input: unknown) => {
+    const record = chronicleIsPlainObject(input) ? input : {};
+    if (!isValidChronicleBundleId(record.bundleId)) {
+      throw new Error("A valid app bundle ID is required");
+    }
+    const current = ChronicleSettingsManager.loadSettings();
+    const next = ChronicleSettingsManager.saveSettings({
+      excludedApps: [
+        ...current.excludedApps,
+        { bundleId: record.bundleId, name: typeof record.name === "string" ? record.name : "" },
+      ],
+    });
+    const capture = ChronicleCaptureService.getInstance();
+    capture.setExcludedApps(next.excludedApps);
+    const deletedFrames = await capture.deleteFramesForApp(record.bundleId);
+    return { settings: next, deletedFrames };
   });
 
   ipcMain.handle(IPC_CHANNELS.CHRONICLE_LIST_OBSERVATIONS, async (_, input: unknown) => {

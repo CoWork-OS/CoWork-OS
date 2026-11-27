@@ -4450,6 +4450,28 @@ export interface ChronicleSettings {
   backgroundGenerationEnabled: boolean;
   respectWorkspaceMemory: boolean;
   consentAcceptedAt?: number | null;
+  /**
+   * Apps Chronicle never captures: while one of them is in front, the capture is skipped.
+   * Password managers by default.
+   */
+  excludedApps: ChronicleExcludedApp[];
+}
+
+export interface ChronicleExcludedApp {
+  /** macOS bundle identifier, such as `com.1password.1password`. */
+  bundleId: string;
+  name: string;
+}
+
+/** One frame of the recent-screen buffer, as the timeline in Settings shows it. */
+export interface ChronicleTimelineFrame {
+  id: string;
+  capturedAt: number;
+  appName: string;
+  bundleId?: string;
+  windowTitle: string;
+  /** A small JPEG of the frame, or null when it could not be read. */
+  thumbnailDataUrl: string | null;
 }
 
 export interface ChronicleCaptureStatus {
@@ -4465,6 +4487,8 @@ export interface ChronicleCaptureStatus {
   frameCount: number;
   bufferBytes: number;
   lastCaptureAt: number | null;
+  /** The last time a capture was skipped because an excluded app was in front. */
+  lastExclusionSkipAt?: number | null;
   lastGeneratedAt: number | null;
   consentRequired: boolean;
   accessibilityTrusted: boolean;
@@ -8819,6 +8843,11 @@ export const IPC_CHANNELS = {
   CHRONICLE_LIST_OBSERVATIONS: "chronicle:listObservations",
   CHRONICLE_DELETE_OBSERVATION: "chronicle:deleteObservation",
   CHRONICLE_CLEAR_OBSERVATIONS: "chronicle:clearObservations",
+  // The recent-screen buffer as a timeline, and keeping apps out of it
+  CHRONICLE_LIST_TIMELINE: "chronicle:listTimeline",
+  CHRONICLE_DELETE_FRAME: "chronicle:deleteFrame",
+  CHRONICLE_CLEAR_TIMELINE: "chronicle:clearTimeline",
+  CHRONICLE_EXCLUDE_APP: "chronicle:excludeApp",
 
   // Computer use (desktop automation session)
   COMPUTER_USE_GET_STATUS: "computerUse:getStatus",

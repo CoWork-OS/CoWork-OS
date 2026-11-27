@@ -124,7 +124,33 @@ export interface TraySettings {
   preventSleepWhileRunning: boolean;
   /** Ask before quitting while tasks are still running. */
   confirmQuitWhileRunning: boolean;
+  /** macOS: Cmd+Shift+2 from any app attaches the window in front to the message box. */
+  windowCaptureShortcut: boolean;
 }
+
+/**
+ * What the window-capture shortcut sends to the renderer: the window's picture and a short
+ * text note (app, window title, page address, text read from the picture), to attach to the
+ * message box. Nothing is sent to a model until the person sends the message.
+ */
+export type WindowCaptureResult =
+  | {
+      ok: true;
+      appName: string;
+      windowTitle: string;
+      url?: string;
+      imageBase64: string;
+      imageWidth: number;
+      imageHeight: number;
+      /** Markdown note attached next to the picture. */
+      note: string;
+      capturedAt: number;
+    }
+  | {
+      ok: false;
+      reason: "self" | "screen_recording" | "not_found" | "failed";
+      message: string;
+    };
 
 /** Which toggle decides a desktop alert for a task that is waiting on the person. */
 export function wantsAttentionAlert(
@@ -8815,6 +8841,8 @@ export const IPC_CHANNELS = {
   TRAY_OPEN_ABOUT: "tray:openAbout",
   QUICK_INPUT_SUBMIT: "quick-input:submit",
   QUICK_INPUT_CLOSE: "quick-input:close",
+  // Main -> renderer: the window-capture shortcut grabbed the window in front.
+  WINDOW_CAPTURE_RESULT: "window-capture:result",
 
   // Cron (Scheduled Tasks)
   CRON_GET_STATUS: "cron:getStatus",

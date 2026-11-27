@@ -7,7 +7,7 @@ import {
   type DisclosureIntentState,
   type DisclosureScope,
 } from "../utils/disclosure-state";
-import { taskSurfaceStore, useTaskSurface } from "../state/task-surface-store";
+import { taskSurfaceStore, useTaskSurfaceDisclosureState } from "../state/task-surface-store";
 import type { TaskSurfaceKey } from "../state/task-view-cache";
 
 const MAX_CACHED_TASK_DISCLOSURE_STATES = 20;
@@ -17,11 +17,11 @@ export function useTaskDisclosureIntents(
   surfaceKey: TaskSurfaceKey | null = null,
 ) {
   const normalizedTaskId = taskId ?? "";
-  const cachedSurface = useTaskSurface(taskSurfaceStore, surfaceKey);
+  const cachedDisclosureState = useTaskSurfaceDisclosureState(taskSurfaceStore, surfaceKey);
   const [statesByTask, setStatesByTask] = useState<Record<string, DisclosureIntentState>>({});
   const taskOrderRef = useRef<string[]>([]);
   const state = surfaceKey
-    ? (cachedSurface?.disclosureState ?? { groups: {}, activities: {} })
+    ? (cachedDisclosureState ?? { groups: {}, activities: {} })
     : (statesByTask[normalizedTaskId] ?? { groups: {}, activities: {} });
 
   const apply = useCallback(

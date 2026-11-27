@@ -239,6 +239,33 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
             </div>
           </div>
 
+          {isMacOS && (
+            <div className="settings-form-group tray-settings-option">
+              <div className="tray-settings-option-inner">
+                <div className="tray-settings-option-text">
+                  <span className="tray-settings-option-title">
+                    Capture the window in front with ⌘⇧2
+                  </span>
+                  <p className="tray-settings-option-desc">
+                    From any app, ⌘⇧2 attaches a picture of the window in front, its title and page
+                    address to your message, and brings CoWork forward. Nothing is sent until you
+                    send the message. Needs Screen Recording permission.
+                  </p>
+                </div>
+                <label className="settings-toggle tray-settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={settings?.windowCaptureShortcut ?? true}
+                    onChange={(e) => void handleSave({ windowCaptureShortcut: e.target.checked })}
+                    disabled={saving}
+                    aria-label="Capture the window in front with Shift Command 2"
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className="settings-form-group tray-settings-option">
             <div className="tray-settings-option-inner">
               <div className="tray-settings-option-text">

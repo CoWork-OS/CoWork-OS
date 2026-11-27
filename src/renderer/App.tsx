@@ -55,6 +55,7 @@ import {
 } from "./components/CommandMenu/keyboard-shortcuts";
 import { nextAttentionSessionId, sessionIdAtPosition } from "./utils/session-navigation";
 import { DEFAULT_RUNNING_SEND_MODE, isRunningSendMode } from "./utils/running-send";
+import { windowCaptureAttachments, type WindowCaptureRequest } from "./utils/window-capture";
 import {
   EMPTY_HOME_SESSIONS,
   buildHomeSessions,
@@ -920,6 +921,8 @@ type SelectedTaskWorkspaceViewProps = {
   subAgentStatsEnabled: boolean;
   autoOpenTurnOutput: boolean;
   runningSendMode: RunningSendMode;
+  windowCaptureRequest: WindowCaptureRequest | null;
+  onWindowCaptureConsumed: (id: number) => void;
   rendererPerfLoggingEnabled: boolean;
   taskSwitchId: string | null;
   hasMoreTimelineHistory: boolean;
@@ -1105,6 +1108,8 @@ const SelectedTaskWorkspaceView = memo(
     subAgentStatsEnabled,
     autoOpenTurnOutput,
     runningSendMode,
+    windowCaptureRequest,
+    onWindowCaptureConsumed,
     rendererPerfLoggingEnabled,
     taskSwitchId,
     hasMoreTimelineHistory,
@@ -1837,6 +1842,8 @@ const SelectedTaskWorkspaceView = memo(
                 key={task?.id || "empty"}
                 autoOpenTurnOutput={autoOpenTurnOutput}
                 runningSendMode={runningSendMode}
+                windowCaptureRequest={windowCaptureRequest}
+                onWindowCaptureConsumed={onWindowCaptureConsumed}
                 headerPlacement="title-bar"
                 rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
                 task={task}
@@ -2123,6 +2130,8 @@ const SelectedTaskWorkspaceView = memo(
     prev.subAgentStatsEnabled === next.subAgentStatsEnabled &&
     prev.autoOpenTurnOutput === next.autoOpenTurnOutput &&
     prev.runningSendMode === next.runningSendMode &&
+    prev.windowCaptureRequest === next.windowCaptureRequest &&
+    prev.onWindowCaptureConsumed === next.onWindowCaptureConsumed &&
     prev.subAgentsFocusRequest === next.subAgentsFocusRequest &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
@@ -2556,6 +2565,13 @@ export function App() {
   const [autoOpenTurnOutput, setAutoOpenTurnOutput] = useState(false);
   const [runningSendMode, setRunningSendMode] =
     useState<RunningSendMode>(DEFAULT_RUNNING_SEND_MODE);
+  // A window captured with the global shortcut, waiting for the open composer to take it.
+  const [windowCaptureRequest, setWindowCaptureRequest] = useState<WindowCaptureRequest | null>(
+    null,
+  );
+  const handleWindowCaptureConsumed = useCallback((id: number) => {
+    setWindowCaptureRequest((current) => (current?.id === id ? null : current));
+  }, []);
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -7393,6 +7409,22 @@ export function App() {
     const unsubscribers = [
       api?.onTrayNewTask?.(() => void handleNewSessionRef.current()),
       api?.onTrayOpenSettings?.(() => setCurrentView("settings")),
+      // The window-capture shortcut (macOS): attach the captured window to the open composer.
+      api?.onWindowCapture?.((result) => {
+        if (!result.ok) {
+          addToastRef.current({
+            type: result.reason === "self" ? "info" : "warning",
+            title: "Window not captured",
+            message: result.message,
+          });
+          return;
+        }
+        setCurrentView("main");
+        setWindowCaptureRequest({
+          id: result.capturedAt,
+          attachments: windowCaptureAttachments(result),
+        });
+      }),
       api?.onTraySelectWorkspace?.((_event, workspaceId) => {
         void (async () => {
           const workspaces = await window.electronAPI.listWorkspaces();
@@ -9339,6 +9371,8 @@ export function App() {
                   subAgentStatsEnabled={subAgentStatsEnabled}
                   autoOpenTurnOutput={autoOpenTurnOutput}
                   runningSendMode={runningSendMode}
+                  windowCaptureRequest={windowCaptureRequest}
+                  onWindowCaptureConsumed={handleWindowCaptureConsumed}
                   rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
                   taskSwitchId={selectedTaskSwitchId}
                   hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}

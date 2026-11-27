@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 
 import type { Task, TaskEvent, TaskTimelinePageCursor } from "../../shared/types";
 import type { ComposerDraft } from "../../shared/composer-drafts";
+import type { DisclosureIntentState } from "../utils/disclosure-state";
 import type { SharedTaskEventUiState } from "../utils/task-event-derived";
 import {
   createEmptyTaskViewSnapshot,
@@ -47,6 +48,11 @@ export class TaskSurfaceStore {
   getSnapshot(key: TaskSurfaceKey | string | null): TaskViewSnapshot | null {
     if (!key) return null;
     return this.cache.get(key);
+  }
+
+  /** Stable across writes that leave the disclosure state alone. */
+  getDisclosureState(key: TaskSurfaceKey | string | null): DisclosureIntentState | null {
+    return this.getSnapshot(key)?.disclosureState ?? null;
   }
 
   getActiveSnapshot(): TaskViewSnapshot | null {
@@ -170,14 +176,22 @@ function compareTaskSurfaceEvents(left: TaskEvent, right: TaskEvent): number {
   return left.id.localeCompare(right.id);
 }
 
-export function useTaskSurface(
+/**
+ * Subscribes to one surface's disclosure state only. Every surface write (each composer
+ * keystroke mirrored by setDraft, each live event, task and projection update) replaces the
+ * snapshot object, and a useSyncExternalStore update re-renders at sync priority. Selecting
+ * the whole snapshot made the main view re-render synchronously on every one of those
+ * writes; while a task was running, typing then stacked sync renders until React aborted
+ * with "Maximum update depth exceeded" and dropped the keystroke.
+ */
+export function useTaskSurfaceDisclosureState(
   store: TaskSurfaceStore,
   key: TaskSurfaceKey | null,
-): TaskViewSnapshot | null {
+): DisclosureIntentState | null {
   const serializedKey = key ? serializeTaskSurfaceKey(normalizeTaskSurfaceKey(key)) : null;
   return useSyncExternalStore(
     store.subscribe,
-    () => (serializedKey ? store.getSnapshot(serializedKey) : null),
+    () => store.getDisclosureState(serializedKey),
     () => null,
   );
 }

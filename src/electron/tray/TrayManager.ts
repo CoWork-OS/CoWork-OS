@@ -30,6 +30,7 @@ import { DatabaseManager } from "../database/schema";
 import { type Channel } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { QuickInputWindow } from "./QuickInputWindow";
+import { WindowCaptureShortcut } from "../window-capture/window-capture-shortcut";
 import { getUpdatePrompt } from "../updater";
 import {
   TEMP_WORKSPACE_NAME,
@@ -106,6 +107,7 @@ const DEFAULT_SETTINGS: TraySettings = {
   notificationSound: "default",
   preventSleepWhileRunning: true,
   confirmQuitWhileRunning: true,
+  windowCaptureShortcut: true,
 };
 
 /**
@@ -178,6 +180,10 @@ export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefi
       typeof merged.confirmQuitWhileRunning === "boolean"
         ? merged.confirmQuitWhileRunning
         : DEFAULT_SETTINGS.confirmQuitWhileRunning,
+    windowCaptureShortcut:
+      typeof merged.windowCaptureShortcut === "boolean"
+        ? merged.windowCaptureShortcut
+        : DEFAULT_SETTINGS.windowCaptureShortcut,
   };
 }
 
@@ -190,6 +196,10 @@ export class TrayManager {
   private taskRepo: TaskRepository | null = null;
   private workspaceRepo: WorkspaceRepository | null = null;
   private settings: TraySettings = DEFAULT_SETTINGS;
+  private readonly windowCapture = new WindowCaptureShortcut(
+    () => this.mainWindow,
+    () => this.showMainWindow(),
+  );
   private connectedChannels: number = 0;
   private contextMenuSequence = 0;
   private activeTaskCount: number = 0;
@@ -291,6 +301,8 @@ export class TrayManager {
 
     // Register global shortcut for quick input (Cmd+Shift+Space)
     this.registerGlobalShortcut();
+    // Cmd+Shift+2 attaches the window in front to the message box (macOS, when turned on).
+    this.windowCapture.apply(this.settings.windowCaptureShortcut);
 
     console.log("[TrayManager] Initialized");
   }
@@ -1082,6 +1094,7 @@ export class TrayManager {
         this.destroyTray();
       }
       this.applyDockIconSetting();
+      this.windowCapture.apply(this.settings.windowCaptureShortcut);
     } catch (error) {
       console.error("[TrayManager] Failed to save settings:", error);
     }
@@ -1122,6 +1135,7 @@ export class TrayManager {
 
     // Unregister global shortcut
     this.unregisterGlobalShortcut();
+    this.windowCapture.dispose();
 
     if (this.quickInputWindow) {
       this.quickInputWindow.destroy();

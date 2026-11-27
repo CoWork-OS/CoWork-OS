@@ -397,6 +397,7 @@ import {
   type TaskTimelineItem,
   type TranscriptMode,
 } from "./task-feed-logic";
+import { pruneStaleMentionSpans } from "./effect-update-guards";
 import {
   isTurnThisIntoRoutinePrompt,
   taskCanBecomeRoutineFromFollowUp,
@@ -470,6 +471,7 @@ const SkillParameterModal = preloadableLazy(() =>
 
 import { useTaskProposals } from "../../hooks/useTaskProposals";
 import { SuggestedTasksContext, type SuggestedTasksContextValue } from "./suggested-tasks-context";
+import type { WindowCaptureRequest } from "../../utils/window-capture";
 import {
   DEFAULT_RUNNING_SEND_MODE,
   isAlternateSendChord,
@@ -671,6 +673,9 @@ interface MainContentProps {
   autoOpenTurnOutput?: boolean;
   /** What Enter does while the agent works; Cmd/Ctrl+Enter does the other. */
   runningSendMode?: RunningSendMode;
+  /** A window captured with the global shortcut, to attach to this composer. */
+  windowCaptureRequest?: WindowCaptureRequest | null;
+  onWindowCaptureConsumed?: (id: number) => void;
   rendererPerfLoggingEnabled?: boolean;
   taskSwitchId?: string | null;
   hasMoreTimelineHistory?: boolean;
@@ -949,6 +954,8 @@ function MainContentComponent({
   homeNextActionsEnabled = false,
   autoOpenTurnOutput = false,
   runningSendMode = DEFAULT_RUNNING_SEND_MODE,
+  windowCaptureRequest = null,
+  onWindowCaptureConsumed,
   rendererPerfLoggingEnabled = false,
   taskSwitchId = null,
   hasMoreTimelineHistory = false,
@@ -3291,18 +3298,14 @@ function MainContentComponent({
     return index;
   }, [integrationMentionOptions]);
 
+  // Drop mention chips whose text was edited away. Runs after every keystroke, so it sets
+  // state only when a chip is stale (see effect-update-guards).
   useEffect(() => {
-    setIntegrationMentionSpans((current) => {
-      const next = current.filter(
-        (span) =>
-          span.end <= inputValue.length &&
-          inputValue.slice(span.start, span.end) === `@${span.mention.label}`,
-      );
-      if (next.length === current.length) return current;
-      recordDraftMutation(onDraftPatch?.({ mentions: next }));
-      return next;
-    });
-  }, [inputValue, onDraftPatch]);
+    const next = pruneStaleMentionSpans(inputValue, integrationMentionSpans);
+    if (next === integrationMentionSpans) return;
+    setIntegrationMentionSpans(next);
+    recordDraftMutation(onDraftPatch?.({ mentions: next }));
+  }, [inputValue, integrationMentionSpans, onDraftPatch]);
 
   const selectedIntegrationMentions = useMemo<IntegrationMentionSelection[]>(() => {
     const byId = new Map<string, IntegrationMentionSelection>();
@@ -4569,6 +4572,20 @@ function MainContentComponent({
       return next;
     });
   };
+
+  // Take a window captured with the global shortcut: attach it here, then focus the message
+  // box so the person can say what they want. Nothing is sent until they send.
+  const appendPendingAttachmentsRef = useRef(appendPendingAttachments);
+  appendPendingAttachmentsRef.current = appendPendingAttachments;
+  useEffect(() => {
+    if (!windowCaptureRequest) return;
+    appendPendingAttachmentsRef.current(
+      windowCaptureRequest.attachments,
+      attachmentOwnerFenceRef.current.capture(),
+    );
+    onWindowCaptureConsumed?.(windowCaptureRequest.id);
+    window.setTimeout(() => promptInputRef.current?.focus(), 0);
+  }, [windowCaptureRequest, onWindowCaptureConsumed]);
 
   const handleAttachFiles = async () => {
     const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
@@ -10333,6 +10350,8 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
     prev.autoOpenTurnOutput === next.autoOpenTurnOutput &&
     prev.runningSendMode === next.runningSendMode &&
+    prev.windowCaptureRequest === next.windowCaptureRequest &&
+    prev.onWindowCaptureConsumed === next.onWindowCaptureConsumed &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.taskSwitchId === next.taskSwitchId &&
     prev.hasMoreTimelineHistory === next.hasMoreTimelineHistory &&

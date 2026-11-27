@@ -3862,6 +3862,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, callback);
   },
+  onWindowCapture: (callback: (result: import("../shared/types").WindowCaptureResult) => void) => {
+    const listener = (_event: unknown, result: import("../shared/types").WindowCaptureResult) =>
+      callback(result);
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_CAPTURE_RESULT, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_CAPTURE_RESULT, listener);
+  },
   onTrayOpenSettings: (callback: () => void) => {
     ipcRenderer.on(IPC_CHANNELS.TRAY_OPEN_SETTINGS, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_OPEN_SETTINGS, callback);
@@ -7686,6 +7692,10 @@ export interface ElectronAPI {
   onTrayNewTask: (callback: () => void) => () => void;
   onTraySelectWorkspace: (callback: (event: Any, workspaceId: string) => void) => () => void;
   onTrayOpenSettings: (callback: () => void) => () => void;
+  /** The window-capture shortcut grabbed the window in front (macOS). */
+  onWindowCapture: (
+    callback: (result: import("../shared/types").WindowCaptureResult) => void,
+  ) => () => void;
   onTrayOpenAbout: (callback: () => void) => () => void;
   // Cron (Scheduled Tasks)
   getCronStatus: () => Promise<CronStatusSummary>;

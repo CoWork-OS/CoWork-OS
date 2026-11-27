@@ -9139,6 +9139,11 @@ export const IPC_CHANNELS = {
   AGENT_IMPORT_DETECT: "agentImport:detect",
   AGENT_IMPORT_PREVIEW: "agentImport:preview",
   AGENT_IMPORT_APPLY: "agentImport:apply",
+  // Settings > Storage
+  STORAGE_GET_BREAKDOWN: "storage:getBreakdown",
+  STORAGE_CLEAR_CACHE: "storage:clearCache",
+  STORAGE_TRASH_DATABASE_COPIES: "storage:trashDatabaseCopies",
+  STORAGE_OPEN_FOLDER: "storage:openFolder",
   // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
   // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
   PACT_STATUS: "pact:status",

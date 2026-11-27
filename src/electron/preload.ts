@@ -29,6 +29,11 @@ import type {
   WatchdogSettings,
 } from "../shared/types";
 import type { AlwaysAllowedComputerUseApp } from "../shared/computer-use-contract";
+import type {
+  StorageBreakdown,
+  StorageClearCacheResult,
+  StorageTrashResult,
+} from "../shared/storage-usage";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   CuaSpaceConnectionResult,
@@ -4329,6 +4334,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_IMPORT_PREVIEW, request),
   applyAgentImport: (request: AgentImportRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_IMPORT_APPLY, request),
+  // Settings > Storage: main resolves every path; copies are named by their scan id.
+  getStorageBreakdown: () => ipcRenderer.invoke(IPC_CHANNELS.STORAGE_GET_BREAKDOWN),
+  clearStorageCache: () => ipcRenderer.invoke(IPC_CHANNELS.STORAGE_CLEAR_CACHE),
+  trashDatabaseCopies: (ids: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STORAGE_TRASH_DATABASE_COPIES, { ids }),
+  openStorageFolder: (folder: "profile" | "backups") =>
+    ipcRenderer.invoke(IPC_CHANNELS.STORAGE_OPEN_FOLDER, { folder }),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -8238,6 +8250,12 @@ export interface ElectronAPI {
     withSecrets?: boolean;
   }) => Promise<AgentImportPreview>;
   applyAgentImport: (request: AgentImportRequest) => Promise<AgentImportResult>;
+  getStorageBreakdown: () => Promise<StorageBreakdown>;
+  clearStorageCache: () => Promise<StorageClearCacheResult>;
+  trashDatabaseCopies: (ids: string[]) => Promise<StorageTrashResult>;
+  openStorageFolder: (
+    folder: "profile" | "backups",
+  ) => Promise<{ success: boolean; error?: string }>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

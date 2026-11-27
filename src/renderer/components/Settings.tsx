@@ -68,6 +68,7 @@ import {
   HeartPulse,
   Film,
   Download,
+  HardDrive,
   KeyRound,
 } from "lucide-react";
 import {
@@ -227,6 +228,10 @@ const PulseSettingsPanel = lazySettingsPanel(
   () => import("./PulseSettingsPanel"),
   "PulseSettingsPanel",
 );
+const StorageSettingsPanel = lazySettingsPanel(
+  () => import("./StorageSettings/StorageSettingsPanel"),
+  "StorageSettingsPanel",
+);
 const AgentImportPanel = lazySettingsPanel(
   () => import("./AgentImport/AgentImportPanel"),
   "AgentImportPanel",
@@ -327,7 +332,8 @@ export type SettingsTab =
   | "access"
   | "webaccess"
   | "browser"
-  | "import";
+  | "import"
+  | "storage";
 
 // A missing browser service should produce an explanation, never an endless loading panel.
 const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
@@ -349,6 +355,7 @@ const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
   mcp: ["getMCPSettings", "saveMCPSettings"],
   memory: ["getMemorySettings", "getMemoryFeaturesSettings", "getRecentMemories"],
   import: ["detectAgentImports", "applyAgentImport", "listWorkspaces"],
+  storage: ["getStorageBreakdown"],
   tools: ["getBuiltinToolsSettings", "saveBuiltinToolsSettings"],
   integrations: ["getConnectorSettings"],
   customize: ["listPluginPacks"],
@@ -824,6 +831,12 @@ const sidebarItems: SidebarItem[] = [
     icon: <Download {...I} />,
   },
   {
+    tab: "storage",
+    label: "Storage",
+    group: "General",
+    icon: <HardDrive {...I} />,
+  },
+  {
     tab: "aimodels",
     label: "AI & Models",
     group: "AI & Models",
@@ -1170,6 +1183,20 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "migrate",
         "migration",
         "move from",
+      ],
+    },
+  ],
+  storage: [
+    {
+      terms: [
+        "storage",
+        "disk",
+        "disk space",
+        "space",
+        "cache",
+        "clear cache",
+        "database",
+        "backups",
       ],
     },
   ],
@@ -9949,6 +9976,8 @@ export function Settings({
                 />
               ) : activeTab === "insights" ? (
                 <UsageInsightsPanel workspaceId={workspaceId} onOpenTask={onOpenTask} />
+              ) : activeTab === "storage" ? (
+                <StorageSettingsPanel />
               ) : activeTab === "import" ? (
                 <AgentImportPanel workspaceId={workspaceId} />
               ) : activeTab === "pulse" ? (

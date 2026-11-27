@@ -1,0 +1,145 @@
+/* Settings > Storage: a total, then one quiet row per kind of data. */
+
+.storage-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.storage-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.storage-summary-total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.storage-summary-size {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-summary-note,
+.storage-hint,
+.storage-copy-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.storage-summary-actions,
+.storage-copy-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.storage-categories,
+.storage-copy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.storage-categories {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.storage-category {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.storage-category + .storage-category {
+  border-top: 1px solid var(--color-border);
+}
+
+.storage-category-head,
+.storage-category-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storage-category-label {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.storage-size {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.storage-bar {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border: none;
+  border-radius: 2px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.storage-bar::-webkit-progress-bar {
+  background: var(--color-bg-secondary);
+  border-radius: 2px;
+}
+
+.storage-bar::-webkit-progress-value {
+  background: var(--color-text-muted);
+  border-radius: 2px;
+}
+
+.storage-copies summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.storage-copy-list {
+  margin: 8px 0;
+}
+
+.storage-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.storage-copy + .storage-copy {
+  border-top: 1px solid var(--color-border);
+}
+
+.storage-copy-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.storage-notice {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .storage-copy {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

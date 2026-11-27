@@ -1,5 +1,56 @@
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
-import type { ChronicleSettings } from "./types";
+import type { ChronicleExcludedApp, ChronicleSettings } from "./types";
+
+/** Never captured unless the user removes them: apps that show passwords and keys. */
+export const DEFAULT_CHRONICLE_EXCLUDED_APPS: ChronicleExcludedApp[] = [
+  { bundleId: "com.apple.Passwords", name: "Passwords" },
+  { bundleId: "com.apple.keychainaccess", name: "Keychain Access" },
+  { bundleId: "com.1password.1password", name: "1Password" },
+  { bundleId: "com.agilebits.onepassword7", name: "1Password 7" },
+  { bundleId: "com.bitwarden.desktop", name: "Bitwarden" },
+  { bundleId: "com.lastpass.LastPass", name: "LastPass" },
+  { bundleId: "org.keepassxc.keepassxc", name: "KeePassXC" },
+  { bundleId: "com.dashlane.dashlanephonefinal", name: "Dashlane" },
+];
+
+const MAX_EXCLUDED_APPS = 200;
+const BUNDLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+
+export function isValidChronicleBundleId(value: unknown): value is string {
+  return typeof value === "string" && BUNDLE_ID_PATTERN.test(value);
+}
+
+function cleanAppName(value: unknown, fallback: string): string {
+  const text = typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]/g, " ").trim() : "";
+  return (text || fallback).slice(0, 120);
+}
+
+/** A valid, de-duplicated list; a missing list means the defaults. */
+export function normalizeExcludedApps(value: unknown): ChronicleExcludedApp[] {
+  if (!Array.isArray(value)) return DEFAULT_CHRONICLE_EXCLUDED_APPS.map((app) => ({ ...app }));
+  const seen = new Set<string>();
+  const apps: ChronicleExcludedApp[] = [];
+  for (const entry of value) {
+    const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    if (!isValidChronicleBundleId(record.bundleId)) continue;
+    const key = record.bundleId.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    apps.push({ bundleId: record.bundleId, name: cleanAppName(record.name, record.bundleId) });
+    if (apps.length >= MAX_EXCLUDED_APPS) break;
+  }
+  return apps;
+}
+
+/** Whether Chronicle must not capture while this app is in front. */
+export function isChronicleExcludedApp(
+  settings: Pick<ChronicleSettings, "excludedApps">,
+  bundleId: string | undefined | null,
+): boolean {
+  if (!bundleId) return false;
+  const key = bundleId.toLowerCase();
+  return (settings.excludedApps ?? []).some((app) => app.bundleId.toLowerCase() === key);
+}
 
 const DEFAULT_SETTINGS: ChronicleSettings = {
   enabled: false,
@@ -12,6 +63,7 @@ const DEFAULT_SETTINGS: ChronicleSettings = {
   backgroundGenerationEnabled: true,
   respectWorkspaceMemory: true,
   consentAcceptedAt: null,
+  excludedApps: DEFAULT_CHRONICLE_EXCLUDED_APPS,
 };
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -44,6 +96,7 @@ function normalizeSettings(
       typeof input?.consentAcceptedAt === "number" && Number.isFinite(input.consentAcceptedAt)
         ? Math.max(0, Math.round(input.consentAcceptedAt))
         : null,
+    excludedApps: normalizeExcludedApps(input?.excludedApps),
   };
 }
 

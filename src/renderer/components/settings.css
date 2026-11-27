@@ -4020,3 +4020,107 @@ html.visual-calm
   align-items: center;
   margin-top: 8px;
 }
+
+/* ── Chronicle: excluded apps and the recent timeline ── */
+.chronicle-excluded-list,
+.chronicle-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chronicle-excluded-app {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.chronicle-excluded-app-text,
+.chronicle-timeline-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chronicle-excluded-app-name,
+.chronicle-timeline-app {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.chronicle-excluded-app-id {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chronicle-excluded-empty,
+.chronicle-timeline-empty {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.chronicle-timeline-frame {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.chronicle-timeline-thumb {
+  width: 120px;
+  height: 72px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  object-fit: cover;
+  object-position: top left;
+}
+
+.chronicle-timeline-title {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chronicle-timeline-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.chronicle-timeline-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chronicle-small-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chronicle-timeline-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-error);
+}

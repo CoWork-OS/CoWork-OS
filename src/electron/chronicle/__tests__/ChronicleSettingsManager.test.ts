@@ -12,7 +12,10 @@ vi.mock("../../database/SecureSettingsRepository", () => ({
   },
 }));
 
-import { ChronicleSettingsManager } from "../ChronicleSettingsManager";
+import {
+  ChronicleSettingsManager,
+  DEFAULT_CHRONICLE_EXCLUDED_APPS,
+} from "../ChronicleSettingsManager";
 
 describe("ChronicleSettingsManager", () => {
   beforeEach(() => {
@@ -36,6 +39,7 @@ describe("ChronicleSettingsManager", () => {
       backgroundGenerationEnabled: true,
       respectWorkspaceMemory: true,
       consentAcceptedAt: null,
+      excludedApps: DEFAULT_CHRONICLE_EXCLUDED_APPS,
     });
   });
 
@@ -61,6 +65,7 @@ describe("ChronicleSettingsManager", () => {
       backgroundGenerationEnabled: true,
       respectWorkspaceMemory: true,
       consentAcceptedAt: null,
+      excludedApps: DEFAULT_CHRONICLE_EXCLUDED_APPS,
     });
     expect(saveMock).toHaveBeenCalledWith("chronicle", saved);
   });

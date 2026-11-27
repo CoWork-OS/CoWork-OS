@@ -14,6 +14,7 @@ const OFF: ChronicleSettings = {
   backgroundGenerationEnabled: true,
   respectWorkspaceMemory: true,
   consentAcceptedAt: null,
+  excludedApps: [],
 };
 
 describe("chronicleEnableNeedsConsent", () => {

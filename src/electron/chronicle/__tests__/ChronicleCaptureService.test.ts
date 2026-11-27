@@ -27,6 +27,7 @@ const BASE_SETTINGS: ChronicleSettings = {
   backgroundGenerationEnabled: true,
   respectWorkspaceMemory: true,
   consentAcceptedAt: 1,
+  excludedApps: [],
 };
 
 describe("ChronicleCaptureService privacy", () => {

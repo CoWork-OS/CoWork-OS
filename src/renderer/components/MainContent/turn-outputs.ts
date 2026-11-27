@@ -2,6 +2,10 @@ import type { TaskEvent, TaskStatus } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { dedupeOutputPaths } from "../../utils/task-outputs";
 import { getSidePanelViewerKind } from "../../utils/open-file-in-panel";
+import { isScratchOutputPath } from "../../../shared/scratch-paths";
+import { FIRST_TURN_KEY } from "../../../shared/turn-changes";
+
+export { isScratchOutputPath };
 
 export type TurnOutputAction = "created" | "updated";
 
@@ -14,41 +18,16 @@ export interface TurnOutputFile {
 export interface TurnOutputSummary {
   /** Stable for the turn: the id of the event that opened it. */
   key: string;
+  /** The turn's key in the main process's change record (see `shared/turn-changes`). */
+  changeKey: string;
   files: TurnOutputFile[];
   /** Event-stream index range [startIndex, endIndex] the turn covers. */
   startIndex: number;
   endIndex: number;
 }
 
-// Working files the agent writes for itself: never deliverables.
-const SCRATCH_PATH_SEGMENTS = new Set([
-  ".cowork",
-  ".git",
-  ".cache",
-  ".venv",
-  ".tmp",
-  "__pycache__",
-  "node_modules",
-  "scratch",
-  "tmp",
-  "temp",
-  "venv",
-]);
-const SCRATCH_ABSOLUTE_PREFIX_RE = /^\/(?:private\/)?(?:tmp|var\/folders)\//;
-const SCRATCH_FILE_NAME_RE = /^(?:~\$|\.DS_Store$|\.~lock\.)/;
-
 function normalizeOutputPath(raw: unknown): string {
   return typeof raw === "string" ? raw.trim().replace(/\\/g, "/") : "";
-}
-
-export function isScratchOutputPath(filePath: string): boolean {
-  const normalized = normalizeOutputPath(filePath);
-  if (!normalized) return true;
-  if (SCRATCH_ABSOLUTE_PREFIX_RE.test(normalized)) return true;
-  const segments = normalized.split("/").filter(Boolean);
-  const fileName = segments[segments.length - 1] || "";
-  if (SCRATCH_FILE_NAME_RE.test(fileName)) return true;
-  return segments.slice(0, -1).some((segment) => SCRATCH_PATH_SEGMENTS.has(segment.toLowerCase()));
 }
 
 /** Paths an event says the agent wrote, split into newly created and changed files. */
@@ -94,8 +73,10 @@ function summarizeTurn(
       : dedupeOutputPaths(updated).map((path) => ({ path, action: "updated" }));
   if (files.length === 0) return null;
   const opener = events[startIndex];
+  const openedByUserMessage = !!opener && getEffectiveTaskEventType(opener) === "user_message";
   return {
     key: opener?.id || `index:${startIndex}`,
+    changeKey: openedByUserMessage && opener.id ? opener.id : FIRST_TURN_KEY,
     files,
     startIndex,
     endIndex,

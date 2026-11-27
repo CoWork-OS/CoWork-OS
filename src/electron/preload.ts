@@ -449,6 +449,7 @@ import type {
   BrowserSettingsState,
   BrowserSitePermissionEntry,
 } from "../shared/browser-settings";
+import type { TurnChangeSet, TurnChangesUndoResult } from "../shared/turn-changes";
 
 const ALLOWED_MESSAGE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
 const ALLOWED_MESSAGE_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
@@ -2060,6 +2061,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
       id,
       undoToken,
     }) as Promise<AnnotationUndoResult>,
+  listTurnChanges: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TURN_CHANGES_LIST, { taskId }) as Promise<TurnChangeSet[]>,
+  undoTurnChanges: (taskId: string, turnKey: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TURN_CHANGES_UNDO, {
+      taskId,
+      turnKey,
+    }) as Promise<TurnChangesUndoResult>,
   onBrowserWorkbenchOpenRequest: (callback: (request: BrowserWorkbenchOpenRequest) => void) => {
     const handler = (_: Any, request: BrowserWorkbenchOpenRequest) => callback(request);
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_OPEN_REQUEST, handler);
@@ -5778,6 +5786,10 @@ export interface ElectronAPI {
   resolveAnnotation: (id: string, resolvedByEventId?: string) => Promise<Annotation | null>;
   dismissAnnotation: (id: string) => Promise<Annotation | null>;
   undoAnnotationChange: (id: string, undoToken: string) => Promise<AnnotationUndoResult>;
+  /** The files each turn of a task changed through the file tools. */
+  listTurnChanges: (taskId: string) => Promise<TurnChangeSet[]>;
+  /** Put back the files one turn changed, as they were before it. */
+  undoTurnChanges: (taskId: string, turnKey: string) => Promise<TurnChangesUndoResult>;
   onBrowserWorkbenchOpenRequest: (
     callback: (request: BrowserWorkbenchOpenRequest) => void,
   ) => () => void;

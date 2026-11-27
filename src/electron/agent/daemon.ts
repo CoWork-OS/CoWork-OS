@@ -146,6 +146,8 @@ import type { ApplicationToolGateway } from "../applications/ApplicationAdapterC
 import { APPLICATION_DECISION_PREFIX, resolveApplicationInput } from "./tools/application-tools";
 import { AnnotationResultService } from "../annotations/AnnotationResultService";
 import { RevisionSnapshotStore } from "../annotations/revision-snapshots";
+import { TurnChangeJournal, type TurnStart } from "../turn-changes/turn-change-journal";
+import type { TurnChangeSet, TurnChangesUndoResult } from "../../shared/turn-changes";
 import { getUserDataDir } from "../utils/user-data-dir";
 import {
   loadSessionRetentionSettings,
@@ -968,6 +970,7 @@ export class AgentDaemon extends EventEmitter {
   private applicationTaskTools = new ApplicationTaskToolGateway();
   private annotationRepo: AnnotationRepository;
   private annotationResults?: AnnotationResultService;
+  private turnChangeJournal?: TurnChangeJournal;
   private activityRepo: ActivityStore;
   private agentRoleRepo: AgentRoleStore;
   private mentionRepo: MentionStore;
@@ -17688,6 +17691,105 @@ export class AgentDaemon extends EventEmitter {
     return this.getAnnotationResults().undo(annotationId, undoToken);
   }
 
+  /** What each turn changed through the file tools, kept so a turn can be undone. */
+  getTurnChangeJournal(): TurnChangeJournal {
+    this.turnChangeJournal ??= new TurnChangeJournal({
+      root: path.join(getUserDataDir(), "turn-changes"),
+      snapshots: new RevisionSnapshotStore(path.join(getUserDataDir(), "artifact-revisions")),
+      trash: async (filePath) => {
+        // oxlint-disable-next-line typescript/no-require-imports
+        const { shell } = require("electron") as typeof import("electron");
+        await shell.trashItem(filePath);
+      },
+      log: (message, error) => log.warn(message, error),
+    });
+    return this.turnChangeJournal;
+  }
+
+  /** The task's user messages, which open its turns after the first. */
+  private turnStartsFor(taskId: string): TurnStart[] {
+    return this.eventRepo
+      .findByTaskIdAndTypes(taskId, ["user_message"])
+      .map((event) => ({ key: event.id, at: event.timestamp }));
+  }
+
+  private workspacePathForTask(taskId: string): string | undefined {
+    const task = this.taskRepo.findById(taskId);
+    return task ? this.workspaceRepo.findById(task.workspaceId)?.path : undefined;
+  }
+
+  /** Every turn of a task that changed files through the file tools. */
+  async listTurnChanges(taskId: string): Promise<TurnChangeSet[]> {
+    if (!this.taskRepo.findById(taskId)) return [];
+    return this.getTurnChangeJournal().list(
+      taskId,
+      this.turnStartsFor(taskId),
+      this.workspacePathForTask(taskId),
+    );
+  }
+
+  /**
+   * Put the files one turn changed back as they were before it. Refused while the task works,
+   * so the agent never writes over a file as it is put back. The agent is told on its next turn.
+   */
+  async undoTurnChanges(taskId: string, turnKey: string): Promise<TurnChangesUndoResult> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) return { ok: false, restored: [], error: "Session not found." };
+    // Paused and blocked sessions resume into the same turn and may write again.
+    if (["planning", "executing", "interrupted", "paused", "blocked"].includes(task.status)) {
+      return {
+        ok: false,
+        restored: [],
+        error: "Stop this session or let it finish before undoing changes.",
+      };
+    }
+    const workspacePath = this.workspacePathForTask(taskId);
+    const result = await this.getTurnChangeJournal().undo(
+      taskId,
+      turnKey,
+      this.turnStartsFor(taskId),
+      workspacePath,
+    );
+    if (result.restored.length > 0) {
+      this.logEvent(taskId, "turn_changes_undone", {
+        turnKey,
+        files: result.restored.map((filePath) =>
+          workspacePath ? path.relative(workspacePath, filePath) || filePath : filePath,
+        ),
+        complete: result.ok,
+      });
+    }
+    return result;
+  }
+
+  /** A note for the agent's next message about files the user put back, and the undos it covers. */
+  private async buildTurnUndoFollowUpNote(
+    taskId: string,
+  ): Promise<{ note: string; turnKeys: string[] }> {
+    let undos: Array<{ turnKey: string; paths: string[] }>;
+    try {
+      undos = await this.getTurnChangeJournal().untoldUndos(taskId);
+    } catch {
+      return { note: "", turnKeys: [] };
+    }
+    const workspacePath = this.workspacePathForTask(taskId);
+    const paths = [...new Set(undos.flatMap((undo) => undo.paths))];
+    if (paths.length === 0) return { note: "", turnKeys: [] };
+    // File names are quoted, so a name with line breaks can't read as more of the note.
+    const shown = paths.slice(0, 40).map((filePath) => {
+      const relative = workspacePath ? path.relative(workspacePath, filePath) : "";
+      return `- ${JSON.stringify(relative && !relative.startsWith("..") ? relative : filePath)}`;
+    });
+    const note = [
+      "## Files the user put back",
+      "",
+      "Since your last reply, the user undid the file changes from an earlier turn of this conversation. These files are back to how they were before that turn (files that turn created were moved to the Trash). Read them again before relying on their contents:",
+      ...shown,
+      ...(paths.length > shown.length ? [`- and ${paths.length - shown.length} more`] : []),
+    ].join("\n");
+    return { note, turnKeys: undos.map((undo) => undo.turnKey) };
+  }
+
   /**
    * An edit the user started by pointing at part of a file (document editor): the annotation is
    * recorded on the task doing the edit and is being addressed from the start.
@@ -18079,8 +18181,17 @@ export class AgentDaemon extends EventEmitter {
 
     this.taskRepo.touch(taskId);
     const annotationContext = await this.buildAnnotationFollowUpContext(taskId, message);
+    const turnUndo = await this.buildTurnUndoFollowUpNote(taskId);
     effectiveOptions?.admissionGuard?.();
-    const effectiveMessage = annotationContext.message;
+    const effectiveMessage = turnUndo.note
+      ? `${annotationContext.message}\n\n${turnUndo.note}`
+      : annotationContext.message;
+    if (turnUndo.turnKeys.length > 0) {
+      // Told only once the message is admitted, so a refused message does not lose the note.
+      await this.getTurnChangeJournal()
+        .markUndosTold(taskId, turnUndo.turnKeys)
+        .catch(() => {});
+    }
     const userMessageAttachmentMetadata = buildUserMessageAttachmentMetadata(images);
     if (annotationContext.annotations.length > 0) {
       const changedCount = await this.annotationRepo.markAddressing(

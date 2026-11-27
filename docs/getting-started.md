@@ -271,6 +271,15 @@ Typical profile workflow:
 
 Each profile keeps its own local database, encrypted settings, managed skills, channel configs, and session history.
 
+### Undoing a Turn's File Changes
+
+Each finished turn ends with a line naming the files it wrote, the lines it added and removed, and **Undo**. Undo lists every file the turn changed and what happens to it, then puts them back as they were before that turn: changed and deleted files are restored, and files the turn created go to the Trash. Your next message tells the agent which files were put back.
+
+- It covers changes made with CoWork's file tools (write, edit, rename, copy, delete). Changes made by commands the agent ran, or by other apps, are not undone.
+- It is all or nothing. When a file changed after that turn (by a later turn, by you, or by another app), Undo says which one and changes nothing. Undo the latest turn first to step further back.
+- Only files in the session's workspace are put back. Copies of files over 25 MB aren't kept, so such changes can't be undone, and kept copies expire after 30 days unused.
+- Undo is not offered while the session is working.
+
 ## Optional: Turn On Automations
 
 Open **Automations** in the main sidebar when you want to build a structured flow. Start from a template, a conservative prompt-generated draft, or a blank flow; test it with sample JSON; review its scopes and approvals; save the draft; and select **Turn on** only after validation passes. See [Automation Studio](automation-studio.md).

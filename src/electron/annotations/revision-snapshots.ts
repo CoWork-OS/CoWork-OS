@@ -48,8 +48,14 @@ export class RevisionSnapshotStore {
     }
   }
 
-  /** Hash a file and keep its bytes when it is small enough. Undefined when it does not exist. */
-  async capture(filePath: string): Promise<FileSnapshot | undefined> {
+  /**
+   * Hash a file and keep its bytes when it is small enough (and `keep` is not false).
+   * Undefined when it does not exist.
+   */
+  async capture(
+    filePath: string,
+    options: { keep?: boolean } = {},
+  ): Promise<FileSnapshot | undefined> {
     let stat;
     try {
       stat = await fs.stat(filePath);
@@ -57,22 +63,39 @@ export class RevisionSnapshotStore {
       return undefined;
     }
     if (!stat.isFile()) return undefined;
-    if (stat.size > this.maxBytes) {
+    if (stat.size > this.maxBytes || options.keep === false) {
       return { sha256: await hashFile(filePath), size: stat.size, kept: false };
     }
-    const bytes = await fs.readFile(filePath);
+    return this.captureBytes(await fs.readFile(filePath));
+  }
+
+  /** Keep `bytes` (when small enough) and return their hash, as `capture` does for a file. */
+  async captureBytes(bytes: Buffer, options: { keep?: boolean } = {}): Promise<FileSnapshot> {
     const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+    if (bytes.length > this.maxBytes || options.keep === false) {
+      return { sha256, size: bytes.length, kept: false };
+    }
     const target = this.blobPath(sha256);
     const now = new Date();
     try {
       await fs.utimes(target, now, now);
     } catch {
-      await fs.mkdir(path.dirname(target), { recursive: true });
+      // Kept copies are the user's file contents: readable by the user only.
+      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       const temp = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
       await fs.writeFile(temp, bytes, { mode: 0o600 });
       await fs.rename(temp, target);
     }
     return { sha256, size: bytes.length, kept: true };
+  }
+
+  /** The kept bytes of `sha256`, or null when they are not kept. */
+  async read(sha256: string): Promise<Buffer | null> {
+    try {
+      return await fs.readFile(this.blobPath(sha256));
+    } catch {
+      return null;
+    }
   }
 
   /** Write the kept bytes of `sha256` to `destPath`, replacing it in one step. */

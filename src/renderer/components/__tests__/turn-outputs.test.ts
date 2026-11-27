@@ -41,12 +41,14 @@ describe("collectTurnOutputSummaries", () => {
     expect(collectTurnOutputSummaries(events, { isTaskWorking: false })).toEqual([
       {
         key: "prompt",
+        changeKey: "prompt",
         files: [{ path: "out/report.docx", action: "created" }],
         startIndex: 0,
         endIndex: 3,
       },
       {
         key: "follow-up",
+        changeKey: "follow-up",
         files: [{ path: "out/data.xlsx", action: "created" }],
         startIndex: 4,
         endIndex: 6,
@@ -140,6 +142,7 @@ describe("collectTurnOutputSummaries", () => {
 describe("pickTurnOutputToAutoOpen", () => {
   const turn = (files: TurnOutputSummary["files"]): TurnOutputSummary => ({
     key: "turn",
+    changeKey: "turn",
     files,
     startIndex: 0,
     endIndex: 1,

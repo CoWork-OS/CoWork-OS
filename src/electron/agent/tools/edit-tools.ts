@@ -18,6 +18,7 @@ import {
 import { LLMTool } from "../llm/types";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import { getUserDataDir } from "../../utils/user-data-dir";
+import { recordFileBytesChange } from "../../turn-changes/turn-change-journal";
 
 function hasStableFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
   if (left.dev === 0 || right.dev === 0 || left.ino === 0 || right.ino === 0) return true;
@@ -839,6 +840,8 @@ export class EditTools {
               expectedParentIdentity: initialParentStats,
               externalApprovalGranted,
             });
+            // Kept so the turn's change can be undone; never fails the edit.
+            await recordFileBytesChange(this.taskId, realPath, currentBuffer, nextBuffer);
             return next;
           },
         );

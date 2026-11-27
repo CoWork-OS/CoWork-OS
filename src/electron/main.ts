@@ -134,6 +134,7 @@ import { AutomationOutcomeService } from "./automation/AutomationOutcomeService"
 import { RecurringApprovalService } from "./security/recurring-approval-repository-facades";
 import { ProactiveSuggestionsService } from "./agent/ProactiveSuggestionsService";
 import { AgentDaemon } from "./agent/daemon";
+import { setActiveTurnChangeJournal } from "./turn-changes/turn-change-journal";
 import { approvalPromptsDisabled } from "./agent/approval-policy";
 import { composerFollowUpProvenance } from "./agent/follow-up-provenance";
 import { USER_TYPED_TASK_PROMPT } from "./agent/task-prompt-provenance";
@@ -2948,6 +2949,8 @@ if (isMacSafeStorageMigrationWorker) {
       const numbatService = NumbatService.initialize(dbManager.getDatabase());
       recurringApprovalService = new RecurringApprovalService(dbManager.getDatabase());
       agentDaemon = new AgentDaemon(dbManager, { recurringApprovalService });
+      // File tools record what each turn changes, so the user can undo a turn.
+      setActiveTurnChangeJournal(agentDaemon.getTurnChangeJournal());
       automationRuntime.registerRecovery(
         new BotWorkControlRecovery(
           dbManager.getDatabase(),
@@ -6266,6 +6269,23 @@ if (isMacSafeStorageMigrationWorker) {
       if (!id) throw new Error("Annotation id is required");
       if (!undoToken) throw new Error("Undo token is required");
       return await agentDaemon.undoAnnotationChange(id, undoToken);
+    });
+
+    const turnChangeId = (value: unknown, label: string): string => {
+      const id = typeof value === "string" ? value.trim() : "";
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error(`A valid ${label} is required`);
+      return id;
+    };
+
+    ipcMain.handle(IPC_CHANNELS.TURN_CHANGES_LIST, async (_event, data: Any) => {
+      return await agentDaemon.listTurnChanges(turnChangeId(data?.taskId, "task id"));
+    });
+
+    ipcMain.handle(IPC_CHANNELS.TURN_CHANGES_UNDO, async (_event, data: Any) => {
+      return await agentDaemon.undoTurnChanges(
+        turnChangeId(data?.taskId, "task id"),
+        turnChangeId(data?.turnKey, "turn key"),
+      );
     });
 
     ipcMain.handle(IPC_CHANNELS.ANNOTATION_DISMISS, async (_event, data: Any) => {

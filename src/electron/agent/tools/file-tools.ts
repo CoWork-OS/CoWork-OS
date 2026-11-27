@@ -30,6 +30,7 @@ import {
 import { extractPptxContentFromFile } from "../../utils/pptx-extractor";
 import { extractPdfText } from "../../utils/pdf-text";
 import { detectWorkspacePathAlias, shouldRewriteWorkspaceAliasPath } from "../path-alias";
+import { watchFileChanges } from "../../turn-changes/turn-change-journal";
 import {
   buildManagedAutomatedOutputPath,
   isAlreadyInManagedOutputZone,
@@ -2122,39 +2123,49 @@ export class FileTools {
         previousContent = bootstrapStub.previousContent?.toString("utf-8") ?? null;
       }
 
+      // The file as it is before this write, so the turn's change can be undone.
+      const changeWatch = await watchFileChanges(this.taskId, [
+        mutationPath.targetRealPath || mutationPath.path,
+      ]);
       await beforeEffect(mutationPath.path);
       // Write file
-      if (reviewedExecution) {
-        await this.runWriteFilePhase(
-          "write reviewed file contents",
-          requestedPath,
-          options,
-          (signal) =>
-            this.writeReviewedBoundFile(
-              mutationPath,
-              content,
-              reviewedExecution!,
-              signal,
-              () => beforeEffect(mutationPath.path, true),
-              () => beforeEffect(mutationPath.path, true),
+      try {
+        if (reviewedExecution) {
+          await this.runWriteFilePhase(
+            "write reviewed file contents",
+            requestedPath,
+            options,
+            (signal) =>
+              this.writeReviewedBoundFile(
+                mutationPath,
+                content,
+                reviewedExecution!,
+                signal,
+                () => beforeEffect(mutationPath.path, true),
+                () => beforeEffect(mutationPath.path, true),
+              ),
+          );
+          // The approved bytes become a WorkSession revision, so result cards can recheck the
+          // current file against what was reviewed. Best effort: the write already committed.
+          try {
+            this.daemon.getWorkSessionContractService?.().recordReviewedOutput(this.taskId, {
+              path: mutationPath.path,
+              sha256: reviewedExecution.contentSha256,
+              size: Buffer.byteLength(content, "utf8"),
+              approvalId: reviewedExecution.approvalId,
+            });
+          } catch {
+            // The committed claim remains the authoritative record of the effect.
+          }
+        } else {
+          await this.runWriteFilePhase("write file contents", requestedPath, options, (signal) =>
+            this.writeBoundFile(mutationPath, content, signal, () =>
+              beforeEffect(mutationPath.path),
             ),
-        );
-        // The approved bytes become a WorkSession revision, so result cards can recheck the
-        // current file against what was reviewed. Best effort: the write already committed.
-        try {
-          this.daemon.getWorkSessionContractService?.().recordReviewedOutput(this.taskId, {
-            path: mutationPath.path,
-            sha256: reviewedExecution.contentSha256,
-            size: Buffer.byteLength(content, "utf8"),
-            approvalId: reviewedExecution.approvalId,
-          });
-        } catch {
-          // The committed claim remains the authoritative record of the effect.
+          );
         }
-      } else {
-        await this.runWriteFilePhase("write file contents", requestedPath, options, (signal) =>
-          this.writeBoundFile(mutationPath, content, signal, () => beforeEffect(mutationPath.path)),
-        );
+      } finally {
+        await changeWatch.commit();
       }
 
       // Build content preview (full content up to 20KB cap)
@@ -2623,7 +2634,15 @@ export class FileTools {
         this.revalidateMutationPath(newMutationPath, "parent directory creation", true),
       ]);
 
-      await fs.rename(oldMutationPath.path, newMutationPath.path);
+      const changeWatch = await watchFileChanges(this.taskId, [
+        oldMutationPath.path,
+        newMutationPath.path,
+      ]);
+      try {
+        await fs.rename(oldMutationPath.path, newMutationPath.path);
+      } finally {
+        await changeWatch.commit();
+      }
 
       this.daemon.logEvent(this.taskId, "file_modified", {
         action: "rename",
@@ -2685,7 +2704,14 @@ export class FileTools {
       ]);
 
       // Copy file using binary buffer (preserves exact content)
-      await this.copyBoundFile(sourceMutationPath, destMutationPath);
+      const changeWatch = await watchFileChanges(this.taskId, [
+        destMutationPath.targetRealPath || destMutationPath.path,
+      ]);
+      try {
+        await this.copyBoundFile(sourceMutationPath, destMutationPath);
+      } finally {
+        await changeWatch.commit();
+      }
 
       this.daemon.logEvent(this.taskId, "file_created", {
         path: requestedDestPath,
@@ -2735,9 +2761,12 @@ export class FileTools {
       throw new Error("User denied file deletion");
     }
 
+    // A deleted file is recorded with its bytes, so the turn's change can be undone.
+    let changeWatch: { commit: () => Promise<void> } | undefined;
     try {
       await this.daemon.captureTaskMutationBaseline?.(this.taskId, mutationPath.path);
       await this.revalidateMutationPath(mutationPath, "mutation baseline");
+      changeWatch = await watchFileChanges(this.taskId, [mutationPath.path]);
       // For .app bundles on macOS, use shell.trashItem directly (safer and expected behavior)
       if (mutationPath.path.endsWith(".app")) {
         const shell = getElectronShell();
@@ -2799,6 +2828,8 @@ export class FileTools {
         }
       }
       throw new Error(`Failed to delete file: ${(error as Error).message}`);
+    } finally {
+      await changeWatch?.commit();
     }
   }
 

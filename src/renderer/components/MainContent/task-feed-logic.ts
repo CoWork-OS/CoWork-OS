@@ -73,6 +73,8 @@ export type TaskFeedRow =
       key: string;
       estimatedHeight: number;
       files: TurnOutputFile[];
+      /** The turn's key in the change record, for Undo. */
+      changeKey: string;
       revision: string;
       visiblePerfEventId: null;
     }

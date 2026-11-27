@@ -41,6 +41,7 @@ See [Release Notes 0.5.61](release-notes-0.5.61.md).
 - [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, session search, and **Running** / **Needs you** filters
 - [x] Command menu (Cmd/Ctrl+K) over actions, loaded sessions, Settings sections and message text
 - [x] Searchable keyboard shortcut list (Cmd/Ctrl+/), session 1–9 and next-session-that-needs-you shortcuts, mark all sessions as read
+- [x] Undo a turn's file changes from its file line (file tools only; blocked when a file changed after the turn)
 - [x] Sidebar Group by activity: Needs you first, then by day across projects, with each finished session's result line
 - [x] Cmd+Shift+2 attaches the window in front (picture, title, address, read text) to the message box on macOS
 - [x] Steer now or send after this run for messages sent while the agent works (Cmd/Ctrl+Enter sends the other way; default in Settings)

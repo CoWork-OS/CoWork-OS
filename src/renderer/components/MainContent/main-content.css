@@ -5765,6 +5765,134 @@ button.collab-timeline-thought-agent:hover {
   color: var(--color-text);
 }
 
+.turn-outputs-lines {
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-outputs-lines-added {
+  color: var(--color-success, #22863a);
+}
+
+.turn-outputs-lines-removed {
+  color: var(--color-error, #cb2431);
+}
+
+.turn-outputs-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.turn-outputs-undo:hover,
+.turn-outputs-undo:focus-visible,
+.turn-outputs-undo[aria-expanded="true"] {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.turn-outputs-undone {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.turn-undo-confirm {
+  flex: 1 0 100%;
+  max-width: 560px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+}
+
+.turn-undo-confirm-title {
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.turn-undo-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  margin: 0 0 8px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.turn-undo-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.turn-undo-file-name {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-undo-file-meta {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.turn-undo-confirm-note {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.turn-undo-confirm-error {
+  margin-top: 6px;
+  color: var(--color-error, #cb2431);
+  font-size: 12px;
+}
+
+.turn-undo-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.turn-undo-confirm-primary,
+.turn-undo-confirm-cancel {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.turn-undo-confirm-primary {
+  border-color: transparent;
+  background: var(--color-text);
+  color: var(--color-bg-primary);
+}
+
+.turn-undo-confirm-primary:disabled,
+.turn-undo-confirm-cancel:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.turn-undo-confirm-cancel:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
 .conversation-artifact-stack {
   margin: 4px 0 14px;
 }

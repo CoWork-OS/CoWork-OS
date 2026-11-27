@@ -81,6 +81,8 @@ import {
 } from "./artifact-logic";
 import { collectTurnOutputSummaries } from "./turn-outputs";
 import { TurnOutputsRow } from "./TurnOutputsRow";
+import { useTurnChanges } from "../../hooks/useTurnChanges";
+import { FIRST_TURN_KEY } from "../../../shared/turn-changes";
 import { collectTurnProposalGroups } from "./turn-proposals";
 import { ConnectedSuggestedTasksCard } from "./SuggestedTasksCard";
 import {
@@ -1111,6 +1113,11 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
   const stepFeedbackText = props.stepFeedbackText;
   const suppressedParallelEventIds = props.suppressedParallelEventIds;
   const task = props.task;
+  const { changeSets: turnChangeSets, undoTurn } = useTurnChanges(
+    task?.id,
+    isTaskWorking,
+    events.length,
+  );
   const isBotConversation = task?.agentConfig?.botConversation === true;
   // Bot transcripts follow the teammate-conversation model: keep messages and
   // user-relevant outcomes in the flow, but keep internal execution activity
@@ -1346,6 +1353,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
           key: `turn-outputs:${summary.key}`,
           estimatedHeight: 44,
           files: summary.files,
+          changeKey: summary.changeKey,
           revision: summary.files.map((file) => `${file.action}:${file.path}`).join("|"),
           visiblePerfEventId: null,
         });
@@ -1696,6 +1704,11 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
         {/* Conversation Flow - renders all events in order; show when we have events OR collaborative run with child tasks */}
         {(events.length > 0 || (collaborativeRun && childTasks.length > 0) || isTaskWorking) &&
           (() => {
+            // The first turn's key only matches when the whole history is loaded.
+            const getTurnChangeSet = (changeKey: string) =>
+              changeKey === FIRST_TURN_KEY && hasMoreTimelineHistory
+                ? undefined
+                : turnChangeSets.get(changeKey);
             const getRowRenderSignature = (row: TaskFeedRow): string => {
               if (row.kind === "history-control") {
                 return row.revision;
@@ -1703,9 +1716,16 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
               if (row.kind === "leading-command-outputs") {
                 return row.revision;
               }
+              if (row.kind === "turn-outputs") {
+                const changeSet = getTurnChangeSet(row.changeKey);
+                return `${row.revision}|${
+                  changeSet
+                    ? `${changeSet.canUndo ? 1 : 0}:${changeSet.undoneAt ?? 0}:${changeSet.files.length}`
+                    : "-"
+                }`;
+              }
               if (
                 row.kind === "image-stack" ||
-                row.kind === "turn-outputs" ||
                 row.kind === "suggested-tasks" ||
                 row.kind === "turn-header"
               ) {
@@ -1809,6 +1829,8 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                     files={row.files}
                     workspacePath={workspace.path}
                     onOpenFile={openFileInPanel}
+                    changeSet={getTurnChangeSet(row.changeKey)}
+                    onUndo={() => undoTurn(row.changeKey)}
                     onViewAll={
                       task && onViewTaskOutputs
                         ? (primaryPath) => onViewTaskOutputs(task.id, primaryPath)
@@ -3247,6 +3269,8 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
     [
       agentContext,
       activityGroupsById,
+      turnChangeSets,
+      undoTurn,
       childEvents,
       childTasks,
       collaborativeRun,

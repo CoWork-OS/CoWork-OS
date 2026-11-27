@@ -786,6 +786,7 @@ export type EventType =
   | "annotation_addressing_started"
   | "annotation_addressed"
   | "annotation_change_undone" // The change that addressed an annotation was reverted
+  | "turn_changes_undone" // The user put back the files one turn changed
   | "annotation_resolved"
   | "annotation_dismissed"
   | "command_output"
@@ -8242,6 +8243,9 @@ export const IPC_CHANNELS = {
   ANNOTATION_RESOLVE: "annotation:resolve",
   ANNOTATION_DISMISS: "annotation:dismiss",
   ANNOTATION_UNDO: "annotation:undo",
+  // The files each turn changed, and putting a turn's files back
+  TURN_CHANGES_LIST: "turnChanges:list",
+  TURN_CHANGES_UNDO: "turnChanges:undo",
   YOUTUBE_ASK_VIDEO: "youtube:askVideo",
   LLM_WIKI_GET_VAULT_SUMMARY: "llmWiki:getVaultSummary",
   FILE_IMPORT_TO_WORKSPACE: "file:importToWorkspace",

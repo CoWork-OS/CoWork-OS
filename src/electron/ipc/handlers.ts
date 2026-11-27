@@ -5984,6 +5984,11 @@ export async function setupIpcHandlers(
     // the task (archive memories, KG facts, Playbook evidence) in the same transaction.
     await taskRepo.delete(id, { purgeDerivedMemory: true });
     agentDaemon.releaseCapturedQueuedAttachmentRefs(id, queuedAttachmentRefs);
+    // Its record of file changes for Undo (the kept copies expire on their own).
+    await agentDaemon
+      .getTurnChangeJournal()
+      .forget(id)
+      .catch(() => {});
 
     // Then the task's file-side memory: transcripts and Chronicle observations.
     if (existingTask) {

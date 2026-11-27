@@ -982,6 +982,20 @@ export function renderEventTitle(
         </span>
       );
     }
+    case "turn_changes_undone": {
+      const undoneFiles: unknown[] = Array.isArray(event.payload?.files) ? event.payload.files : [];
+      const count = undoneFiles.length;
+      return (
+        <span>
+          Undid this turn's changes to{" "}
+          <span className="event-title-meta">
+            {count === 1 && typeof undoneFiles[0] === "string"
+              ? undoneFiles[0]
+              : `${count} ${count === 1 ? "file" : "files"}`}
+          </span>
+        </span>
+      );
+    }
     case "annotation_change_undone": {
       const anchor =
         typeof event.payload?.anchor === "string" && event.payload.anchor

@@ -33,12 +33,13 @@ The workbench model is shared across supported artifact types:
 1. A task creates or updates a local file.
 2. The task feed shows a compact artifact card instead of a plain file link.
 3. The main **Open** action opens the artifact in a resizable right sidebar when an in-app surface is available.
-4. The fullscreen button promotes the same artifact into a focused workspace.
-5. The follow-up composer stays with the artifact so the user can request changes in context.
-6. The preview refreshes after the follow-up finishes and the relevant file changes.
-7. Dropdown actions still provide external app, browser, folder, and copy-path options.
-8. Live websites can open in the Browser Workbench so interactive browser-use tasks happen beside the task instead of in a hidden or external browser.
-9. Terminal tabs can open under the composer so direct CLI work happens in the same workspace as the task, artifacts, browser, approvals, and files.
+4. Opening another file keeps the first one as a tab: with two or more files open, tabs above the viewer switch between them (up to 8; the oldest one not showing closes first), and each tab's × closes it, showing the one beside it. Switching away from a file with unsaved changes asks first.
+5. The fullscreen button promotes the same artifact into a focused workspace.
+6. The follow-up composer stays with the artifact so the user can request changes in context.
+7. The preview refreshes after the follow-up finishes and the relevant file changes.
+8. Dropdown actions still provide external app, browser, folder, and copy-path options.
+9. Live websites can open in the Browser Workbench so interactive browser-use tasks happen beside the task instead of in a hidden or external browser.
+10. Terminal tabs can open under the composer so direct CLI work happens in the same workspace as the task, artifacts, browser, approvals, and files.
 
 This keeps the agent next to the work product. A spreadsheet can be selected and copied, a DOCX can be edited and saved, a deck can be reviewed slide by slide, a generated page can be opened in a sandboxed preview, and a PDF/LaTeX pair can be inspected from the same task surface.
 

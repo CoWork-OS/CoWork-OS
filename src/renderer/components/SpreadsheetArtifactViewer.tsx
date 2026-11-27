@@ -86,6 +86,8 @@ export type SpreadsheetTurnContext = {
 };
 
 type SpreadsheetArtifactViewerProps = {
+  /** Told whenever the file gains or loses unsaved changes. */
+  onUnsavedChange?: (unsaved: boolean) => void;
   filePath: string;
   workspacePath: string;
   mode: SpreadsheetArtifactViewerMode;
@@ -331,6 +333,7 @@ export function SpreadsheetArtifactViewer({
   onModelChange,
   onOpenSettings,
   turnContext,
+  onUnsavedChange,
 }: SpreadsheetArtifactViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -352,6 +355,10 @@ export function SpreadsheetArtifactViewer({
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [dirty, setDirty] = useState(false);
+  // The side panel asks before switching away from a file with unsaved changes.
+  useEffect(() => {
+    onUnsavedChange?.(dirty);
+  }, [dirty, onUnsavedChange]);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [zoom, setZoom] = useState<(typeof ZOOM_OPTIONS)[number]>(100);

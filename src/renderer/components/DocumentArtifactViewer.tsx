@@ -59,6 +59,8 @@ type PendingDocumentAttachment = {
 };
 
 type DocumentArtifactViewerProps = {
+  /** Told whenever the file gains or loses unsaved changes. */
+  onUnsavedChange?: (unsaved: boolean) => void;
   filePath: string;
   workspacePath: string;
   mode: DocumentArtifactViewerMode;
@@ -296,6 +298,7 @@ export function DocumentArtifactViewer({
   onOpenSettings,
   turnContext,
   refreshKey,
+  onUnsavedChange,
 }: DocumentArtifactViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -303,6 +306,10 @@ export function DocumentArtifactViewer({
   const [showMarkdownSource, setShowMarkdownSource] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
   const [dirty, setDirty] = useState(false);
+  // The side panel asks before switching away from a file with unsaved changes.
+  useEffect(() => {
+    onUnsavedChange?.(dirty);
+  }, [dirty, onUnsavedChange]);
   const [saving, setSaving] = useState(false);
   const [editorInitializedKey, setEditorInitializedKey] = useState("");
   const [fullscreenMessage, setFullscreenMessage] = useState("");

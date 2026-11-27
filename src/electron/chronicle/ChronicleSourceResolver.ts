@@ -8,6 +8,8 @@ export interface ChronicleFrontmostContext {
   appName: string;
   bundleId: string;
   windowTitle: string;
+  /** Unix process id of the frontmost app, when the platform reports it. */
+  pid?: number;
   sourceRef?: ChronicleSourceReference | null;
 }
 
@@ -29,6 +31,7 @@ async function resolveFrontmostApp(): Promise<{
   appName: string;
   bundleId: string;
   windowTitle: string;
+  pid?: number;
 }> {
   if (process.platform !== "darwin") {
     return { appName: "Desktop", bundleId: "", windowTitle: "Screen" };
@@ -42,14 +45,18 @@ async function resolveFrontmostApp(): Promise<{
     "try",
     "set windowTitle to name of front window of frontProc",
     "end try",
-    "return appName & linefeed & bundleId & linefeed & windowTitle",
+    "set procId to unix id of frontProc",
+    "return appName & linefeed & bundleId & linefeed & windowTitle & linefeed & procId",
     "end tell",
   ]);
-  const [appName = "Desktop", bundleId = "", windowTitle = "Screen"] = output.split(/\r?\n/);
+  const [appName = "Desktop", bundleId = "", windowTitle = "Screen", procId = ""] =
+    output.split(/\r?\n/);
+  const pid = Number.parseInt(procId.trim(), 10);
   return {
     appName: appName.trim() || "Desktop",
     bundleId: bundleId.trim(),
     windowTitle: windowTitle.trim() || "Screen",
+    ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}),
   };
 }
 

@@ -2516,7 +2516,7 @@ export function App() {
   }, [childTasks]);
 
   // Model selection state
-  const [selectedModel, setSelectedModel] = useState<string>("opus-4-5");
+  const [selectedModel, setSelectedModel] = useState<string>("opus-5-5");
   const [selectedProvider, setSelectedProvider] = useState<LLMProviderType>("anthropic");
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     LLMReasoningEffort | undefined

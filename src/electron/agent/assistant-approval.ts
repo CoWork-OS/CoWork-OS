@@ -149,7 +149,21 @@ function getPermissionPrompt(details: unknown): Partial<PermissionPromptDetails>
  * when the permission engine produced a scope and suggested `allow_workspace`. The engine
  * withholds persistence for requests that must be decided one at a time.
  */
+/**
+ * The app a computer use card may "Always allow", when the main process marked the request
+ * (`AgentDaemon.computerUseAlwaysAllowCandidate`). Tool details never carry this mark.
+ */
+export function getAlwaysAllowApp(details: unknown): { bundleId: string; name: string } | null {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const app = (details as Record<string, unknown>).alwaysAllowApp;
+  if (!app || typeof app !== "object" || Array.isArray(app)) return null;
+  const { bundleId, name } = app as Record<string, unknown>;
+  if (typeof bundleId !== "string" || !bundleId || typeof name !== "string") return null;
+  return { bundleId, name: normalizeText(name, 120) || bundleId };
+}
+
 export function canOfferAssistantAlwaysAllow(details: unknown): boolean {
+  if (getAlwaysAllowApp(details)) return true;
   const prompt = getPermissionPrompt(details);
   if (!prompt?.scope || !Array.isArray(prompt.suggestedActions)) return false;
   return prompt.suggestedActions.some((option) => option?.action === "allow_workspace");
@@ -239,8 +253,16 @@ export function buildAssistantApprovalRequest(
       description: "Stop this operation and return control to the task.",
     },
   ];
+  const alwaysAllowApp = getAlwaysAllowApp(details);
+  if (alwaysAllowApp && !requiresExactWriteReview) {
+    options.push({
+      label: ALWAYS_ALLOW_LABEL,
+      // The bundle id, not only the name an app reports for itself, says which app this is.
+      description: `Continue and let CoWork control ${alwaysAllowApp.name} (${alwaysAllowApp.bundleId}) without asking in sessions you start. Remove it in Settings > Built-in Tools > Computer use.`,
+    });
+  }
   // Task consent already covers the task, and an exact-write review approves one write only.
-  if (!taskConsent && !requiresExactWriteReview && canOfferAssistantAlwaysAllow(details)) {
+  else if (!taskConsent && !requiresExactWriteReview && canOfferAssistantAlwaysAllow(details)) {
     options.push({
       label: ALWAYS_ALLOW_LABEL,
       description: scopePreview

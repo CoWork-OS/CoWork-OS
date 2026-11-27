@@ -251,10 +251,13 @@ export class NativeAppTools {
         ? input.bundleId
         : apps.find((app) => app.pid === pid)?.bundleId;
     if (!bundleId) throw new Error("Selected app exited or has no stable bundle identity");
+    // The app's name, when it is running, for the approval ("Always allow TextEdit").
+    const appName = apps.find((app) => app.bundleId === bundleId)?.appName;
     const details = {
       tool: "native_app",
       kind: "native_background_app",
       bundleId,
+      ...(appName && appName !== "Unknown App" ? { targetApp: appName } : {}),
       backgroundOnly: true,
       taskConsentScope: `background observation, clicking and typing in ${bundleId}; no foreground or clipboard access`,
       taskConsentLabel: "Allow for this task",

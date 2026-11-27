@@ -1,16 +1,25 @@
 import { createHash } from "node:crypto";
 
+/**
+ * Fields the main process adds to an approval's details after evaluating it; they describe the
+ * prompt, not the operation, so they are not part of its identity. `alwaysAllowApp` is the
+ * "Always allow <app>" offer on a computer use card; the app's `bundleId` stays in the identity.
+ */
+const DERIVED_APPROVAL_DETAIL_KEYS = new Set([
+  "permissionPrompt",
+  "accessProfile",
+  "authorization",
+  "reason",
+  "draftRevision",
+  "alwaysAllowApp",
+]);
+
 export function authorizationToolInput(details: Record<string, unknown>): unknown {
   if (Object.prototype.hasOwnProperty.call(details, "permissionInput"))
     return details.permissionInput;
   if (Object.prototype.hasOwnProperty.call(details, "params")) return details.params;
   return Object.fromEntries(
-    Object.entries(details).filter(
-      ([key]) =>
-        !["permissionPrompt", "accessProfile", "authorization", "reason", "draftRevision"].includes(
-          key,
-        ),
-    ),
+    Object.entries(details).filter(([key]) => !DERIVED_APPROVAL_DETAIL_KEYS.has(key)),
   );
 }
 

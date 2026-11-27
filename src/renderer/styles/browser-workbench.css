@@ -187,6 +187,105 @@
   min-width: 0;
 }
 
+/* Open files as tabs above the artifact viewer (shown with two or more files). */
+.browser-workbench-dock > .artifact-tabs-frame {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.artifact-tabs-frame > .spreadsheet-viewer,
+.artifact-tabs-frame > .document-viewer,
+.artifact-tabs-frame > .presentation-artifact-viewer,
+.artifact-tabs-frame > .web-artifact-viewer {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.artifact-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 6px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-secondary);
+  scrollbar-width: none;
+}
+
+.artifact-tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  max-width: 220px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  color: var(--color-text-secondary);
+}
+
+.artifact-tab.active {
+  border-color: var(--color-border-subtle);
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+}
+
+.artifact-tab:hover:not(.active) {
+  background: var(--color-bg-hover);
+}
+
+.artifact-tab-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 4px 6px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.artifact-tab-select .clickable-file-path-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.artifact-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-tab-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.artifact-tab-close:hover,
+.artifact-tab-close:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
 .browser-workbench-tab-shell {
   max-width: min(240px, 42vw);
   min-width: 0;

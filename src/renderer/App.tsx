@@ -355,6 +355,13 @@ const WebArtifactViewer = lazy(() =>
   })),
 );
 import { BrowserWorkbenchDock } from "./components/BrowserWorkbench/BrowserWorkbenchDock";
+import { ArtifactTabsBar } from "./components/ArtifactTabsBar";
+import {
+  addArtifactTab,
+  confirmLeaveArtifact,
+  removeArtifactTab,
+  type ArtifactTab,
+} from "./utils/artifact-tabs";
 import { useBrowserSettings } from "./hooks/useBrowserSettings";
 const BrowserWorkbenchView = lazy(() =>
   import("./components/BrowserWorkbenchView").then((module) => ({
@@ -1224,45 +1231,97 @@ const SelectedTaskWorkspaceView = memo(
         clampResizableSidebarWidth(containerWidth - CALM_CHAT_COLUMN_WIDTH, containerWidth),
       );
     }, [onRevealRightSidebar]);
-    const openSpreadsheetArtifact = useCallback(
-      (path: string) => {
+    // Files open in the side panel, as tabs; `spreadsheetArtifact` is the one showing.
+    const [artifactTabs, setArtifactTabs] = useState<ArtifactTab[]>([]);
+    // Whether the file showing has unsaved changes (reported by its viewer).
+    const artifactUnsavedRef = useRef(false);
+    const handleArtifactUnsavedChange = useCallback((unsaved: boolean) => {
+      artifactUnsavedRef.current = unsaved;
+    }, []);
+    const showArtifact = useCallback(
+      (tab: ArtifactTab | null, mode: "sidebar" | "fullscreen" = "sidebar") => {
+        artifactUnsavedRef.current = false;
+        setSpreadsheetArtifact(tab ? { kind: tab.kind, path: tab.path, mode } : null);
+      },
+      [],
+    );
+    const openArtifact = useCallback(
+      (kind: ArtifactTab["kind"], path: string) => {
+        const current = spreadsheetArtifact;
+        if (current?.path === path && current.kind === kind) {
+          prepareArtifactSidebar();
+          return;
+        }
+        // Opening another file replaces the one showing: ask first when it has unsaved edits.
+        if (current && !confirmLeaveArtifact(current.path, artifactUnsavedRef.current)) return;
         setBrowserWorkbench(null);
         setSpawnedAgentSidebar(null);
         prepareArtifactSidebar();
-        setSpreadsheetArtifact({ kind: "spreadsheet", path, mode: "sidebar" });
+        setArtifactTabs((tabs) =>
+          addArtifactTab(
+            current && !tabs.some((tab) => tab.path === current.path)
+              ? [...tabs, { kind: current.kind, path: current.path }]
+              : tabs,
+            { kind, path },
+            path,
+          ),
+        );
+        showArtifact({ kind, path }, current?.mode ?? "sidebar");
       },
-      [prepareArtifactSidebar],
+      [prepareArtifactSidebar, showArtifact, spreadsheetArtifact],
+    );
+    const openSpreadsheetArtifact = useCallback(
+      (path: string) => openArtifact("spreadsheet", path),
+      [openArtifact],
     );
     const openDocumentArtifact = useCallback(
-      (path: string) => {
-        setBrowserWorkbench(null);
-        setSpawnedAgentSidebar(null);
-        prepareArtifactSidebar();
-        setSpreadsheetArtifact({ kind: "document", path, mode: "sidebar" });
-      },
-      [prepareArtifactSidebar],
+      (path: string) => openArtifact("document", path),
+      [openArtifact],
     );
     const openPresentationArtifact = useCallback(
-      (path: string) => {
-        setBrowserWorkbench(null);
-        setSpawnedAgentSidebar(null);
-        prepareArtifactSidebar();
-        setSpreadsheetArtifact({ kind: "presentation", path, mode: "sidebar" });
-      },
-      [prepareArtifactSidebar],
+      (path: string) => openArtifact("presentation", path),
+      [openArtifact],
     );
     const openWebArtifact = useCallback(
-      (path: string) => {
-        setBrowserWorkbench(null);
-        setSpawnedAgentSidebar(null);
-        prepareArtifactSidebar();
-        setSpreadsheetArtifact({ kind: "webpage", path, mode: "sidebar" });
-      },
-      [prepareArtifactSidebar],
+      (path: string) => openArtifact("webpage", path),
+      [openArtifact],
     );
+    const selectArtifactTab = useCallback(
+      (tab: ArtifactTab) => openArtifact(tab.kind, tab.path),
+      [openArtifact],
+    );
+    /** Close one tab; the one beside it shows instead, and closing the last closes the panel. */
+    const closeArtifactTab = useCallback(
+      (tab: ArtifactTab, alreadyConfirmed = false) => {
+        const current = spreadsheetArtifact;
+        const isShowing = current?.path === tab.path;
+        if (
+          isShowing &&
+          !alreadyConfirmed &&
+          !confirmLeaveArtifact(tab.path, artifactUnsavedRef.current)
+        ) {
+          return;
+        }
+        const { tabs, neighbor } = removeArtifactTab(artifactTabs, tab.path);
+        setArtifactTabs(tabs);
+        if (isShowing) showArtifact(neighbor, current?.mode ?? "sidebar");
+      },
+      [artifactTabs, showArtifact, spreadsheetArtifact],
+    );
+    // The viewer's own close button: it has already asked about unsaved changes.
     const closeSpreadsheetArtifact = useCallback(() => {
-      setSpreadsheetArtifact(null);
-    }, []);
+      const current = spreadsheetArtifact;
+      if (!current) return;
+      closeArtifactTab({ kind: current.kind, path: current.path }, true);
+    }, [closeArtifactTab, spreadsheetArtifact]);
+    // Anything else that closes the panel (another session, the browser, sub-agents) closes
+    // its tabs too.
+    useEffect(() => {
+      if (!spreadsheetArtifact) {
+        setArtifactTabs([]);
+        artifactUnsavedRef.current = false;
+      }
+    }, [spreadsheetArtifact]);
     const closeBrowserWorkbench = useCallback(() => {
       setBrowserWorkbench(null);
     }, []);
@@ -1761,6 +1820,7 @@ const SelectedTaskWorkspaceView = memo(
             workspacePath: workspace.path,
             mode: spreadsheetArtifact.mode,
             onClose: closeSpreadsheetArtifact,
+            onUnsavedChange: handleArtifactUnsavedChange,
             onFullscreen: showSpreadsheetFullscreen,
             onExitFullscreen: showSpreadsheetSidebar,
             onSendMessage: sendArtifactFullscreenMessage,
@@ -1787,20 +1847,32 @@ const SelectedTaskWorkspaceView = memo(
           mode={spreadsheetArtifact.mode}
           slot={artifactWorkbenchSlot}
         >
-          <Suspense fallback={<ArtifactSidebarFallback />}>
-            {spreadsheetArtifact.kind === "document" ? (
-              <DocumentArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
-            ) : spreadsheetArtifact.kind === "presentation" ? (
-              <PresentationArtifactViewer
-                {...artifactViewerProps}
-                refreshKey={artifactRefreshKey}
-              />
-            ) : spreadsheetArtifact.kind === "webpage" ? (
-              <WebArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
-            ) : (
-              <SpreadsheetArtifactViewer {...artifactViewerProps} taskId={task?.id} />
-            )}
-          </Suspense>
+          <div
+            className={
+              artifactTabs.length > 1 ? "artifact-tabs-frame" : "artifact-tabs-frame single"
+            }
+          >
+            <ArtifactTabsBar
+              tabs={artifactTabs}
+              activePath={spreadsheetArtifact.path}
+              onSelect={selectArtifactTab}
+              onClose={(tab) => closeArtifactTab(tab)}
+            />
+            <Suspense fallback={<ArtifactSidebarFallback />}>
+              {spreadsheetArtifact.kind === "document" ? (
+                <DocumentArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
+              ) : spreadsheetArtifact.kind === "presentation" ? (
+                <PresentationArtifactViewer
+                  {...artifactViewerProps}
+                  refreshKey={artifactRefreshKey}
+                />
+              ) : spreadsheetArtifact.kind === "webpage" ? (
+                <WebArtifactViewer {...artifactViewerProps} refreshKey={artifactRefreshKey} />
+              ) : (
+                <SpreadsheetArtifactViewer {...artifactViewerProps} taskId={task?.id} />
+              )}
+            </Suspense>
+          </div>
         </BrowserWorkbenchDock>
       ) : null;
     const workbenchDocks = (

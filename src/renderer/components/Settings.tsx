@@ -9938,7 +9938,7 @@ export function Settings({
                   onOpenSettingsTab={(tab: MemorySettingsLinkTab) => setActiveTab(tab)}
                 />
               ) : activeTab === "insights" ? (
-                <UsageInsightsPanel workspaceId={workspaceId} />
+                <UsageInsightsPanel workspaceId={workspaceId} onOpenTask={onOpenTask} />
               ) : activeTab === "import" ? (
                 <AgentImportPanel workspaceId={workspaceId} />
               ) : activeTab === "pulse" ? (

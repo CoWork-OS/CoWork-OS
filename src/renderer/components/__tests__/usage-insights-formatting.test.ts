@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { formatUsageCount, pickBookComparison } from "../usageInsightsFormatting";
+import {
+  formatUsageCost,
+  formatUsageCount,
+  formatUsageTokens,
+  pickBookComparison,
+} from "../usageInsightsFormatting";
 
 describe("formatUsageCount", () => {
   it("renders counts with a multiplication sign instead of the escaped token text", () => {
     expect(formatUsageCount(22)).toBe("22×");
     expect(formatUsageCount(22)).not.toContain("\\u00D7");
+  });
+});
+
+describe("formatUsageCost and formatUsageTokens", () => {
+  it("shows cents, then more digits only for small amounts", () => {
+    expect(formatUsageCost(0)).toBe("$0");
+    expect(formatUsageCost(12.345)).toBe("$12.35");
+    expect(formatUsageCost(0.4)).toBe("$0.40");
+    expect(formatUsageCost(0.005)).toBe("$0.005");
+    expect(formatUsageCost(0.00012)).toBe("$0.0001");
+  });
+
+  it("shortens token counts", () => {
+    expect(formatUsageTokens(950)).toBe("950");
+    expect(formatUsageTokens(10_500)).toBe("10.5K");
+    expect(formatUsageTokens(2_400_000)).toBe("2.4M");
   });
 });
 

@@ -20,6 +20,8 @@ const WORKER_MODULE_PATTERNS = [
   /^src\/electron\/database\/async\/commands\.ts$/,
   /^src\/electron\/database\/fts-worker\.ts$/,
   /^src\/electron\/memory\/memory-embedding-cache\.ts$/,
+  // Reads Cursor's own state database in an eval worker (Settings > Import).
+  /^src\/electron\/agent-import\/cursor-state-worker\.ts$/,
 ];
 const isWorkerModule = (path) => WORKER_MODULE_PATTERNS.some((pattern) => pattern.test(path));
 

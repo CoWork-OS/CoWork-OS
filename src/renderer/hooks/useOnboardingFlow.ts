@@ -1,5 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { LLMProviderType, LLMSettingsData, PersonaId } from "../../shared/types";
+import {
+  AGENT_IMPORT_SOURCE_NAMES,
+  type LLMProviderType,
+  type LLMSettingsData,
+  type PersonaId,
+} from "../../shared/types";
 import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
 import { GEMINI_DEFAULT_MODEL, OPENROUTER_FREE_MODEL_ID } from "../../shared/llm-provider-catalog";
 import { KIMI_DEFAULT_MODEL } from "../../shared/kimi-models";
@@ -113,7 +118,7 @@ const SCRIPT = {
     "Understood. I'll keep memory fully off with no memory storage for now. You can enable it later in Settings > Memory.",
   transition_setup: "Now connect the AI access you want to use.",
   import_offer: (names: string) =>
-    `I found ${names} on this Mac. Want to bring its persona, memory and skills along?`,
+    `I found ${names} on this Mac. Want to bring your instructions, memory and skills along?`,
   llm_intro: "Connect AI access to run your task.",
   llm_selected: (provider: string) => {
     const responses: Record<string, string> = {
@@ -459,7 +464,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   const asyncMutationTokenRef = useRef(0);
   const pendingLlmSettingsRef = useRef<Record<string, unknown> | null>(null);
 
-  // Look for Hermes / OpenClaw homes once; the import step is offered only when one exists.
+  // Look for agent and coding-tool setups once; the import step is offered only when one exists.
   useEffect(() => {
     let cancelled = false;
     const detect = window.electronAPI?.detectAgentImports;
@@ -469,7 +474,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         if (cancelled) return;
         importSourcesRef.current = found
           .filter((entry) => entry.found)
-          .map((entry) => (entry.source === "hermes" ? "Hermes Agent" : "OpenClaw"));
+          .map((entry) => AGENT_IMPORT_SOURCE_NAMES[entry.source]);
       })
       .catch(() => undefined);
     return () => {
@@ -672,7 +677,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
       case "transition_setup":
         if (!importOfferedRef.current && importSourcesRef.current.length > 0) {
           importOfferedRef.current = true;
-          const names = importSourcesRef.current.join(" and ");
+          const found = importSourcesRef.current;
+          const names =
+            found.length > 1 ? `${found.slice(0, -1).join(", ")} and ${found.at(-1)}` : found[0];
           timeoutRef.current = setTimeout(() => {
             setState("import_offer");
             setCurrentText(SCRIPT.import_offer(names));

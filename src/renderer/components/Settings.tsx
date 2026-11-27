@@ -1173,7 +1173,17 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
   memory: [{ terms: ["memory", "memories", "memory hub", "knowledge"] }],
   import: [
     {
-      terms: ["import", "hermes", "hermes agent", "openclaw", "migrate", "migration", "move from"],
+      terms: [
+        "import",
+        "hermes",
+        "hermes agent",
+        "openclaw",
+        "claude code",
+        "cursor",
+        "migrate",
+        "migration",
+        "move from",
+      ],
     },
   ],
   storage: [

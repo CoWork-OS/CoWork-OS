@@ -43,6 +43,7 @@ See [Release Notes 0.5.61](release-notes-0.5.61.md).
 - [x] Searchable keyboard shortcut list (Cmd/Ctrl+/), session 1–9 and next-session-that-needs-you shortcuts, mark all sessions as read
 - [x] File tabs in the side panel, with a prompt before leaving unsaved changes
 - [x] Storage settings: profile folder size by kind, clear cache, move backups to the Trash
+- [x] Import from Claude Code and Cursor (instructions, skills, MCP servers switched off, command rules, workspace memory and project rules)
 - [x] Chronicle timeline of the recent-screen buffer and apps it never captures (password managers by default)
 - [x] Always allowed apps for computer use (your sessions only; never list for password managers, terminals, settings)
 - [x] Undo a turn's file changes from its file line (file tools only; blocked when a file changed after the turn)

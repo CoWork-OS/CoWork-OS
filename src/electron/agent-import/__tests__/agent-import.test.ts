@@ -114,6 +114,8 @@ describe("locating homes", () => {
     expect(found.map((entry) => [entry.source, entry.found])).toEqual([
       ["hermes", true],
       ["openclaw", true],
+      ["claude-code", false],
+      ["cursor", false],
     ]);
     const empty = detectAgentImports({ env: {}, homedir: path.join(base, "nobody") });
     expect(empty.every((entry) => !entry.found)).toBe(true);
@@ -442,6 +444,17 @@ function fakeTargets(
     workspaceInstructions: {
       write: async (_text, workspace) => {
         calls.push(["instructions", workspace.id]);
+        return { ok: true };
+      },
+    },
+    customInstructions: {
+      existing: () => "",
+      save: (text) => calls.push(["guidance", text]),
+    },
+    mcpServers: {
+      exists: () => false,
+      add: async (server) => {
+        calls.push(["mcp", server.name]);
         return { ok: true };
       },
     },

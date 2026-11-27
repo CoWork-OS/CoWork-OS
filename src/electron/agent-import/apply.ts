@@ -22,6 +22,7 @@ import {
   planSecretValues,
   scrubSecrets,
   type ImportChannelType,
+  type ImportMcpServer,
   type ImportModelProviderId,
   type ImportPlan,
   type ImportProviderId,
@@ -102,6 +103,18 @@ export interface AgentImportTargets {
       source: AgentImportSource,
     ): Promise<TargetOutcome>;
   };
+  /** Settings > Personality > Response guidance. */
+  customInstructions: {
+    /** The current text ("" when none). */
+    existing(): string;
+    save(text: string): void;
+  };
+  mcpServers: {
+    /** A server with this name, command line or address is already set up. */
+    exists(server: ImportMcpServer): boolean;
+    /** Adds it switched off. */
+    add(server: ImportMcpServer, source: AgentImportSource): Promise<TargetOutcome>;
+  };
 }
 
 export interface ApplyImportOptions {
@@ -121,11 +134,15 @@ const CATEGORY_ORDER: AgentImportCategory[] = [
   "command_rule",
   "scheduled_task",
   "workspace_instructions",
+  "custom_instructions",
+  "mcp_server",
 ];
 
-const SOURCE_LABELS: Record<AgentImportSource, string> = {
+export const SOURCE_LABELS: Record<AgentImportSource, string> = {
   hermes: "Hermes",
   openclaw: "OpenClaw",
+  "claude-code": "Claude Code",
+  cursor: "Cursor",
 };
 
 const CHANNEL_LABELS: Record<ImportChannelType, string> = {
@@ -297,6 +314,26 @@ class ImportRun {
         if (!workspace) return { ok: false, reason: "Choose a workspace for these instructions." };
         if (dryRun) return { ok: true };
         return targets.workspaceInstructions.write(payload.text, workspace, plan.source);
+      }
+      case "custom_instructions": {
+        const existing = targets.customInstructions.existing().trim();
+        if (existing === payload.text.trim()) return { ok: false, reason: "Already imported." };
+        if (existing) {
+          return {
+            ok: false,
+            reason:
+              "CoWork already has response guidance; add to it in Settings > Personality > Instructions.",
+          };
+        }
+        if (!dryRun) targets.customInstructions.save(payload.text);
+        return { ok: true };
+      }
+      case "mcp_server": {
+        if (targets.mcpServers.exists(payload.server)) {
+          return { ok: false, reason: "CoWork already has this server." };
+        }
+        if (dryRun) return { ok: true };
+        return targets.mcpServers.add(payload.server, plan.source);
       }
       case "none":
       default:

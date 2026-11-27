@@ -397,6 +397,7 @@ import {
   type TaskTimelineItem,
   type TranscriptMode,
 } from "./task-feed-logic";
+import { pruneStaleMentionSpans } from "./effect-update-guards";
 import {
   isTurnThisIntoRoutinePrompt,
   taskCanBecomeRoutineFromFollowUp,
@@ -3291,18 +3292,14 @@ function MainContentComponent({
     return index;
   }, [integrationMentionOptions]);
 
+  // Drop mention chips whose text was edited away. Runs after every keystroke, so it sets
+  // state only when a chip is stale (see effect-update-guards).
   useEffect(() => {
-    setIntegrationMentionSpans((current) => {
-      const next = current.filter(
-        (span) =>
-          span.end <= inputValue.length &&
-          inputValue.slice(span.start, span.end) === `@${span.mention.label}`,
-      );
-      if (next.length === current.length) return current;
-      recordDraftMutation(onDraftPatch?.({ mentions: next }));
-      return next;
-    });
-  }, [inputValue, onDraftPatch]);
+    const next = pruneStaleMentionSpans(inputValue, integrationMentionSpans);
+    if (next === integrationMentionSpans) return;
+    setIntegrationMentionSpans(next);
+    recordDraftMutation(onDraftPatch?.({ mentions: next }));
+  }, [inputValue, integrationMentionSpans, onDraftPatch]);
 
   const selectedIntegrationMentions = useMemo<IntegrationMentionSelection[]>(() => {
     const byId = new Map<string, IntegrationMentionSelection>();

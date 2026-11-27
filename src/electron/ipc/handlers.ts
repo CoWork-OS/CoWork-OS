@@ -653,6 +653,7 @@ import { AnswerImageService } from "../answer-surfaces/AnswerImageService";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
 import { setupAgentImportHandlers } from "./agent-import-handlers";
+import { setupStorageHandlers } from "./storage-handlers";
 import { setupPactHandlers } from "./pact-handlers";
 import { PactSurfaceService } from "../pact/pact-surface-service";
 import { PactSettingsManager } from "../pact/settings";
@@ -11467,6 +11468,9 @@ export async function setupIpcHandlers(
       customSkillLoader.clearEligibilityCache();
     },
   });
+
+  // Settings > Storage: sizes of the profile folder, clearing caches, database copies.
+  setupStorageHandlers();
 }
 
 /**

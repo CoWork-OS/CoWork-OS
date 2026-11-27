@@ -946,6 +946,24 @@ Supports **7-day**, **14-day**, and **30-day** windows. Per-pack analytics cross
 
 ---
 
+## Storage
+
+**Settings > Storage** shows how much space CoWork's profile folder takes and what for, with the free space on that disk. Your workspaces' own files are not counted.
+
+| Kind | What it holds | What you can do |
+| --- | --- | --- |
+| Database | Sessions, messages, settings and history | Nothing here; it is in use |
+| Backups | Copies of the database and memory made before upgrades and cleanups, in the profile folder and its `backups` folder | List them and **Move to Trash**, one at a time or all; each copy goes with its `-wal` and `-shm` files. The live database is never offered. |
+| Browser data | Sign-ins, cookies and site data for the built-in browser | Clear site data in the browser's own settings |
+| Cache | Saved pages, scripts and graphics, including each browser workspace's cache | **Clear cache** empties the app's and the built-in browser's caches; sign-ins and site data stay |
+| Undo history | Earlier versions of files, kept so turns and edits can be undone | Nothing here |
+| Chronicle | Recent screen captures | Clear them in **Settings > Built-in Tools > Chronicle** |
+| Files CoWork made, Skills and tools, Memory, Other | What their names say | **Show folder** opens the profile folder |
+
+The count reads only file sizes and does not follow links. On a very large folder it stops after a while and says the sizes are a lower bound. Moved backups stay in the Trash until you empty it.
+
+---
+
 ## Daily Briefing
 
 Proactive morning briefing combining:

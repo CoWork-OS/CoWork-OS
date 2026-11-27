@@ -1613,7 +1613,7 @@ export function Settings({
   );
   const settingsRef = useRef<LLMSettingsData>({
     providerType: "anthropic",
-    modelKey: "sonnet-4-5",
+    modelKey: "sonnet-5-5",
   });
   const [settings, setSettingsState] = useState<LLMSettingsData>(settingsRef.current);
   const setSettings = (value: SetStateAction<LLMSettingsData>) => {
@@ -2456,7 +2456,7 @@ export function Settings({
 
     switch (providerType) {
       case "anthropic":
-        return settings.modelKey || "sonnet-4-5";
+        return settings.modelKey || "sonnet-5-5";
       case "bedrock":
         return bedrockModel || settings.bedrock?.model || settings.modelKey || "";
       case "ollama":

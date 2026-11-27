@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPENROUTER_DEFAULT_MODEL } from "../openrouter-provider";
 import { LLMProviderFactory, type LLMSettings } from "../provider-factory";
-import { ANTHROPIC_HEALTHCHECK_MODEL_ID } from "../types";
+import { ANTHROPIC_HEALTHCHECK_MODEL_ID, DEFAULT_MODEL } from "../types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -12,8 +12,8 @@ describe("LLMProviderFactory model status", () => {
   it.each([
     {
       name: "anthropic",
-      settings: { providerType: "anthropic", modelKey: "sonnet-4-5" } as LLMSettings,
-      expectedCurrentModel: "sonnet-4-5",
+      settings: { providerType: "anthropic", modelKey: "sonnet-5-5" } as LLMSettings,
+      expectedCurrentModel: "sonnet-5-5",
     },
     {
       name: "anthropic cached",
@@ -34,7 +34,7 @@ describe("LLMProviderFactory model status", () => {
       name: "bedrock",
       settings: {
         providerType: "bedrock",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         bedrock: { model: "us.anthropic.claude-opus-4-6-20260115-v1:0" },
       } as LLMSettings,
       expectedCurrentModel: "us.anthropic.claude-opus-4-6-20260115-v1:0",
@@ -43,7 +43,7 @@ describe("LLMProviderFactory model status", () => {
       name: "openai",
       settings: {
         providerType: "openai",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         openai: { model: "gpt-4o" },
       } as LLMSettings,
       expectedCurrentModel: "gpt-4o",
@@ -52,7 +52,7 @@ describe("LLMProviderFactory model status", () => {
       name: "azure",
       settings: {
         providerType: "azure",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         azure: { deployment: "my-deployment", deployments: ["my-deployment"] },
       } as LLMSettings,
       expectedCurrentModel: "my-deployment",
@@ -61,7 +61,7 @@ describe("LLMProviderFactory model status", () => {
       name: "gemini",
       settings: {
         providerType: "gemini",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         gemini: { model: "gemini-2.5-pro-preview-05-06" },
       } as LLMSettings,
       expectedCurrentModel: "gemini-2.5-pro-preview-05-06",
@@ -70,7 +70,7 @@ describe("LLMProviderFactory model status", () => {
       name: "openrouter",
       settings: {
         providerType: "openrouter",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         openrouter: {},
       } as LLMSettings,
       expectedCurrentModel: OPENROUTER_DEFAULT_MODEL,
@@ -79,7 +79,7 @@ describe("LLMProviderFactory model status", () => {
       name: "ollama",
       settings: {
         providerType: "ollama",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         ollama: { model: "llama3.2" },
       } as LLMSettings,
       expectedCurrentModel: "llama3.2",
@@ -88,7 +88,7 @@ describe("LLMProviderFactory model status", () => {
       name: "groq",
       settings: {
         providerType: "groq",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         groq: { model: "llama-3.3-70b-versatile" },
       } as LLMSettings,
       expectedCurrentModel: "llama-3.3-70b-versatile",
@@ -97,7 +97,7 @@ describe("LLMProviderFactory model status", () => {
       name: "xai",
       settings: {
         providerType: "xai",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         xai: { model: "grok-4" },
       } as LLMSettings,
       expectedCurrentModel: "grok-4",
@@ -106,7 +106,7 @@ describe("LLMProviderFactory model status", () => {
       name: "kimi",
       settings: {
         providerType: "kimi",
-        modelKey: "sonnet-4-5",
+        modelKey: "sonnet-5-5",
         kimi: { model: "kimi-k3" },
       } as LLMSettings,
       expectedCurrentModel: "kimi-k3",
@@ -337,14 +337,14 @@ describe("LLMProviderFactory model status", () => {
             name: "Frontier Council",
             enabled: true,
             referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
-            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-5-5" },
           },
           disabled: {
             id: "disabled",
             name: "Disabled",
             enabled: false,
             referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
-            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-5-5" },
           },
         },
       },
@@ -362,7 +362,7 @@ describe("LLMProviderFactory model status", () => {
   it("filters retired Claude models from cached Anthropic model lists", async () => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
       providerType: "anthropic",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       cachedAnthropicModels: [
         {
           key: "haiku-3-5",
@@ -391,7 +391,7 @@ describe("LLMProviderFactory model status", () => {
 
     const status = LLMProviderFactory.getConfigStatus();
 
-    expect(status.currentModel).toBe("sonnet-4-5");
+    expect(status.currentModel).toBe("sonnet-5-5");
     expect(status.models.some((model) => model.key === "sonnet-3-5")).toBe(false);
   });
 
@@ -525,19 +525,19 @@ describe("LLMProviderFactory model status", () => {
 
 describe("LLMProviderFactory model selection persistence", () => {
   it("stores selected model in provider-specific fields", () => {
-    const openaiSettings: LLMSettings = { providerType: "openai", modelKey: "opus-4-5" };
-    const geminiSettings: LLMSettings = { providerType: "gemini", modelKey: "opus-4-5" };
-    const openrouterSettings: LLMSettings = { providerType: "openrouter", modelKey: "opus-4-5" };
-    const ollamaSettings: LLMSettings = { providerType: "ollama", modelKey: "opus-4-5" };
+    const openaiSettings: LLMSettings = { providerType: "openai", modelKey: "opus-5-5" };
+    const geminiSettings: LLMSettings = { providerType: "gemini", modelKey: "opus-5-5" };
+    const openrouterSettings: LLMSettings = { providerType: "openrouter", modelKey: "opus-5-5" };
+    const ollamaSettings: LLMSettings = { providerType: "ollama", modelKey: "opus-5-5" };
     const azureSettings: LLMSettings = {
       providerType: "azure",
-      modelKey: "opus-4-5",
+      modelKey: "opus-5-5",
       azure: { deployments: ["existing"] },
     };
-    const groqSettings: LLMSettings = { providerType: "groq", modelKey: "opus-4-5" };
-    const xaiSettings: LLMSettings = { providerType: "xai", modelKey: "opus-4-5" };
-    const kimiSettings: LLMSettings = { providerType: "kimi", modelKey: "opus-4-5" };
-    const bedrockSettings: LLMSettings = { providerType: "bedrock", modelKey: "sonnet-4-5" };
+    const groqSettings: LLMSettings = { providerType: "groq", modelKey: "opus-5-5" };
+    const xaiSettings: LLMSettings = { providerType: "xai", modelKey: "opus-5-5" };
+    const kimiSettings: LLMSettings = { providerType: "kimi", modelKey: "opus-5-5" };
+    const bedrockSettings: LLMSettings = { providerType: "bedrock", modelKey: "sonnet-5-5" };
 
     expect(LLMProviderFactory.applyModelSelection(openaiSettings, "gpt-4o").openai?.model).toBe(
       "gpt-4o",
@@ -573,7 +573,7 @@ describe("LLMProviderFactory model selection persistence", () => {
   it("can switch provider and model in one global selection", () => {
     const settings: LLMSettings = {
       providerType: "anthropic",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: { model: "gpt-4o-mini" },
     };
 
@@ -581,13 +581,13 @@ describe("LLMProviderFactory model selection persistence", () => {
 
     expect(updated.providerType).toBe("openai");
     expect(updated.openai?.model).toBe("gpt-4o");
-    expect(updated.modelKey).toBe("sonnet-4-5");
+    expect(updated.modelKey).toBe("sonnet-5-5");
   });
 
   it("stores Azure reasoning effort without changing unsupported provider request config", () => {
     const settings: LLMSettings = {
       providerType: "azure",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       azure: { deployment: "gpt-5-deployment" },
     };
 
@@ -607,7 +607,7 @@ describe("LLMProviderFactory model selection persistence", () => {
             id: "frontier-council",
             name: "Frontier Council",
             referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
-            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-5-5" },
           },
           "fast-council": {
             id: "fast-council",
@@ -641,7 +641,7 @@ describe("LLMProviderFactory MoA routing", () => {
             id: "frontier-council",
             name: "Frontier Council",
             referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
-            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-5-5" },
           },
         },
       },
@@ -653,8 +653,8 @@ describe("LLMProviderFactory MoA routing", () => {
     expect(resolved.providerType).toBe("moa");
     expect(resolved.modelKey).toBe("frontier-council");
     expect(resolved.modelId).toBe("frontier-council");
-    expect(resolved.contextModelKey).toBe("sonnet-4-5");
-    expect(resolved.contextModelId).toContain("claude-sonnet-4-5");
+    expect(resolved.contextModelKey).toBe("sonnet-5-5");
+    expect(resolved.contextModelId).toContain("claude-sonnet-5-5");
   });
 
   it("does not inherit global failover providers for MoA presets", () => {
@@ -840,7 +840,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   it("uses the configured provider model instead of task model overrides by default", () => {
     const settings: LLMSettings = {
       providerType: "openai",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: {
         model: "gpt-4o-mini",
         profileRoutingEnabled: true,
@@ -864,7 +864,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   it("uses profile model only when legacy profile routing is explicitly allowed", () => {
     const settings: LLMSettings = {
       providerType: "openai",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: {
         model: "gpt-4o-mini",
         profileRoutingEnabled: true,
@@ -890,7 +890,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   it("ignores invalid profile models by default", () => {
     const settings: LLMSettings = {
       providerType: "anthropic",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       anthropic: {
         profileRoutingEnabled: true,
         strongModelKey: "not-a-real-anthropic-key",
@@ -905,8 +905,8 @@ describe("LLMProviderFactory profile-based task model routing", () => {
     });
 
     expect(resolved.modelSource).toBe("provider_default");
-    expect(resolved.modelKey).toBe("sonnet-4-5");
-    expect(resolved.modelId).toBe("claude-sonnet-4-5");
+    expect(resolved.modelKey).toBe("sonnet-5-5");
+    expect(resolved.modelId).toBe("claude-sonnet-5-5");
     expect(resolved.warnings).toHaveLength(0);
   });
 
@@ -915,13 +915,26 @@ describe("LLMProviderFactory profile-based task model routing", () => {
       ANTHROPIC_HEALTHCHECK_MODEL_ID,
     );
     expect(LLMProviderFactory.getModelId("claude-sonnet-4-5-20250514", "anthropic")).toBe(
-      "claude-sonnet-4-5",
+      "claude-sonnet-5-5",
     );
     expect(LLMProviderFactory.getModelId("opus-4-6", "anthropic")).toBe("claude-opus-4-6");
   });
 
+  it("moves saved Claude 4.5 models to their 5.5 replacements (#938)", () => {
+    expect(DEFAULT_MODEL).toBe("opus-5-5");
+    expect(LLMProviderFactory.getModelId(DEFAULT_MODEL, "anthropic")).toBe("claude-opus-5-5");
+    expect(LLMProviderFactory.getModelId("opus-4-5", "anthropic")).toBe("claude-opus-5-5");
+    expect(LLMProviderFactory.getModelId("sonnet-4-5", "anthropic")).toBe("claude-sonnet-5-5");
+    expect(LLMProviderFactory.getModelId("claude-opus-4-5-20251101", "anthropic")).toBe(
+      "claude-opus-5-5",
+    );
+    expect(LLMProviderFactory.getModelId("claude-sonnet-4-5", "anthropic")).toBe(
+      "claude-sonnet-5-5",
+    );
+  });
+
   it("maps retired Claude 3.5 direct API IDs to active replacements", () => {
-    expect(LLMProviderFactory.getModelId("sonnet-3-5", "anthropic")).toBe("claude-sonnet-4-5");
+    expect(LLMProviderFactory.getModelId("sonnet-3-5", "anthropic")).toBe("claude-sonnet-5-5");
     expect(LLMProviderFactory.getModelId("haiku-3-5", "anthropic")).toBe(
       ANTHROPIC_HEALTHCHECK_MODEL_ID,
     );
@@ -933,7 +946,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   it("normalizes retired Anthropic profile routing keys", () => {
     const settings: LLMSettings = {
       providerType: "anthropic",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       anthropic: {
         profileRoutingEnabled: true,
         strongModelKey: "sonnet-3-5",
@@ -951,7 +964,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
       { allowProfileRouting: true },
     );
 
-    expect(routing.strongModelKey).toBe("sonnet-4-5");
+    expect(routing.strongModelKey).toBe("sonnet-5-5");
     expect(routing.cheapModelKey).toBe("haiku-4-5");
     expect(resolved.modelSource).toBe("profile_model");
     expect(resolved.modelKey).toBe("haiku-4-5");
@@ -961,7 +974,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   it("uses strong profile for verification routing", () => {
     const settings: LLMSettings = {
       providerType: "openai",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: {
         model: "gpt-4o-mini",
         profileRoutingEnabled: true,
@@ -987,7 +1000,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   it("keeps forced profiles from changing the configured provider model by default", () => {
     const settings: LLMSettings = {
       providerType: "openai",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: {
         model: "gpt-4o-mini",
         profileRoutingEnabled: true,
@@ -1013,7 +1026,7 @@ describe("LLMProviderFactory provider failover chain", () => {
   it("builds an ordered chain from configured fallback providers", () => {
     const settings: LLMSettings = {
       providerType: "openai",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: {
         apiKey: "openai-key",
         model: "gpt-4o-mini",
@@ -1022,7 +1035,7 @@ describe("LLMProviderFactory provider failover chain", () => {
         apiKey: "anthropic-key",
       },
       fallbackProviders: [
-        { providerType: "anthropic", modelKey: "sonnet-4-5" },
+        { providerType: "anthropic", modelKey: "sonnet-5-5" },
         { providerType: "gemini", modelKey: "gemini-2.5-flash" },
         { providerType: "openai", modelKey: "gpt-4o-mini" },
       ],
@@ -1033,7 +1046,7 @@ describe("LLMProviderFactory provider failover chain", () => {
     const chain = LLMProviderFactory.resolveProviderFailoverChain(primary);
 
     expect(chain.map((entry) => entry.providerType)).toEqual(["openai", "anthropic"]);
-    expect(chain.map((entry) => entry.modelKey)).toEqual(["gpt-4o-mini", "sonnet-4-5"]);
+    expect(chain.map((entry) => entry.modelKey)).toEqual(["gpt-4o-mini", "sonnet-5-5"]);
   });
 
   it("keeps provider-specific failover chains isolated by primary provider", () => {
@@ -1043,7 +1056,7 @@ describe("LLMProviderFactory provider failover chain", () => {
       openai: {
         apiKey: "openai-key",
         model: "gpt-4o-mini",
-        fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-4-5" }],
+        fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-5-5" }],
         failoverPrimaryRetryCooldownSeconds: 15,
       },
       anthropic: {
@@ -1091,7 +1104,7 @@ describe("LLMProviderFactory provider failover chain", () => {
   it("disables automatic failover when a task explicitly overrides provider or model", () => {
     const settings: LLMSettings = {
       providerType: "openai",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openai: {
         apiKey: "openai-key",
         model: "gpt-4o-mini",
@@ -1099,7 +1112,7 @@ describe("LLMProviderFactory provider failover chain", () => {
       anthropic: {
         apiKey: "anthropic-key",
       },
-      fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-4-5" }],
+      fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-5-5" }],
     };
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
 
@@ -1119,7 +1132,7 @@ describe("LLMProviderFactory provider failover chain", () => {
   it("filters known text-only OpenRouter fallbacks for image-bearing requests", () => {
     const settings: LLMSettings = {
       providerType: "openrouter",
-      modelKey: "sonnet-4-5",
+      modelKey: "sonnet-5-5",
       openrouter: {
         apiKey: "openrouter-key",
         model: "openai/gpt-4o",
@@ -1129,7 +1142,7 @@ describe("LLMProviderFactory provider failover chain", () => {
       },
       fallbackProviders: [
         { providerType: "openrouter", modelKey: "minimax/minimax-m2.5:free" },
-        { providerType: "anthropic", modelKey: "sonnet-4-5" },
+        { providerType: "anthropic", modelKey: "sonnet-5-5" },
       ],
     };
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
@@ -1147,7 +1160,7 @@ describe("LLMProviderFactory provider failover chain", () => {
         expect.objectContaining({ providerType: "openrouter", modelId: "openai/gpt-4o" }),
         expect.objectContaining({
           providerType: "anthropic",
-          modelId: "claude-sonnet-4-5",
+          modelId: "claude-sonnet-5-5",
         }),
       ]),
     );
@@ -1164,7 +1177,7 @@ describe("LLMProviderFactory provider failover chain", () => {
       anthropic: {
         apiKey: "anthropic-key",
       },
-      fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-4-5" }],
+      fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-5-5" }],
     };
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
 
@@ -1176,7 +1189,7 @@ describe("LLMProviderFactory provider failover chain", () => {
     expect(chain[0]).toEqual(
       expect.objectContaining({
         providerType: "anthropic",
-        modelId: "claude-sonnet-4-5",
+        modelId: "claude-sonnet-5-5",
       }),
     );
     expect(chain).not.toEqual(
@@ -1213,12 +1226,12 @@ describe("LLMProviderFactory thread model pin", () => {
 
     const resolved = LLMProviderFactory.resolveTaskModelSelection({
       providerType: "anthropic",
-      modelKey: "opus-4-5",
+      modelKey: "opus-5-5",
       modelPinned: true,
     });
 
     expect(resolved.providerType).toBe("anthropic");
-    expect(resolved.modelKey).toBe("opus-4-5");
+    expect(resolved.modelKey).toBe("opus-5-5");
     expect(resolved.modelSource).toBe("explicit_override");
     expect(resolved.warnings).toEqual([]);
   });
@@ -1228,7 +1241,7 @@ describe("LLMProviderFactory thread model pin", () => {
 
     const resolved = LLMProviderFactory.resolveTaskModelSelection({
       providerType: "anthropic",
-      modelKey: "opus-4-5",
+      modelKey: "opus-5-5",
     });
 
     expect(resolved.providerType).toBe("openai");

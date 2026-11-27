@@ -468,15 +468,15 @@ describe("AnthropicProvider", () => {
       expect(sentPayload().output_config).toEqual({ effort: "low" });
     });
 
-    it("uses budget thinking on Sonnet 4.5 only when an effort is chosen", async () => {
-      await providerFor("claude-sonnet-4-5").createMessage({
+    it("uses budget thinking on Sonnet 4 only when an effort is chosen", async () => {
+      await providerFor("claude-sonnet-4-20250514").createMessage({
         ...makeRequest(),
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-4-20250514",
         maxTokens: 16_000,
       });
-      await providerFor("claude-sonnet-4-5", "high").createMessage({
+      await providerFor("claude-sonnet-4-20250514", "high").createMessage({
         ...makeRequest(),
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-4-20250514",
         maxTokens: 16_000,
       });
 
@@ -484,7 +484,7 @@ describe("AnthropicProvider", () => {
       const enabled = sentPayload(1);
       expect(enabled.thinking).toEqual({ type: "enabled", budget_tokens: 16_384 });
       expect(enabled.max_tokens).toBeGreaterThan(enabled.thinking.budget_tokens);
-      // Sonnet 4.5 rejects effort.
+      // Sonnet 4 rejects effort.
       expect(enabled).not.toHaveProperty("output_config");
       expectNoSamplingOrForcedToolChoice(enabled);
     });

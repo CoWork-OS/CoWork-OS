@@ -54,7 +54,7 @@ export function selectClaudeModelKey(
     return currentModelKey;
   }
 
-  return providerModels[0]?.key || currentModelKey || "sonnet-4-5";
+  return providerModels[0]?.key || currentModelKey || "sonnet-5-5";
 }
 
 export function resolveOpenAIReasoningEffort(

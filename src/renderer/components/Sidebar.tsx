@@ -5,6 +5,7 @@ import {
 } from "../host/browser-host-folders";
 import { SidebarNotices } from "./sidebar/SidebarNotices";
 import { SidebarArchivedSessions } from "./sidebar/SidebarArchivedSessions";
+import { groupSessionsByActivity, sidebarResultSnippet } from "./sidebar/sidebar-activity";
 import {
   SESSION_ARCHIVED_EVENT,
   type SessionArchivedDetail,
@@ -756,6 +757,8 @@ export interface SidebarWorkspaceSettings {
   expandedWorkspaceIds: string[];
   collapsedWorkspaceIds: string[];
   collapsedRecentGroups?: string[];
+  /** List sessions by what needs you and by day, across projects, with result lines. */
+  groupByActivity?: boolean;
   labels: Record<string, string>;
 }
 
@@ -800,6 +803,7 @@ function readSidebarWorkspaceSettings(): SidebarWorkspaceSettings {
       collapsedRecentGroups: Array.isArray(parsed.collapsedRecentGroups)
         ? parsed.collapsedRecentGroups.filter((value): value is string => typeof value === "string")
         : [],
+      groupByActivity: parsed.groupByActivity === true,
       labels:
         parsed.labels && typeof parsed.labels === "object"
           ? Object.fromEntries(
@@ -1028,6 +1032,19 @@ function SidebarComponent({
   const completionAttentionSet = useMemo(
     () => new Set(completionAttentionTaskIds),
     [completionAttentionTaskIds],
+  );
+  // A finished session not opened since: an unread dot, and "Needs you" in the activity view.
+  const isCompletionUnread = useCallback(
+    (task: Task) =>
+      task.status === "completed" &&
+      !(
+        task.agentConfig?.executionMode === "chat" &&
+        task.agentConfig?.executionModeSource === "user"
+      ) &&
+      !isSpeculativeTask(task) &&
+      selectedTaskId !== task.id &&
+      completionAttentionSet.has(task.id),
+    [completionAttentionSet, selectedTaskId],
   );
   const deferredSessionSearch = useDeferredValue(sessionSearch);
   const normalizedSessionSearch = useMemo(
@@ -1270,6 +1287,14 @@ function SidebarComponent({
       return next;
     });
   }, []);
+
+  const groupByActivity = workspaceNavSettings.groupByActivity === true;
+  const handleToggleGroupByActivity = useCallback(() => {
+    updateWorkspaceNavSettings((current) => ({
+      ...current,
+      groupByActivity: current.groupByActivity !== true,
+    }));
+  }, [updateWorkspaceNavSettings]);
 
   const handleToggleRecentGroup = useCallback(
     (label: string) => {
@@ -1866,6 +1891,34 @@ function SidebarComponent({
       for (const group of pinnedWorkspaceGroups) appendWorkspaceGroup(group);
     }
 
+    // Group by activity: what needs you first, then every other session by day, across
+    // projects. Projects and the Calm short list step aside; automated sessions keep their drawer.
+    if (groupByActivity) {
+      const now = new Date();
+      const groups = groupSessionsByActivity([...unpinnedTaskTree].sort(compareTaskTreeNodes), {
+        needsYou: (node) =>
+          activityOf(node.task)?.category === "needs-you" || isCompletionUnread(node.task),
+        dayBucket: (task) => getSidebarRecencyBucket(task, now),
+      });
+      for (const group of groups) {
+        const expanded =
+          hasSessionSearch ||
+          hasSessionStateFilter ||
+          !workspaceNavSettings.collapsedRecentGroups?.includes(group.label);
+        rows.push({
+          kind: "date-header",
+          id: `activity:${group.label}`,
+          label: group.label,
+          expanded,
+        });
+        if (expanded) appendTaskRows(group.nodes, "user");
+      }
+      if (hasMoreTasks) {
+        rows.push({ kind: "load-more", id: "load-more", loading: isLoadingMoreTasks });
+      }
+      return rows;
+    }
+
     const shouldShowProjectsSection =
       regularWorkspaceGroups.length > 0 ||
       (pinnedWorkspaceGroups.length === 0 && !hasSessionSearch && !hasSessionStateFilter);
@@ -1931,6 +1984,9 @@ function SidebarComponent({
     workTakesOverSessions,
     unpinnedAutomatedTaskTree,
     activityOf,
+    groupByActivity,
+    isCompletionUnread,
+    unpinnedTaskTree,
   ]);
 
   const useVirtualizedTaskRows = sidebarVirtualRows.length > SIDEBAR_VIRTUALIZATION_MIN_ROWS;
@@ -2450,18 +2506,13 @@ function SidebarComponent({
     const treePrefix = depth > 0 ? (isLast ? "└─" : "├─") : "";
     const taskMode = depth === 0 ? getSessionMode(task) : null;
     const modeClass = taskMode && taskMode !== "standard" ? `session-mode-${taskMode}` : "";
-    const isChatSession =
-      task.agentConfig?.executionMode === "chat" &&
-      task.agentConfig?.executionModeSource === "user";
-    // A speculative worker reports through its delivery gate only, never an unread dot.
+    // Chat sessions and speculative workers (which report through their delivery gate) never
+    // get an unread dot.
     const isSpeculative = isSpeculativeTask(task);
-    const showCompletionAttention =
-      task.status === "completed" &&
-      !isChatSession &&
-      !isSpeculative &&
-      selectedTaskId !== task.id &&
-      completionAttentionSet.has(task.id);
+    const showCompletionAttention = isCompletionUnread(task);
     const activity = activityOf(task);
+    const resultSnippet =
+      groupByActivity && !activity && !isSubAgent ? sidebarResultSnippet(task) : null;
     const rowStatus =
       activity?.category === "needs-you"
         ? "paused"
@@ -2555,7 +2606,7 @@ function SidebarComponent({
 
     return (
       <div
-        className={`task-item cli-task-item ${activity ? "cli-task-item-with-activity" : ""} ${highlightSelection && selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""} ${showCompletionAttention ? "task-completion-unread" : ""} ${isActiveSessionStatus(rowStatus) ? "task-item-running" : ""}`}
+        className={`task-item cli-task-item ${activity || resultSnippet ? "cli-task-item-with-activity" : ""} ${highlightSelection && selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""} ${showCompletionAttention ? "task-completion-unread" : ""} ${isActiveSessionStatus(rowStatus) ? "task-item-running" : ""}`}
         data-task-id={node.synthetic ? undefined : task.id}
         onClick={() => {
           if (node.synthetic) return;
@@ -2734,6 +2785,11 @@ function SidebarComponent({
               {activity.label}
             </div>
           )}
+          {resultSnippet && renameTaskId !== task.id && (
+            <div className="cli-task-activity result" title={resultSnippet}>
+              {resultSnippet}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2835,6 +2891,16 @@ function SidebarComponent({
       </div>
     );
   };
+
+  // A result line under a finished session takes the same second line as an activity label.
+  const sessionRowHeight = (row: SidebarVisibleRow): number =>
+    getSidebarSessionRowHeight(
+      row.node.task,
+      activityOf,
+      groupByActivity &&
+        !row.node.task.parentTaskId &&
+        sidebarResultSnippet(row.node.task) !== null,
+    );
 
   const renderSidebarVirtualRow = (row: SidebarVirtualRow): React.ReactNode => {
     if (row.kind === "date-header") {
@@ -3579,6 +3645,18 @@ function SidebarComponent({
                         {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className={`sidebar-session-filter-option ${groupByActivity ? "active" : ""}`}
+                      onClick={() => {
+                        handleToggleGroupByActivity();
+                        setShowSessionFilters(false);
+                      }}
+                      aria-pressed={groupByActivity}
+                      title="Sessions that need you first, then by day across projects, with each result"
+                    >
+                      <span>Group by activity</span>
+                    </button>
                     {canShowArchivedSessions && (
                       <button
                         type="button"
@@ -3688,7 +3766,7 @@ function SidebarComponent({
                                     ? SIDEBAR_LOAD_MORE_HEIGHT
                                     : row.kind === "work-link"
                                       ? SIDEBAR_WORK_LINK_HEIGHT
-                                      : getSidebarSessionRowHeight(row.row.node.task, activityOf)
+                                      : sessionRowHeight(row.row)
                       }
                       renderItem={(row) => renderSidebarVirtualRow(row)}
                       estimatedItemHeight={

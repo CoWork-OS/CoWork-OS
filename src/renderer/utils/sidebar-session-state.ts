@@ -37,8 +37,10 @@ export function withAttentionOverlay(
 export function getSidebarSessionRowHeight(
   task: Task,
   activityOf: SidebarSessionActivityResolver = getSidebarSessionActivity,
+  /** The row shows another second line, such as a result line. */
+  hasSecondLine = false,
 ): number {
-  return activityOf(task) ? 46 : 32;
+  return activityOf(task) || hasSecondLine ? 46 : 32;
 }
 
 interface SessionTreeNode<T> {

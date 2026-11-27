@@ -12,7 +12,13 @@ import {
 } from "./awu-outcomes";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import { usageLocalDateKey, type UsageInsightsDateRange } from "../../shared/usageInsightsDates";
+import type { UsageSessionBreakdown } from "../../shared/usageSessionBreakdown";
 import { UsageInsightsProjector } from "./UsageInsightsProjector";
+import {
+  buildSessionUsageBreakdown,
+  type SessionUsageCallGroup,
+  type SessionUsageTaskRow,
+} from "./usage-session-breakdown";
 import { providerLogPayloadAt, routingPayloadAt } from "./usage-sql";
 import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../agent/llm/pricing";
 import type { DatabaseClient } from "../database/async/DatabaseClient";
@@ -170,6 +176,9 @@ export interface UsageInsights {
 
   /** Jev provider usage is reported separately and is never run through LLM pricing. */
   jevSummary: UsageInsightsJevSummary;
+
+  /** Usage by kind of work, and the sessions that used the most. */
+  sessionUsage: UsageSessionBreakdown;
 
   requestsByDay: UsageInsightsRequestDay[];
 
@@ -1121,6 +1130,7 @@ export class UsageInsightsService {
     const costMetrics = this.costMetricsFromScan(llmScan);
     const llmSummary = this.llmSummaryFromScan(llmScan);
     const jevSummary = this.collectJevUsageSummary(workspaceId, periodStart, periodEnd);
+    const sessionUsage = this.collectSessionUsage(workspaceId, periodStart, periodEnd);
     const requestsByDay = this.requestsByDayFromScan(llmScan, periodStart, periodEnd);
     const providerBreakdown = this.providerBreakdownFromScan(llmScan);
     const denom = llmScan.totalLlmCalls + llmErrorCount;
@@ -1175,6 +1185,7 @@ export class UsageInsightsService {
       llmSuccessRate,
       llmSummary,
       jevSummary,
+      sessionUsage,
       requestsByDay,
       providerBreakdown,
       activityPattern,
@@ -1212,6 +1223,7 @@ export class UsageInsightsService {
     const costMetrics = this.costMetricsFromScan(llmScan);
     const llmSummary = this.llmSummaryFromScan(llmScan);
     const jevSummary = this.collectJevUsageSummary(workspaceId, periodStart, periodEnd);
+    const sessionUsage = this.collectSessionUsage(workspaceId, periodStart, periodEnd);
     const requestsByDay = this.requestsByDayFromScan(llmScan, periodStart, periodEnd);
     const providerBreakdown = this.providerBreakdownFromScan(llmScan);
 
@@ -1264,6 +1276,7 @@ export class UsageInsightsService {
       llmSuccessRate,
       llmSummary,
       jevSummary,
+      sessionUsage,
       requestsByDay,
       providerBreakdown,
       activityPattern,
@@ -1293,6 +1306,7 @@ export class UsageInsightsService {
     const costMetrics = this.costMetricsFromScan(llmScan);
     const llmSummary = this.llmSummaryFromScan(llmScan);
     const jevSummary = this.collectJevUsageSummary(workspaceId, periodStart, periodEnd);
+    const sessionUsage = this.collectSessionUsage(workspaceId, periodStart, periodEnd);
     const requestsByDay = this.requestsByDayFromScan(llmScan, periodStart, periodEnd);
     const providerBreakdown = this.providerBreakdownFromScan(llmScan);
     const denom = llmScan.totalLlmCalls + llmErrorCount;
@@ -1347,6 +1361,7 @@ export class UsageInsightsService {
       llmSuccessRate,
       llmSummary,
       jevSummary,
+      sessionUsage,
       requestsByDay,
       providerBreakdown,
       activityPattern,
@@ -2013,6 +2028,102 @@ export class UsageInsightsService {
       // llm_call_events table may not exist yet.
     }
     return out;
+  }
+
+  /**
+   * Successful model calls grouped by task, with each task and its parents, split by kind of
+   * work. Reads `llm_call_events` in every report path, like the Jev summary.
+   */
+  private collectSessionUsage(
+    workspaceId: string | null,
+    periodStart: number,
+    periodEnd: number,
+  ): UsageSessionBreakdown {
+    const empty: UsageSessionBreakdown = { byCategory: [], topSessions: [] };
+    let groups: SessionUsageCallGroup[];
+    try {
+      const ws = wsFilter(workspaceId, "");
+      groups = (
+        this.db
+          .prepare(
+            `SELECT task_id, COUNT(*) AS calls, SUM(cost) AS cost,
+                    SUM(input_tokens + output_tokens) AS tokens
+             FROM llm_call_events
+             WHERE ${ws.clause} success = 1 AND timestamp >= ? AND timestamp <= ?
+             GROUP BY task_id`,
+          )
+          .all(...ws.params, periodStart, periodEnd) as Array<{
+          task_id: string | null;
+          calls: number;
+          cost: number | null;
+          tokens: number | null;
+        }>
+      ).map((row) => ({
+        taskId: row.task_id,
+        calls: Number(row.calls) || 0,
+        cost: Number.isFinite(row.cost) ? (row.cost as number) : 0,
+        tokens: Number.isFinite(row.tokens) ? (row.tokens as number) : 0,
+      }));
+    } catch {
+      // llm_call_events table may not exist yet.
+      return empty;
+    }
+
+    const tasks = new Map<string, SessionUsageTaskRow>();
+    let pending = [...new Set(groups.map((g) => g.taskId).filter((id): id is string => !!id))];
+    const tried = new Set<string>();
+    // Load the tasks, then any parents not loaded yet, a few levels up.
+    for (let level = 0; level < 8 && pending.length > 0; level += 1) {
+      for (let start = 0; start < pending.length; start += 500) {
+        const ids = pending.slice(start, start + 500);
+        for (const id of ids) tried.add(id);
+        const rows = this.db
+          .prepare(
+            `SELECT id, title, status, source, parent_task_id, agent_config, assigned_agent_role_id,
+                    company_id, goal_id, project_id, issue_id, heartbeat_run_id
+             FROM tasks WHERE id IN (${ids.map(() => "?").join(", ")})`,
+          )
+          .all(...ids) as Array<{
+          id: string;
+          title: string | null;
+          status: string | null;
+          source: string | null;
+          parent_task_id: string | null;
+          agent_config: string | null;
+          assigned_agent_role_id: string | null;
+          company_id: string | null;
+          goal_id: string | null;
+          project_id: string | null;
+          issue_id: string | null;
+          heartbeat_run_id: string | null;
+        }>;
+        for (const row of rows) {
+          tasks.set(row.id, {
+            id: row.id,
+            title: row.title,
+            status: row.status,
+            source: row.source,
+            parentTaskId: row.parent_task_id,
+            agentConfig: this.parseJsonObject(row.agent_config),
+            assignedAgentRoleId: row.assigned_agent_role_id,
+            companyId: row.company_id,
+            goalId: row.goal_id,
+            projectId: row.project_id,
+            issueId: row.issue_id,
+            heartbeatRunId: row.heartbeat_run_id,
+          });
+        }
+      }
+      pending = [
+        ...new Set(
+          [...tasks.values()]
+            .map((task) => task.parentTaskId)
+            .filter((id): id is string => !!id && !tried.has(id)),
+        ),
+      ];
+    }
+
+    return buildSessionUsageBreakdown(groups, tasks);
   }
 
   private collectJevUsageSummary(

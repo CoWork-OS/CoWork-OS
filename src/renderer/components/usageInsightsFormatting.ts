@@ -2,6 +2,19 @@ export function formatUsageCount(count: number): string {
   return `${count}×`;
 }
 
+export function formatUsageTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+export function formatUsageCost(n: number): string {
+  if (n <= 0) return "$0";
+  if (n >= 0.1) return `$${n.toFixed(2)}`;
+  if (n >= 0.001) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(4)}`;
+}
+
 // Roughly the word count of Moby-Dick (~210k words ≈ ~270k tokens).
 const MOBY_DICK_TOKENS = 270_000;
 

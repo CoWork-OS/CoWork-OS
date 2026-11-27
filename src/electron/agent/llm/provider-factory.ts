@@ -3410,24 +3410,24 @@ export class LLMProviderFactory {
               )
             : [
                 {
-                  key: "opus-4-6",
-                  displayName: "Opus 4.6",
+                  key: "opus-5-5",
+                  displayName: "Opus 5.5",
                   description: "Most capable model for complex tasks",
                 },
                 {
-                  key: "opus-4-5",
-                  displayName: "Opus 4.5",
-                  description: "Previous flagship Claude model",
+                  key: "sonnet-5-5",
+                  displayName: "Sonnet 5.5",
+                  description: "Best model for everyday coding tasks",
+                },
+                {
+                  key: "opus-4-6",
+                  displayName: "Opus 4.6",
+                  description: "Previous Opus model",
                 },
                 {
                   key: "sonnet-4-6",
                   displayName: "Sonnet 4.6",
-                  description: "Best model for everyday coding tasks",
-                },
-                {
-                  key: "sonnet-4-5",
-                  displayName: "Sonnet 4.5",
-                  description: "Previous generation balanced model",
+                  description: "Previous Sonnet model",
                 },
                 {
                   key: "haiku-4-5",
@@ -4159,24 +4159,24 @@ export class LLMProviderFactory {
 
     const defaultModels = [
       {
-        id: "opus-4-6",
-        displayName: "Opus 4.6",
+        id: "opus-5-5",
+        displayName: "Opus 5.5",
         description: "Most capable model for complex tasks",
       },
       {
-        id: "opus-4-5",
-        displayName: "Opus 4.5",
-        description: "Previous flagship Claude model",
+        id: "sonnet-5-5",
+        displayName: "Sonnet 5.5",
+        description: "Best model for everyday coding tasks",
+      },
+      {
+        id: "opus-4-6",
+        displayName: "Opus 4.6",
+        description: "Previous Opus model",
       },
       {
         id: "sonnet-4-6",
         displayName: "Sonnet 4.6",
-        description: "Best model for everyday coding tasks",
-      },
-      {
-        id: "sonnet-4-5",
-        displayName: "Sonnet 4.5",
-        description: "Previous generation balanced model",
+        description: "Previous Sonnet model",
       },
       {
         id: "haiku-4-5",

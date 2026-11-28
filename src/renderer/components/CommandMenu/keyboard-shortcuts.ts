@@ -128,6 +128,13 @@ const SHORTCUTS: readonly ShortcutDefinition[] = [
     keywords: ["queue", "steer", "later", "after", "running", "interrupt"],
   },
   {
+    id: "send-in-background",
+    title: "While the agent works: run the message in a new background session",
+    keys: mod("⌘⇧Enter", "Ctrl+Shift+Enter"),
+    where: "Composer",
+    keywords: ["background", "parallel", "fork", "running", "side", "new session"],
+  },
+  {
     id: "accept-suggestion",
     title: "Accept the suggested prompt",
     keys: same("Tab"),

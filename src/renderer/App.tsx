@@ -991,6 +991,7 @@ type SelectedTaskWorkspaceViewProps = {
     fromEventId?: string;
     initialMessage?: string;
   }) => Promise<void>;
+  onSendInBackground?: (request: { taskId: string; message: string }) => Promise<boolean>;
   onSendSideChatMessage: (message: string) => Promise<void>;
   onCloseSideChat: () => void;
   onOpenSideChatFullThread: (taskId: string) => void | Promise<void>;
@@ -1143,6 +1144,7 @@ const SelectedTaskWorkspaceView = memo(
     onSelectTask,
     onSendMessage,
     onOpenSideChat,
+    onSendInBackground,
     onSendSideChatMessage,
     onCloseSideChat,
     onOpenSideChatFullThread,
@@ -2001,6 +2003,7 @@ const SelectedTaskWorkspaceView = memo(
                     : undefined
                 }
                 onOpenSideChat={onOpenSideChat}
+                onSendInBackground={onSendInBackground}
                 onOpenChildAgentSidebar={openSpawnedAgentSidebar}
               />
             </Suspense>
@@ -8030,6 +8033,39 @@ export function App() {
   useEffect(() => {
     addToastRef.current = addToast;
   });
+
+  // Cmd/Ctrl+Shift+Enter while a session works: a new session starts from this conversation
+  // and runs the message, while you stay where you are.
+  const handleSendInBackground = useCallback(
+    async ({ taskId, message }: { taskId: string; message: string }): Promise<boolean> => {
+      if (!hasHostMethod("forkTaskSession")) return false;
+      try {
+        const forked = (await window.electronAPI.forkTaskSession({
+          taskId,
+          branchLabel: "background",
+          initialMessage: message,
+        })) as Task | null;
+        if (!forked?.id) return false;
+        void refreshTaskLists();
+        addToastRef.current({
+          type: "success",
+          title: "Running in the background",
+          message: forked.title,
+          taskId: forked.id,
+          action: {
+            label: "Open",
+            callback: () => handleSelectTaskFromShell(forked.id),
+            dismissOnClick: true,
+          },
+        });
+        return true;
+      } catch (error) {
+        console.error("Failed to send in background:", error);
+        return false;
+      }
+    },
+    [handleSelectTaskFromShell, refreshTaskLists],
+  );
   const notifySidebarDestinationUnavailable = useCallback((label: string) => {
     addToastRef.current({
       id: "sidebar-destination-unavailable",
@@ -9471,6 +9507,9 @@ export function App() {
                   onSelectTask={handleSelectTaskFromShell}
                   onSendMessage={handleSendMessage}
                   onOpenSideChat={hasHostMethod("forkTaskSession") ? handleOpenSideChat : undefined}
+                  onSendInBackground={
+                    hasHostMethod("forkTaskSession") ? handleSendInBackground : undefined
+                  }
                   onSendSideChatMessage={handleSendSideChatMessage}
                   onCloseSideChat={handleCloseSideChat}
                   onOpenSideChatFullThread={handleOpenSideChatFullThread}

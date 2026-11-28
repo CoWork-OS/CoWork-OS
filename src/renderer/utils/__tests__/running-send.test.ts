@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAlternateSendChord,
+  isBackgroundSendChord,
   isRunningSendMode,
   runningSendHint,
   shouldWaitForTurn,
@@ -31,6 +32,26 @@ describe("isAlternateSendChord", () => {
   });
 });
 
+describe("isBackgroundSendChord", () => {
+  it("is Cmd+Shift+Enter on macOS and Ctrl+Shift+Enter elsewhere", () => {
+    expect(isBackgroundSendChord(enter({ metaKey: true, shiftKey: true }), true)).toBe(true);
+    expect(isBackgroundSendChord(enter({ ctrlKey: true, shiftKey: true }), false)).toBe(true);
+    expect(isBackgroundSendChord(enter({ ctrlKey: true, shiftKey: true }), true)).toBe(false);
+    expect(isBackgroundSendChord(enter({ metaKey: true, shiftKey: true }), false)).toBe(false);
+  });
+
+  it("leaves Shift+Enter (new line), Cmd+Enter and Alt chords alone", () => {
+    expect(isBackgroundSendChord(enter({ shiftKey: true }), true)).toBe(false);
+    expect(isBackgroundSendChord(enter({ metaKey: true }), true)).toBe(false);
+    expect(
+      isBackgroundSendChord(enter({ metaKey: true, shiftKey: true, altKey: true }), true),
+    ).toBe(false);
+    expect(
+      isBackgroundSendChord({ ...enter({ metaKey: true, shiftKey: true }), key: "k" }, true),
+    ).toBe(false);
+  });
+});
+
 describe("shouldWaitForTurn", () => {
   it("never waits when the agent is idle", () => {
     expect(shouldWaitForTurn({ working: false, mode: "queue", alternate: false })).toBe(false);
@@ -50,6 +71,15 @@ describe("runningSendHint", () => {
     expect(runningSendHint("steer", true)).toBe("Enter steers now · ⌘Enter sends after this run");
     expect(runningSendHint("queue", false)).toBe(
       "Enter sends after this run · Ctrl+Enter steers now",
+    );
+  });
+
+  it("adds the background chord when a background session can start", () => {
+    expect(runningSendHint("steer", true, true)).toBe(
+      "Enter steers now · ⌘Enter sends after this run · ⌘⇧Enter runs in the background",
+    );
+    expect(runningSendHint("queue", false, true)).toBe(
+      "Enter sends after this run · Ctrl+Enter steers now · Ctrl+Shift+Enter runs in the background",
     );
   });
 });

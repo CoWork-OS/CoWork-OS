@@ -4651,10 +4651,10 @@ export class AgentDaemon extends EventEmitter {
       typeof params.prompt === "string" && params.prompt.trim().length > 0
         ? params.prompt.trim()
         : undefined;
+    // The first message to run in the fork: a side chat's question, or a message sent to run
+    // in the background while the source task keeps working.
     const initialMessage =
-      params.sideChat && typeof params.initialMessage === "string"
-        ? params.initialMessage.trim()
-        : "";
+      typeof params.initialMessage === "string" ? params.initialMessage.trim() : "";
     const forkHistory = this.buildForkHistory(sourceEvents, {
       fromEventId: params.fromEventId,
       useSelectedUserMessageAsPrompt: !explicitPrompt,
@@ -4731,8 +4731,8 @@ export class AgentDaemon extends EventEmitter {
       sideChat: params.sideChat === true,
     });
     this.logTaskIntentRouted(forkedTask.id, derived);
-    if (params.sideChat && initialMessage) {
-      // The user typed the side chat's first message in the desktop app.
+    if (initialMessage) {
+      // The user typed this first message in the desktop app (side chat or send in background).
       void this.sendMessage(
         forkedTask.id,
         initialMessage,
@@ -4740,9 +4740,11 @@ export class AgentDaemon extends EventEmitter {
         undefined,
         USER_TYPED_FOLLOW_UP,
       ).catch((error) => {
-        log.error(`[AgentDaemon] Failed to start sidechat ${forkedTask.id}:`, error);
+        log.error(`[AgentDaemon] Failed to start forked session ${forkedTask.id}:`, error);
         this.logEvent(forkedTask.id, "log", {
-          message: "Side conversation failed to start",
+          message: params.sideChat
+            ? "Side conversation failed to start"
+            : "Background session failed to start",
           error: String((error as Any)?.message || error),
         });
       });

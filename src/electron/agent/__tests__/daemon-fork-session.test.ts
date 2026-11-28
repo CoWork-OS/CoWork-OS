@@ -260,6 +260,91 @@ describe("AgentDaemon.forkTaskSession", () => {
     );
   });
 
+  it("runs a message sent in the background as a full fork with the source's settings", async () => {
+    const forkedTask = { id: "bg-task", title: "Original task (background)" };
+    const createTaskRecord = vi.fn().mockReturnValue({
+      task: forkedTask,
+      derived: {
+        route: { intent: "execution", domain: "general", confidence: 0.8, signals: [] },
+        strategy: { conversationMode: "task", executionMode: "execute" },
+      },
+    });
+    const sendMessage = vi.fn().mockResolvedValue({ queued: false });
+    const sourceConfig = { executionMode: "execute", allowedTools: ["read_file", "write_file"] };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "task-1",
+          title: "Original task",
+          prompt: "Original prompt",
+          rawPrompt: "Original prompt",
+          userPrompt: "Original prompt",
+          workspaceId: "workspace-1",
+          agentConfig: sourceConfig,
+          source: "manual",
+        }),
+      },
+      getTaskEventsForReplay: vi.fn().mockReturnValue([]),
+      createTaskRecord,
+      cloneForkHistoryEvents: vi.fn(),
+      logEvent: vi.fn(),
+      logTaskIntentRouted: vi.fn(),
+      sendMessage,
+    } as Any);
+
+    await AgentDaemon.prototype.forkTaskSession.call(daemonLike, {
+      taskId: "task-1",
+      branchLabel: "background",
+      initialMessage: "  Also write the release notes.  ",
+    });
+
+    expect(createTaskRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Original task (background)",
+        source: "manual",
+        agentConfig: sourceConfig,
+      }),
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      "bg-task",
+      "Also write the release notes.",
+      undefined,
+      undefined,
+      { textProvenance: "user_typed" },
+    );
+  });
+
+  it("starts nothing in a fork without a first message", async () => {
+    const sendMessage = vi.fn();
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "task-1",
+          title: "Original task",
+          prompt: "Original prompt",
+          workspaceId: "workspace-1",
+          agentConfig: {},
+          source: "manual",
+        }),
+      },
+      getTaskEventsForReplay: vi.fn().mockReturnValue([]),
+      createTaskRecord: vi.fn().mockReturnValue({
+        task: { id: "fork", title: "Original task (fork)" },
+        derived: { route: {}, strategy: {} },
+      }),
+      cloneForkHistoryEvents: vi.fn(),
+      logEvent: vi.fn(),
+      logTaskIntentRouted: vi.fn(),
+      sendMessage,
+    } as Any);
+    await AgentDaemon.prototype.forkTaskSession.call(daemonLike, {
+      taskId: "task-1",
+      branchLabel: "fork",
+      initialMessage: "   ",
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it("refreshes sidechat parent context with missing parent events before later turns", () => {
     const cloneForkHistoryEvents = vi.fn();
     const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {

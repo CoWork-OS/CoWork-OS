@@ -51,6 +51,7 @@ See [Release Notes 0.5.61](release-notes-0.5.61.md).
 - [x] Sidebar Group by activity: Needs you first, then by day across projects, with each finished session's result line
 - [x] Cmd+Shift+2 attaches the window in front (picture, title, address, read text) to the message box on macOS
 - [x] Steer now or send after this run for messages sent while the agent works (Cmd/Ctrl+Enter sends the other way; default in Settings)
+- [x] Run a message in a new background session while the agent works (Cmd/Ctrl+Shift+Enter)
 - [x] Opt-in Calm visual style with Library and Build views
 - [x] Sandboxed `cowork-preview://` web previews and the `preview_web_page` tool
 - [x] Interactive answer components, a per-task Cost panel with a $10 default cap, an Automation Library, and **Settings > Add tools**

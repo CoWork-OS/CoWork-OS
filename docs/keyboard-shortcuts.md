@@ -31,21 +31,25 @@ Nothing is sent to a model until you type your question and send. Remove either 
 
 ## Sending while the agent works
 
-While the agent is working, a message you send can go two ways:
+While the agent is working, a message you send can go three ways:
 
 - **Steer now**: the agent reads it at its next step, inside the run it is doing. This is what Enter does by default and what CoWork always did.
 - **Send after this run**: it waits until the agent finishes, then starts a new turn with it. It shows under **Queued messages** marked **After this run**, and you can edit it there until it starts.
+- **Run in the background**: a new session starts from this conversation (everything said so far) and works on the message while this session keeps going. You stay where you are; a notice names the new session and **Open** takes you there. It is listed in the sidebar like any session, titled after this one with **(background)**.
 
 | | macOS | Windows / Linux |
 |---|---|---|
 | Send the default way | Enter | Enter |
 | Send the other way | Cmd+Enter | Ctrl+Enter |
+| Run in the background | Cmd+Shift+Enter | Ctrl+Shift+Enter |
 
 Pick which one Enter does in **Settings > Appearance > Composer**. A hint under the message box says what each key does while the agent works. When the agent is idle both keys simply send.
 
 Messages keep the order you sent them: anything you send after a message that waits for the run also waits behind it.
 
-In the app served in a browser, a message sent while the agent works always steers.
+A background session works in the same workspace folder with the same access as this one, so the two can change the same files at once; give them separate work. It takes text only: send attachments in this session, or remove them first. Slash commands always run here.
+
+In the app served in a browser, a message sent while the agent works always steers, and there is no background send.
 
 ## Where the full list lives
 

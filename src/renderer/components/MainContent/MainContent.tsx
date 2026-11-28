@@ -475,6 +475,7 @@ import type { WindowCaptureRequest } from "../../utils/window-capture";
 import {
   DEFAULT_RUNNING_SEND_MODE,
   isAlternateSendChord,
+  isBackgroundSendChord,
   runningSendHint,
   shouldWaitForTurn,
 } from "../../utils/running-send";
@@ -620,6 +621,11 @@ interface MainContentProps {
     fromEventId?: string;
     initialMessage?: string;
   }) => void | Promise<void>;
+  /**
+   * Cmd/Ctrl+Shift+Enter while the agent works: start a new session from this conversation
+   * that runs the message, and stay here. Resolves false when it could not start.
+   */
+  onSendInBackground?: (request: { taskId: string; message: string }) => Promise<boolean>;
   onStartOnboarding?: () => void;
   onStartFreshSession?: () => void;
   onCreateTask?: (
@@ -917,6 +923,7 @@ function MainContentComponent({
   onReleaseDraftAttachment,
   onSendMessage,
   onOpenSideChat,
+  onSendInBackground,
   onStartOnboarding,
   onStartFreshSession,
   onCreateTask,
@@ -2443,6 +2450,14 @@ function MainContentComponent({
     [task, events, hasActiveChildren],
   );
   const alternateSendRef = useRef(false);
+  const backgroundSendRef = useRef(false);
+  // Send in background: while this session works, in the desktop app, for your own sessions.
+  const canSendInBackground =
+    isTaskWorking &&
+    Boolean(onSendInBackground && task?.id) &&
+    !remoteSession &&
+    !isBrowserHost &&
+    !isBotConversation;
   const isMacPlatform = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
 
   const composerPredictionRevision = useMemo(() => predictionRevision(rawEvents), [rawEvents]);
@@ -4841,6 +4856,8 @@ function MainContentComponent({
     // Cmd/Ctrl+Enter sets this just before calling; read it once so a later send is plain.
     const alternateSend = alternateSendRef.current;
     alternateSendRef.current = false;
+    const backgroundSend = backgroundSendRef.current;
+    backgroundSendRef.current = false;
     if (!permissionSettingsLoaded) {
       setAttachmentError("Loading access profiles. Try again in a moment.");
       return;
@@ -4989,6 +5006,49 @@ function MainContentComponent({
         taskId: task.id,
         ...(sideQuestion ? { initialMessage: sideQuestion } : {}),
       });
+      return;
+    }
+
+    // Cmd/Ctrl+Shift+Enter: the message runs in a new session forked from this one. Slash
+    // commands still run here.
+    if (
+      backgroundSend &&
+      canSendInBackground &&
+      task?.id &&
+      onSendInBackground &&
+      !appSlashCommand.matched &&
+      !goalSlashCommand.matched &&
+      !onboardingSlashCommand.matched
+    ) {
+      if (hasAttachments) {
+        setAttachmentError(
+          "A background session takes text only. Send attachments here, or remove them first.",
+        );
+        return;
+      }
+      if (!trimmedInput) return;
+      const backgroundMessage = trimmedInput;
+      pendingProgrammaticResizeRef.current = true;
+      setInputValue("");
+      void onDraftAccepted?.(draftRevision);
+      setIntegrationMentionSpans([]);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionTarget(null);
+      setModeSuggestions([]);
+      setActiveWelcomeSuggestionDraft(null);
+      setQuotedAssistantMessage(null);
+      setAttachmentError(null);
+      const started = await onSendInBackground({
+        taskId: task.id,
+        message: backgroundMessage,
+      }).catch(() => false);
+      if (!started) {
+        setInputValue((current) => current || backgroundMessage);
+        setAttachmentError(
+          "Couldn't start the background session. Your message is back in the box.",
+        );
+      }
       return;
     }
 
@@ -6161,6 +6221,13 @@ function MainContentComponent({
           setSlashOpen(false);
           return;
       }
+    }
+
+    if (canSendInBackground && isBackgroundSendChord(e, isMacPlatform)) {
+      e.preventDefault();
+      backgroundSendRef.current = true;
+      void handleSend();
+      return;
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
@@ -10036,7 +10103,7 @@ function MainContentComponent({
           </div>
           {isTaskWorking && !isBrowserHost && (
             <div className="composer-running-send-hint">
-              {runningSendHint(runningSendMode, isMacPlatform)}
+              {runningSendHint(runningSendMode, isMacPlatform, canSendInBackground)}
             </div>
           )}
           <div className="input-below-actions">

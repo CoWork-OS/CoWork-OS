@@ -1,4 +1,5 @@
 import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
+import type { Clipboard } from "electron";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import * as os from "os";
@@ -89,7 +90,33 @@ function getCurrentLocationFailureMessage(error: unknown): string {
   return rawMessage || "Unable to determine current location.";
 }
 
-function getElectronApis(): { clipboard?: Any; desktopCapturer?: Any; shell?: Any; app?: Any } {
+const OS_CLIPBOARD_FORMAT_PATTERN = /^electron application\/osclipboard;format="(.*)"$/;
+
+/**
+ * Turns the MIME types of `clipboard.read()` items into a readable format list.
+ * Raw platform formats arrive wrapped as `electron application/osclipboard;format="…"`;
+ * only the inner format name is kept.
+ */
+export function summarizeClipboardTypes(types: readonly string[]): {
+  hasImage: boolean;
+  formats: string[];
+} {
+  const formats: string[] = [];
+  let hasImage = false;
+  for (const type of types) {
+    if (type.startsWith("image/")) hasImage = true;
+    const format = OS_CLIPBOARD_FORMAT_PATTERN.exec(type)?.[1] ?? type;
+    if (format && !formats.includes(format)) formats.push(format);
+  }
+  return { hasImage, formats };
+}
+
+function getElectronApis(): {
+  clipboard?: Pick<Clipboard, "read" | "readText" | "writeText">;
+  desktopCapturer?: Any;
+  shell?: Any;
+  app?: Any;
+} {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     // oxlint-disable-next-line typescript/no-require-imports
@@ -348,13 +375,13 @@ export class SystemTools {
       throw new Error("Clipboard access is only available in the desktop (Electron) runtime");
     }
 
-    const text = clipboard.readText();
-    const image = clipboard.readImage();
-    const formats = clipboard.availableFormats();
+    // Electron 45+ only has the async clipboard API.
+    const [text, items] = await Promise.all([clipboard.readText(), clipboard.read()]);
+    const { hasImage, formats } = summarizeClipboardTypes(items.flatMap((item) => item.types));
 
     const result = {
       text: text || "(no text in clipboard)",
-      hasImage: !image.isEmpty(),
+      hasImage,
       formats,
     };
 
@@ -386,7 +413,7 @@ export class SystemTools {
       throw new Error("Clipboard access is only available in the desktop (Electron) runtime");
     }
 
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
 
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "write_clipboard",

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const memoryFeatureMocks = vi.hoisted(() => ({
   loadSettings: vi.fn().mockReturnValue({
@@ -17,7 +17,6 @@ vi.mock("electron", () => ({
     getAppPath: () => "/app",
     getPath: (name: string) => `/electron/${name}`,
   },
-  clipboard: { readText: () => "", writeText: vi.fn() },
   desktopCapturer: { getSources: vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
 }));
@@ -38,7 +37,7 @@ vi.mock("../../../memory/MemoryService", () => ({
   MemoryService: memoryServiceMocks,
 }));
 
-import { SystemTools } from "../system-tools";
+import { SystemTools, summarizeClipboardTypes } from "../system-tools";
 import { beginPrivateSurface } from "../../../browser/credentials/private-capture-guard";
 import { createRequire } from "node:module";
 import { shell } from "electron";
@@ -258,6 +257,119 @@ describe("SystemTools.getCurrentLocation", () => {
         error: expect.stringContaining("Location Services"),
       }),
     );
+  });
+});
+
+describe("SystemTools clipboard", () => {
+  // Electron 45 only has the async clipboard API: read(), readText(), writeText() all return promises.
+  const clipboardMocks = {
+    read: vi.fn(),
+    readText: vi.fn(),
+    writeText: vi.fn(),
+  };
+  let restoreElectron: (() => void) | undefined;
+
+  beforeEach(() => {
+    // getElectronApis uses CommonJS require, so swap the cached module rather than vi.mock.
+    const nodeRequire = createRequire(import.meta.url);
+    const electronPath = nodeRequire.resolve("electron");
+    nodeRequire("electron");
+    const cached = nodeRequire.cache[electronPath]!;
+    const originalExports = cached.exports;
+    cached.exports = { clipboard: clipboardMocks };
+    restoreElectron = () => {
+      cached.exports = originalExports;
+    };
+  });
+
+  afterEach(() => {
+    restoreElectron?.();
+    restoreElectron = undefined;
+  });
+
+  function makeTools() {
+    return new SystemTools(
+      { id: "w", name: "W", path: "/tmp", createdAt: 0, permissions: { write: true } } as Any,
+      { logEvent: vi.fn() } as Any,
+      "clipboard-test",
+    );
+  }
+
+  it("reads text and formats through the async clipboard API", async () => {
+    clipboardMocks.readText.mockResolvedValue("hello");
+    clipboardMocks.read.mockResolvedValue([
+      {
+        types: [
+          "text/plain",
+          "image/png",
+          'electron application/osclipboard;format="public.utf8-plain-text"',
+        ],
+      },
+    ]);
+
+    await expect(makeTools().readClipboard()).resolves.toEqual({
+      text: "hello",
+      hasImage: true,
+      formats: ["text/plain", "image/png", "public.utf8-plain-text"],
+    });
+  });
+
+  it("reports an empty clipboard without an image", async () => {
+    clipboardMocks.readText.mockResolvedValue("");
+    clipboardMocks.read.mockResolvedValue([]);
+
+    await expect(makeTools().readClipboard()).resolves.toEqual({
+      text: "(no text in clipboard)",
+      hasImage: false,
+      formats: [],
+    });
+  });
+
+  it("surfaces clipboard read failures instead of returning a partial result", async () => {
+    clipboardMocks.readText.mockResolvedValue("hello");
+    clipboardMocks.read.mockRejectedValue(new Error("clipboard unavailable"));
+
+    await expect(makeTools().readClipboard()).rejects.toThrow("clipboard unavailable");
+  });
+
+  it("waits for the clipboard write before reporting success", async () => {
+    let finishWrite!: () => void;
+    clipboardMocks.writeText.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      }),
+    );
+
+    let settled = false;
+    const pending = makeTools()
+      .writeClipboard("copied")
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await Promise.resolve();
+    expect(clipboardMocks.writeText).toHaveBeenCalledWith("copied");
+    expect(settled).toBe(false);
+
+    finishWrite();
+    await expect(pending).resolves.toEqual({ success: true });
+  });
+
+  it("rejects when the clipboard write fails", async () => {
+    clipboardMocks.writeText.mockRejectedValue(new Error("write denied"));
+
+    await expect(makeTools().writeClipboard("copied")).rejects.toThrow("write denied");
+  });
+
+  it("dedupes formats across items and unwraps platform formats", () => {
+    expect(
+      summarizeClipboardTypes([
+        "text/html",
+        'electron application/osclipboard;format="public.html"',
+        "text/html",
+        "image/jpeg",
+      ]),
+    ).toEqual({ hasImage: true, formats: ["text/html", "public.html", "image/jpeg"] });
   });
 });
 

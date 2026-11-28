@@ -27,7 +27,7 @@ export function buildImageContextMenuTemplate(
   if (/^(https?|file):/i.test(params.srcURL)) {
     items.push({
       label: "Copy Image Address",
-      click: () => clipboard.writeText(params.srcURL),
+      click: () => void clipboard.writeText(params.srcURL),
     });
   }
 

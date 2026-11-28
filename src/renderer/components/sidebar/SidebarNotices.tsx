@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Box, CalendarClock, Orbit, Sparkles, X } from "lucide-react";
-import { useSearchProviderNotices } from "../../hooks/useClosingSearchProvider";
+import { useRetiredSearchSwitch } from "../../hooks/useRetiredSearchSwitch";
 import { useComposerPredictionAvailable } from "../../hooks/useComposerPredictions";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { requestUseCasesGallery, requestUseCasesGalleryWhenReady } from "../use-cases-events";
@@ -32,8 +32,6 @@ export interface SidebarNotice {
 
 export interface SidebarNoticeVisibilityContext {
   composerPredictionAvailable: boolean;
-  /** Web search uses a provider whose service is closing, as primary or fallback. */
-  searchUsesClosingProvider: boolean;
   /** Web search was moved off a provider whose service shut down. */
   searchMovedOffRetiredProvider: boolean;
 }
@@ -46,23 +44,8 @@ export interface SidebarNoticeContext {
 
 export const SIDEBAR_NOTICES: SidebarNotice[] = [
   {
-    // Google closes the Custom Search JSON API on 1 January 2027 (#914).
-    id: "google-search-ending-v1",
-    icon: CalendarClock,
-    // Fits the sidebar at its default width; the tip and Settings give the year.
-    label: "Google search ends 1 Jan",
-    tip: {
-      title: "Google Custom Search is closing",
-      description:
-        "Your web search uses Google Custom Search, which Google shuts down on 1 January 2027. Set up another provider, such as Brave, Tavily, Exa or SerpAPI, and choose it as primary or fallback in Settings → AI Models → Web Search.",
-    },
-    isVisible: ({ searchUsesClosingProvider }) => searchUsesClosingProvider,
-    onActivate: () => {
-      window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "search" } }));
-    },
-  },
-  {
-    // After 1 January 2027 search is moved off Google automatically (#914); say so once.
+    // Google shut down Custom Search on 1 January 2027 and the provider was removed;
+    // search is moved off it automatically (#914). Say so once.
     id: "google-search-ended-v1",
     icon: CalendarClock,
     label: "Google search has ended",
@@ -238,9 +221,7 @@ function SidebarNoticeTip({
 
 export function SidebarNotices({ onStartNewSession }: { onStartNewSession?: () => void } = {}) {
   const composerPredictionAvailable = useComposerPredictionAvailable();
-  const searchNotices = useSearchProviderNotices();
-  const searchUsesClosingProvider = searchNotices.closingProvider !== null;
-  const searchMovedOffRetiredProvider = searchNotices.retiredSwitch?.from === "google";
+  const searchMovedOffRetiredProvider = useRetiredSearchSwitch()?.from === "google";
   const [dismissed, setDismissed] = useState(() => readIds(DISMISSED_KEY));
   // Snapshot of notices seen before this mount, so only brand-new ones animate.
   const [seenAtMount] = useState(() => readIds(SEEN_KEY));
@@ -254,7 +235,6 @@ export function SidebarNotices({ onStartNewSession }: { onStartNewSession?: () =
       !dismissed.has(notice.id) &&
       (notice.isVisible?.({
         composerPredictionAvailable,
-        searchUsesClosingProvider,
         searchMovedOffRetiredProvider,
       }) ??
         true),

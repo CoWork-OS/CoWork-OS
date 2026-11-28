@@ -1245,7 +1245,7 @@ The browser workbench supports:
 
 Use `web_fetch` for reading a known static URL. Use the browser workbench for interactive websites, JavaScript-heavy pages, forms, app testing, and visual checks. See [Browser Workbench](browser-workbench.md) for user behavior and [Browser V2 Architecture](browser-v2-architecture.md) for the implementation contract.
 
-### Web Search (7 providers, always available)
+### Web Search (6 providers, always available)
 
 Multi-provider web search with automatic fallback. DuckDuckGo is built-in and requires no API key, so `web_search` works out of the box for every user.
 
@@ -1256,7 +1256,6 @@ Multi-provider web search with automatic fallback. DuckDuckGo is built-in and re
 | **Exa**                  | Web, News         | Required     | Semantic search and research-heavy retrieval |
 | **Brave Search**         | Web, News, Images | Required     | Privacy-focused                              |
 | **SerpAPI**              | Web, News, Images | Required     | Google results                               |
-| **Google Custom Search** | Web, Images       | Required     | Existing setups only; ends 1 Jan 2027        |
 | **Keenable**             | Web               | Optional     | Opt-in; keyless up to 1,000 searches/hour    |
 
 Paid providers are tried first in configured order. DuckDuckGo is automatically appended as the last-resort fallback. Includes retry with exponential backoff, provider cooldowns, and explicit primary/fallback ordering in Settings.

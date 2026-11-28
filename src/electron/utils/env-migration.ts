@@ -365,15 +365,6 @@ export async function migrateEnvToSettings(): Promise<MigrationResult> {
       searchChanged = true;
     }
 
-    if (env.GOOGLE_API_KEY && !searchSettings.google?.apiKey) {
-      searchSettings.google = {
-        apiKey: env.GOOGLE_API_KEY,
-        searchEngineId: env.GOOGLE_SEARCH_ENGINE_ID,
-      };
-      migratedKeys.push("Google Search API Key");
-      searchChanged = true;
-    }
-
     // Save migrated settings
     if (llmChanged) {
       LLMProviderFactory.saveSettings(llmSettings);
@@ -615,21 +606,6 @@ export async function importProcessEnvToSettings(
         apiKey: serpApiKey,
       };
       migratedKeys.push("SerpAPI Key");
-      searchChanged = true;
-    }
-
-    const googleApiKey = normalizeEnvValue(process.env.GOOGLE_API_KEY);
-    const googleSearchEngineId = normalizeEnvValue(process.env.GOOGLE_SEARCH_ENGINE_ID);
-    const shouldWriteGoogle =
-      shouldWriteValue(searchSettings?.google?.apiKey, googleApiKey, mode) ||
-      shouldWriteValue(searchSettings?.google?.searchEngineId, googleSearchEngineId, mode);
-    if (shouldWriteGoogle && (googleApiKey || googleSearchEngineId)) {
-      searchSettings.google = {
-        ...searchSettings.google,
-        ...(googleApiKey ? { apiKey: googleApiKey } : {}),
-        ...(googleSearchEngineId ? { searchEngineId: googleSearchEngineId } : {}),
-      };
-      migratedKeys.push("Google Search API Key");
       searchChanged = true;
     }
 

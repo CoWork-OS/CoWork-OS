@@ -1156,7 +1156,6 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
         "exa",
         "keenable",
         "duckduckgo",
-        "google search",
       ],
       target: { tab: "aimodels", aiModelsSubTab: "search" },
     },

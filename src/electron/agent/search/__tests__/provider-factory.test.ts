@@ -36,16 +36,10 @@ vi.mock("../../../database/SecureSettingsRepository", () => ({
 import { SearchProviderFactory } from "../provider-factory";
 import { SecureSettingsRepository } from "../../../database/SecureSettingsRepository";
 
-// Google Custom Search shuts down on 1 January 2027 (#914). Pin the clock before that date
-// so the Google tests below keep exercising a live provider; the retirement tests move it.
-const BEFORE_GOOGLE_SHUTDOWN = new Date("2026-11-24T12:00:00").getTime();
-const AFTER_GOOGLE_SHUTDOWN = new Date("2027-01-01T00:00:00").getTime();
-
 describe("SearchProviderFactory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     SearchProviderFactory.clearCache();
-    vi.spyOn(SearchProviderFactory, "now").mockReturnValue(BEFORE_GOOGLE_SHUTDOWN);
   });
 
   afterEach(() => {
@@ -277,44 +271,6 @@ describe("SearchProviderFactory", () => {
     });
   });
 
-  describe("Google settings lifecycle", () => {
-    it.each([
-      [
-        "API key",
-        { apiKey: "replacement-key", searchEngineId: undefined },
-        { apiKey: "replacement-key", searchEngineId: "existing-engine" },
-      ],
-      [
-        "engine ID",
-        { apiKey: undefined, searchEngineId: "replacement-engine" },
-        { apiKey: "existing-key", searchEngineId: "replacement-engine" },
-      ],
-    ])("keeps Google configured when saving just the %s", (_, update, savedGoogle) => {
-      const repository = SecureSettingsRepository.getInstance() as Any;
-      repository.load.mockReturnValueOnce({
-        primaryProvider: "google",
-        fallbackProvider: null,
-        google: { apiKey: "existing-key", searchEngineId: "existing-engine" },
-      });
-
-      SearchProviderFactory.saveSettings({
-        primaryProvider: "google",
-        fallbackProvider: null,
-        google: update,
-      });
-
-      expect(repository.save).toHaveBeenCalledWith(
-        "search",
-        expect.objectContaining({ primaryProvider: "google", google: savedGoogle }),
-      );
-      expect(
-        SearchProviderFactory.getConfigStatus().providers.find(
-          (provider) => provider.type === "google",
-        )?.configured,
-      ).toBe(true);
-    });
-  });
-
   describe("SearXNG settings lifecycle", () => {
     it("clears the saved endpoint and invalid routing when an empty SearXNG object is saved", () => {
       const repository = SecureSettingsRepository.getInstance() as Any;
@@ -369,21 +325,16 @@ describe("SearchProviderFactory", () => {
       });
     });
 
-    it("marks Google Custom Search as ending on 1 January 2027 (#914)", () => {
+    it("no longer offers Google Custom Search (#914)", () => {
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
-        primaryProvider: "google",
+        primaryProvider: "brave",
         fallbackProvider: null,
-        google: { apiKey: "key", searchEngineId: "engine" },
+        brave: { apiKey: "brave" },
       });
 
       const providers = SearchProviderFactory.getConfigStatus().providers;
-      const google = providers.find((provider) => provider.type === "google");
 
-      expect(google).toMatchObject({ configured: true, retirement: { endsOn: "2027-01-01" } });
-      expect(google?.retirement?.notice).toMatch(/1 January 2027/);
-      expect(providers.filter((provider) => provider.retirement).map((p) => p.type)).toEqual([
-        "google",
-      ]);
+      expect(providers.map((provider) => provider.type)).not.toContain("google");
     });
   });
 
@@ -391,16 +342,15 @@ describe("SearchProviderFactory", () => {
     it("uses only the explicit primary and fallback", () => {
       const settings = {
         primaryProvider: "tavily",
-        fallbackProvider: "google",
+        fallbackProvider: "brave",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
         serpapi: { apiKey: "serpapi" },
-        google: { apiKey: "google", searchEngineId: "id" },
       } as Any;
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
-      expect(order).toEqual(["tavily", "google"]);
+      expect(order).toEqual(["tavily", "brave"]);
     });
 
     it("uses no alternate provider when fallback is None", () => {
@@ -408,7 +358,7 @@ describe("SearchProviderFactory", () => {
         primaryProvider: "tavily",
         fallbackProvider: null,
         tavily: { apiKey: "tavily" },
-        google: { apiKey: "google", searchEngineId: "id" },
+        brave: { apiKey: "brave" },
       } as Any;
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
@@ -465,7 +415,7 @@ describe("SearchProviderFactory", () => {
 
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
         primaryProvider: "tavily",
-        fallbackProvider: "google",
+        fallbackProvider: "brave",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
       } as Any);
@@ -504,7 +454,7 @@ describe("SearchProviderFactory", () => {
 
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
         primaryProvider: "tavily",
-        fallbackProvider: "google",
+        fallbackProvider: "brave",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
       } as Any);
@@ -549,7 +499,7 @@ describe("SearchProviderFactory", () => {
 
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
         primaryProvider: "tavily",
-        fallbackProvider: "google",
+        fallbackProvider: "brave",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
       } as Any);
@@ -860,26 +810,10 @@ describe("SearchProviderFactory", () => {
     });
   });
 
-  describe("after Google Custom Search shuts down (#914)", () => {
+  describe("settings saved before Google Custom Search was removed (#914)", () => {
     const repo = () => SecureSettingsRepository.getInstance() as Any;
 
-    beforeEach(() => {
-      vi.spyOn(SearchProviderFactory, "now").mockReturnValue(AFTER_GOOGLE_SHUTDOWN);
-    });
-
-    it("keeps Google working until the end of 31 December 2026", () => {
-      vi.spyOn(SearchProviderFactory, "now").mockReturnValue(AFTER_GOOGLE_SHUTDOWN - 1);
-      repo().load.mockReturnValueOnce({
-        primaryProvider: "google",
-        fallbackProvider: null,
-        google: { apiKey: "key", searchEngineId: "engine" },
-      });
-
-      expect(SearchProviderFactory.loadSettings().primaryProvider).toBe("google");
-      expect(repo().save).not.toHaveBeenCalled();
-    });
-
-    it("moves a Google primary to the configured fallback and records the switch", () => {
+    it("moves a Google primary to the configured fallback, drops the key and records the switch", () => {
       repo().load.mockReturnValueOnce({
         primaryProvider: "google",
         fallbackProvider: "brave",
@@ -887,22 +821,20 @@ describe("SearchProviderFactory", () => {
         brave: { apiKey: "brave" },
       });
 
-      const settings = SearchProviderFactory.loadSettings();
+      const settings = SearchProviderFactory.loadSettings() as Any;
 
       expect(settings.primaryProvider).toBe("brave");
       expect(settings.fallbackProvider).toBeNull();
-      // Saved credentials stay readable.
-      expect(settings.google).toEqual({ apiKey: "key", searchEngineId: "engine" });
+      expect(settings.google).toBeUndefined();
       expect(settings.retiredProviderSwitch).toMatchObject({
         from: "google",
         fromName: "Google Custom Search",
         to: "brave",
         toName: "Brave Search",
       });
-      expect(repo().save).toHaveBeenCalledWith(
-        "search",
-        expect.objectContaining({ primaryProvider: "brave", fallbackProvider: null }),
-      );
+      const saved = repo().save.mock.calls[0][1];
+      expect(saved).toMatchObject({ primaryProvider: "brave", fallbackProvider: null });
+      expect(saved).not.toHaveProperty("google");
     });
 
     it("moves a Google primary to the next configured provider when there is no fallback", () => {
@@ -950,20 +882,41 @@ describe("SearchProviderFactory", () => {
       expect(repo().save).toHaveBeenCalledTimes(1);
     });
 
-    it("never creates a Google provider, so no request reaches customsearch/v1", async () => {
-      expect(() =>
-        SearchProviderFactory.createProviderFromConfig({
-          type: "google",
-          googleApiKey: "key",
-          googleSearchEngineId: "engine",
-        }),
-      ).toThrow(/shut down/);
-      await expect(SearchProviderFactory.testProvider("google")).resolves.toMatchObject({
-        success: false,
+    it("drops a leftover Google key that no route uses", () => {
+      repo().load.mockReturnValueOnce({
+        primaryProvider: "brave",
+        fallbackProvider: null,
+        brave: { apiKey: "brave" },
+        google: { apiKey: "key", searchEngineId: "engine" },
       });
+
+      const settings = SearchProviderFactory.loadSettings() as Any;
+
+      expect(settings).toMatchObject({ primaryProvider: "brave", fallbackProvider: null });
+      expect(settings.google).toBeUndefined();
+      expect(settings.retiredProviderSwitch).toBeUndefined();
+      expect(repo().save.mock.calls[0][1]).not.toHaveProperty("google");
     });
 
-    it("stops offering Google and reports the switch in the config status", () => {
+    it("leaves settings without Google untouched", () => {
+      repo().load.mockReturnValueOnce({
+        primaryProvider: "brave",
+        fallbackProvider: null,
+        brave: { apiKey: "brave" },
+      });
+
+      SearchProviderFactory.loadSettings();
+
+      expect(repo().save).not.toHaveBeenCalled();
+    });
+
+    it("cannot create a Google provider", () => {
+      expect(() =>
+        SearchProviderFactory.createProviderFromConfig({ type: "google" } as Any),
+      ).toThrow(/Unknown search provider type: google/);
+    });
+
+    it("reports the switch in the config status", () => {
       repo().load.mockReturnValueOnce({
         primaryProvider: "google",
         fallbackProvider: null,

@@ -1,21 +1,10 @@
 import { useState, useEffect } from "react";
-import { SearchProviderType, SearchConfigStatus, SearchProviderInfo } from "../../shared/types";
-import { SEARCH_SETTINGS_CHANGED } from "../hooks/useClosingSearchProvider";
+import { SearchProviderType, SearchConfigStatus } from "../../shared/types";
+import { SEARCH_SETTINGS_CHANGED } from "../hooks/useRetiredSearchSwitch";
 import {
   resolvePrimarySearchProvider,
   supportsSearchFallback,
 } from "../utils/search-provider-selection";
-
-/** A closing provider stays visible only for people who already set it up. */
-export function isProviderOffered(provider: SearchProviderInfo): boolean {
-  return !provider.retirement || provider.configured;
-}
-
-export function formatEndDate(isoDate: string): string {
-  const date = new Date(`${isoDate}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return isoDate;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-}
 
 interface SearchSettingsProps {
   onStatusChange?: (configured: boolean) => void;
@@ -41,8 +30,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
   const [exaApiKey, setExaApiKey] = useState("");
   const [braveApiKey, setBraveApiKey] = useState("");
   const [serpapiApiKey, setSerpapiApiKey] = useState("");
-  const [googleApiKey, setGoogleApiKey] = useState("");
-  const [googleSearchEngineId, setGoogleSearchEngineId] = useState("");
   const [searxngBaseUrl, setSearxngBaseUrl] = useState("");
   const [searxngAllowPrivate, setSearxngAllowPrivate] = useState(false);
   const [keenableEnabled, setKeenableEnabled] = useState(false);
@@ -65,14 +52,14 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setSearxngBaseUrl(status.searxng.baseUrl || "");
       setSearxngAllowPrivate(status.searxng.allowPrivate);
       setKeenableEnabled(status.keenable?.enabled === true);
-      const offered = status.providers.filter(isProviderOffered);
+      const providers = status.providers;
       setActiveProvider((prev) => {
-        if (prev && offered.some((provider) => provider.type === prev)) {
+        if (prev && providers.some((provider) => provider.type === prev)) {
           return prev;
         }
         return (
-          offered.find((provider) => provider.type === status.primaryProvider)?.type ??
-          offered[0]?.type ??
+          providers.find((provider) => provider.type === status.primaryProvider)?.type ??
+          providers[0]?.type ??
           null
         );
       });
@@ -95,13 +82,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
         exa: exaApiKey ? { apiKey: exaApiKey } : undefined,
         brave: braveApiKey ? { apiKey: braveApiKey } : undefined,
         serpapi: serpapiApiKey ? { apiKey: serpapiApiKey } : undefined,
-        google:
-          googleApiKey || googleSearchEngineId
-            ? {
-                apiKey: googleApiKey || undefined,
-                searchEngineId: googleSearchEngineId || undefined,
-              }
-            : undefined,
         searxng: {
           baseUrl: searxngBaseUrl.trim() || undefined,
           allowPrivate: searxngAllowPrivate,
@@ -116,8 +96,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setExaApiKey("");
       setBraveApiKey("");
       setSerpapiApiKey("");
-      setGoogleApiKey("");
-      setGoogleSearchEngineId("");
       setKeenableApiKey("");
       await loadConfig();
       window.dispatchEvent(new Event(SEARCH_SETTINGS_CHANGED));
@@ -141,14 +119,14 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
     }
   };
 
-  const offeredProviders = configStatus?.providers.filter(isProviderOffered) || [];
-  const configuredProviders = offeredProviders.filter((provider) => provider.configured);
+  const allProviders = configStatus?.providers || [];
+  const configuredProviders = allProviders.filter((provider) => provider.configured);
   const selectedPrimary =
     resolvePrimarySearchProvider(configuredProviders, primaryProvider)?.type ?? null;
   const fallbackOptions = configuredProviders.filter(
     (provider) => provider.type !== selectedPrimary && provider.type !== "duckduckgo",
   );
-  const activeProviderConfig = offeredProviders.find((p) => p.type === activeProvider) || null;
+  const activeProviderConfig = allProviders.find((p) => p.type === activeProvider) || null;
 
   if (loading) {
     return <div className="settings-loading">Loading search settings...</div>;
@@ -164,7 +142,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
         </p>
 
         <div className="llm-provider-tabs">
-          {offeredProviders.map((provider) => (
+          {allProviders.map((provider) => (
             <button
               key={provider.type}
               className={`llm-provider-tab ${activeProvider === provider.type ? "active" : ""}`}
@@ -183,11 +161,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
           <div className="settings-card provider-config-panel">
             <div className="provider-config-form">
               <p className="provider-description">{activeProviderConfig.description}</p>
-              {activeProviderConfig.retirement && (
-                <p className="settings-hint warning" role="note">
-                  {activeProviderConfig.retirement.notice}
-                </p>
-              )}
               <p className="provider-types">
                 Supports: {activeProviderConfig.supportedTypes.join(", ")}
               </p>
@@ -272,41 +245,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                     </a>
                   </p>
                 </div>
-              )}
-
-              {activeProviderConfig.type === "google" && (
-                <>
-                  <div className="settings-field">
-                    <label>Google API Key</label>
-                    <input
-                      type="password"
-                      className="settings-input"
-                      placeholder={activeProviderConfig.configured ? "••••••••••••••••" : "AIza..."}
-                      value={googleApiKey}
-                      onChange={(e) => setGoogleApiKey(e.target.value)}
-                    />
-                  </div>
-                  <div className="settings-field">
-                    <label>Search Engine ID</label>
-                    <input
-                      type="text"
-                      className="settings-input"
-                      placeholder="Enter Search Engine ID"
-                      value={googleSearchEngineId}
-                      onChange={(e) => setGoogleSearchEngineId(e.target.value)}
-                    />
-                    <p className="settings-hint">
-                      Uses the key and Search Engine ID you already have.{" "}
-                      <a
-                        href="https://developers.google.com/custom-search/v1/overview"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Google&apos;s notice
-                      </a>
-                    </p>
-                  </div>
-                </>
               )}
 
               {activeProviderConfig.type === "searxng" && (
@@ -462,11 +400,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                     <span className="provider-types">
                       Supports: {provider.supportedTypes.join(", ")}
                     </span>
-                    {provider.retirement && (
-                      <span className="settings-hint warning">
-                        Ends {formatEndDate(provider.retirement.endsOn)}
-                      </span>
-                    )}
                   </div>
                 </label>
               ))}
@@ -512,11 +445,6 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                       <span className="provider-types">
                         Supports: {provider.supportedTypes.join(", ")}
                       </span>
-                      {provider.retirement && (
-                        <span className="settings-hint warning">
-                          Ends {formatEndDate(provider.retirement.endsOn)}
-                        </span>
-                      )}
                     </div>
                   </label>
                 ))}

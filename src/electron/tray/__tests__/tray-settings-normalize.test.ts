@@ -48,6 +48,15 @@ describe("normalizeTraySettings", () => {
     expect(s.preventSleepWhileRunning).toBe(true);
     expect(s.confirmQuitWhileRunning).toBe(true);
     expect(s.windowCaptureShortcut).toBe(true);
+    expect(s.dictationShortcut).toBe(false);
+  });
+
+  it("keeps the dictation shortcut on once turned on, and ignores non-booleans", () => {
+    expect(normalizeTraySettings({ dictationShortcut: true }).dictationShortcut).toBe(true);
+    expect(
+      normalizeTraySettings({ dictationShortcut: "yes" } as unknown as Partial<TraySettings>)
+        .dictationShortcut,
+    ).toBe(false);
   });
 
   it("keeps the window-capture shortcut off once turned off, and ignores non-booleans", () => {

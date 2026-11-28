@@ -126,6 +126,8 @@ export interface TraySettings {
   confirmQuitWhileRunning: boolean;
   /** macOS: Cmd+Shift+2 from any app attaches the window in front to the message box. */
   windowCaptureShortcut: boolean;
+  /** macOS: Control+Shift+Space from any app dictates into the text field in front. */
+  dictationShortcut: boolean;
 }
 
 /**

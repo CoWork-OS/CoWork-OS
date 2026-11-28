@@ -572,7 +572,7 @@ export class QuickInputWindow {
       );
 
       if (text) {
-        clipboard.writeText(text);
+        await clipboard.writeText(text);
 
         // Show visual feedback
         this.window.webContents

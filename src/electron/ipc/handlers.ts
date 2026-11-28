@@ -12090,7 +12090,7 @@ function setupMCPHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND, async (event) => {
     if (!fromTopFrame(event)) throw new Error("Not allowed.");
     checkRateLimit(IPC_CHANNELS.CAMOFOX_COPY_START_COMMAND);
-    clipboard.writeText(CamofoxSettingsManager.startCommandWithProxyPassword());
+    await clipboard.writeText(CamofoxSettingsManager.startCommandWithProxyPassword());
   });
 
   let camofoxTest: Promise<CamofoxConnectionResult> | null = null;

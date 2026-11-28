@@ -456,7 +456,8 @@
       "extendInfo": {
         "NSLocationWhenInUseUsageDescription": "CoWork OS uses your current location once to answer nearby places and walking route requests.",
         "NSLocationUsageDescription": "CoWork OS uses your current location once to answer nearby places and walking route requests.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "CoWork OS uses your current location once to answer nearby places and walking route requests."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "CoWork OS uses your current location once to answer nearby places and walking route requests.",
+        "NSMicrophoneUsageDescription": "CoWork OS uses the microphone when you talk to it or dictate, to write down what you say."
       },
       "notarize": true
     },

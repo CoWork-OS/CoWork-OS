@@ -201,8 +201,13 @@ export class VoiceService extends EventEmitter {
    * @param audioData - Audio data as Buffer
    * @param options - Optional settings
    * @param options.force - If true, bypass the enabled check (useful for channel audio messages)
+   * @param options.quiet - If true, the text is only returned: no "transcript" or "error" event
+   *   carries it or the provider's error to the main window (dictation into other apps)
    */
-  async transcribe(audioData: Buffer, options?: { force?: boolean }): Promise<string> {
+  async transcribe(
+    audioData: Buffer,
+    options?: { force?: boolean; quiet?: boolean },
+  ): Promise<string> {
     if (!this.settings.enabled && !options?.force) {
       throw new Error("Voice mode is disabled");
     }
@@ -242,9 +247,15 @@ export class VoiceService extends EventEmitter {
           throw new Error(`Unknown STT provider: ${this.settings.sttProvider}`);
       }
 
-      this.emit("transcript", transcript);
+      if (!options?.quiet) this.emit("transcript", transcript);
       return transcript;
     } catch (error) {
+      if (options?.quiet) {
+        // Dictation: the provider's message can echo request details, so it stays out of
+        // the log, the voice state and the main window; the caller reports the failure.
+        console.error("[VoiceService] STT error:", (error as Error)?.name ?? "Error");
+        throw error;
+      }
       console.error("[VoiceService] STT error:", error);
       this.updateState({ error: (error as Error).message });
       this.emit("error", error);

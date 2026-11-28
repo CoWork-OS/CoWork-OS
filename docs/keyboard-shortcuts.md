@@ -29,6 +29,21 @@ Nothing is sent to a model until you type your question and send. Remove either 
 - Turn the shortcut off in **Settings > System & Security > Menu Bar > Capture the window in front with ⌘⇧2**. If another app already uses Cmd+Shift+2, CoWork can't register it.
 - Windows and Linux don't have it yet.
 
+## Dictating into any app (macOS)
+
+Turn on **Settings > System & Security > Menu Bar > Dictate into any app with ⌃⇧Space**. Then, in any app:
+
+1. Put the cursor where the text should go and press **Control+Shift+Space**. A small pill at the bottom of the screen shows that CoWork is listening; the app you are in keeps the cursor.
+2. Speak, then press **Control+Shift+Space** again (or click **Done** on the pill).
+3. CoWork writes down what you said and pastes it where the cursor is, as one line.
+
+- **Esc** cancels while CoWork is listening or writing down; nothing is pasted. Listening stops by itself after 3 minutes.
+- Speech goes to the speech-to-text provider set up in **Settings > Voice** (OpenAI Whisper or Azure), whether or not voice mode is on. Without one, the pill says so. The text goes only to the app in front, never into a CoWork session.
+- The first time, macOS asks for **Microphone** permission. Pasting needs **Accessibility** permission (System Settings > Privacy & Security > Accessibility); without it the text is put on the clipboard and the pill says to press Cmd+V.
+- If you switch to another app while CoWork listens or writes down, nothing is pasted: the text is put on the clipboard and the pill says so.
+- CoWork pastes by putting the text on the clipboard and pressing Cmd+V for you, then puts back what the clipboard held a moment before, unless something else was copied in between. A password manager's copied password is never put back, and the old contents aren't kept when they can't be held (a very large picture, for example); the dictated text then stays on the clipboard instead.
+- If another app already uses Control+Shift+Space, CoWork can't register it. Windows and Linux don't have it yet.
+
 ## Sending while the agent works
 
 While the agent is working, a message you send can go two ways:

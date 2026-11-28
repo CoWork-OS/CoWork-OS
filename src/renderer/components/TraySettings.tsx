@@ -266,6 +266,35 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
             </div>
           )}
 
+          {isMacOS && (
+            <div className="settings-form-group tray-settings-option">
+              <div className="tray-settings-option-inner">
+                <div className="tray-settings-option-text">
+                  <span className="tray-settings-option-title">
+                    Dictate into any app with ⌃⇧Space
+                  </span>
+                  <p className="tray-settings-option-desc">
+                    In any text field, press ⌃⇧Space, speak, and press it again. CoWork writes down
+                    what you said and pastes it where your cursor is; Esc cancels. Your speech goes
+                    to the speech-to-text provider from Settings &gt; Voice, even when voice mode is
+                    off. Needs Microphone and Accessibility permission; without Accessibility the
+                    text is copied for you to paste.
+                  </p>
+                </div>
+                <label className="settings-toggle tray-settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={settings?.dictationShortcut ?? false}
+                    onChange={(e) => void handleSave({ dictationShortcut: e.target.checked })}
+                    disabled={saving}
+                    aria-label="Dictate into any app with Control Shift Space"
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className="settings-form-group tray-settings-option">
             <div className="tray-settings-option-inner">
               <div className="tray-settings-option-text">

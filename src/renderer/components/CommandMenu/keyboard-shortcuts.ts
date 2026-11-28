@@ -90,6 +90,13 @@ const SHORTCUTS: readonly ShortcutDefinition[] = [
     keywords: ["screenshot", "capture", "window", "screen", "attach"],
   },
   {
+    id: "dictation",
+    title: "Dictate into the app in front (when turned on)",
+    keys: { mac: "⌃⇧Space" },
+    where: "From any app",
+    keywords: ["dictation", "voice", "speech", "microphone", "talk", "type"],
+  },
+  {
     id: "rail-reorder",
     title: "Move a sidebar destination up or down",
     keys: mod("⌥↑ / ⌥↓", "Alt+↑ / Alt+↓"),

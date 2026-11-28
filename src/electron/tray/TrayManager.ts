@@ -31,6 +31,7 @@ import { type Channel } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { QuickInputWindow } from "./QuickInputWindow";
 import { WindowCaptureShortcut } from "../window-capture/window-capture-shortcut";
+import { DictationShortcut } from "../dictation/dictation-shortcut";
 import { getUpdatePrompt } from "../updater";
 import {
   TEMP_WORKSPACE_NAME,
@@ -108,6 +109,8 @@ const DEFAULT_SETTINGS: TraySettings = {
   preventSleepWhileRunning: true,
   confirmQuitWhileRunning: true,
   windowCaptureShortcut: true,
+  // Off until turned on: it needs the microphone, Accessibility and a speech-to-text provider.
+  dictationShortcut: false,
 };
 
 /**
@@ -184,6 +187,10 @@ export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefi
       typeof merged.windowCaptureShortcut === "boolean"
         ? merged.windowCaptureShortcut
         : DEFAULT_SETTINGS.windowCaptureShortcut,
+    dictationShortcut:
+      typeof merged.dictationShortcut === "boolean"
+        ? merged.dictationShortcut
+        : DEFAULT_SETTINGS.dictationShortcut,
   };
 }
 
@@ -200,6 +207,7 @@ export class TrayManager {
     () => this.mainWindow,
     () => this.showMainWindow(),
   );
+  private readonly dictation = new DictationShortcut();
   private connectedChannels: number = 0;
   private contextMenuSequence = 0;
   private activeTaskCount: number = 0;
@@ -303,6 +311,8 @@ export class TrayManager {
     this.registerGlobalShortcut();
     // Cmd+Shift+2 attaches the window in front to the message box (macOS, when turned on).
     this.windowCapture.apply(this.settings.windowCaptureShortcut);
+    // Control+Shift+Space dictates into the app in front (macOS, when turned on).
+    this.dictation.apply(this.settings.dictationShortcut);
 
     console.log("[TrayManager] Initialized");
   }
@@ -1095,6 +1105,7 @@ export class TrayManager {
       }
       this.applyDockIconSetting();
       this.windowCapture.apply(this.settings.windowCaptureShortcut);
+      this.dictation.apply(this.settings.dictationShortcut);
     } catch (error) {
       console.error("[TrayManager] Failed to save settings:", error);
     }
@@ -1136,6 +1147,7 @@ export class TrayManager {
     // Unregister global shortcut
     this.unregisterGlobalShortcut();
     this.windowCapture.dispose();
+    this.dictation.dispose();
 
     if (this.quickInputWindow) {
       this.quickInputWindow.destroy();
